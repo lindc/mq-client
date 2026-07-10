@@ -1,0 +1,115 @@
+/* =========================================================================
+ * 调色板 —— 修改这里的取值即可统一改变整个界面的配色。
+ * 这些是 JavaFX 的 "looked-up color"（查找色）：在 .root 中定义一次，
+ * 下方各规则按名称引用。少数由 Java 代码绘制的颜色见 README 说明。
+ * ========================================================================= */
+.root {
+    -c-left-panel-bg:   #d3dae3;  /* 左侧导航卡片背景（深灰） */
+    -c-hover-bg:        white;    /* 列表项悬停时背景（浮起） */
+    -c-selected-bg:     #4a90d9;  /* 选中项 / 主强调蓝        */
+    -c-selected-text:   white;    /* 选中项的文字颜色         */
+
+    -c-table-border:    #c8c8c8;  /* 右侧表格边框             */
+    -c-row-odd:         #ffffff;  /* 表格斑马纹 —— 偶数索引行 */
+    -c-row-even:        #f2f5f8;  /* 表格斑马纹 —— 奇数索引行 */
+    -c-row-sel-bg:      #dbe7f3;  /* 选中表格行背景           */
+    -c-row-sel-text:    #4a90d9;  /* 选中表格行文字           */
+    -c-row-text:        black;    /* 未选中表格行文字         */
+}
+
+/* ===== SplitPane 分隔条 ===== */
+/* 透明背景，让左侧面板的阴影透过来显示；保留一点宽度以便拖动 */
+.split-pane {
+    -fx-background-color: transparent;
+    -fx-padding: 0;
+}
+
+.split-pane > .split-pane-divider {
+    /* 浅灰色分隔条，宽度 2px */
+    -fx-background-color: #ced4db;
+    -fx-padding: 0 1 0 1;   /* 左右各 1px -> 分隔条总宽 2px */
+}
+
+/* ===== 左侧导航面板 ===== */
+/* 外层（底层）面板：透明背景，露出与右侧一致的窗口默认浅灰底 */
+.nav-panel {
+    -fx-background-color: transparent;
+}
+
+/* 内层卡片：深灰色底 + 圆角 + 阴影 + 细边框，形成悬浮卡片效果 */
+.nav-card {
+    -fx-background-color: -c-left-panel-bg;
+    -fx-background-radius: 8;
+    -fx-border-color: #9aa5b1;   /* 细但明显的边框 */
+    -fx-border-width: 1;
+    -fx-border-radius: 8;        /* 边框圆角与背景圆角保持一致 */
+    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.22), 12, 0.15, 0, 3);
+}
+
+/* 列表与单元格透明，使面板背景色透过来显示 */
+.nav-list,
+.nav-list .list-cell {
+    -fx-background-color: transparent;
+}
+
+.nav-list .list-cell {
+    -fx-padding: 8 10 8 10;
+}
+
+/* 悬停效果：仅轻微背景高亮 + 手型光标，不再浮起（去掉阴影和放大） */
+.nav-list .list-cell:filled:hover {
+    -fx-background-color: -c-hover-bg;
+    -fx-background-radius: 4;
+    -fx-background-insets: 2 4 2 4;
+    -fx-cursor: hand;
+}
+
+/* 选中项 —— 即使处于悬停状态也保持强调色填充（否则白字会落在白色悬停底上看不见） */
+.nav-list .list-cell:filled:selected,
+.nav-list .list-cell:filled:selected:hover {
+    -fx-background-color: -c-selected-bg;
+    -fx-background-radius: 4;
+    -fx-effect: null;
+}
+
+.nav-list .list-cell:filled:selected .text,
+.nav-list .list-cell:filled:selected:hover .text {
+    -fx-fill: -c-selected-text;
+}
+
+/* ===== 标签页 TabPane —— 去掉所有默认的灰色背景 ===== */
+.tab-pane,
+.tab-pane > .tab-header-area,
+.tab-pane > .tab-header-area > .tab-header-background,
+.tab-pane > .tab-content-area {
+    -fx-background-color: transparent;
+}
+
+/* ===== 右侧数据表格 ===== */
+.data-table {
+    -fx-border-color: -c-table-border;
+    -fx-border-width: 1;
+}
+
+/* 斑马纹（隔行变色） */
+.data-table .table-row-cell {
+    -fx-background-color: -c-row-odd;
+}
+
+.data-table .table-row-cell:odd {
+    -fx-background-color: -c-row-even;
+}
+
+/* 选中行：浅色背景 + 强调色文字（而非默认的蓝底白字） */
+.data-table .table-row-cell:selected {
+    -fx-background-color: -c-row-sel-bg;
+}
+
+.data-table .table-row-cell:selected .text {
+    -fx-fill: -c-row-sel-text;
+}
+
+/* 未选中行的文字颜色 */
+.data-table .table-row-cell .text {
+    -fx-fill: -c-row-text;
+}

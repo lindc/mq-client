@@ -1,58 +1,70 @@
 # MQBrowser
 
-MQBrowser is a message queue browser tool designed for visually managing message queue services such as RabbitMQ and Kafka.
+MQBrowser is a **local desktop** message queue browser for visually accessing and
+managing multiple message queue systems, with support for remote connections.
 
 ## Features
 
-- 🔍 Browse and manage message queues
-- 📬 Send and receive messages
-- 🔐 Connection management
-- 📊 Queue monitoring
+- 🔍 Browse queues / topics
+- 📬 Publish and subscribe to messages
+- 🔐 Connection management (remote brokers, TLS)
+- 🧩 Unified abstraction layer — one interface, many MQs; adding an MQ means writing one adapter
+
+## Supported Message Queues
+
+| MQ | Client library | Notes |
+|----|---------------|-------|
+| RabbitMQ | amqp-client | AMQP 0-9-1 |
+| Kafka | kafka-clients | destination = topic |
+| MQTT | Eclipse Paho | pub/sub, no server-side browse |
+| ActiveMQ Artemis | artemis-jakarta-client | JMS 2.0 |
+| IBM MQ | com.ibm.mq.jakarta.client | needs queue manager + channel |
 
 ## Technology Stack
 
-- Backend: Go
-- Frontend: Vue.js / React
-- Message Queues: RabbitMQ, Kafka
+- Language/runtime: Java 21
+- UI: JavaFX 21
+- Build: Maven
+- Logging: SLF4J + Logback
 
 ## Quick Start
 
-### Installation
+### Prerequisites
 
-```bash
-# Clone the project
-git clone https://gitee.com/benbear_335/mqbrowser.git
-
-# Navigate to the project directory
-cd mqbrowser
-```
-
-### Configuration
-
-Modify the configuration files according to your environment:
-
-- `config.yaml` - Basic configuration
-- `.env` - Environment variables
+- JDK 21+
+- Maven 3.9+
 
 ### Run
 
 ```bash
-# Start the service
-go run main.go
+git clone https://gitee.com/benbear_335/mqbrowser.git
+cd mqbrowser
 
-# Or use the Makefile
-make run
+# Run directly via javafx-maven-plugin
+mvn javafx:run
 ```
 
-## Usage Instructions
+### Package
 
-1. After starting the application, visit `http://localhost:8080`
-2. Configure RabbitMQ/Kafka connection details on the settings page
-3. Begin browsing and managing your message queues
+```bash
+mvn clean package
+```
 
-## Contribution Guidelines
+## Usage
 
-Pull requests are welcome!
+1. Click **New Connection…** in the left panel.
+2. Pick the MQ type, fill in host / port / credentials and the type-specific extra
+   field (RabbitMQ vhost, IBM MQ queue manager, Kafka consumer group).
+3. Select the connection and click **Connect**.
+4. Use the **Browse** tab to read messages and the **Publish** tab to send them.
+
+## Extending with a New MQ
+
+1. Add a value to `MqType`.
+2. Create a class under `mq/adapter/` implementing `MqClient` (extend `AbstractMqClient`).
+3. Register it in `MqClientFactory`.
+
+No UI changes required.
 
 ## License
 
