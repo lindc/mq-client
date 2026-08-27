@@ -1,6 +1,7 @@
 package io.mqclient.core.config;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import org.springframework.stereotype.Component;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import io.mqclient.core.model.MQConnectionConfig;
@@ -16,6 +17,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * 密码字段由各 MQ 的 config editor 自行加密（如 AES），
  * ConnectionStore 只做存储不关心加密逻辑。
  */
+@Component
 public class ConnectionStore {
 
     private static final File DEFAULT_FILE = new File(

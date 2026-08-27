@@ -39,6 +39,15 @@
 
     <dependencyManagement>
         <dependencies>
+            <!-- Spring Boot BOM：统一管理所有 spring-* 版本 -->
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-dependencies</artifactId>
+                <version>4.1.1</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
             <!-- 模块间依赖 -->
             <dependency>
                 <groupId>io.mqclient</groupId>

@@ -1,0 +1,5 @@
+app:
+  window:
+    width: 1200
+    height: 800
+  theme: light

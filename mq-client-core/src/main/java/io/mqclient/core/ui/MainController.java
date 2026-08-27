@@ -34,8 +34,8 @@ public class MainController {
     private final Map<String, MQServiceProvider> serviceProviders;
     private final Map<String, MQUIProvider> uiProviders;
 
-    public MainController() {
-        this.connectionStore = new ConnectionStore();
+    public MainController(ConnectionStore connectionStore) {
+        this.connectionStore = connectionStore;
         this.serviceProviders = new HashMap<>();
         this.uiProviders = new HashMap<>();
 

@@ -1,0 +1,17 @@
+package io.mqclient.core;
+
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+/**
+ * Spring Boot 配置入口。
+ * <p>
+ * 仅用 @SpringBootApplication 开启组件扫描与自动配置，
+ * 扫描范围限定在 io.mqclient.core（不扫描各 MQ 插件模块，
+ * 那些模块仍通过 ServiceLoader SPI 发现，保持插件化解耦）。
+ * <p>
+ * 注意：未引入任何 web starter，因此这是一个非 Web 应用，
+ * Spring Boot 不会启动内嵌服务器。
+ */
+@SpringBootApplication(scanBasePackages = "io.mqclient.core")
+public class CoreConfig {
+}
