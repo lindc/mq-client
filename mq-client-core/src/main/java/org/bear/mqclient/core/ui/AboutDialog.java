@@ -12,6 +12,7 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
+import javafx.stage.Modality;
 import javafx.stage.Stage;
 import javafx.stage.Window;
 import javafx.util.Duration;
@@ -44,6 +45,11 @@ public class AboutDialog extends Dialog<Void> {
     public AboutDialog(MessageSource messageSource, LocaleHolder localeHolder) {
         this.messageSource = messageSource;
         this.localeHolder = localeHolder;
+
+        // 窗口级模态而非应用级：APPLICATION_MODAL 在 Wayland/XWayland 下
+        // 依赖全局 grab，窗口可能在 show 后被立刻隐藏导致对话框不显示；
+        // WINDOW_MODAL 只需 owner + WM 的 transient-for 提示，更可靠。
+        initModality(Modality.WINDOW_MODAL);
 
         setTitle(msg("about.title"));
         setHeaderText(msg("about.header"));
