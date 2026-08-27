@@ -61,6 +61,7 @@ public class MenuBarManager {
         // Help
         Menu helpMenu = new Menu("Help");
         MenuItem aboutItem = new MenuItem("关于");
+        aboutItem.setOnAction(e -> new AboutDialog().showAndWait());
         helpMenu.getItems().add(aboutItem);
 
         menuBar.getMenus().addAll(fileMenu, editMenu, connMenu, viewMenu, helpMenu);
