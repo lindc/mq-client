@@ -1,50 +1,100 @@
 package io.mqclient.core.ui;
 
 import javafx.animation.AnimationTimer;
+import javafx.animation.KeyFrame;
+import javafx.animation.Timeline;
 import javafx.geometry.Insets;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.control.*;
 import javafx.scene.layout.BorderPane;
+import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
+import javafx.scene.text.Font;
+import javafx.util.Duration;
 
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalTime;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * 关于对话框。
  * <p>
- * 展示应用信息，并绘制一个走动的模拟时钟（沿用旧版设计中的时钟元素）。
- * 旧版的 ASCII 小火车动画资源在重构为 SPI 架构时丢失，这里以时钟代替。
+ * 左侧一个走动的模拟时钟；右侧一列「冒烟小火车」ASCII 动画
+ * （烟雾帧来自 resources/ascii/smoke.txt，循环播放形成飘动效果，
+ * 车身来自 resources/ascii/train.txt）。
  */
 public class AboutDialog extends Dialog<Void> {
+
+    private final List<String> smokeFrames = new ArrayList<>();
+    private final String train;
+    private final ClockCanvas clock = new ClockCanvas(150);
+    private Timeline smokeTimeline;
 
     public AboutDialog() {
         setTitle("关于 MQBrowser");
         setHeaderText("MQBrowser — 统一消息队列桌面客户端");
 
-        VBox info = new VBox(6);
-        info.setPadding(new Insets(10));
-        info.getChildren().addAll(
-                new Label("版本：1.0.0-SNAPSHOT"),
-                new Label("JavaFX + Spring Boot 4.1.1"),
-                new Label("支持：RabbitMQ / IBM MQ / Kafka / Artemis / RocketMQ"),
-                new Label("© 2026 MQBrowser")
-        );
+        train = loadResource("/ascii/train.txt").stripTrailing();
+        loadSmokeFrames(loadResource("/ascii/smoke.txt"));
 
-        ClockCanvas clock = new ClockCanvas(160);
+        Label smokeLabel = new Label(buildArt(0));
+        smokeLabel.setFont(Font.font("Monospaced", 13));
 
-        BorderPane content = new BorderPane();
-        content.setCenter(info);
-        content.setRight(clock);
-        content.setPadding(new Insets(10));
+        Label info = new Label("版本：1.0.0-SNAPSHOT\n"
+                + "JavaFX 26.0.2 + Spring Boot 4.1.1\n"
+                + "支持：RabbitMQ / IBM MQ / Kafka / Artemis / RocketMQ\n"
+                + "© 2026 MQBrowser");
+        info.setPadding(new Insets(0, 0, 8, 0));
 
-        getDialogPane().setContent(content);
+        VBox trainBox = new VBox(6, info, smokeLabel);
+
+        HBox center = new HBox(24, clock, trainBox);
+        center.setPadding(new Insets(10));
+
+        getDialogPane().setContent(center);
         getDialogPane().getButtonTypes().add(
                 new ButtonType("关闭", ButtonBar.ButtonData.CANCEL_CLOSE));
-        getDialogPane().setPrefSize(460, 240);
+        getDialogPane().setPrefSize(560, 300);
 
-        setOnCloseRequest(e -> clock.stop());
+        if (!smokeFrames.isEmpty()) {
+            final int[] idx = {0};
+            smokeTimeline = new Timeline(new KeyFrame(Duration.millis(350), e -> {
+                smokeLabel.setText(buildArt(idx[0]));
+                idx[0] = (idx[0] + 1) % smokeFrames.size();
+            }));
+            smokeTimeline.setCycleCount(Timeline.INDEFINITE);
+            smokeTimeline.play();
+        }
+
+        setOnCloseRequest(e -> {
+            clock.stop();
+            if (smokeTimeline != null) smokeTimeline.stop();
+        });
+    }
+
+    private String buildArt(int frameIndex) {
+        String frame = smokeFrames.isEmpty() ? "" : smokeFrames.get(frameIndex % smokeFrames.size());
+        return frame + "\n" + train;
+    }
+
+    private void loadSmokeFrames(String text) {
+        for (String part : text.split("\\n\\s*\\n")) {
+            String trimmed = part.strip();
+            if (!trimmed.isEmpty()) smokeFrames.add(trimmed);
+        }
+    }
+
+    private String loadResource(String path) {
+        try (InputStream in = getClass().getResourceAsStream(path)) {
+            if (in == null) return "";
+            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     /** 自绘模拟时钟（每秒走动）。 */
