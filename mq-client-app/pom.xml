@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>io.mqclient</groupId>
+        <artifactId>mq-client</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>mq-client-app</artifactId>
+    <name>MQ Client — Application</name>
+    <description>聚合运行模块，依赖所有 MQ 实现确保 SPI 正常加载</description>
+
+    <dependencies>
+        <!-- JavaFX Windows 平台本地库（javafx-maven-plugin 需要明确指定） -->
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-controls</artifactId>
+            <version>${javafx.version}</version>
+            <classifier>win</classifier>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-fxml</artifactId>
+            <version>${javafx.version}</version>
+            <classifier>win</classifier>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-graphics</artifactId>
+            <version>${javafx.version}</version>
+            <classifier>win</classifier>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-base</artifactId>
+            <version>${javafx.version}</version>
+            <classifier>win</classifier>
+        </dependency>
+
+        <!-- 依赖所有 UI 模块（传递依赖 service → core） -->
+        <dependency>
+            <groupId>io.mqclient</groupId>
+            <artifactId>mq-client-rabbitmq-ui</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.mqclient</groupId>
+            <artifactId>mq-client-ibm-ui</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.mqclient</groupId>
+            <artifactId>mq-client-kafka-ui</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.mqclient</groupId>
+            <artifactId>mq-client-artemis-ui</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.mqclient</groupId>
+            <artifactId>mq-client-rocketmq-ui</artifactId>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.5.0</version>
+                <configuration>
+                    <mainClass>io.mqclient.core.ui.MainApp</mainClass>
+                    <cleanupDaemonThreads>false</cleanupDaemonThreads>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

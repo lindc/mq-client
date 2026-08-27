@@ -1,0 +1,54 @@
+package io.mqclient.kafka.ui;
+
+import io.mqclient.core.model.MQConnectionConfig;
+import io.mqclient.core.service.MQService;
+import io.mqclient.core.spi.MQUIProvider;
+import javafx.scene.Node;
+import javafx.scene.control.Menu;
+
+import java.util.List;
+
+/**
+ * Kafka UI 提供者 SPI 实现。
+ */
+public class KafkaUIProvider implements MQUIProvider {
+
+    private KafkaMainPanel mainPanel;
+
+    @Override
+    public String getType() { return "KAFKA"; }
+
+    @Override
+    public String getDisplayName() { return "Apache Kafka"; }
+
+    @Override
+    public Node createMainPanel(MQConnectionConfig config, MQService service) {
+        mainPanel = new KafkaMainPanel(config, service);
+        return mainPanel;
+    }
+
+    @Override
+    public Node createConfigEditor() {
+        return new KafkaConfigEditor();
+    }
+
+    @Override
+    public void applyConfig(Node editor, MQConnectionConfig config) {
+        if (editor instanceof KafkaConfigEditor kce) {
+            kce.setConfig(config);
+        }
+    }
+
+    @Override
+    public List<Menu> getMenus() {
+        return mainPanel != null ? mainPanel.getMenus() : List.of();
+    }
+
+    @Override
+    public void onPanelClosed() {
+        if (mainPanel != null) {
+            mainPanel.cleanup();
+            mainPanel = null;
+        }
+    }
+}

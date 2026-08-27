@@ -1,59 +1,194 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>com.mqbrowser</groupId>
-    <artifactId>mqbrowser</artifactId>
-    <version>0.1.0</version>
-    <packaging>jar</packaging>
-    <name>MQBrowser</name>
+    <groupId>io.mqclient</groupId>
+    <artifactId>mq-client</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+
+    <name>MQ Client</name>
+    <description>Unified MQ desktop client — IBM MQ, Kafka, Artemis, RabbitMQ, RocketMQ</description>
+
+    <modules>
+        <module>mq-client-core</module>
+        <module>mq-client-rabbitmq-service</module>
+        <module>mq-client-rabbitmq-ui</module>
+        <module>mq-client-ibm-service</module>
+        <module>mq-client-ibm-ui</module>
+        <module>mq-client-kafka-service</module>
+        <module>mq-client-kafka-ui</module>
+        <module>mq-client-artemis-service</module>
+        <module>mq-client-artemis-ui</module>
+        <module>mq-client-rocketmq-service</module>
+        <module>mq-client-rocketmq-ui</module>
+        <module>mq-client-app</module>
+    </modules>
 
     <properties>
-        <maven.compiler.release>25</maven.compiler.release>
+        <!-- 注意：如果 javafx-maven-plugin 报错，降级 java.version 到 21 -->
+        <java.version>25</java.version>
+        <javafx.version>24</javafx.version>
+        <jackson.version>2.18.3</jackson.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <javafx.version>25</javafx.version>
-        <controlsfx.version>11.2.3</controlsfx.version>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
     </properties>
 
-    <dependencies>
-        <dependency>
-            <groupId>org.openjfx</groupId>
-            <artifactId>javafx-controls</artifactId>
-            <version>${javafx.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.openjfx</groupId>
-            <artifactId>javafx-fxml</artifactId>
-            <version>${javafx.version}</version>
-        </dependency>
+    <dependencyManagement>
+        <dependencies>
+            <!-- 模块间依赖 -->
+            <dependency>
+                <groupId>io.mqclient</groupId>
+                <artifactId>mq-client-core</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.mqclient</groupId>
+                <artifactId>mq-client-rabbitmq-service</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.mqclient</groupId>
+                <artifactId>mq-client-ibm-service</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.mqclient</groupId>
+                <artifactId>mq-client-kafka-service</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.mqclient</groupId>
+                <artifactId>mq-client-artemis-service</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.mqclient</groupId>
+                <artifactId>mq-client-rocketmq-service</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.mqclient</groupId>
+                <artifactId>mq-client-rabbitmq-ui</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.mqclient</groupId>
+                <artifactId>mq-client-ibm-ui</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.mqclient</groupId>
+                <artifactId>mq-client-kafka-ui</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.mqclient</groupId>
+                <artifactId>mq-client-artemis-ui</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.mqclient</groupId>
+                <artifactId>mq-client-rocketmq-ui</artifactId>
+                <version>${project.version}</version>
+            </dependency>
 
-        <dependency>
-            <groupId>org.controlsfx</groupId>
-            <artifactId>controlsfx</artifactId>
-            <version>${controlsfx.version}</version>
-        </dependency>
-    </dependencies>
+            <!-- JavaFX -->
+            <dependency>
+                <groupId>org.openjfx</groupId>
+                <artifactId>javafx-controls</artifactId>
+                <version>${javafx.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.openjfx</groupId>
+                <artifactId>javafx-fxml</artifactId>
+                <version>${javafx.version}</version>
+            </dependency>
+
+            <!-- Jackson (配置序列化) -->
+            <dependency>
+                <groupId>com.fasterxml.jackson.core</groupId>
+                <artifactId>jackson-databind</artifactId>
+                <version>${jackson.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.fasterxml.jackson.core</groupId>
+                <artifactId>jackson-annotations</artifactId>
+                <version>${jackson.version}</version>
+            </dependency>
+
+            <!-- RabbitMQ AMQP client -->
+            <dependency>
+                <groupId>com.rabbitmq</groupId>
+                <artifactId>amqp-client</artifactId>
+                <version>5.25.0</version>
+            </dependency>
+
+            <!-- IBM MQ -->
+            <dependency>
+                <groupId>com.ibm.mq</groupId>
+                <artifactId>com.ibm.mq.allclient</artifactId>
+                <version>9.4.2.0</version>
+            </dependency>
+
+            <!-- Kafka -->
+            <dependency>
+                <groupId>org.apache.kafka</groupId>
+                <artifactId>kafka-clients</artifactId>
+                <version>3.9.0</version>
+            </dependency>
+
+            <!-- Artemis -->
+            <dependency>
+                <groupId>org.apache.activemq</groupId>
+                <artifactId>artemis-core-client</artifactId>
+                <version>2.39.0</version>
+            </dependency>
+
+            <!-- RocketMQ -->
+            <dependency>
+                <groupId>org.apache.rocketmq</groupId>
+                <artifactId>rocketmq-client</artifactId>
+                <version>5.3.2</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.rocketmq</groupId>
+                <artifactId>rocketmq-tools</artifactId>
+                <version>5.3.2</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.rocketmq</groupId>
+                <artifactId>rocketmq-common</artifactId>
+                <version>5.3.2</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <build>
-        <finalName>mqbrowser</finalName>
-        <plugins>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.14.0</version>
-            </plugin>
-
-            <!-- Run with: mvn javafx:run -->
-            <plugin>
-                <groupId>org.openjfx</groupId>
-                <artifactId>javafx-maven-plugin</artifactId>
-                <version>0.0.8</version>
-                <configuration>
-                    <mainClass>com.mqbrowser.MQBrowserApp</mainClass>
-                </configuration>
-            </plugin>
-        </plugins>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <version>3.14.0</version>
+                    <configuration>
+                        <release>${java.version}</release>
+                        <encoding>UTF-8</encoding>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.openjfx</groupId>
+                    <artifactId>javafx-maven-plugin</artifactId>
+                    <version>0.0.8</version>
+                    <configuration>
+                        <mainClass>io.mqclient.core.ui.MainApp</mainClass>
+                    </configuration>
+                </plugin>
+            </plugins>
+        </pluginManagement>
     </build>
+
 </project>
