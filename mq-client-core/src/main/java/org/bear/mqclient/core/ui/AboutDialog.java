@@ -52,16 +52,17 @@ public class AboutDialog extends Dialog<Void> {
         initModality(Modality.WINDOW_MODAL);
 
         setTitle(msg("about.title"));
-        setHeaderText(msg("about.header"));
+        setHeaderText(msg("about.header") + "  " + msg("about.version"));
 
         train = loadResource("/ascii/train.txt").stripTrailing();
         loadSmokeFrames(loadResource("/ascii/smoke.txt"));
 
         Label smokeLabel = new Label(buildArt(0));
         smokeLabel.setFont(Font.font("Monospaced", 13));
+        // 火车与烟整体下移，给上方冒烟留出空间
+        smokeLabel.setPadding(new Insets(28, 0, 0, 0));
 
-        Label info = new Label(msg("about.version") + "\n"
-                + msg("about.tech") + "\n"
+        Label info = new Label(msg("about.tech") + "\n"
                 + msg("about.supported") + "\n"
                 + msg("about.copyright"));
         info.setPadding(new Insets(0, 0, 8, 0));
@@ -74,7 +75,7 @@ public class AboutDialog extends Dialog<Void> {
         getDialogPane().setContent(center);
         getDialogPane().getButtonTypes().add(
                 new ButtonType(msg("about.close"), ButtonBar.ButtonData.CANCEL_CLOSE));
-        getDialogPane().setPrefSize(560, 300);
+        getDialogPane().setPrefSize(820, 560);
 
         if (!smokeFrames.isEmpty()) {
             final int[] idx = {0};
@@ -106,13 +107,28 @@ public class AboutDialog extends Dialog<Void> {
 
     private String buildArt(int frameIndex) {
         String frame = smokeFrames.isEmpty() ? "" : smokeFrames.get(frameIndex % smokeFrames.size());
-        return frame + "\n" + train;
+        // 烟与车身之间空一行，让烟团浮在烟囱上方
+        return frame + "\n\n" + train;
     }
 
     private void loadSmokeFrames(String text) {
+        List<String> frames = new ArrayList<>();
         for (String part : text.split("\\n\\s*\\n")) {
-            String trimmed = part.strip();
-            if (!trimmed.isEmpty()) smokeFrames.add(trimmed);
+            // 只去行尾空白：保留行首空格才能维持烟团与烟囱的列对齐
+            String trimmed = part.stripTrailing();
+            if (!trimmed.isBlank()) frames.add(trimmed);
+        }
+        // 补齐到统一行高：帧高度不一会让标签在切换时上下跳动，
+        // 且烟团必须始终锚定在烟囱上方（补空白行加在帧首）。
+        int maxLines = 0;
+        for (String f : frames) {
+            maxLines = Math.max(maxLines, (int) f.lines().count());
+        }
+        for (String f : frames) {
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < maxLines - f.lines().count(); i++) sb.append('\n');
+            sb.append(f);
+            smokeFrames.add(sb.toString());
         }
     }
 
