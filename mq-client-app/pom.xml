@@ -5,7 +5,7 @@
                              https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
     <parent>
-        <groupId>io.mqclient</groupId>
+        <groupId>org.bear.mqclient</groupId>
         <artifactId>mq-client</artifactId>
         <version>1.0.0-SNAPSHOT</version>
     </parent>
@@ -43,23 +43,23 @@
 
         <!-- 依赖所有 UI 模块（传递依赖 service → core） -->
         <dependency>
-            <groupId>io.mqclient</groupId>
+            <groupId>org.bear.mqclient</groupId>
             <artifactId>mq-client-rabbitmq-ui</artifactId>
         </dependency>
         <dependency>
-            <groupId>io.mqclient</groupId>
+            <groupId>org.bear.mqclient</groupId>
             <artifactId>mq-client-ibm-ui</artifactId>
         </dependency>
         <dependency>
-            <groupId>io.mqclient</groupId>
+            <groupId>org.bear.mqclient</groupId>
             <artifactId>mq-client-kafka-ui</artifactId>
         </dependency>
         <dependency>
-            <groupId>io.mqclient</groupId>
+            <groupId>org.bear.mqclient</groupId>
             <artifactId>mq-client-artemis-ui</artifactId>
         </dependency>
         <dependency>
-            <groupId>io.mqclient</groupId>
+            <groupId>org.bear.mqclient</groupId>
             <artifactId>mq-client-rocketmq-ui</artifactId>
         </dependency>
     </dependencies>
@@ -71,7 +71,7 @@
                 <artifactId>javafx-maven-plugin</artifactId>
                 <version>0.0.8</version>
                 <configuration>
-                    <mainClass>io.mqclient.app.App</mainClass>
+                    <mainClass>org.bear.mqclient.app.App</mainClass>
                 </configuration>
             </plugin>
             <plugin>
@@ -79,7 +79,7 @@
                 <artifactId>exec-maven-plugin</artifactId>
                 <version>3.5.0</version>
                 <configuration>
-                    <mainClass>io.mqclient.app.App</mainClass>
+                    <mainClass>org.bear.mqclient.app.App</mainClass>
                     <cleanupDaemonThreads>false</cleanupDaemonThreads>
                 </configuration>
             </plugin>
