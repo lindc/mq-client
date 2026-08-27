@@ -3,6 +3,8 @@ package io.mqclient.core.ui;
 import javafx.scene.control.Menu;
 import javafx.scene.control.MenuBar;
 import javafx.scene.control.MenuItem;
+import javafx.scene.control.Alert;
+import javafx.scene.control.ButtonType;
 import javafx.scene.control.SeparatorMenuItem;
 
 import java.util.ArrayList;
@@ -61,7 +63,15 @@ public class MenuBarManager {
         // Help
         Menu helpMenu = new Menu("Help");
         MenuItem aboutItem = new MenuItem("关于");
-        aboutItem.setOnAction(e -> new AboutDialog().showAndWait());
+        aboutItem.setOnAction(e -> {
+            try {
+                new AboutDialog().showAndWait();
+            } catch (Throwable t) {
+                t.printStackTrace();
+                new Alert(Alert.AlertType.ERROR,
+                        "打开关于对话框失败：\n" + t, ButtonType.OK).showAndWait();
+            }
+        });
         helpMenu.getItems().add(aboutItem);
 
         menuBar.getMenus().addAll(fileMenu, editMenu, connMenu, viewMenu, helpMenu);

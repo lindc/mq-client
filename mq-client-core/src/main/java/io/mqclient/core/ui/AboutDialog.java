@@ -12,6 +12,8 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
+import javafx.stage.Stage;
+import javafx.stage.Window;
 import javafx.util.Duration;
 
 import java.io.InputStream;
@@ -74,6 +76,14 @@ public class AboutDialog extends Dialog<Void> {
             clock.stop();
             if (smokeTimeline != null) smokeTimeline.stop();
         });
+
+        // 设为主窗口的子窗口，避免无 owner 时被主窗口遮挡而不显示
+        for (Window w : Stage.getWindows()) {
+            if (w.isShowing()) {
+                initOwner(w);
+                break;
+            }
+        }
     }
 
     private String buildArt(int frameIndex) {
