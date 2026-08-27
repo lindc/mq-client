@@ -15,9 +15,10 @@ import org.springframework.context.MessageSource;
 /**
  * JavaFX 入口。
  * <p>
- * 与 Spring Boot 整合方式（经典模式）：
+ * 与 Spring Boot 整合方式（掘金《JavaFX 桌面开发——进阶 · SpringBoot 整合》的启动方式）：
  * <ul>
- *   <li>{@code init()} 中启动 Spring ApplicationContext（DI + 外部化配置）；</li>
+ *   <li>{@code main()} 中先 {@code SpringApplication.run} 启动 Spring 容器，
+ *       再 {@code Application.launch} 启动 JavaFX；</li>
  *   <li>{@code start()} 中从容器获取 Bean 构建界面；</li>
  *   <li>{@code stop()} 中关闭容器。</li>
  * </ul>
@@ -25,11 +26,11 @@ import org.springframework.context.MessageSource;
  */
 public class MainApp extends Application {
 
-    private ConfigurableApplicationContext context;
+    private static ConfigurableApplicationContext context;
 
-    @Override
-    public void init() {
-        context = SpringApplication.run(CoreConfig.class);
+    /** 由 {@link org.bear.mqclient.app.App#main(String[])} 在 launch 前注入已启动的容器。 */
+    public static void setContext(ConfigurableApplicationContext ctx) {
+        context = ctx;
     }
 
     @Override
@@ -61,7 +62,9 @@ public class MainApp extends Application {
         }
     }
 
+    /** 直接运行本类时的备用入口：同样先启动 Spring 再启动 JavaFX。 */
     public static void main(String[] args) {
+        context = SpringApplication.run(CoreConfig.class, args);
         launch(args);
     }
 }
