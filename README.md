@@ -11,13 +11,13 @@ MQBrowser 是一个**本地运行的桌面**消息队列浏览器工具，用于
 
 ## 支持的消息队列
 
-| MQ | 客户端库 | 说明 |
-|----|---------|------|
-| RabbitMQ | amqp-client | AMQP 0-9-1 |
-| Kafka | kafka-clients | destination 即 topic |
-| MQTT | Eclipse Paho | pub/sub，无服务端浏览 |
-| ActiveMQ Artemis | artemis-jakarta-client | JMS 2.0 |
-| IBM MQ | com.ibm.mq.jakarta.client | 需 queue manager + channel |
+| MQ               | 客户端库                  | 说明                       |
+| ---------------- | ------------------------- | -------------------------- |
+| RabbitMQ         | amqp-client               | AMQP 0-9-1                 |
+| Kafka            | kafka-clients             | destination 即 topic       |
+| RocketMQ         | rocketmq-client           | rocketmq client 5.5.0      |
+| ActiveMQ Artemis | artemis-jakarta-client    | JMS 2.0                    |
+| IBM MQ           | com.ibm.mq.jakarta.client | 需 queue manager + channel |
 
 ## 技术栈
 
@@ -83,20 +83,21 @@ src/main/
 界面颜色集中在 **`src/main/resources/styles/app.css`** 顶部的 `.root` 块，
 定义为一组 JavaFX looked-up color 变量，改这里即可统一换色：
 
-| 变量 | 当前值 | 作用 |
-|------|--------|------|
-| `-c-left-panel-bg`  | `#dfe4ea` | 左侧导航面板背景 |
-| `-c-hover-bg`       | `white`   | 列表项悬停时背景（浮起） |
-| `-c-selected-bg`    | `#4a90d9` | 选中项 / 主强调蓝 |
-| `-c-selected-text`  | `white`   | 选中项文字色 |
-| `-c-table-border`   | `#c8c8c8` | 右侧表格边框 |
-| `-c-row-odd`        | `#ffffff` | 表格斑马纹（偶数索引行） |
-| `-c-row-even`       | `#f2f5f8` | 表格斑马纹（奇数索引行） |
-| `-c-row-sel-bg`     | `#dbe7f3` | 选中表格行背景 |
-| `-c-row-sel-text`   | `#4a90d9` | 选中表格行文字 |
-| `-c-row-text`       | `black`   | 未选中表格行文字 |
+| 变量               | 当前值    | 作用                     |
+| ------------------ | --------- | ------------------------ |
+| `-c-left-panel-bg` | `#dfe4ea` | 左侧导航面板背景         |
+| `-c-hover-bg`      | `white`   | 列表项悬停时背景（浮起） |
+| `-c-selected-bg`   | `#4a90d9` | 选中项 / 主强调蓝        |
+| `-c-selected-text` | `white`   | 选中项文字色             |
+| `-c-table-border`  | `#c8c8c8` | 右侧表格边框             |
+| `-c-row-odd`       | `#ffffff` | 表格斑马纹（偶数索引行） |
+| `-c-row-even`      | `#f2f5f8` | 表格斑马纹（奇数索引行） |
+| `-c-row-sel-bg`    | `#dbe7f3` | 选中表格行背景           |
+| `-c-row-sel-text`  | `#4a90d9` | 选中表格行文字           |
+| `-c-row-text`      | `black`   | 未选中表格行文字         |
 
 > ⚠️ 少数几处颜色由 Java 代码绘制，CSS 变量管不到，需要时改这两处：
+>
 > - **左侧列表项图标**（蓝色小圆点）：`ui/LeftPanel.java` 中 `new Circle(5, Color.web("#4a90d9"))`
 > - **左侧面板悬浮阴影**：`ui/MainView.java` 中 `new DropShadow(...)`
 
