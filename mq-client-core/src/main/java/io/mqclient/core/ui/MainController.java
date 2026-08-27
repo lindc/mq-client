@@ -1,10 +1,12 @@
 package io.mqclient.core.ui;
 
 import io.mqclient.core.config.ConnectionStore;
+import io.mqclient.core.config.LocaleHolder;
 import io.mqclient.core.model.MQConnectionConfig;
 import io.mqclient.core.service.MQService;
 import io.mqclient.core.spi.MQServiceProvider;
 import io.mqclient.core.spi.MQUIProvider;
+import org.springframework.context.MessageSource;
 import javafx.scene.Node;
 import javafx.scene.control.Menu;
 import javafx.scene.control.MenuBar;
@@ -34,7 +36,8 @@ public class MainController {
     private final Map<String, MQServiceProvider> serviceProviders;
     private final Map<String, MQUIProvider> uiProviders;
 
-    public MainController(ConnectionStore connectionStore) {
+    public MainController(ConnectionStore connectionStore,
+                          MessageSource messageSource, LocaleHolder localeHolder) {
         this.connectionStore = connectionStore;
         this.serviceProviders = new HashMap<>();
         this.uiProviders = new HashMap<>();
@@ -44,7 +47,8 @@ public class MainController {
 
         // 菜单栏
         MenuBar menuBar = new MenuBar();
-        this.menuBarManager = new MenuBarManager(menuBar, this::onNewConnection);
+        this.menuBarManager = new MenuBarManager(menuBar, this::onNewConnection,
+                messageSource, localeHolder);
 
         // 左侧导航
         this.navigation = new NavigationPanel(connectionStore, this::onConnectionSelected);

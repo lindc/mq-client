@@ -3,12 +3,14 @@ package io.mqclient.core.ui;
 import io.mqclient.core.CoreConfig;
 import io.mqclient.core.config.AppProperties;
 import io.mqclient.core.config.ConnectionStore;
+import io.mqclient.core.config.LocaleHolder;
 import javafx.application.Application;
 import javafx.scene.Scene;
 import javafx.scene.image.Image;
 import javafx.stage.Stage;
 import org.springframework.boot.SpringApplication;
 import org.springframework.context.ConfigurableApplicationContext;
+import org.springframework.context.MessageSource;
 
 /**
  * JavaFX 入口。
@@ -34,8 +36,10 @@ public class MainApp extends Application {
     public void start(Stage primaryStage) {
         ConnectionStore store = context.getBean(ConnectionStore.class);
         AppProperties props = context.getBean(AppProperties.class);
+        MessageSource messageSource = context.getBean(MessageSource.class);
+        LocaleHolder localeHolder = context.getBean(LocaleHolder.class);
 
-        MainController controller = new MainController(store);
+        MainController controller = new MainController(store, messageSource, localeHolder);
         int width = props.getWindow().getWidth();
         int height = props.getWindow().getHeight();
         Scene scene = new Scene(controller.getRoot(), width, height);

@@ -16,6 +16,9 @@ import javafx.stage.Stage;
 import javafx.stage.Window;
 import javafx.util.Duration;
 
+import io.mqclient.core.config.LocaleHolder;
+import org.springframework.context.MessageSource;
+
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalTime;
@@ -34,11 +37,16 @@ public class AboutDialog extends Dialog<Void> {
     private final List<String> smokeFrames = new ArrayList<>();
     private final String train;
     private final ClockCanvas clock = new ClockCanvas(150);
+    private final MessageSource messageSource;
+    private final LocaleHolder localeHolder;
     private Timeline smokeTimeline;
 
-    public AboutDialog() {
-        setTitle("关于 MQBrowser");
-        setHeaderText("MQBrowser — 统一消息队列桌面客户端");
+    public AboutDialog(MessageSource messageSource, LocaleHolder localeHolder) {
+        this.messageSource = messageSource;
+        this.localeHolder = localeHolder;
+
+        setTitle(msg("about.title"));
+        setHeaderText(msg("about.header"));
 
         train = loadResource("/ascii/train.txt").stripTrailing();
         loadSmokeFrames(loadResource("/ascii/smoke.txt"));
@@ -46,10 +54,10 @@ public class AboutDialog extends Dialog<Void> {
         Label smokeLabel = new Label(buildArt(0));
         smokeLabel.setFont(Font.font("Monospaced", 13));
 
-        Label info = new Label("版本：1.0.0-SNAPSHOT\n"
-                + "JavaFX 26.0.2 + Spring Boot 4.1.1\n"
-                + "支持：RabbitMQ / IBM MQ / Kafka / Artemis / RocketMQ\n"
-                + "© 2026 MQBrowser");
+        Label info = new Label(msg("about.version") + "\n"
+                + msg("about.tech") + "\n"
+                + msg("about.supported") + "\n"
+                + msg("about.copyright"));
         info.setPadding(new Insets(0, 0, 8, 0));
 
         VBox trainBox = new VBox(6, info, smokeLabel);
@@ -59,7 +67,7 @@ public class AboutDialog extends Dialog<Void> {
 
         getDialogPane().setContent(center);
         getDialogPane().getButtonTypes().add(
-                new ButtonType("关闭", ButtonBar.ButtonData.CANCEL_CLOSE));
+                new ButtonType(msg("about.close"), ButtonBar.ButtonData.CANCEL_CLOSE));
         getDialogPane().setPrefSize(560, 300);
 
         if (!smokeFrames.isEmpty()) {
@@ -84,6 +92,10 @@ public class AboutDialog extends Dialog<Void> {
                 break;
             }
         }
+    }
+
+    private String msg(String key) {
+        return messageSource.getMessage(key, null, key, localeHolder.getLocale());
     }
 
     private String buildArt(int frameIndex) {
