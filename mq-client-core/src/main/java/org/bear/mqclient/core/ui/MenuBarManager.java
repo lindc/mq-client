@@ -24,12 +24,18 @@ public class MenuBarManager {
     private final MenuBar menuBar;
     private final List<Menu> injectedMenus;
     private final Runnable onNewConnection;
+    private final Runnable onImportConfig;
+    private final Runnable onExportConfig;
     private final LocaleHolder localeHolder;
 
-    public MenuBarManager(MenuBar menuBar, Runnable onNewConnection, LocaleHolder localeHolder) {
+    public MenuBarManager(MenuBar menuBar, Runnable onNewConnection,
+                          Runnable onImportConfig, Runnable onExportConfig,
+                          LocaleHolder localeHolder) {
         this.menuBar = menuBar;
         this.injectedMenus = new ArrayList<>();
         this.onNewConnection = onNewConnection;
+        this.onImportConfig = onImportConfig;
+        this.onExportConfig = onExportConfig;
         this.localeHolder = localeHolder;
         buildFixedMenus();
     }
@@ -56,14 +62,18 @@ public class MenuBarManager {
         Menu connMenu = new Menu(msg("menu.connection"));
         MenuItem newConnItem = new MenuItem(msg("menu.connection.new"));
         newConnItem.setOnAction(e -> onNewConnection.run());
+        MenuItem importItem = new MenuItem(msg("menu.connection.import"));
+        importItem.setOnAction(e -> onImportConfig.run());
+        MenuItem exportItem = new MenuItem(msg("menu.connection.export"));
+        exportItem.setOnAction(e -> onExportConfig.run());
         connMenu.getItems().addAll(
                 newConnItem,
                 new SeparatorMenuItem(),
                 new MenuItem(msg("menu.connection.edit")),
                 new MenuItem(msg("menu.connection.delete")),
                 new SeparatorMenuItem(),
-                new MenuItem(msg("menu.connection.import")),
-                new MenuItem(msg("menu.connection.export"))
+                importItem,
+                exportItem
         );
 
         // View

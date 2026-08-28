@@ -1,6 +1,9 @@
 package org.bear.mqclient.core.ui;
 
 import lombok.extern.slf4j.Slf4j;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import org.bear.mqclient.core.config.ConnectionStore;
 import org.bear.mqclient.core.config.LocaleHolder;
 import org.bear.mqclient.core.model.ConnectionState;
@@ -8,14 +11,20 @@ import org.bear.mqclient.core.model.MQConnectionConfig;
 import org.bear.mqclient.core.service.MQService;
 import org.bear.mqclient.core.spi.MQServiceProvider;
 import org.bear.mqclient.core.spi.MQUIProvider;
+import org.bear.mqclient.core.util.I18n;
 import javafx.scene.Node;
+import javafx.scene.control.Alert;
+import javafx.scene.control.ButtonType;
 import javafx.scene.control.Menu;
 import javafx.scene.control.MenuBar;
 import javafx.scene.control.SplitPane;
 import javafx.geometry.Insets;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.StackPane;
+import javafx.stage.FileChooser;
 
+import java.io.File;
+import java.io.IOException;
 import java.util.*;
 
 /**
@@ -53,7 +62,8 @@ public class MainController {
 
         // 菜单栏
         MenuBar menuBar = new MenuBar();
-        this.menuBarManager = new MenuBarManager(menuBar, this::onNewConnection, localeHolder);
+        this.menuBarManager = new MenuBarManager(menuBar, this::onNewConnection,
+                this::onImportConfig, this::onExportConfig, localeHolder);
 
         // 左侧导航
         this.navigation = new NavigationPanel(connectionStore, uiProviders, this::onConnectionSelected);
@@ -169,6 +179,51 @@ public class MainController {
             connectionStore.add(config);
             navigation.refresh();
         });
+    }
+
+    // ── 导入 / 导出配置 ──
+
+    private void onImportConfig() {
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle(I18n.get("menu.connection.import"));
+        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("JSON", "*.json"));
+        File file = chooser.showOpenDialog(root.getScene().getWindow());
+        if (file == null) return;
+        try {
+            List<MQConnectionConfig> imported = new ObjectMapper()
+                    .readValue(file, new TypeReference<List<MQConnectionConfig>>() {});
+            if (imported == null || imported.isEmpty()) return;
+            imported.forEach(connectionStore::add); // add 触发保存 + 导航监听自动刷新
+            log.info("Imported {} connections from {}", imported.size(), file);
+        } catch (IOException e) {
+            log.error("Import failed: {}", e.getMessage());
+            showError(I18n.get("menu.connection.importFailed", e.getMessage()));
+        }
+    }
+
+    private void onExportConfig() {
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle(I18n.get("menu.connection.export"));
+        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("JSON", "*.json"));
+        chooser.setInitialFileName("mq-client-connections.json");
+        File file = chooser.showSaveDialog(root.getScene().getWindow());
+        if (file == null) return;
+        try {
+            new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT)
+                    .writeValue(file, connectionStore.listAll());
+            log.info("Exported {} connections to {}", connectionStore.listAll().size(), file);
+        } catch (IOException e) {
+            log.error("Export failed: {}", e.getMessage());
+            showError(I18n.get("menu.connection.exportFailed", e.getMessage()));
+        }
+    }
+
+    private void showError(String message) {
+        Alert alert = new Alert(Alert.AlertType.ERROR, message, ButtonType.OK);
+        if (root.getScene() != null && root.getScene().getWindow() != null) {
+            alert.initOwner(root.getScene().getWindow());
+        }
+        alert.showAndWait();
     }
 
     // ── 公开 ──
