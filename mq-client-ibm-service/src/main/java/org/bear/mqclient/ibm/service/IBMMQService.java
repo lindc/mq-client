@@ -48,16 +48,17 @@ public class IBMMQService implements MQService {
                     props.put(MQConstants.TRANSPORT_PROPERTY, MQConstants.TRANSPORT_MQSERIES_BINDINGS);
                 } else {
                     // Client 模式：远程 TCP 连接
+                    props.put(MQConstants.TRANSPORT_PROPERTY, MQConstants.TRANSPORT_MQSERIES_CLIENT);
                     props.put(MQConstants.HOST_NAME_PROPERTY, host);
                     props.put(MQConstants.PORT_PROPERTY, Integer.parseInt(portStr));
                     props.put(MQConstants.CHANNEL_PROPERTY, channel);
                     if (user != null && !user.isEmpty()) {
+                        props.put(MQConstants.USE_MQCSP_AUTHENTICATION_PROPERTY, true);
                         props.put(MQConstants.USER_ID_PROPERTY, user);
                         if (pass != null && !pass.isEmpty()) {
                             props.put(MQConstants.PASSWORD_PROPERTY, pass);
                         }
                     }
-                    props.put(MQConstants.USE_MQCSP_AUTHENTICATION_PROPERTY, true);
 
                     if (sslCipher != null && !sslCipher.isEmpty()) {
                         // 使用 Oracle/OpenJDK（非 IBM JRE）时需关闭 IBM cipher 名称映射
@@ -82,6 +83,7 @@ public class IBMMQService implements MQService {
 
                 this.qmgr = new com.ibm.mq.MQQueueManager(qmgrName, props);
             } catch (Exception e) {
+                LogAdapter.error("IBM_MQ", "Connect error", e);
                 throw new RuntimeException("IBM MQ connect failed: " + e.getMessage(), e);
             }
         }, executor);
