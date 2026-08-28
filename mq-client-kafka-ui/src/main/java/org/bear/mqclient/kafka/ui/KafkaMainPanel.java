@@ -4,6 +4,7 @@ import org.bear.mqclient.core.model.MQConnectionConfig;
 import org.bear.mqclient.core.model.MQMessage;
 import org.bear.mqclient.core.service.MQService;
 import org.bear.mqclient.core.ui.MessageDetailContainer;
+import org.bear.mqclient.core.ui.FilterableCardGrid;
 import org.bear.mqclient.core.util.I18n;
 import javafx.application.Platform;
 import javafx.beans.property.SimpleStringProperty;
@@ -69,7 +70,7 @@ public class KafkaMainPanel extends VBox {
     // ═══════════════════════════════════════
 
     static class TopicsPanel extends VBox {
-        private final ListView<String> topicList;
+        private final FilterableCardGrid topicGrid;
         private final TableView<MQMessage> messageTable;
         private final ObservableList<MQMessage> messages;
         private final MQService service;
@@ -79,13 +80,13 @@ public class KafkaMainPanel extends VBox {
             this.service = svc;
             this.messages = FXCollections.observableArrayList();
 
-            // 左：Topic 列表，右：消息
-            topicList = new ListView<>();
-            topicList.setPrefWidth(200);
-            topicList.setPlaceholder(new Label(I18n.get("common.loading")));
+            // 左：Topic 卡片网格（3 列 + 过滤），右：消息
+            topicGrid = new FilterableCardGrid(null,
+                    d -> { selectedTopic = d.getName(); browseTopic(d.getName()); }, null);
+            topicGrid.setPrefWidth(240);
 
             Button refreshBtn = new Button(I18n.get("common.refresh"));
-            VBox leftSide = new VBox(4, refreshBtn, topicList);
+            VBox leftSide = new VBox(4, refreshBtn, topicGrid);
             leftSide.setPadding(new Insets(8));
 
             // 消息表格
@@ -135,18 +136,10 @@ public class KafkaMainPanel extends VBox {
                 }
             });
 
-            // 点击 topic → 浏览
-            topicList.getSelectionModel().selectedItemProperty().addListener((obs, old, sel) -> {
-                if (sel != null) {
-                    selectedTopic = sel;
-                    browseTopic(sel);
-                }
-            });
-
             refreshBtn.setOnAction(e -> refreshTopics());
 
             SplitPane mainSplit = new SplitPane(leftSide, split);
-            mainSplit.setDividerPositions(0.2);
+            mainSplit.setDividerPositions(0.5);
 
             getChildren().add(mainSplit);
             refreshTopics();
@@ -154,10 +147,7 @@ public class KafkaMainPanel extends VBox {
 
         private void refreshTopics() {
             service.listDestinations().thenAccept(dests ->
-                    Platform.runLater(() -> {
-                        topicList.getItems().clear();
-                        dests.forEach(d -> topicList.getItems().add(d.getName()));
-                    }));
+                    Platform.runLater(() -> topicGrid.setDestinations(dests)));
         }
 
         private void browseTopic(String topic) {
