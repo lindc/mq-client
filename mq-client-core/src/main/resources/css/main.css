@@ -18,3 +18,24 @@
 .list-cell:selected .nav-addr {
     -fx-text-fill: white;
 }
+
+/* 左侧连接列表：行级卡片化 — 默认透明，hover 浮现圆角浅灰小卡片，
+   选中为圆角蓝卡；:focused 去掉默认虚线边框 */
+.nav-list .list-cell {
+    -fx-background-color: transparent;
+    -fx-padding: 3 6 3 6;
+}
+.nav-list .list-cell:hover {
+    -fx-background-color: #f0f2f5;
+    -fx-background-radius: 8;
+}
+.nav-list .list-cell:selected {
+    -fx-background-color: #3f7fd4;
+    -fx-background-radius: 8;
+}
+.nav-list .list-cell:selected:hover {
+    -fx-background-color: #5a94dc;
+}
+.nav-list .list-cell:focused {
+    -fx-border-color: transparent;
+}

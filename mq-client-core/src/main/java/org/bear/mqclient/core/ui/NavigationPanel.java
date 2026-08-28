@@ -59,6 +59,7 @@ public class NavigationPanel {
         this.items = FXCollections.observableArrayList();
 
         this.listView = new ListView<>(items);
+        listView.getStyleClass().add("nav-list"); // 行级卡片样式见 css/main.css
         listView.setCellFactory(lv -> new ListCell<>() {
             @Override
             protected void updateItem(MQConnectionConfig cfg, boolean empty) {
@@ -81,18 +82,23 @@ public class NavigationPanel {
         // 右键菜单
         listView.setContextMenu(createContextMenu());
 
-        // 布局：无标题；列表内容圆角裁剪（不能裁剪 view 本身，否则溢出阴影被裁掉）
+        // 布局：无标题文字；面板带背景色 + 小圆角 + 阴影（与行级卡片圆角 8px 一致），
+        // 呈悬浮卡片效果（阴影需配合 navWrap 空隙与同色背景才能完整可见）
         VBox.setVgrow(listView, Priority.ALWAYS);
+        // ListView 背景透明，露出面板背景
         listView.setStyle("-fx-background-color: transparent;");
+        // ListView 内容圆角裁剪：避免直角内容把阴影形状顶出尖角。
+        // 注意：不能裁剪 view 本身——clip 作用于节点全部渲染，会把溢出面板边界的阴影一并裁掉
         Rectangle clip = new Rectangle();
-        clip.setArcWidth(24);
-        clip.setArcHeight(24);
+        clip.setArcWidth(16);
+        clip.setArcHeight(16);
         clip.widthProperty().bind(listView.widthProperty());
         clip.heightProperty().bind(listView.heightProperty());
         listView.setClip(clip);
         this.view = new VBox(listView);
+        // 面板白色、背景灰（#e8eaed）：色差 + 阴影形成悬浮卡片；阴影只向下偏移避免右缘灰带
         view.setStyle("-fx-background-color: #ffffff;"
-                + " -fx-background-radius: 12;"
+                + " -fx-background-radius: 8;"
                 + " -fx-effect: dropshadow(gaussian, rgba(70, 110, 160, 0.4), 18, 0.2, 0, 5);");
         view.setMinWidth(140);
 
@@ -121,17 +127,17 @@ public class NavigationPanel {
         Node icon = provider != null && provider.getIcon() != null
                 ? provider.getIcon()
                 : new Region();
-        // 统一图标显示尺寸为 36px（provider 返回的 ImageView 按此缩放，Region 占位同尺寸）
+        // 统一图标显示尺寸为 40px（provider 返回的 ImageView 按此缩放，Region 占位同尺寸）
         if (icon instanceof ImageView iv) {
-            iv.setFitWidth(36);
-            iv.setFitHeight(36);
+            iv.setFitWidth(40);
+            iv.setFitHeight(40);
         } else if (icon instanceof Region r) {
-            r.setPrefSize(36, 36);
+            r.setPrefSize(40, 40);
         }
         // 图标包一层 StackPane：随行高拉伸、图标居中，上下空隙均匀（直接放 HBox
         // 会被 fillHeight 拉伸或出现视觉偏移）
         StackPane iconBox = new StackPane(icon);
-        iconBox.setPrefSize(36, 36);
+        iconBox.setPrefSize(40, 40);
         HBox.setHgrow(iconBox, Priority.NEVER);
 
         Label name = new Label(cfg.getName());
