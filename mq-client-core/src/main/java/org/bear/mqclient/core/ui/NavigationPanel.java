@@ -73,6 +73,10 @@ public class NavigationPanel {
                 setGraphic(buildCard(cfg));
             }
         });
+        // 空列表占位提示：避免空白卡片看起来像有内容的空洞
+        Label emptyLabel = new Label(I18n.get("navigation.empty"));
+        emptyLabel.getStyleClass().add("nav-empty");
+        listView.setPlaceholder(emptyLabel);
 
         // 点击选择
         listView.getSelectionModel().selectedItemProperty().addListener((obs, old, sel) -> {

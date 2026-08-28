@@ -1,13 +1,10 @@
 /* MQ Client 全局样式 */
 
-/* 左侧导航与内容区之间的分隔条：默认不可见（导航面板阴影提供视觉分隔），
-   hover 时浅色浮现提示可拖动 */
+/* 左侧导航与内容区之间的分隔条：始终不可见（导航面板阴影提供视觉分隔），
+   拖动热区保留（padding 提供可拖区域） */
 .mq-split-pane > .split-pane-divider {
     -fx-background-color: transparent;
     -fx-padding: 0 2 0 2;
-}
-.mq-split-pane > .split-pane-divider:hover {
-    -fx-background-color: rgba(0, 0, 0, 0.15);
 }
 
 /* 连接卡片：地址小字；选中行时变白，避免蓝底上灰色不可读 */
@@ -25,17 +22,18 @@
     -fx-background-color: transparent;
     -fx-padding: 3 6 3 6;
 }
-.nav-list .list-cell:hover {
-    -fx-background-color: #f0f2f5;
-    -fx-background-radius: 8;
-}
+/* 注：不提供 hover 高亮（鼠标移动时跟随浮现的浅灰块视为干扰），
+   仅保留点击后的选中态蓝卡 */
 .nav-list .list-cell:selected {
     -fx-background-color: #3f7fd4;
     -fx-background-radius: 8;
 }
-.nav-list .list-cell:selected:hover {
-    -fx-background-color: #5a94dc;
-}
 .nav-list .list-cell:focused {
     -fx-border-color: transparent;
+}
+
+/* 空列表占位提示（无连接时） */
+.nav-list .nav-empty {
+    -fx-text-fill: #9aa0a6;
+    -fx-font-size: 12px;
 }
