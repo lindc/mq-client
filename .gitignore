@@ -16,6 +16,3 @@ Thumbs.db
 
 # Logs
 *.log
-
-# 本地 logo 源文件（图标副本已复制进各模块 resources/icons/）
-logo/
