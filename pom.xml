@@ -194,6 +194,16 @@
         </dependencies>
     </dependencyManagement>
 
+    <!-- Lombok：编译期注解处理，provided 不打包。根 pom 声明后所有子模块继承，
+         各模块可直接使用 @Slf4j 等注解（仅 dependencyManagement 不会引入依赖） -->
+    <dependencies>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
+
     <build>
         <pluginManagement>
             <plugins>
