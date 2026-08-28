@@ -4,7 +4,6 @@ import com.ibm.mq.MQException;
 import com.ibm.mq.constants.MQConstants;
 import org.bear.mqclient.core.model.*;
 import org.bear.mqclient.core.service.MQService;
-import org.bear.mqclient.core.util.LogAdapter;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -83,7 +82,7 @@ public class IBMMQService implements MQService {
 
                 this.qmgr = new com.ibm.mq.MQQueueManager(qmgrName, props);
             } catch (Exception e) {
-                LogAdapter.error("IBM_MQ", "Connect error", e);
+                IBMMQLogs.LOG.error("Connect error", e);
                 throw new RuntimeException("IBM MQ connect failed: " + e.getMessage(), e);
             }
         }, executor);
@@ -268,7 +267,7 @@ public class IBMMQService implements MQService {
                     }
                 }
             } catch (Exception e) {
-                LogAdapter.error("IBM_MQ", "Subscribe error", e);
+                IBMMQLogs.LOG.error("Subscribe error", e);
             }
         });
 

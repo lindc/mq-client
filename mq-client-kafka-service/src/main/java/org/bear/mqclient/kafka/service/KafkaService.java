@@ -2,7 +2,6 @@ package org.bear.mqclient.kafka.service;
 
 import org.bear.mqclient.core.model.*;
 import org.bear.mqclient.core.service.MQService;
-import org.bear.mqclient.core.util.LogAdapter;
 import org.apache.kafka.clients.admin.*;
 import org.apache.kafka.clients.consumer.*;
 import org.apache.kafka.clients.producer.*;
@@ -245,7 +244,7 @@ public class KafkaService implements MQService {
                 }
             } catch (Exception e) {
                 if (running) {
-                    LogAdapter.error("KAFKA", "Subscribe error", e);
+                    KafkaLogs.LOG.error("Subscribe error", e);
                 }
             } finally {
                 if (consumer != null) {

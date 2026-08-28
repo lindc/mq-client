@@ -51,6 +51,35 @@ public final class LogAdapter {
         log.error(prefix(source, message), t);
     }
 
+    /**
+     * 创建绑定固定 source 的日志器 —— source 只写一次，后续调用无需再传。
+     * <p>
+     * 各 MQ service 模块建议用 {@code private static final} 持有，避免每次调用
+     * 手写 source 字符串导致打错或不一致：
+     * <pre>
+     * private static final LogAdapter.Log LOG = LogAdapter.forSource("IBM_MQ");
+     * </pre>
+     */
+    public static Log forSource(String source) {
+        return new Log(source);
+    }
+
+    /** 绑定 source 的轻量日志器，{@link #forSource(String)} 的返回值。 */
+    public static final class Log {
+
+        private final String source;
+
+        private Log(String source) {
+            this.source = source;
+        }
+
+        public void record(String level, String message) { LogAdapter.record(source, level, message); }
+        public void info(String message) { LogAdapter.info(source, message); }
+        public void warn(String message) { LogAdapter.warn(source, message); }
+        public void error(String message) { LogAdapter.error(source, message); }
+        public void error(String message, Throwable t) { LogAdapter.error(source, message, t); }
+    }
+
     private static String prefix(String source, String message) {
         return "[" + source + "] " + message;
     }
