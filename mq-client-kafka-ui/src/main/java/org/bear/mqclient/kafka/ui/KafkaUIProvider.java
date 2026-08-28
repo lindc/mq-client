@@ -5,6 +5,8 @@ import org.bear.mqclient.core.service.MQService;
 import org.bear.mqclient.core.spi.MQUIProvider;
 import javafx.scene.Node;
 import javafx.scene.control.Menu;
+import javafx.scene.image.Image;
+import javafx.scene.image.ImageView;
 
 import java.util.List;
 
@@ -13,6 +15,7 @@ import java.util.List;
  */
 public class KafkaUIProvider implements MQUIProvider {
 
+    private final Image iconImage = new Image(getClass().getResourceAsStream("/icons/kafka.png"));
     private KafkaMainPanel mainPanel;
 
     @Override
@@ -20,6 +23,15 @@ public class KafkaUIProvider implements MQUIProvider {
 
     @Override
     public String getDisplayName() { return "Apache Kafka"; }
+
+    @Override
+    public Node getIcon() {
+        ImageView icon = new ImageView(iconImage);
+        icon.setFitWidth(28);
+        icon.setFitHeight(28);
+        icon.setPreserveRatio(true);
+        return icon;
+    }
 
     @Override
     public Node createMainPanel(MQConnectionConfig config, MQService service) {

@@ -3,6 +3,7 @@ package org.bear.mqclient.core.ui;
 import lombok.extern.slf4j.Slf4j;
 import org.bear.mqclient.core.config.ConnectionStore;
 import org.bear.mqclient.core.config.LocaleHolder;
+import org.bear.mqclient.core.model.ConnectionState;
 import org.bear.mqclient.core.model.MQConnectionConfig;
 import org.bear.mqclient.core.service.MQService;
 import org.bear.mqclient.core.spi.MQServiceProvider;
@@ -54,7 +55,7 @@ public class MainController {
         this.menuBarManager = new MenuBarManager(menuBar, this::onNewConnection, localeHolder);
 
         // 左侧导航
-        this.navigation = new NavigationPanel(connectionStore, this::onConnectionSelected);
+        this.navigation = new NavigationPanel(connectionStore, uiProviders, this::onConnectionSelected);
 
         // 根布局：菜单栏 +（导航 | 内容区）可拖动的 SplitPane
         this.contentArea = new StackPane();
@@ -104,6 +105,7 @@ public class MainController {
         if (config == null) return;
 
         currentConfig = config;
+        navigation.updateState(config.getId(), ConnectionState.CONNECTING);
 
         // 获取对应的 Provider
         MQServiceProvider svcProvider = serviceProviders.get(config.getType());
@@ -121,9 +123,11 @@ public class MainController {
         currentService = service;
         service.connect(config).whenComplete((v, ex) -> {
             if (ex != null) {
+                navigation.updateState(config.getId(), ConnectionState.FAILED);
                 log.error("Connection failed: {}", ex.getMessage());
                 return;
             }
+            navigation.updateState(config.getId(), ConnectionState.CONNECTED);
             javafx.application.Platform.runLater(() -> {
                 // 创建 MQ 专属面板
                 currentPanel = uiProvider.createMainPanel(config, service);
@@ -138,6 +142,9 @@ public class MainController {
         if (currentService != null) {
             currentService.disconnect();
             currentService = null;
+        }
+        if (currentConfig != null) {
+            navigation.updateState(currentConfig.getId(), ConnectionState.DISCONNECTED);
         }
         if (currentUIProvider != null) {
             currentUIProvider.onPanelClosed();
