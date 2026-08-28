@@ -73,6 +73,13 @@ public class RabbitMQConfigEditor extends VBox {
         virtualHostField.setText(cfg.getProperty("virtualHost"));
         usernameField.setText(cfg.getProperty("username"));
         passwordField.setText(cfg.getProperty("password"));
+        // 字段当前值（含构造时的默认值）同步回 config：未编辑过的字段也要进配置，
+        // 否则连接卡片/后续读取拿不到 host/port 等默认值
+        cfg.setProperty("host", hostField.getText());
+        cfg.setProperty("port", portField.getText());
+        cfg.setProperty("virtualHost", virtualHostField.getText());
+        cfg.setProperty("username", usernameField.getText());
+        cfg.setProperty("password", passwordField.getText());
     }
 
     private MQConnectionConfig cfg() { return config; }

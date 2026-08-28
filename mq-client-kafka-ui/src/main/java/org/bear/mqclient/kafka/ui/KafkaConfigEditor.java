@@ -74,6 +74,13 @@ public class KafkaConfigEditor extends VBox {
         if (sec != null) securityCombo.setValue(sec);
         saslMechField.setText(cfg.getProperty("saslMechanism"));
         saslJaasField.setText(cfg.getProperty("saslJaasConfig"));
+        // 字段当前值（含构造时的默认值）同步回 config：未编辑过的字段也要进配置，
+        // 否则连接卡片/后续读取拿不到 bootstrapServers 等默认值
+        cfg.setProperty("bootstrapServers", bootstrapField.getText());
+        cfg.setProperty("groupId", groupIdField.getText());
+        cfg.setProperty("securityProtocol", securityCombo.getValue());
+        cfg.setProperty("saslMechanism", saslMechField.getText());
+        cfg.setProperty("saslJaasConfig", saslJaasField.getText());
     }
 
     private MQConnectionConfig cfg() { return config; }

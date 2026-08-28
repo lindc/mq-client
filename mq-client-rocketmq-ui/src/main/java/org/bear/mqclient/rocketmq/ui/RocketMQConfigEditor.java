@@ -60,6 +60,11 @@ public class RocketMQConfigEditor extends VBox {
         nsAddrField.setText(cfg.getProperty("namesrvAddr"));
         consumerGroupField.setText(cfg.getProperty("consumerGroup"));
         producerGroupField.setText(cfg.getProperty("producerGroup"));
+        // 字段当前值（含构造时的默认值）同步回 config：未编辑过的字段也要进配置，
+        // 否则连接卡片/后续读取拿不到 namesrvAddr 等默认值
+        cfg.setProperty("namesrvAddr", nsAddrField.getText());
+        cfg.setProperty("consumerGroup", consumerGroupField.getText());
+        cfg.setProperty("producerGroup", producerGroupField.getText());
     }
 
     private MQConnectionConfig cfg() { return config; }
