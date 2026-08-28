@@ -4,6 +4,7 @@ import org.bear.mqclient.core.model.MQConnectionConfig;
 import org.bear.mqclient.core.model.MQMessage;
 import org.bear.mqclient.core.service.MQService;
 import org.bear.mqclient.core.ui.MessageDetailContainer;
+import org.bear.mqclient.core.util.I18n;
 import javafx.application.Platform;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
@@ -53,10 +54,10 @@ public class KafkaMainPanel extends VBox {
     public List<Menu> getMenus() {
         Menu kafkaMenu = new Menu("Kafka");
         kafkaMenu.getItems().addAll(
-                new MenuItem("刷新 Topic 列表"),
-                new MenuItem("查看 Consumer Groups..."),
+                new MenuItem(I18n.get("kafka.refreshTopics")),
+                new MenuItem(I18n.get("kafka.consumerGroups")),
                 new SeparatorMenuItem(),
-                new MenuItem("连接状态")
+                new MenuItem(I18n.get("common.connectionStatus"))
         );
         return List.of(kafkaMenu);
     }
@@ -81,9 +82,9 @@ public class KafkaMainPanel extends VBox {
             // 左：Topic 列表，右：消息
             topicList = new ListView<>();
             topicList.setPrefWidth(200);
-            topicList.setPlaceholder(new Label("加载中..."));
+            topicList.setPlaceholder(new Label(I18n.get("common.loading")));
 
-            Button refreshBtn = new Button("刷新");
+            Button refreshBtn = new Button(I18n.get("common.refresh"));
             VBox leftSide = new VBox(4, refreshBtn, topicList);
             leftSide.setPadding(new Insets(8));
 
@@ -175,7 +176,7 @@ public class KafkaMainPanel extends VBox {
             setSpacing(8);
 
             TextField topicField = new TextField();
-            topicField.setPromptText("输入 Topic 名");
+            topicField.setPromptText(I18n.get("kafka.topicNamePrompt"));
             TextField countField = new TextField("10");
             countField.setPrefWidth(60);
 
@@ -184,7 +185,7 @@ public class KafkaMainPanel extends VBox {
             outputArea.setFont(Font.font("Consolas", 12));
             VBox.setVgrow(outputArea, Priority.ALWAYS);
 
-            Button consumeBtn = new Button("消费");
+            Button consumeBtn = new Button(I18n.get("common.consume"));
             consumeBtn.setOnAction(e -> {
                 String topic = topicField.getText().trim();
                 if (topic.isEmpty()) return;
@@ -200,7 +201,7 @@ public class KafkaMainPanel extends VBox {
                         }));
             });
 
-            Button subscribeBtn = new Button("订阅监听");
+            Button subscribeBtn = new Button(I18n.get("common.subscribeListen"));
             subscribeBtn.setOnAction(e -> {
                 String topic = topicField.getText().trim();
                 if (topic.isEmpty()) return;
@@ -211,7 +212,7 @@ public class KafkaMainPanel extends VBox {
             });
 
             HBox topBar = new HBox(6, new Label("Topic:"), topicField,
-                    new Label("条数:"), countField, consumeBtn, subscribeBtn);
+                    new Label(I18n.get("common.count")), countField, consumeBtn, subscribeBtn);
 
             getChildren().addAll(topBar, outputArea);
         }
@@ -227,16 +228,16 @@ public class KafkaMainPanel extends VBox {
             setSpacing(8);
 
             TextField topicField = new TextField();
-            topicField.setPromptText("目标 Topic");
+            topicField.setPromptText(I18n.get("common.targetTopicPrompt"));
 
             TextField keyField = new TextField();
-            keyField.setPromptText("Key (可选)");
+            keyField.setPromptText(I18n.get("common.keyOptional"));
 
             TextArea bodyArea = new TextArea();
-            bodyArea.setPromptText("消息内容...");
+            bodyArea.setPromptText(I18n.get("common.bodyPromptEllipsis"));
             bodyArea.setPrefRowCount(12);
 
-            Button sendBtn = new Button("发送");
+            Button sendBtn = new Button(I18n.get("common.send"));
             sendBtn.setOnAction(e -> {
                 MQMessage msg = new MQMessage();
                 msg.setPayloadText(bodyArea.getText());
@@ -249,7 +250,7 @@ public class KafkaMainPanel extends VBox {
             getChildren().addAll(
                     new Label("Topic:"), topicField,
                     new Label("Key:"), keyField,
-                    new Label("消息体:"), bodyArea,
+                    new Label(I18n.get("common.messageBody")), bodyArea,
                     sendBtn
             );
         }

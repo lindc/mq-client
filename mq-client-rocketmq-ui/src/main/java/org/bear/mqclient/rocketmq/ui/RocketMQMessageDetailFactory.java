@@ -3,6 +3,7 @@ package org.bear.mqclient.rocketmq.ui;
 import org.bear.mqclient.core.model.BodyEncoding;
 import org.bear.mqclient.core.model.MQMessage;
 import org.bear.mqclient.core.spi.MessageDetailViewFactory;
+import org.bear.mqclient.core.util.I18n;
 import javafx.geometry.Insets;
 import javafx.scene.Node;
 import javafx.scene.control.*;
@@ -25,7 +26,7 @@ public class RocketMQMessageDetailFactory implements MessageDetailViewFactory {
         TabPane tabs = new TabPane();
         tabs.setTabMinWidth(80);
 
-        tabs.getTabs().add(new Tab("元数据", buildGrid(message,
+        tabs.getTabs().add(new Tab(I18n.get("message.tab.metadata"), buildGrid(message,
                 "RocketMQ.msgId", "RocketMQ.queueId",
                 "RocketMQ.queueOffset", "RocketMQ.commitLogOffset",
                 "RocketMQ.bornHost", "RocketMQ.storeHost",
@@ -33,7 +34,7 @@ public class RocketMQMessageDetailFactory implements MessageDetailViewFactory {
                 "RocketMQ.keys", "RocketMQ.sysFlag"
         )));
 
-        tabs.getTabs().add(new Tab("时间", timeGrid(message)));
+        tabs.getTabs().add(new Tab(I18n.get("message.tab.time"), timeGrid(message)));
 
         tabs.getTabs().add(new Tab("Properties", propsGrid(message)));
 
@@ -93,7 +94,7 @@ public class RocketMQMessageDetailFactory implements MessageDetailViewFactory {
         box.setPadding(new Insets(8));
         Map<String, Object> props = msg.getUserProperties();
         if (props.isEmpty()) {
-            box.getChildren().add(new Label("(无属性)"));
+            box.getChildren().add(new Label(I18n.get("message.noProps")));
             return box;
         }
         for (var e : props.entrySet()) {

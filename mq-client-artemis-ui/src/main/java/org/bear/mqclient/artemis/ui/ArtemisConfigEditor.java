@@ -1,6 +1,7 @@
 package org.bear.mqclient.artemis.ui;
 
 import org.bear.mqclient.core.model.MQConnectionConfig;
+import org.bear.mqclient.core.util.I18n;
 import javafx.geometry.Insets;
 import javafx.scene.control.*;
 import javafx.scene.layout.GridPane;
@@ -41,16 +42,16 @@ public class ArtemisConfigEditor extends VBox {
         usernameField.textProperty().addListener((o, a, b) -> { if (config != null) cfg().setProperty("username", b); });
         passwordField.textProperty().addListener((o, a, b) -> { if (config != null) cfg().setProperty("password", b); });
 
-        grid.addRow(0, new Label("连接名:"),   nameField);
-        grid.addRow(1, new Label("主机:"),     hostField);
-        grid.addRow(2, new Label("端口:"),     portField);
-        grid.addRow(3, new Label("用户名:"),   usernameField);
-        grid.addRow(4, new Label("密码:"),     passwordField);
+        grid.addRow(0, new Label(I18n.get("common.name")),   nameField);
+        grid.addRow(1, new Label(I18n.get("common.host")),     hostField);
+        grid.addRow(2, new Label(I18n.get("common.port")),     portField);
+        grid.addRow(3, new Label(I18n.get("common.username")), usernameField);
+        grid.addRow(4, new Label(I18n.get("common.password")), passwordField);
 
-        Button testBtn = new Button("测试连接");
+        Button testBtn = new Button(I18n.get("common.testConnection"));
         testBtn.setOnAction(e -> {
             Alert alert = new Alert(Alert.AlertType.INFORMATION,
-                    "测试连接 " + hostField.getText() + ":" + portField.getText());
+                    I18n.get("common.testingConnect", hostField.getText(), portField.getText()));
             alert.showAndWait();
         });
 

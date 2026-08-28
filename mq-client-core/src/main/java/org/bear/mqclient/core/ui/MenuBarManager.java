@@ -1,6 +1,7 @@
 package org.bear.mqclient.core.ui;
 
 import org.bear.mqclient.core.config.LocaleHolder;
+import org.bear.mqclient.core.util.I18n;
 import javafx.scene.control.*;
 import org.springframework.context.MessageSource;
 
@@ -81,7 +82,7 @@ public class MenuBarManager {
             } catch (Throwable t) {
                 t.printStackTrace();
                 new Alert(Alert.AlertType.ERROR,
-                        "打开关于对话框失败：\n" + t, ButtonType.OK).showAndWait();
+                        I18n.get("menu.help.about.error", t), ButtonType.OK).showAndWait();
             }
         });
         helpMenu.getItems().addAll(aboutItem, new SeparatorMenuItem());

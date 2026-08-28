@@ -1,6 +1,7 @@
 package org.bear.mqclient.core.config;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
@@ -18,6 +19,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * ConnectionStore 只做存储不关心加密逻辑。
  */
 @Component
+@Slf4j
 public class ConnectionStore {
 
     private static final File DEFAULT_FILE = new File(
@@ -97,7 +99,7 @@ public class ConnectionStore {
                 connections.addAll(loaded);
             }
         } catch (IOException e) {
-            System.err.println("[ConnectionStore] Failed to load: " + e.getMessage());
+            log.error("Failed to load connections from {}: {}", file, e.getMessage());
         }
     }
 
@@ -106,7 +108,7 @@ public class ConnectionStore {
             file.getParentFile().mkdirs();
             mapper.writeValue(file, connections);
         } catch (IOException e) {
-            System.err.println("[ConnectionStore] Failed to save: " + e.getMessage());
+            log.error("Failed to save connections to {}: {}", file, e.getMessage());
         }
     }
 

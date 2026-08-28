@@ -2,6 +2,7 @@ package org.bear.mqclient.core.ui;
 
 import org.bear.mqclient.core.model.MQConnectionConfig;
 import org.bear.mqclient.core.spi.MQUIProvider;
+import org.bear.mqclient.core.util.I18n;
 import javafx.geometry.Insets;
 import javafx.scene.Node;
 import javafx.scene.control.*;
@@ -29,18 +30,18 @@ public class NewConnectionDialog extends Dialog<MQConnectionConfig> {
     public NewConnectionDialog(Map<String, MQUIProvider> uiProviders) {
         this.uiProviders = uiProviders;
 
-        setTitle("新建连接");
-        setHeaderText("选择 MQ 类型");
+        setTitle(I18n.get("connection.dialog.title"));
+        setHeaderText(I18n.get("connection.dialog.selectType"));
 
         // 按钮
-        ButtonType nextBtn = new ButtonType("下一步", ButtonBar.ButtonData.NEXT_FORWARD);
-        ButtonType cancelBtn = new ButtonType("取消", ButtonBar.ButtonData.CANCEL_CLOSE);
+        ButtonType nextBtn = new ButtonType(I18n.get("common.next"), ButtonBar.ButtonData.NEXT_FORWARD);
+        ButtonType cancelBtn = new ButtonType(I18n.get("common.cancel"), ButtonBar.ButtonData.CANCEL_CLOSE);
         getDialogPane().getButtonTypes().addAll(nextBtn, cancelBtn);
 
         // 内容
         this.content = new BorderPane();
         content.setLeft(createTypeSelector());
-        content.setCenter(new Label("请选择左侧的 MQ 类型"));
+        content.setCenter(new Label(I18n.get("connection.dialog.prompt")));
 
         getDialogPane().setContent(content);
         getDialogPane().setPrefSize(650, 450);
@@ -59,7 +60,7 @@ public class NewConnectionDialog extends Dialog<MQConnectionConfig> {
         box.setPadding(new Insets(12));
         box.setPrefWidth(180);
 
-        Label title = new Label("MQ 类型");
+        Label title = new Label(I18n.get("connection.dialog.mqType"));
         title.setStyle("-fx-font-weight: bold; -fx-padding: 0 0 8 0;");
 
         for (var entry : uiProviders.entrySet()) {
@@ -91,6 +92,6 @@ public class NewConnectionDialog extends Dialog<MQConnectionConfig> {
         }
 
         content.setCenter(configEditor);
-        setHeaderText(provider.getDisplayName() + " — 连接配置");
+        setHeaderText(I18n.get("connection.dialog.header", provider.getDisplayName()));
     }
 }

@@ -3,6 +3,7 @@ package org.bear.mqclient.kafka.ui;
 import org.bear.mqclient.core.model.BodyEncoding;
 import org.bear.mqclient.core.model.MQMessage;
 import org.bear.mqclient.core.spi.MessageDetailViewFactory;
+import org.bear.mqclient.core.util.I18n;
 import javafx.geometry.Insets;
 import javafx.scene.Node;
 import javafx.scene.control.*;
@@ -29,14 +30,14 @@ public class KafkaMessageDetailFactory implements MessageDetailViewFactory {
         tabs.setTabMinWidth(80);
 
         // ── 消息元数据 ──
-        tabs.getTabs().add(new Tab("元数据", buildGrid(message,
+        tabs.getTabs().add(new Tab(I18n.get("message.tab.metadata"), buildGrid(message,
                 "topic", "partition", "offset", "kafkaKey",
                 "timestampType", "serializedKeySize",
                 "serializedValueSize", "leaderEpoch"
         )));
 
         // ── 时间戳 ──
-        tabs.getTabs().add(new Tab("时间", timeGrid(message)));
+        tabs.getTabs().add(new Tab(I18n.get("message.tab.time"), timeGrid(message)));
 
         // ── Headers ──
         tabs.getTabs().add(new Tab("Headers", headersGrid(message)));
@@ -97,7 +98,7 @@ public class KafkaMessageDetailFactory implements MessageDetailViewFactory {
         box.setPadding(new Insets(8));
         Map<String, String> headers = msg.getHeaders();
         if (headers.isEmpty()) {
-            box.getChildren().add(new Label("(无 header)"));
+            box.getChildren().add(new Label(I18n.get("message.noHeaders")));
             return box;
         }
         for (Map.Entry<String, String> h : headers.entrySet()) {

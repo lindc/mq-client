@@ -2,6 +2,7 @@ package org.bear.mqclient.artemis.service;
 
 import org.bear.mqclient.core.model.*;
 import org.bear.mqclient.core.service.MQService;
+import org.bear.mqclient.core.util.LogAdapter;
 import org.apache.activemq.artemis.api.core.*;
 import org.apache.activemq.artemis.api.core.client.*;
 
@@ -192,7 +193,7 @@ public class ArtemisService implements MQService {
                     artMsg.acknowledge();
                 }
             } catch (Exception e) {
-                if (running) System.err.println("[Artemis] Subscribe error: " + e.getMessage());
+                if (running) LogAdapter.error("ARTEMIS", "Subscribe error", e);
             } finally {
                 if (consumer != null) try { consumer.close(); } catch (Exception ignored) {}
             }

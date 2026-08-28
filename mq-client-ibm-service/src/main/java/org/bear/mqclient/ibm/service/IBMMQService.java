@@ -4,6 +4,7 @@ import com.ibm.mq.MQException;
 import com.ibm.mq.constants.MQConstants;
 import org.bear.mqclient.core.model.*;
 import org.bear.mqclient.core.service.MQService;
+import org.bear.mqclient.core.util.LogAdapter;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -239,7 +240,7 @@ public class IBMMQService implements MQService {
                     }
                 }
             } catch (Exception e) {
-                System.err.println("[IBM MQ] Subscribe error: " + e.getMessage());
+                LogAdapter.error("IBM_MQ", "Subscribe error", e);
             }
         });
 

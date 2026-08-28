@@ -3,6 +3,7 @@ package org.bear.mqclient.rabbitmq.ui;
 import org.bear.mqclient.core.model.MQConnectionConfig;
 import org.bear.mqclient.core.model.MQMessage;
 import org.bear.mqclient.core.service.MQService;
+import org.bear.mqclient.core.util.I18n;
 import javafx.application.Platform;
 import javafx.scene.control.*;
 import javafx.scene.layout.VBox;
@@ -36,22 +37,22 @@ public class RabbitMQMainPanel extends VBox {
         // ── Exchange 管理 Tab ──
         Tab exchangeTab = new Tab("Exchange");
         exchangeTab.setClosable(false);
-        exchangeTab.setContent(new Label("Exchange 管理面板 — 待实现"));
+        exchangeTab.setContent(new Label(I18n.get("rabbitmq.exchangePanel")));
 
         // ── Binding 管理 Tab ──
         Tab bindingTab = new Tab("Binding");
         bindingTab.setClosable(false);
-        bindingTab.setContent(new Label("Binding 管理面板 — 待实现"));
+        bindingTab.setContent(new Label(I18n.get("rabbitmq.bindingPanel")));
 
         // ── Publish Tab ──
-        Tab publishTab = new Tab("发布");
+        Tab publishTab = new Tab(I18n.get("rabbitmq.publish"));
         publishTab.setClosable(false);
         publishTab.setContent(new PublishPanel(service));
 
         // ── Consume Tab ──
-        Tab consumeTab = new Tab("消费");
+        Tab consumeTab = new Tab(I18n.get("common.consume"));
         consumeTab.setClosable(false);
-        consumeTab.setContent(new Label("消息消费面板 — 待实现"));
+        consumeTab.setContent(new Label(I18n.get("rabbitmq.consumePanel")));
 
         tabPane.getTabs().addAll(exchangeTab, bindingTab, publishTab, consumeTab);
         getChildren().add(tabPane);
@@ -61,11 +62,11 @@ public class RabbitMQMainPanel extends VBox {
     public List<Menu> getMenus() {
         Menu rabbitMenu = new Menu("RabbitMQ");
         rabbitMenu.getItems().addAll(
-                new MenuItem("声明队列..."),
-                new MenuItem("声明 Exchange..."),
-                new MenuItem("清空队列"),
+                new MenuItem(I18n.get("rabbitmq.declareQueue")),
+                new MenuItem(I18n.get("rabbitmq.declareExchange")),
+                new MenuItem(I18n.get("rabbitmq.clearQueue")),
                 new SeparatorMenuItem(),
-                new MenuItem("Connection 状态")
+                new MenuItem(I18n.get("rabbitmq.connectionStatus"))
         );
         return List.of(rabbitMenu);
     }
@@ -80,9 +81,9 @@ public class RabbitMQMainPanel extends VBox {
     static class QueuePanel extends VBox {
         QueuePanel(MQService service) {
             ListView<String> queueList = new ListView<>();
-            queueList.getItems().addAll("示例队列 — 连接后自动加载");
+            queueList.getItems().addAll(I18n.get("rabbitmq.sampleQueues"));
 
-            Button refreshBtn = new Button("刷新队列列表");
+            Button refreshBtn = new Button(I18n.get("rabbitmq.refreshQueues"));
             refreshBtn.setOnAction(e -> {
                 service.listDestinations().thenAccept(dests ->
                         Platform.runLater(() -> {
@@ -102,13 +103,13 @@ public class RabbitMQMainPanel extends VBox {
     static class PublishPanel extends VBox {
         PublishPanel(MQService service) {
             TextField targetField = new TextField();
-            targetField.setPromptText("目标队列名");
+            targetField.setPromptText(I18n.get("common.targetQueuePrompt"));
 
             TextArea bodyArea = new TextArea();
-            bodyArea.setPromptText("消息内容...");
+            bodyArea.setPromptText(I18n.get("common.bodyPromptEllipsis"));
             bodyArea.setPrefRowCount(10);
 
-            Button sendBtn = new Button("发送");
+            Button sendBtn = new Button(I18n.get("common.send"));
             sendBtn.setOnAction(e -> {
                 MQMessage msg = new MQMessage();
                 msg.setPayloadText(bodyArea.getText());
@@ -120,8 +121,8 @@ public class RabbitMQMainPanel extends VBox {
             });
 
             getChildren().addAll(
-                    new Label("目标:"), targetField,
-                    new Label("消息体:"), bodyArea,
+                    new Label(I18n.get("common.target")), targetField,
+                    new Label(I18n.get("common.messageBody")), bodyArea,
                     sendBtn
             );
         }

@@ -1,6 +1,7 @@
 package org.bear.mqclient.rocketmq.ui;
 
 import org.bear.mqclient.core.model.MQConnectionConfig;
+import org.bear.mqclient.core.util.I18n;
 import javafx.geometry.Insets;
 import javafx.scene.control.*;
 import javafx.scene.layout.GridPane;
@@ -37,15 +38,15 @@ public class RocketMQConfigEditor extends VBox {
         consumerGroupField.textProperty().addListener((o, a, b) -> { if (config != null) cfg().setProperty("consumerGroup", b); });
         producerGroupField.textProperty().addListener((o, a, b) -> { if (config != null) cfg().setProperty("producerGroup", b); });
 
-        grid.addRow(0, new Label("连接名:"),           nameField);
+        grid.addRow(0, new Label(I18n.get("common.name")),           nameField);
         grid.addRow(1, new Label("NameSrv Addr:"),   nsAddrField);
         grid.addRow(2, new Label("Consumer Group:"), consumerGroupField);
         grid.addRow(3, new Label("Producer Group:"), producerGroupField);
 
-        Button testBtn = new Button("测试连接");
+        Button testBtn = new Button(I18n.get("common.testConnection"));
         testBtn.setOnAction(e -> {
             Alert alert = new Alert(Alert.AlertType.INFORMATION,
-                    "测试连接 " + nsAddrField.getText());
+                    I18n.get("rocketmq.testConnect", nsAddrField.getText()));
             alert.showAndWait();
         });
 

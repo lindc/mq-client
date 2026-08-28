@@ -1,6 +1,7 @@
 package org.bear.mqclient.ibm.ui;
 
 import org.bear.mqclient.core.model.MQConnectionConfig;
+import org.bear.mqclient.core.util.I18n;
 import javafx.geometry.Insets;
 import javafx.scene.control.*;
 import javafx.scene.layout.GridPane;
@@ -42,14 +43,14 @@ public class IBMMQConfigEditor extends VBox {
         usernameField = new TextField();
         passwordField = new PasswordField();
 
-        grid.addRow(0, new Label("连接名:"),          nameField);
-        grid.addRow(1, new Label("队列管理器:"),       qmgrField);
-        grid.addRow(2, new Label("主机:"),            hostField);
-        grid.addRow(3, new Label("端口:"),            portField);
-        grid.addRow(4, new Label("通道:"),            channelField);
+        grid.addRow(0, new Label(I18n.get("common.name")),          nameField);
+        grid.addRow(1, new Label(I18n.get("ibm.queueManager")),       qmgrField);
+        grid.addRow(2, new Label(I18n.get("common.host")),            hostField);
+        grid.addRow(3, new Label(I18n.get("common.port")),            portField);
+        grid.addRow(4, new Label(I18n.get("ibm.channel")),            channelField);
         grid.addRow(5, new Label("SSL CipherSuite:"), sslField);
-        grid.addRow(6, new Label("用户名:"),          usernameField);
-        grid.addRow(7, new Label("密码:"),            passwordField);
+        grid.addRow(6, new Label(I18n.get("common.username")),          usernameField);
+        grid.addRow(7, new Label(I18n.get("common.password")),            passwordField);
 
         // 字段变化时自动同步到 config
         nameField.textProperty().addListener((o, a, b) -> { if (config != null) config.setName(b); });
@@ -61,7 +62,7 @@ public class IBMMQConfigEditor extends VBox {
         usernameField.textProperty().addListener((o, a, b) -> { if (config != null) cfg().setProperty("username", b); });
         passwordField.textProperty().addListener((o, a, b) -> { if (config != null) cfg().setProperty("password", b); });
 
-        Button testBtn = new Button("测试连接");
+        Button testBtn = new Button(I18n.get("common.testConnection"));
         testBtn.setOnAction(e -> testConnection());
 
         getChildren().addAll(grid, testBtn);
@@ -84,8 +85,7 @@ public class IBMMQConfigEditor extends VBox {
 
     private void testConnection() {
         Alert alert = new Alert(Alert.AlertType.INFORMATION,
-                "测试连接功能待实现。\n将尝试连接 " + hostField.getText() + ":" + portField.getText()
-                + " / " + qmgrField.getText());
+                I18n.get("ibm.testNotImplemented", hostField.getText(), portField.getText(), qmgrField.getText()));
         alert.showAndWait();
     }
 }

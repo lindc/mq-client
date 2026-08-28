@@ -2,6 +2,7 @@ package org.bear.mqclient.core.ui;
 
 import org.bear.mqclient.core.config.ConnectionStore;
 import org.bear.mqclient.core.model.MQConnectionConfig;
+import org.bear.mqclient.core.util.I18n;
 import javafx.beans.property.ReadOnlyObjectProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
@@ -85,7 +86,7 @@ public class NavigationPanel {
         treeView.setContextMenu(ctxMenu);
 
         // 布局
-        Label header = new Label("  连接列表");
+        Label header = new Label(I18n.get("navigation.title"));
         header.setStyle("-fx-font-size: 13px; -fx-padding: 8 4 4 8; -fx-text-fill: #666;");
 
         VBox.setVgrow(treeView, Priority.ALWAYS);
@@ -129,7 +130,7 @@ public class NavigationPanel {
     private ContextMenu createContextMenu() {
         ContextMenu menu = new ContextMenu();
 
-        MenuItem editItem = new MenuItem("编辑连接");
+        MenuItem editItem = new MenuItem(I18n.get("navigation.edit"));
         editItem.setOnAction(e -> {
             TreeItem<Item> sel = treeView.getSelectionModel().getSelectedItem();
             if (sel != null && sel.getValue() != null && !sel.getValue().isGroup()) {
@@ -137,7 +138,7 @@ public class NavigationPanel {
             }
         });
 
-        MenuItem deleteItem = new MenuItem("删除连接");
+        MenuItem deleteItem = new MenuItem(I18n.get("navigation.delete"));
         deleteItem.setOnAction(e -> {
             TreeItem<Item> sel = treeView.getSelectionModel().getSelectedItem();
             if (sel != null && sel.getValue() != null && !sel.getValue().isGroup()) {

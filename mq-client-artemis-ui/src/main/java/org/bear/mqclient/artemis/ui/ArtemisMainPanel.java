@@ -4,6 +4,7 @@ import org.bear.mqclient.core.model.MQConnectionConfig;
 import org.bear.mqclient.core.model.MQMessage;
 import org.bear.mqclient.core.service.MQService;
 import org.bear.mqclient.core.ui.MessageDetailContainer;
+import org.bear.mqclient.core.util.I18n;
 import javafx.application.Platform;
 
 import java.util.List;
@@ -47,7 +48,7 @@ public class ArtemisMainPanel extends VBox {
         listenerTab.setContent(new ListenerPanel(service));
         tabPane.getTabs().add(listenerTab);
 
-        Tab sendTab = new Tab("发送");
+        Tab sendTab = new Tab(I18n.get("common.send"));
         sendTab.setClosable(false);
         sendTab.setContent(new SendPanel(service));
         tabPane.getTabs().add(sendTab);
@@ -58,10 +59,10 @@ public class ArtemisMainPanel extends VBox {
     public List<Menu> getMenus() {
         Menu menu = new Menu("Artemis");
         menu.getItems().addAll(
-                new MenuItem("创建队列..."),
-                new MenuItem("创建主题..."),
+                new MenuItem(I18n.get("common.createQueue")),
+                new MenuItem(I18n.get("common.createTopic")),
                 new SeparatorMenuItem(),
-                new MenuItem("连接状态")
+                new MenuItem(I18n.get("common.connectionStatus"))
         );
         return List.of(menu);
     }
@@ -85,11 +86,11 @@ public class ArtemisMainPanel extends VBox {
             HBox topBar = new HBox(6);
             topBar.setPadding(new Insets(8));
             queueField = new TextField();
-            queueField.setPromptText("输入队列名...");
+            queueField.setPromptText(I18n.get("common.queueNamePrompt"));
             HBox.setHgrow(queueField, Priority.ALWAYS);
-            Button browseBtn = new Button("浏览");
-            Button consumeBtn = new Button("消费");
-            topBar.getChildren().addAll(new Label("队列:"), queueField, browseBtn, consumeBtn);
+            Button browseBtn = new Button(I18n.get("common.browse"));
+            Button consumeBtn = new Button(I18n.get("common.consume"));
+            topBar.getChildren().addAll(new Label(I18n.get("common.queue")), queueField, browseBtn, consumeBtn);
 
             table = new TableView<>(messages);
 
@@ -158,14 +159,14 @@ public class ArtemisMainPanel extends VBox {
     static class TopicPanel extends VBox {
         TopicPanel(MQService service) {
             TextField topicField = new TextField();
-            topicField.setPromptText("Topic 名 (如 news.> )");
+            topicField.setPromptText(I18n.get("artemis.topicNamePrompt"));
 
             TextArea outputArea = new TextArea();
             outputArea.setEditable(false);
             outputArea.setFont(Font.font("Consolas", 12));
             VBox.setVgrow(outputArea, Priority.ALWAYS);
 
-            Button browseBtn = new Button("浏览");
+            Button browseBtn = new Button(I18n.get("common.browse"));
             browseBtn.setOnAction(e -> {
                 String t = topicField.getText().trim();
                 if (t.isEmpty()) return;
@@ -192,14 +193,14 @@ public class ArtemisMainPanel extends VBox {
     static class ListenerPanel extends VBox {
         ListenerPanel(MQService service) {
             TextField destField = new TextField();
-            destField.setPromptText("队列名 / Topic 名");
+            destField.setPromptText(I18n.get("artemis.destPrompt"));
 
             TextArea outputArea = new TextArea();
             outputArea.setEditable(false);
             outputArea.setFont(Font.font("Consolas", 12));
             VBox.setVgrow(outputArea, Priority.ALWAYS);
 
-            Button listenBtn = new Button("开始监听");
+            Button listenBtn = new Button(I18n.get("common.startListening"));
             listenBtn.setOnAction(e -> {
                 String d = destField.getText().trim();
                 if (d.isEmpty()) return;
@@ -209,7 +210,7 @@ public class ArtemisMainPanel extends VBox {
             });
 
             getChildren().addAll(
-                    new HBox(6, new Label("目的地:"), destField, listenBtn),
+                    new HBox(6, new Label(I18n.get("common.destination")), destField, listenBtn),
                     outputArea
             );
         }
@@ -225,16 +226,16 @@ public class ArtemisMainPanel extends VBox {
             setSpacing(8);
 
             TextField targetField = new TextField();
-            targetField.setPromptText("目标队列/主题");
+            targetField.setPromptText(I18n.get("common.targetDestPrompt"));
 
             TextField propField = new TextField();
-            propField.setPromptText("属性 (key=val, 可选)");
+            propField.setPromptText(I18n.get("common.propsPrompt"));
 
             TextArea bodyArea = new TextArea();
-            bodyArea.setPromptText("消息内容");
+            bodyArea.setPromptText(I18n.get("common.bodyPrompt"));
             bodyArea.setPrefRowCount(12);
 
-            Button sendBtn = new Button("发送");
+            Button sendBtn = new Button(I18n.get("common.send"));
             sendBtn.setOnAction(e -> {
                 MQMessage msg = new MQMessage();
                 msg.setPayloadText(bodyArea.getText());
@@ -250,9 +251,9 @@ public class ArtemisMainPanel extends VBox {
             });
 
             getChildren().addAll(
-                    new Label("目标:"), targetField,
-                    new Label("属性:"), propField,
-                    new Label("消息体:"), bodyArea,
+                    new Label(I18n.get("common.target")), targetField,
+                    new Label(I18n.get("common.props")), propField,
+                    new Label(I18n.get("common.messageBody")), bodyArea,
                     sendBtn
             );
         }

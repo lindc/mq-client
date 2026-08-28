@@ -3,6 +3,7 @@ package org.bear.mqclient.ibm.ui;
 import org.bear.mqclient.core.model.BodyEncoding;
 import org.bear.mqclient.core.model.MQMessage;
 import org.bear.mqclient.core.spi.MessageDetailViewFactory;
+import org.bear.mqclient.core.util.I18n;
 import javafx.geometry.Insets;
 import javafx.scene.Node;
 import javafx.scene.control.Label;
@@ -34,7 +35,7 @@ public class IBMMQMessageDetailFactory implements MessageDetailViewFactory {
         tabPane.setTabMinWidth(80);
 
         // ── MQMD 基础字段 ──
-        tabPane.getTabs().add(new Tab("MQMD 基础", buildGrid(message,
+        tabPane.getTabs().add(new Tab(I18n.get("ibm.tab.mqmd"), buildGrid(message,
                 "MQMD.MsgId", "MQMD.CorrelId", "MQMD.Format",
                 "MQMD.Expiry", "MQMD.Priority", "MQMD.Persistence",
                 "MQMD.MsgType", "MQMD.Feedback", "MQMD.Report",
@@ -42,7 +43,7 @@ public class IBMMQMessageDetailFactory implements MessageDetailViewFactory {
         )));
 
         // ── 身份 / 来源 ──
-        tabPane.getTabs().add(new Tab("来源/身份", buildGrid(message,
+        tabPane.getTabs().add(new Tab(I18n.get("ibm.tab.origin"), buildGrid(message,
                 "MQMD.PutApplicationName", "MQMD.UserId",
                 "MQMD.PutDate", "MQMD.PutTime",
                 "MQMD.ApplIdentityData", "MQMD.ApplOriginData",
@@ -50,7 +51,7 @@ public class IBMMQMessageDetailFactory implements MessageDetailViewFactory {
         )));
 
         // ── 回覆 / 分组 ──
-        tabPane.getTabs().add(new Tab("回覆/分组", buildGrid(message,
+        tabPane.getTabs().add(new Tab(I18n.get("ibm.tab.reply"), buildGrid(message,
                 "MQMD.ReplyToQ", "MQMD.ReplyToQMgr",
                 "MQMD.GroupId", "MQMD.MsgSeqNumber",
                 "MQMD.Offset", "MQMD.OriginalLength",
@@ -58,7 +59,7 @@ public class IBMMQMessageDetailFactory implements MessageDetailViewFactory {
         )));
 
         // ── 通用字段 ──
-        tabPane.getTabs().add(new Tab("通用", buildGridWithoutMqmd(message,
+        tabPane.getTabs().add(new Tab(I18n.get("message.tab.common"), buildGridWithoutMqmd(message,
                 "MessageId", "CorrelationId", "Content Type", "Reply To", "Timestamp"
         )));
 

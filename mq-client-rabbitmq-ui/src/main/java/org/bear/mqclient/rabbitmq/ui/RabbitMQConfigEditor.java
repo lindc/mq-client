@@ -1,6 +1,7 @@
 package org.bear.mqclient.rabbitmq.ui;
 
 import org.bear.mqclient.core.model.MQConnectionConfig;
+import org.bear.mqclient.core.util.I18n;
 import javafx.geometry.Insets;
 import javafx.scene.Node;
 import javafx.scene.control.*;
@@ -49,14 +50,14 @@ public class RabbitMQConfigEditor extends VBox {
         usernameField.textProperty().addListener((o, a, b) -> { if (config != null) cfg().setProperty("username", b); });
         passwordField.textProperty().addListener((o, a, b) -> { if (config != null) cfg().setProperty("password", b); });
 
-        grid.addRow(0, new Label("连接名:"),   nameField);
-        grid.addRow(1, new Label("主机:"),     hostField);
-        grid.addRow(2, new Label("端口:"),     portField);
+        grid.addRow(0, new Label(I18n.get("common.name")),   nameField);
+        grid.addRow(1, new Label(I18n.get("common.host")),     hostField);
+        grid.addRow(2, new Label(I18n.get("common.port")),     portField);
         grid.addRow(3, new Label("Virtual Host:"), virtualHostField);
-        grid.addRow(4, new Label("用户名:"),   usernameField);
-        grid.addRow(5, new Label("密码:"),     passwordField);
+        grid.addRow(4, new Label(I18n.get("common.username")),   usernameField);
+        grid.addRow(5, new Label(I18n.get("common.password")),     passwordField);
 
-        Button testBtn = new Button("测试连接");
+        Button testBtn = new Button(I18n.get("common.testConnection"));
         testBtn.setOnAction(e -> testConnection());
 
         getChildren().addAll(grid, testBtn);
@@ -77,7 +78,7 @@ public class RabbitMQConfigEditor extends VBox {
 
     private void testConnection() {
         // TODO: 实际测试连接
-        Alert alert = new Alert(Alert.AlertType.INFORMATION, "测试连接功能待实现");
+        Alert alert = new Alert(Alert.AlertType.INFORMATION, I18n.get("common.testNotImplemented"));
         alert.showAndWait();
     }
 }

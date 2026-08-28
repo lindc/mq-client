@@ -4,6 +4,7 @@ import org.bear.mqclient.core.model.MQConnectionConfig;
 import org.bear.mqclient.core.model.MQMessage;
 import org.bear.mqclient.core.service.MQService;
 import org.bear.mqclient.core.ui.MessageDetailContainer;
+import org.bear.mqclient.core.util.I18n;
 import javafx.application.Platform;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
@@ -50,7 +51,7 @@ public class IBMMQMainPanel extends VBox {
         tabPane.getTabs().add(listenerTab);
 
         // ── 发送 Tab ──
-        Tab sendTab = new Tab("发送");
+        Tab sendTab = new Tab(I18n.get("common.send"));
         sendTab.setClosable(false);
         sendTab.setContent(new SendPanel(service));
         tabPane.getTabs().add(sendTab);
@@ -61,11 +62,11 @@ public class IBMMQMainPanel extends VBox {
     public List<Menu> getMenus() {
         Menu ibmMenu = new Menu("IBM MQ");
         ibmMenu.getItems().addAll(
-                new MenuItem("清除队列..."),
-                new MenuItem("创建队列..."),
+                new MenuItem(I18n.get("ibm.clearQueue")),
+                new MenuItem(I18n.get("common.createQueue")),
                 new SeparatorMenuItem(),
-                new MenuItem("Channel 状态..."),
-                new MenuItem("连接状态")
+                new MenuItem(I18n.get("ibm.channelStatus")),
+                new MenuItem(I18n.get("common.connectionStatus"))
         );
         return List.of(ibmMenu);
     }
@@ -92,11 +93,11 @@ public class IBMMQMainPanel extends VBox {
             HBox topBar = new HBox(6);
             topBar.setPadding(new Insets(8));
             queueNameField = new TextField();
-            queueNameField.setPromptText("输入队列名...");
+            queueNameField.setPromptText(I18n.get("common.queueNamePrompt"));
             HBox.setHgrow(queueNameField, Priority.ALWAYS);
-            Button browseBtn = new Button("浏览");
-            Button getBtn = new Button("取消息");
-            topBar.getChildren().addAll(new Label("队列:"), queueNameField, browseBtn, getBtn);
+            Button browseBtn = new Button(I18n.get("common.browse"));
+            Button getBtn = new Button(I18n.get("ibm.getMessages"));
+            topBar.getChildren().addAll(new Label(I18n.get("common.queue")), queueNameField, browseBtn, getBtn);
 
             // 消息表格
             messageTable = new TableView<>(messages);
@@ -173,13 +174,13 @@ public class IBMMQMainPanel extends VBox {
     static class TopicPanel extends VBox {
         TopicPanel(MQService service) {
             TextField topicField = new TextField();
-            topicField.setPromptText("输入主题名 (如 TOPIC://... )");
+            topicField.setPromptText(I18n.get("ibm.topicNamePrompt"));
 
-            Button subscribeBtn = new Button("订阅并监听");
+            Button subscribeBtn = new Button(I18n.get("ibm.subscribeListen"));
 
             TextArea outputArea = new TextArea();
             outputArea.setEditable(false);
-            outputArea.setPromptText("接收到的消息将显示在这里...");
+            outputArea.setPromptText(I18n.get("ibm.outputPrompt"));
             VBox.setVgrow(outputArea, Priority.ALWAYS);
 
             subscribeBtn.setOnAction(e -> {
@@ -191,8 +192,8 @@ public class IBMMQMainPanel extends VBox {
             });
 
             getChildren().addAll(
-                    new HBox(6, new Label("主题:"), topicField, subscribeBtn),
-                    new Label("消息输出:"),
+                    new HBox(6, new Label(I18n.get("common.topic")), topicField, subscribeBtn),
+                    new Label(I18n.get("ibm.messageOutput")),
                     outputArea
             );
         }
@@ -207,25 +208,25 @@ public class IBMMQMainPanel extends VBox {
 
         ListenerPanel(MQService service) {
             listenerList = new ListView<>();
-            listenerList.setPlaceholder(new Label("尚未添加监听器"));
+            listenerList.setPlaceholder(new Label(I18n.get("common.noListeners")));
 
             HBox inputBar = new HBox(6);
             inputBar.setPadding(new Insets(8));
             TextField destField = new TextField();
-            destField.setPromptText("队列名/主题名");
+            destField.setPromptText(I18n.get("common.destinationPrompt"));
             HBox.setHgrow(destField, Priority.ALWAYS);
-            Button listenBtn = new Button("开始监听");
+            Button listenBtn = new Button(I18n.get("common.startListening"));
 
             listenBtn.setOnAction(e -> {
                 String dest = destField.getText().trim();
                 if (dest.isEmpty()) return;
-                listenerList.getItems().add("🟢 监听中: " + dest);
+                listenerList.getItems().add(I18n.get("common.listening", dest));
                 service.subscribe(dest, msg -> Platform.runLater(() -> {
                     // 更新状态显示
                 }));
             });
 
-            inputBar.getChildren().addAll(new Label("目的地:"), destField, listenBtn);
+            inputBar.getChildren().addAll(new Label(I18n.get("common.destination")), destField, listenBtn);
             VBox.setVgrow(listenerList, Priority.ALWAYS);
             getChildren().addAll(inputBar, listenerList);
         }
@@ -241,19 +242,19 @@ public class IBMMQMainPanel extends VBox {
             setSpacing(8);
 
             TextField targetField = new TextField();
-            targetField.setPromptText("目标队列名");
+            targetField.setPromptText(I18n.get("common.targetQueuePrompt"));
 
             TextField correlIdField = new TextField();
-            correlIdField.setPromptText("CorrelationId (Hex, 可选)");
+            correlIdField.setPromptText(I18n.get("ibm.corrId"));
 
             TextField formatField = new TextField("MQSTR");
             formatField.setPromptText("Format (MQSTR / MQBYTES)");
 
             TextArea bodyArea = new TextArea();
-            bodyArea.setPromptText("消息内容...");
+            bodyArea.setPromptText(I18n.get("common.bodyPromptEllipsis"));
             bodyArea.setPrefRowCount(12);
 
-            Button sendBtn = new Button("发送");
+            Button sendBtn = new Button(I18n.get("common.send"));
             sendBtn.setOnAction(e -> {
                 MQMessage msg = new MQMessage();
                 msg.setPayloadText(bodyArea.getText());
@@ -270,10 +271,10 @@ public class IBMMQMainPanel extends VBox {
             });
 
             getChildren().addAll(
-                    new Label("目标队列:"), targetField,
+                    new Label(I18n.get("common.targetQueue")), targetField,
                     new Label("CorrelationId:"), correlIdField,
                     new Label("Format:"), formatField,
-                    new Label("消息体:"), bodyArea,
+                    new Label(I18n.get("common.messageBody")), bodyArea,
                     sendBtn
             );
         }

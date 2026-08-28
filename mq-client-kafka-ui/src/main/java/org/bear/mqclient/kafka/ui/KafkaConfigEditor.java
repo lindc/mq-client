@@ -1,6 +1,7 @@
 package org.bear.mqclient.kafka.ui;
 
 import org.bear.mqclient.core.model.MQConnectionConfig;
+import org.bear.mqclient.core.util.I18n;
 import javafx.geometry.Insets;
 import javafx.scene.control.*;
 import javafx.scene.layout.GridPane;
@@ -40,7 +41,7 @@ public class KafkaConfigEditor extends VBox {
         saslMechField   = new TextField();
         saslJaasField   = new TextField();
 
-        grid.addRow(0, new Label("连接名:"),             nameField);
+        grid.addRow(0, new Label(I18n.get("common.name")),             nameField);
         grid.addRow(1, new Label("Bootstrap Servers:"), bootstrapField);
         grid.addRow(2, new Label("Consumer Group ID:"), groupIdField);
         grid.addRow(3, new Label("Security Protocol:"), securityCombo);
@@ -55,7 +56,7 @@ public class KafkaConfigEditor extends VBox {
         saslMechField.textProperty().addListener((o, a, b) -> { if (config != null) cfg().setProperty("saslMechanism", b); });
         saslJaasField.textProperty().addListener((o, a, b) -> { if (config != null) cfg().setProperty("saslJaasConfig", b); });
 
-        Button testBtn = new Button("测试连接");
+        Button testBtn = new Button(I18n.get("common.testConnection"));
         testBtn.setOnAction(e -> testConnection());
 
         getChildren().addAll(grid, testBtn);
@@ -76,7 +77,7 @@ public class KafkaConfigEditor extends VBox {
 
     private void testConnection() {
         Alert alert = new Alert(Alert.AlertType.INFORMATION,
-                "测试连接功能。\n将尝试连接到 " + bootstrapField.getText());
+                I18n.get("kafka.testConnect", bootstrapField.getText()));
         alert.showAndWait();
     }
 }

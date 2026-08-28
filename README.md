@@ -8,6 +8,8 @@ MQ Client 是一个**本地运行的桌面**消息队列客户端工具，用于
 - 📬 消息发送与订阅
 - 🔐 连接管理（支持远程 broker、TLS）
 - 🧩 统一抽象层（ServiceLoader SPI），新增 MQ 只需实现 service + ui 两个提供者
+- 🌐 国际化：中文 / English 即时切换，插件可自带翻译文件
+- 📝 日志落盘：滚动文件（`~/.mqclient/logs/`），插件经 LogAdapter 统一记录
 
 ## 支持的消息队列
 
@@ -26,7 +28,9 @@ MQ Client 是一个**本地运行的桌面**消息队列客户端工具，用于
 - 容器/配置：Spring Boot 4.1.1（仅管理 core 内的单例与配置）
 - 插件机制：ServiceLoader SPI（service 与 ui 两层，各 MQ 模块通过 META-INF/services 注册）
 - 构建：Maven 多模块
-- 日志：SLF4J + Logback（随 spring-boot-starter 引入）
+- 日志：SLF4J + Logback（`logback.xml` 滚动文件，输出到 `~/.mqclient/logs/`）
+- 国际化：Spring MessageSource + `I18n` 静态门面（core 公共 bundle + 插件自带 bundle）
+- 工具：Lombok（`@Slf4j` 等注解）
 
 ## 快速开始
 
@@ -71,6 +75,35 @@ mvn clean package
   RabbitMQ 有 Queue / Exchange / Binding / 发布 / 消费 等 Tab，部分 Tab 仍是占位。
 - **新建连接**：对话框左侧选择 MQ 类型，右侧是该类型的配置表单（由各 MQ 模块提供）。
 - **消息详情**：Headers + Body 两个 Tab，Body 右上角支持编码切换（TEXT / RAW / HEX / JSON）。
+
+## 国际化
+
+界面文本全部走 Spring `MessageSource`，通过 core 的 `I18n` 静态门面读取
+（`I18n.get("key")` / `I18n.get("key", arg...)`，支持 `{0}` 占位符），
+菜单栏「语言」可即时切换 **中文 / English**。文本分两层：
+
+- **core 公共 bundle**：`mq-client-core/src/main/resources/messages.properties`（中文，默认）
+  与 `messages_en.properties`（英文），承载 `menu.*`、`common.*`、`message.*` 等公共 key。
+- **插件自带 bundle**：各 UI 插件在自身 resources 下提供 `messages_<类型小写>.properties`
+  （+ 可选 `_en` 变体），例如 `messages_kafka.properties`。`I18nBinder` 启动时通过
+  ServiceLoader 发现全部插件并自动注册，优先级高于 core。
+
+**第三方插件接入约定**：实现 `MQUIProvider` 并在 `META-INF/services` 注册后，
+只需再提供 `messages_<type>.properties` 即完成国际化，无需改 core。
+
+## 日志
+
+- SLF4J + Logback，配置在 `mq-client-core/src/main/resources/logback.xml`。
+- 输出：控制台 + `~/.mqclient/logs/mq-client.log`，按天 + 大小（10MB）滚动，
+  保留 30 天（总量上限 500MB）。
+- 插件记录统一走 `LogAdapter`（`org.bear.mqclient.core.util.LogAdapter`）：
+  `LogAdapter.error("KAFKA", "发送失败", e)`，日志自动带 `[来源]` 标签便于过滤。
+- core 内使用 Lombok `@Slf4j` 生成 logger。
+
+## 配置存储
+
+- 连接配置保存为 JSON：`~/.mqclient/connections.json`（Jackson 序列化，增删改时全量写回）。
+- 密码字段由各 MQ 配置编辑器自行加密（如 AES），存储层不关心加密细节。
 
 ## 项目结构
 

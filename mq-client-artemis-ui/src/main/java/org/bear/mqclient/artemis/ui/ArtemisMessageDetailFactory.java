@@ -3,6 +3,7 @@ package org.bear.mqclient.artemis.ui;
 import org.bear.mqclient.core.model.BodyEncoding;
 import org.bear.mqclient.core.model.MQMessage;
 import org.bear.mqclient.core.spi.MessageDetailViewFactory;
+import org.bear.mqclient.core.util.I18n;
 import javafx.geometry.Insets;
 import javafx.scene.Node;
 import javafx.scene.control.*;
@@ -25,7 +26,7 @@ public class ArtemisMessageDetailFactory implements MessageDetailViewFactory {
         TabPane tabs = new TabPane();
         tabs.setTabMinWidth(80);
 
-        tabs.getTabs().add(new Tab("Artemis 属性", buildGrid(message,
+        tabs.getTabs().add(new Tab(I18n.get("artemis.propsTab"), buildGrid(message,
                 "Artemis.messageId", "Artemis.priority",
                 "Artemis.expiration", "Artemis.durable",
                 "Artemis.largeMessage", "Artemis.type",
@@ -33,9 +34,9 @@ public class ArtemisMessageDetailFactory implements MessageDetailViewFactory {
                 "Artemis.address", "Artemis.replyTo"
         )));
 
-        tabs.getTabs().add(new Tab("通用", timeGrid(message)));
+        tabs.getTabs().add(new Tab(I18n.get("message.tab.common"), timeGrid(message)));
 
-        tabs.getTabs().add(new Tab("属性", propsGrid(message)));
+        tabs.getTabs().add(new Tab(I18n.get("message.tab.props"), propsGrid(message)));
 
         return tabs;
     }
@@ -92,7 +93,7 @@ public class ArtemisMessageDetailFactory implements MessageDetailViewFactory {
         box.setPadding(new Insets(8));
         Map<String, Object> props = msg.getUserProperties();
         if (props.isEmpty()) {
-            box.getChildren().add(new Label("(无额外属性)"));
+            box.getChildren().add(new Label(I18n.get("message.noExtraProps")));
             return box;
         }
         for (Map.Entry<String, Object> e : props.entrySet()) {

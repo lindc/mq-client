@@ -30,6 +30,8 @@ public class CoreConfig {
         // 回退到基础 messages.properties（中文），而不是 JVM 默认语言对应的
         // 语言包，否则中文会错误地回退到 messages_en
         ms.setFallbackToSystemLocale(false);
+        // 缺 key 时显示 key 本身而非抛异常，便于发现遗漏
+        ms.setUseCodeAsDefaultMessage(true);
         return ms;
     }
 }

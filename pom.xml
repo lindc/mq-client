@@ -34,6 +34,7 @@
         <javafx.version>26.0.2</javafx.version>
         <rocketmq.version>5.5.1</rocketmq.version>
         <jackson.version>2.18.3</jackson.version>
+        <lombok.version>1.18.46</lombok.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
     </properties>
@@ -129,6 +130,12 @@
                 <artifactId>jackson-annotations</artifactId>
                 <version>${jackson.version}</version>
             </dependency>
+            <!-- Lombok（@Slf4j 等，编译期注解处理，provided 不打包） -->
+            <dependency>
+                <groupId>org.projectlombok</groupId>
+                <artifactId>lombok</artifactId>
+                <version>${lombok.version}</version>
+            </dependency>
 
             <!-- RabbitMQ AMQP client -->
             <dependency>
@@ -187,6 +194,13 @@
                 <configuration>
                     <release>${java.version}</release>
                     <encoding>UTF-8</encoding>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                            <version>${lombok.version}</version>
+                        </path>
+                    </annotationProcessorPaths>
                 </configuration>
             </plugin>
             <plugin>

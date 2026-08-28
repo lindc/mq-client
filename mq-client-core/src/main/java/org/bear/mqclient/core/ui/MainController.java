@@ -1,5 +1,6 @@
 package org.bear.mqclient.core.ui;
 
+import lombok.extern.slf4j.Slf4j;
 import org.bear.mqclient.core.config.ConnectionStore;
 import org.bear.mqclient.core.config.LocaleHolder;
 import org.bear.mqclient.core.model.MQConnectionConfig;
@@ -19,6 +20,7 @@ import java.util.*;
  * <p>
  * 负责：左侧连接导航 + 右侧内容区切换 + 菜单栏动态注入。
  */
+@Slf4j
 public class MainController {
 
     private final BorderPane root;
@@ -83,7 +85,7 @@ public class MainController {
         MQUIProvider uiProvider = uiProviders.get(config.getType());
 
         if (svcProvider == null || uiProvider == null) {
-            System.err.println("[Main] No provider found for type: " + config.getType());
+            log.warn("No provider found for type: {}", config.getType());
             return;
         }
 
@@ -94,7 +96,7 @@ public class MainController {
         currentService = service;
         service.connect(config).whenComplete((v, ex) -> {
             if (ex != null) {
-                System.err.println("[Main] Connection failed: " + ex.getMessage());
+                log.error("Connection failed: {}", ex.getMessage());
                 return;
             }
             javafx.application.Platform.runLater(() -> {
