@@ -48,6 +48,10 @@ public class MainApp extends Application {
             primaryStage.getIcons().add(new Image(iconStream));
         }
         primaryStage.setScene(scene);
+        // 最大化时左侧面板恢复为窗口 1/6（拖动过的分隔条位置不随窗口缩放保持比例）
+        primaryStage.maximizedProperty().addListener((obs, was, now) -> {
+            if (now) controller.resetDivider();
+        });
         primaryStage.show();
     }
 

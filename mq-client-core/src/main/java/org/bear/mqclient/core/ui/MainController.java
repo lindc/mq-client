@@ -31,6 +31,7 @@ public class MainController {
     private final MenuBarManager menuBarManager;
     private final ConnectionStore connectionStore;
     private final StackPane contentArea;
+    private final SplitPane splitPane;
 
     // 当前选中的连接和 UI 提供者
     private MQConnectionConfig currentConfig;
@@ -68,15 +69,16 @@ public class MainController {
         // 白色面板在灰背景上靠色差 + 阴影悬浮
         StackPane navWrap = new StackPane(navigation.getView());
         navWrap.setPadding(new Insets(6));
-        navWrap.setStyle("-fx-background-color: #e8eaed; -fx-background-radius: 12;");
+        navWrap.setStyle("-fx-background-color: #e8eaed; -fx-background-radius: 8;");
 
         // 右侧内容区外层：仅留空隙，不做背景（背景在 contentArea 上，见上）；
         // 左侧距收窄到 2px，压缩中间空隙（上下右保持 6px，窗口边缘空隙不变）
         StackPane rightPanel = new StackPane(contentArea);
         rightPanel.setPadding(new Insets(6, 6, 6, 2));
 
-        SplitPane splitPane = new SplitPane(navWrap, rightPanel);
-        splitPane.setDividerPositions(0.2);
+        this.splitPane = new SplitPane(navWrap, rightPanel);
+        // 左侧面板默认宽度 = 窗口的 1/6（可拖动调整；最大化时由 resetDivider 恢复）
+        splitPane.setDividerPositions(1.0 / 6.0);
         // 分隔条样式（透明 + hover 浮现）在 css/main.css 中定义；setStyle 只能写声明，
         // 不能写选择器规则（否则解析失败且样式不生效）
         splitPane.getStyleClass().add("mq-split-pane");
@@ -172,4 +174,9 @@ public class MainController {
     // ── 公开 ──
 
     public BorderPane getRoot() { return root; }
+
+    /** 重置分隔条为默认比例（左侧 = 窗口 1/6），窗口最大化时由 MainApp 调用 */
+    public void resetDivider() {
+        splitPane.setDividerPositions(1.0 / 6.0);
+    }
 }
