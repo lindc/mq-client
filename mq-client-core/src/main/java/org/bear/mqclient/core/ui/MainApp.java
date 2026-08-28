@@ -38,6 +38,8 @@ public class MainApp extends Application {
         int width = props.getWindow().getWidth();
         int height = props.getWindow().getHeight();
         Scene scene = new Scene(controller.getRoot(), width, height);
+        // 全局样式表（分隔条透明等 UI 定制）
+        scene.getStylesheets().add(getClass().getResource("/css/main.css").toExternalForm());
 
         primaryStage.setTitle("MQ Client");
         // 加载图标（可选）

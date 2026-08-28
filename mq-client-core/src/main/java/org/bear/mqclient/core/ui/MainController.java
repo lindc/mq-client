@@ -10,7 +10,10 @@ import org.bear.mqclient.core.spi.MQUIProvider;
 import javafx.scene.Node;
 import javafx.scene.control.Menu;
 import javafx.scene.control.MenuBar;
+import javafx.scene.control.SplitPane;
+import javafx.geometry.Insets;
 import javafx.scene.layout.BorderPane;
+import javafx.scene.layout.StackPane;
 
 import java.util.*;
 
@@ -26,6 +29,7 @@ public class MainController {
     private final NavigationPanel navigation;
     private final MenuBarManager menuBarManager;
     private final ConnectionStore connectionStore;
+    private final StackPane contentArea;
 
     // 当前选中的连接和 UI 提供者
     private MQConnectionConfig currentConfig;
@@ -52,10 +56,23 @@ public class MainController {
         // 左侧导航
         this.navigation = new NavigationPanel(connectionStore, this::onConnectionSelected);
 
-        // 根布局
+        // 根布局：菜单栏 +（导航 | 内容区）可拖动的 SplitPane
+        this.contentArea = new StackPane();
+        // 导航面板外包一层：留 6px 空隙让阴影完整可见；空隙填背景灰（与 SplitPane 同色），
+        // 白色面板在灰背景上靠色差 + 阴影悬浮
+        StackPane navWrap = new StackPane(navigation.getView());
+        navWrap.setPadding(new Insets(6));
+        navWrap.setStyle("-fx-background-color: #e8eaed; -fx-background-radius: 12;");
+        SplitPane splitPane = new SplitPane(navWrap, contentArea);
+        splitPane.setDividerPositions(0.2);
+        // 分隔条样式（透明 + hover 浮现）在 css/main.css 中定义；setStyle 只能写声明，
+        // 不能写选择器规则（否则解析失败且样式不生效）
+        splitPane.getStyleClass().add("mq-split-pane");
+        splitPane.setStyle("-fx-background-color: #e8eaed;");
+
         this.root = new BorderPane();
         this.root.setTop(menuBar);
-        this.root.setLeft(navigation.getView());
+        this.root.setCenter(splitPane);
     }
 
     // ── SPI 发现 ──
@@ -99,7 +116,7 @@ public class MainController {
             javafx.application.Platform.runLater(() -> {
                 // 创建 MQ 专属面板
                 currentPanel = uiProvider.createMainPanel(config, service);
-                root.setCenter(currentPanel);
+                contentArea.getChildren().setAll(currentPanel);
                 // 注入菜单
                 menuBarManager.injectMenus(uiProvider.getMenus());
             });
@@ -116,7 +133,7 @@ public class MainController {
             currentUIProvider = null;
         }
         if (currentPanel != null) {
-            root.setCenter(null);
+            contentArea.getChildren().clear();
             currentPanel = null;
         }
         menuBarManager.clearInjectedMenus();

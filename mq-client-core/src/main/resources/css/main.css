@@ -1,0 +1,11 @@
+/* MQ Client 全局样式 */
+
+/* 左侧导航与内容区之间的分隔条：默认不可见（导航面板阴影提供视觉分隔），
+   hover 时浅色浮现提示可拖动 */
+.mq-split-pane > .split-pane-divider {
+    -fx-background-color: transparent;
+    -fx-padding: 0 2 0 2;
+}
+.mq-split-pane > .split-pane-divider:hover {
+    -fx-background-color: rgba(0, 0, 0, 0.15);
+}

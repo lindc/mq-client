@@ -11,6 +11,7 @@ import javafx.scene.control.*;
 import javafx.scene.input.MouseButton;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
+import javafx.scene.shape.Rectangle;
 
 import java.util.*;
 import java.util.function.Consumer;
@@ -85,12 +86,25 @@ public class NavigationPanel {
         ContextMenu ctxMenu = createContextMenu();
         treeView.setContextMenu(ctxMenu);
 
-        // 布局
-        Label header = new Label(I18n.get("navigation.title"));
-        header.setStyle("-fx-font-size: 13px; -fx-padding: 8 4 4 8; -fx-text-fill: #666;");
-
+        // 布局：无标题文字；面板带背景色 + 圆角 + 阴影，呈悬浮卡片效果
+        // （阴影需配合 SplitPane 中 navWrap 留出的空隙与同色背景才能完整可见）
         VBox.setVgrow(treeView, Priority.ALWAYS);
-        this.view = new VBox(header, treeView);
+        // TreeView 背景透明，圆角才能透出面板背景
+        treeView.setStyle("-fx-background-color: transparent;");
+        // TreeView 内容圆角裁剪：避免直角内容把阴影形状顶出尖角。
+        // 注意：不能裁剪 view 本身——clip 作用于节点全部渲染，会把溢出面板边界的阴影一并裁掉
+        Rectangle clip = new Rectangle();
+        clip.setArcWidth(24);
+        clip.setArcHeight(24);
+        clip.widthProperty().bind(treeView.widthProperty());
+        clip.heightProperty().bind(treeView.heightProperty());
+        treeView.setClip(clip);
+        this.view = new VBox(treeView);
+        // 面板白色、背景灰（#e8eaed）：色差 + 阴影形成悬浮卡片；阴影只向下偏移避免右缘灰带
+        view.setStyle("-fx-background-color: #ffffff;"
+                + " -fx-background-radius: 12;"
+                + " -fx-effect: dropshadow(gaussian, rgba(70, 110, 160, 0.4), 18, 0.2, 0, 5);");
+        view.setMinWidth(140);
 
         // 初始加载
         refresh();
