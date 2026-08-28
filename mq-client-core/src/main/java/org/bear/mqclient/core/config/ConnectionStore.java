@@ -2,7 +2,6 @@ package org.bear.mqclient.core.config;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Component;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import org.bear.mqclient.core.model.MQConnectionConfig;
@@ -18,7 +17,6 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * 密码字段由各 MQ 的 config editor 自行加密（如 AES），
  * ConnectionStore 只做存储不关心加密逻辑。
  */
-@Component
 @Slf4j
 public class ConnectionStore {
 

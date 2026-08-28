@@ -7,7 +7,6 @@ import org.bear.mqclient.core.model.MQConnectionConfig;
 import org.bear.mqclient.core.service.MQService;
 import org.bear.mqclient.core.spi.MQServiceProvider;
 import org.bear.mqclient.core.spi.MQUIProvider;
-import org.springframework.context.MessageSource;
 import javafx.scene.Node;
 import javafx.scene.control.Menu;
 import javafx.scene.control.MenuBar;
@@ -38,8 +37,7 @@ public class MainController {
     private final Map<String, MQServiceProvider> serviceProviders;
     private final Map<String, MQUIProvider> uiProviders;
 
-    public MainController(ConnectionStore connectionStore,
-                          MessageSource messageSource, LocaleHolder localeHolder) {
+    public MainController(ConnectionStore connectionStore, LocaleHolder localeHolder) {
         this.connectionStore = connectionStore;
         this.serviceProviders = new HashMap<>();
         this.uiProviders = new HashMap<>();
@@ -49,8 +47,7 @@ public class MainController {
 
         // 菜单栏
         MenuBar menuBar = new MenuBar();
-        this.menuBarManager = new MenuBarManager(menuBar, this::onNewConnection,
-                messageSource, localeHolder);
+        this.menuBarManager = new MenuBarManager(menuBar, this::onNewConnection, localeHolder);
 
         // 左侧导航
         this.navigation = new NavigationPanel(connectionStore, this::onConnectionSelected);

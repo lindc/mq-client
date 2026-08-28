@@ -3,7 +3,6 @@ package org.bear.mqclient.core.ui;
 import org.bear.mqclient.core.config.LocaleHolder;
 import org.bear.mqclient.core.util.I18n;
 import javafx.scene.control.*;
-import org.springframework.context.MessageSource;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -25,21 +24,18 @@ public class MenuBarManager {
     private final MenuBar menuBar;
     private final List<Menu> injectedMenus;
     private final Runnable onNewConnection;
-    private final MessageSource messageSource;
     private final LocaleHolder localeHolder;
 
-    public MenuBarManager(MenuBar menuBar, Runnable onNewConnection,
-                          MessageSource messageSource, LocaleHolder localeHolder) {
+    public MenuBarManager(MenuBar menuBar, Runnable onNewConnection, LocaleHolder localeHolder) {
         this.menuBar = menuBar;
         this.injectedMenus = new ArrayList<>();
         this.onNewConnection = onNewConnection;
-        this.messageSource = messageSource;
         this.localeHolder = localeHolder;
         buildFixedMenus();
     }
 
     private String msg(String key) {
-        return messageSource.getMessage(key, null, key, localeHolder.getLocale());
+        return I18n.get(key);
     }
 
     private void buildFixedMenus() {
@@ -78,7 +74,7 @@ public class MenuBarManager {
         MenuItem aboutItem = new MenuItem(msg("menu.help.about"));
         aboutItem.setOnAction(e -> {
             try {
-                new AboutDialog(messageSource, localeHolder).showAndWait();
+                new AboutDialog().showAndWait();
             } catch (Throwable t) {
                 t.printStackTrace();
                 new Alert(Alert.AlertType.ERROR,

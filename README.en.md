@@ -26,11 +26,11 @@ managing multiple message queue systems, with support for remote connections.
 
 - Language/runtime: Java 25
 - UI: JavaFX 26.0.2
-- Container/Config: Spring Boot 4.1.1 (manages core singletons and config only)
+- Assembly/Config: zero-framework (manual wiring in `MainApp.bootstrap()`, `application.yml` parsed via snakeyaml)
 - Plugin mechanism: ServiceLoader SPI (service + ui layers, registered via META-INF/services)
 - Build: Maven multi-module
 - Logging: SLF4J + Logback (`logback.xml` rolling files, written under `~/.mqclient/logs/`)
-- i18n: Spring `MessageSource` + `I18n` static facade (core bundle + per-plugin bundles)
+- i18n: `I18n` static facade (JDK ResourceBundle, core bundle + per-plugin bundles)
 - Tooling: Lombok (`@Slf4j` etc.)
 
 ## Quick Start
@@ -87,9 +87,10 @@ The core shell (menus, navigation, connection store) stays untouched.
 
 ## Internationalization
 
-All UI text is resolved through Spring `MessageSource` via the `I18n` static facade
-(`I18n.get("key")` / `I18n.get("key", arg...)`, `{0}` placeholders supported);
-the **Language** menu switches between Chinese / English at runtime. Text lives in two layers:
+All UI text is resolved through the `I18n` static facade
+(`I18n.get("key")` / `I18n.get("key", arg...)`, `{0}` placeholders supported),
+backed by JDK `ResourceBundle` (no framework dependency); the **Language** menu
+switches between Chinese / English at runtime. Text lives in two layers:
 
 - **Core bundle**: `mq-client-core/src/main/resources/messages.properties` (Chinese, default)
   plus `messages_en.properties` (English) — shared keys like `menu.*`, `common.*`, `message.*`.

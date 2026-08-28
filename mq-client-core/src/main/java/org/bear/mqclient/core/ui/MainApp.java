@@ -1,46 +1,40 @@
 package org.bear.mqclient.core.ui;
 
-import org.bear.mqclient.core.CoreConfig;
 import org.bear.mqclient.core.config.AppProperties;
 import org.bear.mqclient.core.config.ConnectionStore;
 import org.bear.mqclient.core.config.LocaleHolder;
+import org.bear.mqclient.core.util.I18nBinder;
 import javafx.application.Application;
 import javafx.scene.Scene;
 import javafx.scene.image.Image;
 import javafx.stage.Stage;
-import org.springframework.boot.SpringApplication;
-import org.springframework.context.ConfigurableApplicationContext;
-import org.springframework.context.MessageSource;
 
 /**
  * JavaFX 入口。
  * <p>
- * 与 Spring Boot 整合方式（掘金《JavaFX 桌面开发——进阶 · SpringBoot 整合》的启动方式）：
- * <ul>
- *   <li>{@code main()} 中先 {@code SpringApplication.run} 启动 Spring 容器，
- *       再 {@code Application.launch} 启动 JavaFX；</li>
- *   <li>{@code start()} 中从容器获取 Bean 构建界面；</li>
- *   <li>{@code stop()} 中关闭容器。</li>
- * </ul>
- * MQ 插件仍通过 ServiceLoader SPI 发现，Spring 仅管理 core 内的单例与配置。
+ * 无 Spring 容器：{@link #bootstrap()} 完成手动装配（连接存储、外部配置、
+ * 国际化绑定与插件 bundle 注册），再由 {@code App.main} 或本类的
+ * {@code main} 调用 {@code launch} 启动 JavaFX。
+ * <p>
+ * MQ 插件仍通过 ServiceLoader SPI 发现，装配逻辑不依赖任何框架。
  */
 public class MainApp extends Application {
 
-    private static ConfigurableApplicationContext context;
+    private static ConnectionStore store;
+    private static AppProperties props;
+    private static LocaleHolder localeHolder;
 
-    /** 由 {@link org.bear.mqclient.app.App#main(String[])} 在 launch 前注入已启动的容器。 */
-    public static void setContext(ConfigurableApplicationContext ctx) {
-        context = ctx;
+    /** 手动装配：I18n 绑定 + 插件 bundle 注册 + 组件实例化（launch 前调用一次） */
+    public static void bootstrap() {
+        localeHolder = new LocaleHolder();
+        I18nBinder.bind(localeHolder);
+        store = new ConnectionStore();
+        props = AppProperties.load();
     }
 
     @Override
     public void start(Stage primaryStage) {
-        ConnectionStore store = context.getBean(ConnectionStore.class);
-        AppProperties props = context.getBean(AppProperties.class);
-        MessageSource messageSource = context.getBean(MessageSource.class);
-        LocaleHolder localeHolder = context.getBean(LocaleHolder.class);
-
-        MainController controller = new MainController(store, messageSource, localeHolder);
+        MainController controller = new MainController(store, localeHolder);
         int width = props.getWindow().getWidth();
         int height = props.getWindow().getHeight();
         Scene scene = new Scene(controller.getRoot(), width, height);
@@ -55,16 +49,9 @@ public class MainApp extends Application {
         primaryStage.show();
     }
 
-    @Override
-    public void stop() {
-        if (context != null) {
-            context.close();
-        }
-    }
-
-    /** 直接运行本类时的备用入口：同样先启动 Spring 再启动 JavaFX。 */
+    /** 直接运行本类时的备用入口：与 {@code App.main} 等价。 */
     public static void main(String[] args) {
-        context = SpringApplication.run(CoreConfig.class, args);
+        bootstrap();
         launch(args);
     }
 }

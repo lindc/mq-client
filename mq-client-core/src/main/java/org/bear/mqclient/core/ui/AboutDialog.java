@@ -17,8 +17,7 @@ import javafx.stage.Stage;
 import javafx.stage.Window;
 import javafx.util.Duration;
 
-import org.bear.mqclient.core.config.LocaleHolder;
-import org.springframework.context.MessageSource;
+import org.bear.mqclient.core.util.I18n;
 
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -38,13 +37,9 @@ public class AboutDialog extends Dialog<Void> {
     private final List<String> smokeFrames = new ArrayList<>();
     private final String train;
     private final ClockCanvas clock = new ClockCanvas(150);
-    private final MessageSource messageSource;
-    private final LocaleHolder localeHolder;
     private Timeline smokeTimeline;
 
-    public AboutDialog(MessageSource messageSource, LocaleHolder localeHolder) {
-        this.messageSource = messageSource;
-        this.localeHolder = localeHolder;
+    public AboutDialog() {
 
         // 窗口级模态而非应用级：APPLICATION_MODAL 在 Wayland/XWayland 下
         // 依赖全局 grab，窗口可能在 show 后被立刻隐藏导致对话框不显示；
@@ -102,7 +97,7 @@ public class AboutDialog extends Dialog<Void> {
     }
 
     private String msg(String key) {
-        return messageSource.getMessage(key, null, key, localeHolder.getLocale());
+        return I18n.get(key);
     }
 
     private String buildArt(int frameIndex) {

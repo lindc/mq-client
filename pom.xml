@@ -41,15 +41,6 @@
 
     <dependencyManagement>
         <dependencies>
-            <!-- Spring Boot BOM：统一管理所有 spring-* 版本 -->
-            <dependency>
-                <groupId>org.springframework.boot</groupId>
-                <artifactId>spring-boot-dependencies</artifactId>
-                <version>4.1.1</version>
-                <type>pom</type>
-                <scope>import</scope>
-            </dependency>
-
             <!-- 模块间依赖 -->
             <dependency>
                 <groupId>org.bear.mqclient</groupId>
@@ -135,6 +126,25 @@
                 <groupId>org.projectlombok</groupId>
                 <artifactId>lombok</artifactId>
                 <version>${lombok.version}</version>
+            </dependency>
+
+            <!-- 日志（core 显式依赖，不再经 spring-boot-starter 传递） -->
+            <dependency>
+                <groupId>org.slf4j</groupId>
+                <artifactId>slf4j-api</artifactId>
+                <version>2.0.17</version>
+            </dependency>
+            <dependency>
+                <groupId>ch.qos.logback</groupId>
+                <artifactId>logback-classic</artifactId>
+                <version>1.5.18</version>
+            </dependency>
+
+            <!-- YAML 配置解析（application.yml） -->
+            <dependency>
+                <groupId>org.yaml</groupId>
+                <artifactId>snakeyaml</artifactId>
+                <version>2.3</version>
             </dependency>
 
             <!-- RabbitMQ AMQP client -->

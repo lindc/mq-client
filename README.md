@@ -25,11 +25,11 @@ MQ Client 是一个**本地运行的桌面**消息队列客户端工具，用于
 
 - 语言/运行时：Java 25
 - UI：JavaFX 26.0.2
-- 容器/配置：Spring Boot 4.1.1（仅管理 core 内的单例与配置）
+- 装配/配置：零框架依赖（MainApp.bootstrap 手动装配，snakeyaml 读 application.yml）
 - 插件机制：ServiceLoader SPI（service 与 ui 两层，各 MQ 模块通过 META-INF/services 注册）
 - 构建：Maven 多模块
 - 日志：SLF4J + Logback（`logback.xml` 滚动文件，输出到 `~/.mqclient/logs/`）
-- 国际化：Spring MessageSource + `I18n` 静态门面（core 公共 bundle + 插件自带 bundle）
+- 国际化：`I18n` 静态门面（JDK ResourceBundle，core 公共 bundle + 插件自带 bundle）
 - 工具：Lombok（`@Slf4j` 等注解）
 
 ## 快速开始
@@ -78,9 +78,9 @@ mvn clean package
 
 ## 国际化
 
-界面文本全部走 Spring `MessageSource`，通过 core 的 `I18n` 静态门面读取
+界面文本全部走 core 的 `I18n` 静态门面
 （`I18n.get("key")` / `I18n.get("key", arg...)`，支持 `{0}` 占位符），
-菜单栏「语言」可即时切换 **中文 / English**。文本分两层：
+基于 JDK `ResourceBundle`（无框架依赖），菜单栏「语言」可即时切换 **中文 / English**。文本分两层：
 
 - **core 公共 bundle**：`mq-client-core/src/main/resources/messages.properties`（中文，默认）
   与 `messages_en.properties`（英文），承载 `menu.*`、`common.*`、`message.*` 等公共 key。
