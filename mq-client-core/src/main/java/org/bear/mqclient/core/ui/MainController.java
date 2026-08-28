@@ -58,12 +58,23 @@ public class MainController {
 
         // 根布局：菜单栏 +（导航 | 内容区）可拖动的 SplitPane
         this.contentArea = new StackPane();
+        // 背景 + 边框放在内层 contentArea 上：外层 rightPanel 只留空隙（透明，露出
+        // SplitPane 底色），上下各 6px 空隙，与左侧悬浮卡片的结构对称
+        contentArea.setPadding(new Insets(4));
+        contentArea.setStyle("-fx-background-color: #eef0f3;"
+                + " -fx-border-color: #c9ced6; -fx-border-width: 1;");
         // 导航面板外包一层：留 6px 空隙让阴影完整可见；空隙填背景灰（与 SplitPane 同色），
         // 白色面板在灰背景上靠色差 + 阴影悬浮
         StackPane navWrap = new StackPane(navigation.getView());
         navWrap.setPadding(new Insets(6));
         navWrap.setStyle("-fx-background-color: #e8eaed; -fx-background-radius: 12;");
-        SplitPane splitPane = new SplitPane(navWrap, contentArea);
+
+        // 右侧内容区外层：仅留空隙，不做背景（背景在 contentArea 上，见上）；
+        // 左侧距收窄到 2px，压缩中间空隙（上下右保持 6px，窗口边缘空隙不变）
+        StackPane rightPanel = new StackPane(contentArea);
+        rightPanel.setPadding(new Insets(6, 6, 6, 2));
+
+        SplitPane splitPane = new SplitPane(navWrap, rightPanel);
         splitPane.setDividerPositions(0.2);
         // 分隔条样式（透明 + hover 浮现）在 css/main.css 中定义；setStyle 只能写声明，
         // 不能写选择器规则（否则解析失败且样式不生效）
