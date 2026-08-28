@@ -38,39 +38,47 @@ public class IBMMQService implements MQService {
                 String user = cfg.getProperty("username");
                 String pass = cfg.getProperty("password");
                 String sslCipher = cfg.getProperty("sslCipherSuite");
+                String mode = cfg.getProperty("connectionMode");
+                boolean bind = "bind".equalsIgnoreCase(mode);
 
                 Hashtable<String, Object> props = new Hashtable<>();
 
-                props.put(MQConstants.HOST_NAME_PROPERTY, host);
-                props.put(MQConstants.PORT_PROPERTY, Integer.parseInt(portStr));
-                props.put(MQConstants.CHANNEL_PROPERTY, channel);
-                if (user != null && !user.isEmpty()) {
-                    props.put(MQConstants.USER_ID_PROPERTY, user);
-                    if (pass != null && !pass.isEmpty()) {
-                        props.put(MQConstants.PASSWORD_PROPERTY, pass);
+                if (bind) {
+                    // Bind 模式：本地绑定连接，只需队列管理器名（host/port/channel 不参与连接）
+                    props.put(MQConstants.TRANSPORT_PROPERTY, MQConstants.TRANSPORT_MQSERIES_BINDINGS);
+                } else {
+                    // Client 模式：远程 TCP 连接
+                    props.put(MQConstants.HOST_NAME_PROPERTY, host);
+                    props.put(MQConstants.PORT_PROPERTY, Integer.parseInt(portStr));
+                    props.put(MQConstants.CHANNEL_PROPERTY, channel);
+                    if (user != null && !user.isEmpty()) {
+                        props.put(MQConstants.USER_ID_PROPERTY, user);
+                        if (pass != null && !pass.isEmpty()) {
+                            props.put(MQConstants.PASSWORD_PROPERTY, pass);
+                        }
                     }
-                }
-                props.put(MQConstants.USE_MQCSP_AUTHENTICATION_PROPERTY, true);
-                props.put(MQConstants.CCSID_PROPERTY, 1208); // UTF-8
+                    props.put(MQConstants.USE_MQCSP_AUTHENTICATION_PROPERTY, true);
 
-                if (sslCipher != null && !sslCipher.isEmpty()) {
-                    // 使用 Oracle/OpenJDK（非 IBM JRE）时需关闭 IBM cipher 名称映射
-                    System.setProperty("com.ibm.mq.cfg.useIBMCipherMappings", "false");
-                    // 证书库按连接配置按需设置：不填则使用 JVM 默认信任库/密钥库
-                    String trustStore = cfg.getProperty("sslTrustStore");
-                    if (trustStore != null && !trustStore.isEmpty()) {
-                        System.setProperty("javax.net.ssl.trustStore", trustStore);
-                        System.setProperty("javax.net.ssl.trustStorePassword",
-                                cfg.getProperty("sslTrustStorePassword", ""));
+                    if (sslCipher != null && !sslCipher.isEmpty()) {
+                        // 使用 Oracle/OpenJDK（非 IBM JRE）时需关闭 IBM cipher 名称映射
+                        System.setProperty("com.ibm.mq.cfg.useIBMCipherMappings", "false");
+                        // 证书库按连接配置按需设置：不填则使用 JVM 默认信任库/密钥库
+                        String trustStore = cfg.getProperty("sslTrustStore");
+                        if (trustStore != null && !trustStore.isEmpty()) {
+                            System.setProperty("javax.net.ssl.trustStore", trustStore);
+                            System.setProperty("javax.net.ssl.trustStorePassword",
+                                    cfg.getProperty("sslTrustStorePassword", ""));
+                        }
+                        String keyStore = cfg.getProperty("sslKeyStore");
+                        if (keyStore != null && !keyStore.isEmpty()) {
+                            System.setProperty("javax.net.ssl.keyStore", keyStore);
+                            System.setProperty("javax.net.ssl.keyStorePassword",
+                                    cfg.getProperty("sslKeyStorePassword", ""));
+                        }
+                        props.put(MQConstants.SSL_CIPHER_SUITE_PROPERTY, sslCipher);
                     }
-                    String keyStore = cfg.getProperty("sslKeyStore");
-                    if (keyStore != null && !keyStore.isEmpty()) {
-                        System.setProperty("javax.net.ssl.keyStore", keyStore);
-                        System.setProperty("javax.net.ssl.keyStorePassword",
-                                cfg.getProperty("sslKeyStorePassword", ""));
-                    }
-                    props.put(MQConstants.SSL_CIPHER_SUITE_PROPERTY, sslCipher);
                 }
+                props.put(MQConstants.CCSID_PROPERTY, 1208); // UTF-8
 
                 this.qmgr = new com.ibm.mq.MQQueueManager(qmgrName, props);
             } catch (Exception e) {

@@ -17,11 +17,14 @@ import java.io.File;
 /**
  * IBM MQ 连接配置编辑器。
  * <p>
- * 字段：连接名 / 队列管理器 / 主机 / 端口 / 通道 / SSL CipherSuite / 用户名 / 密码
+ * 字段：连接名 / 队列管理器 / 连接模式（Client 或 Bind） / 主机 / 端口 / 通道 /
+ * SSL CipherSuite / 用户名 / 密码
  */
 public class IBMMQConfigEditor extends VBox {
 
     private final TextField nameField;
+    private final RadioButton clientMode;
+    private final RadioButton bindMode;
     private final TextField qmgrField;
     private final TextField hostField;
     private final TextField portField;
@@ -84,18 +87,28 @@ public class IBMMQConfigEditor extends VBox {
         usernameField = new TextField();
         passwordField = new PasswordField();
 
+        // 连接模式：Client（远程，需 host/port/channel）或 Bind（本地绑定，只需队列管理器名）
+        ToggleGroup modeGroup = new ToggleGroup();
+        clientMode = new RadioButton(I18n.get("ibm.mode.client"));
+        bindMode = new RadioButton(I18n.get("ibm.mode.bind"));
+        clientMode.setToggleGroup(modeGroup);
+        bindMode.setToggleGroup(modeGroup);
+        clientMode.setSelected(true);
+        HBox modeBox = new HBox(16, clientMode, bindMode);
+
         grid.addRow(0, FormLabels.label(I18n.get("common.name")),          nameField);
         grid.addRow(1, FormLabels.label(I18n.get("ibm.queueManager")),       qmgrField);
-        grid.addRow(2, FormLabels.label(I18n.get("common.host")),            hostField);
-        grid.addRow(3, FormLabels.label(I18n.get("common.port")),            portField);
-        grid.addRow(4, FormLabels.label(I18n.get("ibm.channel")),            channelField);
-        grid.addRow(5, FormLabels.label("SSL CipherSuite:"), sslCombo);
-        grid.addRow(6, FormLabels.label(I18n.get("ibm.sslTrustStore")), trustStoreBox);
-        grid.addRow(7, FormLabels.label(I18n.get("ibm.sslTrustStorePassword")), sslTrustStorePwdField);
-        grid.addRow(8, FormLabels.label(I18n.get("ibm.sslKeyStore")), keyStoreBox);
-        grid.addRow(9, FormLabels.label(I18n.get("ibm.sslKeyStorePassword")), sslKeyStorePwdField);
-        grid.addRow(10, FormLabels.label(I18n.get("common.username")),          usernameField);
-        grid.addRow(11, FormLabels.label(I18n.get("common.password")),            passwordField);
+        grid.addRow(2, FormLabels.label(I18n.get("ibm.connectionMode")),     modeBox);
+        grid.addRow(3, FormLabels.label(I18n.get("common.host")),            hostField);
+        grid.addRow(4, FormLabels.label(I18n.get("common.port")),            portField);
+        grid.addRow(5, FormLabels.label(I18n.get("ibm.channel")),            channelField);
+        grid.addRow(6, FormLabels.label("SSL CipherSuite:"), sslCombo);
+        grid.addRow(7, FormLabels.label(I18n.get("ibm.sslTrustStore")), trustStoreBox);
+        grid.addRow(8, FormLabels.label(I18n.get("ibm.sslTrustStorePassword")), sslTrustStorePwdField);
+        grid.addRow(9, FormLabels.label(I18n.get("ibm.sslKeyStore")), keyStoreBox);
+        grid.addRow(10, FormLabels.label(I18n.get("ibm.sslKeyStorePassword")), sslKeyStorePwdField);
+        grid.addRow(11, FormLabels.label(I18n.get("common.username")),          usernameField);
+        grid.addRow(12, FormLabels.label(I18n.get("common.password")),            passwordField);
 
         // 字段变化时自动同步到 config
         nameField.textProperty().addListener((o, a, b) -> { if (config != null) config.setName(b); });
@@ -111,12 +124,33 @@ public class IBMMQConfigEditor extends VBox {
         usernameField.textProperty().addListener((o, a, b) -> { if (config != null) cfg().setProperty("username", b); });
         passwordField.textProperty().addListener((o, a, b) -> { if (config != null) cfg().setProperty("password", b); });
 
+        // 模式切换：Bind 只连本地队列管理器，网络相关字段全部禁用
+        modeGroup.selectedToggleProperty().addListener((o, a, b) -> {
+            boolean bind = b == bindMode;
+            hostField.setDisable(bind);
+            portField.setDisable(bind);
+            channelField.setDisable(bind);
+            sslCombo.setDisable(bind);
+            trustStoreBox.setDisable(bind);
+            sslTrustStorePwdField.setDisable(bind);
+            keyStoreBox.setDisable(bind);
+            sslKeyStorePwdField.setDisable(bind);
+            if (config != null) cfg().setProperty("connectionMode", bind ? "bind" : "client");
+        });
+
         getChildren().add(grid);
     }
 
     public void setConfig(MQConnectionConfig cfg) {
         this.config = cfg;
         nameField.setText(cfg.getName());
+        // 恢复连接模式（缺省 client，保持与旧配置兼容）
+        String mode = cfg.getProperty("connectionMode");
+        if ("bind".equalsIgnoreCase(mode)) {
+            bindMode.setSelected(true);
+        } else {
+            clientMode.setSelected(true);
+        }
         qmgrField.setText(cfg.getProperty("queueManager"));
         hostField.setText(cfg.getProperty("host"));
         String port = cfg.getProperty("port");
@@ -134,6 +168,7 @@ public class IBMMQConfigEditor extends VBox {
         // 字段当前值（含构造时的默认值）同步回 config：未编辑过的字段也要进配置，
         // 否则连接卡片/后续读取拿不到 host/port 等默认值
         cfg.setProperty("queueManager", qmgrField.getText());
+        cfg.setProperty("connectionMode", bindMode.isSelected() ? "bind" : "client");
         cfg.setProperty("host", hostField.getText());
         cfg.setProperty("port", portField.getText());
         cfg.setProperty("channel", channelField.getText());
@@ -164,8 +199,11 @@ public class IBMMQConfigEditor extends VBox {
     }
 
     public void testConnection() {
-        Alert alert = new Alert(Alert.AlertType.INFORMATION,
-                I18n.get("ibm.testNotImplemented", hostField.getText(), portField.getText(), qmgrField.getText()));
+        String info = bindMode.isSelected()
+                ? I18n.get("ibm.testNotImplementedBind", qmgrField.getText())
+                : I18n.get("ibm.testNotImplemented",
+                        hostField.getText(), portField.getText(), qmgrField.getText());
+        Alert alert = new Alert(Alert.AlertType.INFORMATION, info);
         alert.showAndWait();
     }
 }
