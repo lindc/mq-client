@@ -4,6 +4,7 @@ import org.bear.mqclient.core.model.MQConnectionConfig;
 import org.bear.mqclient.core.spi.MQUIProvider;
 import org.bear.mqclient.core.util.I18n;
 import javafx.geometry.Insets;
+import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.control.*;
 import javafx.scene.layout.BorderPane;
@@ -65,7 +66,11 @@ public class NewConnectionDialog extends Dialog<MQConnectionConfig> {
 
         for (var entry : uiProviders.entrySet()) {
             Button btn = new Button(entry.getValue().getDisplayName());
+            // 固定宽度 + 文字左对齐：各 MQ 显示名长度不同（IBM MQ / ActiveMQ Artemis ...），
+            // 切换时保持布局与文字起点一致，避免左右晃动
+            btn.setPrefWidth(180);
             btn.setMaxWidth(Double.MAX_VALUE);
+            btn.setAlignment(Pos.CENTER_LEFT);
             String type = entry.getKey();
             MQUIProvider provider = entry.getValue();
             btn.setOnAction(e -> selectType(type, provider));
