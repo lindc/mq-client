@@ -18,3 +18,6 @@ Thumbs.db
 *.log
 # IBM MQ 客户端运行时日志（mqjms.log.0 / .1 ...）
 mqjms.log.*
+
+# IBM MQ 故障转储（FFDC）
+FFDC/
