@@ -20,7 +20,7 @@ public class IBMMQConfigEditor extends VBox {
     private final TextField hostField;
     private final TextField portField;
     private final TextField channelField;
-    private final TextField sslField;
+    private final ComboBox<String> sslCombo;
     private final TextField usernameField;
     private final PasswordField passwordField;
 
@@ -40,7 +40,23 @@ public class IBMMQConfigEditor extends VBox {
         hostField    = new TextField("localhost");
         portField    = new TextField("1414");
         channelField = new TextField("SYSTEM.DEF.SVRCONN");
-        sslField     = new TextField();
+        // SSL CipherSuite：下拉选择（首项为空 = 不使用 SSL），可编辑以兼容自定义/旧值
+        sslCombo = new ComboBox<>();
+        sslCombo.getItems().addAll("",
+                "TLS_AES_128_GCM_SHA256",
+                "TLS_AES_256_GCM_SHA384",
+                "TLS_CHACHA20_POLY1305_SHA256",
+                "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+                "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+                "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
+                "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
+                "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256",
+                "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384",
+                "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA",
+                "TLS_DHE_RSA_WITH_AES_128_GCM_SHA256",
+                "TLS_DHE_RSA_WITH_AES_256_GCM_SHA384");
+        sslCombo.setValue("");
+        sslCombo.setEditable(true);
         usernameField = new TextField();
         passwordField = new PasswordField();
 
@@ -49,7 +65,7 @@ public class IBMMQConfigEditor extends VBox {
         grid.addRow(2, FormLabels.label(I18n.get("common.host")),            hostField);
         grid.addRow(3, FormLabels.label(I18n.get("common.port")),            portField);
         grid.addRow(4, FormLabels.label(I18n.get("ibm.channel")),            channelField);
-        grid.addRow(5, FormLabels.label("SSL CipherSuite:"), sslField);
+        grid.addRow(5, FormLabels.label("SSL CipherSuite:"), sslCombo);
         grid.addRow(6, FormLabels.label(I18n.get("common.username")),          usernameField);
         grid.addRow(7, FormLabels.label(I18n.get("common.password")),            passwordField);
 
@@ -59,7 +75,7 @@ public class IBMMQConfigEditor extends VBox {
         hostField.textProperty().addListener((o, a, b) -> { if (config != null) cfg().setProperty("host", b); });
         portField.textProperty().addListener((o, a, b) -> { if (config != null) cfg().setProperty("port", b); });
         channelField.textProperty().addListener((o, a, b) -> { if (config != null) cfg().setProperty("channel", b); });
-        sslField.textProperty().addListener((o, a, b) -> { if (config != null) cfg().setProperty("sslCipherSuite", b); });
+        sslCombo.valueProperty().addListener((o, a, b) -> { if (config != null) cfg().setProperty("sslCipherSuite", b); });
         usernameField.textProperty().addListener((o, a, b) -> { if (config != null) cfg().setProperty("username", b); });
         passwordField.textProperty().addListener((o, a, b) -> { if (config != null) cfg().setProperty("password", b); });
 
@@ -77,7 +93,9 @@ public class IBMMQConfigEditor extends VBox {
         String port = cfg.getProperty("port");
         portField.setText(port != null ? port : "1414");
         channelField.setText(cfg.getProperty("channel"));
-        sslField.setText(cfg.getProperty("sslCipherSuite"));
+        // 已有连接可能存了列表外的值：editable 模式下 setValue 可显示任意文本；空/无则回到空项
+        String ssl = cfg.getProperty("sslCipherSuite");
+        sslCombo.setValue(ssl != null && !ssl.isEmpty() ? ssl : "");
         usernameField.setText(cfg.getProperty("username"));
         passwordField.setText(cfg.getProperty("password"));
         // 字段当前值（含构造时的默认值）同步回 config：未编辑过的字段也要进配置，
@@ -86,7 +104,7 @@ public class IBMMQConfigEditor extends VBox {
         cfg.setProperty("host", hostField.getText());
         cfg.setProperty("port", portField.getText());
         cfg.setProperty("channel", channelField.getText());
-        cfg.setProperty("sslCipherSuite", sslField.getText());
+        cfg.setProperty("sslCipherSuite", sslCombo.getValue());
         cfg.setProperty("username", usernameField.getText());
         cfg.setProperty("password", passwordField.getText());
     }
