@@ -1,6 +1,7 @@
 package org.bear.mqclient.ibm.ui;
 
 import org.bear.mqclient.core.model.MQConnectionConfig;
+import org.bear.mqclient.core.ui.FormLabels;
 import org.bear.mqclient.core.util.I18n;
 import javafx.geometry.Insets;
 import javafx.scene.control.*;
@@ -43,14 +44,14 @@ public class IBMMQConfigEditor extends VBox {
         usernameField = new TextField();
         passwordField = new PasswordField();
 
-        grid.addRow(0, new Label(I18n.get("common.name")),          nameField);
-        grid.addRow(1, new Label(I18n.get("ibm.queueManager")),       qmgrField);
-        grid.addRow(2, new Label(I18n.get("common.host")),            hostField);
-        grid.addRow(3, new Label(I18n.get("common.port")),            portField);
-        grid.addRow(4, new Label(I18n.get("ibm.channel")),            channelField);
-        grid.addRow(5, new Label("SSL CipherSuite:"), sslField);
-        grid.addRow(6, new Label(I18n.get("common.username")),          usernameField);
-        grid.addRow(7, new Label(I18n.get("common.password")),            passwordField);
+        grid.addRow(0, FormLabels.label(I18n.get("common.name")),          nameField);
+        grid.addRow(1, FormLabels.label(I18n.get("ibm.queueManager")),       qmgrField);
+        grid.addRow(2, FormLabels.label(I18n.get("common.host")),            hostField);
+        grid.addRow(3, FormLabels.label(I18n.get("common.port")),            portField);
+        grid.addRow(4, FormLabels.label(I18n.get("ibm.channel")),            channelField);
+        grid.addRow(5, FormLabels.label("SSL CipherSuite:"), sslField);
+        grid.addRow(6, FormLabels.label(I18n.get("common.username")),          usernameField);
+        grid.addRow(7, FormLabels.label(I18n.get("common.password")),            passwordField);
 
         // 字段变化时自动同步到 config
         nameField.textProperty().addListener((o, a, b) -> { if (config != null) config.setName(b); });

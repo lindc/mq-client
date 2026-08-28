@@ -1,6 +1,7 @@
 package org.bear.mqclient.kafka.ui;
 
 import org.bear.mqclient.core.model.MQConnectionConfig;
+import org.bear.mqclient.core.ui.FormLabels;
 import org.bear.mqclient.core.util.I18n;
 import javafx.geometry.Insets;
 import javafx.scene.control.*;
@@ -38,15 +39,17 @@ public class KafkaConfigEditor extends VBox {
         securityCombo   = new ComboBox<>();
         securityCombo.getItems().addAll("PLAINTEXT", "SSL", "SASL_PLAINTEXT", "SASL_SSL");
         securityCombo.setValue("PLAINTEXT");
+        // 与同列 TextField 等宽（ComboBox 默认按内容宽，不拉伸会比其他输入框短一截）
+        securityCombo.setMaxWidth(Double.MAX_VALUE);
         saslMechField   = new TextField();
         saslJaasField   = new TextField();
 
-        grid.addRow(0, new Label(I18n.get("common.name")),             nameField);
-        grid.addRow(1, new Label("Bootstrap Servers:"), bootstrapField);
-        grid.addRow(2, new Label("Consumer Group ID:"), groupIdField);
-        grid.addRow(3, new Label("Security Protocol:"), securityCombo);
-        grid.addRow(4, new Label("SASL Mechanism:"),    saslMechField);
-        grid.addRow(5, new Label("SASL JAAS Config:"),  saslJaasField);
+        grid.addRow(0, FormLabels.label(I18n.get("common.name")),             nameField);
+        grid.addRow(1, FormLabels.label("Bootstrap Servers:"), bootstrapField);
+        grid.addRow(2, FormLabels.label("Consumer Group ID:"), groupIdField);
+        grid.addRow(3, FormLabels.label("Security Protocol:"), securityCombo);
+        grid.addRow(4, FormLabels.label("SASL Mechanism:"),    saslMechField);
+        grid.addRow(5, FormLabels.label("SASL JAAS Config:"),  saslJaasField);
 
         // 字段同步
         nameField.textProperty().addListener((o, a, b) -> { if (config != null) config.setName(b); });

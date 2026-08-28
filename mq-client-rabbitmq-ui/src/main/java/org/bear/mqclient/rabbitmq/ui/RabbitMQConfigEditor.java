@@ -1,6 +1,7 @@
 package org.bear.mqclient.rabbitmq.ui;
 
 import org.bear.mqclient.core.model.MQConnectionConfig;
+import org.bear.mqclient.core.ui.FormLabels;
 import org.bear.mqclient.core.util.I18n;
 import javafx.geometry.Insets;
 import javafx.scene.Node;
@@ -50,12 +51,12 @@ public class RabbitMQConfigEditor extends VBox {
         usernameField.textProperty().addListener((o, a, b) -> { if (config != null) cfg().setProperty("username", b); });
         passwordField.textProperty().addListener((o, a, b) -> { if (config != null) cfg().setProperty("password", b); });
 
-        grid.addRow(0, new Label(I18n.get("common.name")),   nameField);
-        grid.addRow(1, new Label(I18n.get("common.host")),     hostField);
-        grid.addRow(2, new Label(I18n.get("common.port")),     portField);
-        grid.addRow(3, new Label("Virtual Host:"), virtualHostField);
-        grid.addRow(4, new Label(I18n.get("common.username")),   usernameField);
-        grid.addRow(5, new Label(I18n.get("common.password")),     passwordField);
+        grid.addRow(0, FormLabels.label(I18n.get("common.name")),   nameField);
+        grid.addRow(1, FormLabels.label(I18n.get("common.host")),     hostField);
+        grid.addRow(2, FormLabels.label(I18n.get("common.port")),     portField);
+        grid.addRow(3, FormLabels.label("Virtual Host:"), virtualHostField);
+        grid.addRow(4, FormLabels.label(I18n.get("common.username")),   usernameField);
+        grid.addRow(5, FormLabels.label(I18n.get("common.password")),     passwordField);
 
         Button testBtn = new Button(I18n.get("common.testConnection"));
         testBtn.setOnAction(e -> testConnection());
