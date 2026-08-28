@@ -8,15 +8,18 @@ import org.bear.mqclient.core.util.I18n;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.geometry.Insets;
+import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
 import javafx.scene.control.MenuItem;
+import javafx.scene.image.ImageView;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
+import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.shape.Rectangle;
 
@@ -118,9 +121,18 @@ public class NavigationPanel {
         Node icon = provider != null && provider.getIcon() != null
                 ? provider.getIcon()
                 : new Region();
-        if (icon instanceof Region r) {
-            r.setPrefSize(28, 28);
+        // 统一图标显示尺寸为 36px（provider 返回的 ImageView 按此缩放，Region 占位同尺寸）
+        if (icon instanceof ImageView iv) {
+            iv.setFitWidth(36);
+            iv.setFitHeight(36);
+        } else if (icon instanceof Region r) {
+            r.setPrefSize(36, 36);
         }
+        // 图标包一层 StackPane：随行高拉伸、图标居中，上下空隙均匀（直接放 HBox
+        // 会被 fillHeight 拉伸或出现视觉偏移）
+        StackPane iconBox = new StackPane(icon);
+        iconBox.setPrefSize(36, 36);
+        HBox.setHgrow(iconBox, Priority.NEVER);
 
         Label name = new Label(cfg.getName());
         name.setStyle("-fx-font-weight: bold; -fx-font-size: 13px;");
@@ -128,15 +140,43 @@ public class NavigationPanel {
 
         Region dot = new Region();
         dot.setPrefSize(8, 8);
+        dot.setMaxSize(8, 8); // 锁死尺寸，否则会被 VBox fillWidth 拉成长条
+        dot.setTranslateY(1); // 文字含 descent，几何中心略偏下，微调 1px 视觉对齐
         dot.setStyle("-fx-background-radius: 4; -fx-background-color: " + stateColor(cfg.getId()));
 
-        VBox right = new VBox(4, name, dot);
+        VBox right;
+        String address = addressOf(cfg);
+        if (!address.isEmpty()) {
+            Label addr = new Label(address);
+            // 颜色在 css/main.css 的 .nav-addr 定义（选中行时变白，内联样式无法被 CSS 覆盖）
+            addr.getStyleClass().add("nav-addr");
+            addr.setMaxWidth(110); // 超长地址省略号截断
+            HBox statusRow = new HBox(6, dot, addr);
+            statusRow.setAlignment(Pos.CENTER_LEFT);
+            right = new VBox(4, name, statusRow);
+        } else {
+            right = new VBox(4, name, dot);
+        }
         right.setMaxWidth(Double.MAX_VALUE);
         HBox.setHgrow(right, Priority.ALWAYS);
 
-        HBox card = new HBox(10, icon, right);
-        card.setPadding(new Insets(6, 8, 6, 8));
+        HBox card = new HBox(10, iconBox, right);
+        card.setPadding(new Insets(4, 8, 4, 8));
         return card;
+    }
+
+    /** 提取连接地址用于卡片展示：host:port 优先，其次各 MQ 的地址字段 */
+    private String addressOf(MQConnectionConfig cfg) {
+        String host = cfg.getProperty("host");
+        String port = cfg.getProperty("port");
+        if (host != null && !host.isBlank()) {
+            return port != null && !port.isBlank() ? host + ":" + port : host;
+        }
+        for (String key : new String[]{"bootstrapServers", "namesrvAddr", "queueManager", "virtualHost"}) {
+            String v = cfg.getProperty(key);
+            if (v != null && !v.isBlank()) return v;
+        }
+        return "";
     }
 
     private String stateColor(String connectionId) {

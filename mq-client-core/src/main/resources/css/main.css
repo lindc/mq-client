@@ -9,3 +9,12 @@
 .mq-split-pane > .split-pane-divider:hover {
     -fx-background-color: rgba(0, 0, 0, 0.15);
 }
+
+/* 连接卡片：地址小字；选中行时变白，避免蓝底上灰色不可读 */
+.nav-addr {
+    -fx-font-size: 11px;
+    -fx-text-fill: #888;
+}
+.list-cell:selected .nav-addr {
+    -fx-text-fill: white;
+}
