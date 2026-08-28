@@ -54,6 +54,16 @@ public class IBMMQService implements MQService {
                 props.put(MQConstants.CCSID_PROPERTY, 1208); // UTF-8
 
                 if (sslCipher != null && !sslCipher.isEmpty()) {
+                    // Disabling IBM cipher suite mapping due to
+                    // using Oracle Java and not IBM Java
+                    System.setProperty("com.ibm.mq.cfg.useIBMCipherMappings", "false");
+                    // Enabling SSL debug to view the communication
+                    //System.setProperty("javax.net.debug", "ssl:handshake");
+                    System.setProperty("javax.net.ssl.trustStore","client.jks");
+                    System.setProperty("javax.net.ssl.trustStorePassword","clientpass");
+                    System.setProperty("javax.net.ssl.keyStore","client.jks");
+                    System.setProperty("javax.net.ssl.keyStorePassword","clientpass");
+                    //props.put(MQConstants.SSL_CIPHER_SUITE_PROPERTY, "TLS_RSA_WITH_AES_128_CBC_SHA256");
                     props.put(MQConstants.SSL_CIPHER_SUITE_PROPERTY, sslCipher);
                 }
 
