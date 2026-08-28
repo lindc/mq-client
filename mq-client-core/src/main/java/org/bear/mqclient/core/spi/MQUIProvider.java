@@ -56,6 +56,14 @@ public interface MQUIProvider {
      */
     List<Menu> getMenus();
 
+    /**
+     * 「测试连接」动作 — core 将其绑定到新建连接对话框底部的「测试连接」按钮。
+     * <p>
+     * 插件返回 null 表示无测试动作（按钮无响应）；通常返回配置编辑器的
+     * {@code testConnection()} 方法引用。
+     */
+    default Runnable getTestAction(Node editor) { return null; }
+
     /** 面板关闭/连接切换时清理回调 */
     void onPanelClosed();
 }

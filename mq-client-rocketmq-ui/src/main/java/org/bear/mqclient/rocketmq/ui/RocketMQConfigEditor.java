@@ -5,7 +5,9 @@ import org.bear.mqclient.core.ui.FormLabels;
 import org.bear.mqclient.core.util.I18n;
 import javafx.geometry.Insets;
 import javafx.scene.control.*;
+import javafx.scene.layout.ColumnConstraints;
 import javafx.scene.layout.GridPane;
+import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 
 /**
@@ -28,6 +30,11 @@ public class RocketMQConfigEditor extends VBox {
         GridPane grid = new GridPane();
         grid.setHgap(8);
         grid.setVgap(6);
+        // label 列固定宽，输入列占满剩余空间（与各 MQ 编辑器统一后输入框等长）
+        ColumnConstraints labelCol = new ColumnConstraints(FormLabels.WIDTH);
+        ColumnConstraints inputCol = new ColumnConstraints();
+        inputCol.setHgrow(Priority.ALWAYS);
+        grid.getColumnConstraints().addAll(labelCol, inputCol);
 
         nameField          = new TextField();
         nsAddrField        = new TextField("localhost:9876");
@@ -44,14 +51,13 @@ public class RocketMQConfigEditor extends VBox {
         grid.addRow(2, FormLabels.label("Consumer Group:"), consumerGroupField);
         grid.addRow(3, FormLabels.label("Producer Group:"), producerGroupField);
 
-        Button testBtn = new Button(I18n.get("common.testConnection"));
-        testBtn.setOnAction(e -> {
-            Alert alert = new Alert(Alert.AlertType.INFORMATION,
-                    I18n.get("rocketmq.testConnect", nsAddrField.getText()));
-            alert.showAndWait();
-        });
+        getChildren().add(grid);
+    }
 
-        getChildren().addAll(grid, testBtn);
+    public void testConnection() {
+        Alert alert = new Alert(Alert.AlertType.INFORMATION,
+                I18n.get("rocketmq.testConnect", nsAddrField.getText()));
+        alert.showAndWait();
     }
 
     public void setConfig(MQConnectionConfig cfg) {

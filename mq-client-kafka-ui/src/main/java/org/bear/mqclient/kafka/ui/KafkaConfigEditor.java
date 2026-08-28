@@ -5,7 +5,9 @@ import org.bear.mqclient.core.ui.FormLabels;
 import org.bear.mqclient.core.util.I18n;
 import javafx.geometry.Insets;
 import javafx.scene.control.*;
+import javafx.scene.layout.ColumnConstraints;
 import javafx.scene.layout.GridPane;
+import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 
 /**
@@ -32,6 +34,11 @@ public class KafkaConfigEditor extends VBox {
         GridPane grid = new GridPane();
         grid.setHgap(8);
         grid.setVgap(6);
+        // label 列固定宽，输入列占满剩余空间（与各 MQ 编辑器统一后输入框等长）
+        ColumnConstraints labelCol = new ColumnConstraints(FormLabels.WIDTH);
+        ColumnConstraints inputCol = new ColumnConstraints();
+        inputCol.setHgrow(Priority.ALWAYS);
+        grid.getColumnConstraints().addAll(labelCol, inputCol);
 
         nameField       = new TextField();
         bootstrapField  = new TextField("localhost:9092");
@@ -59,10 +66,7 @@ public class KafkaConfigEditor extends VBox {
         saslMechField.textProperty().addListener((o, a, b) -> { if (config != null) cfg().setProperty("saslMechanism", b); });
         saslJaasField.textProperty().addListener((o, a, b) -> { if (config != null) cfg().setProperty("saslJaasConfig", b); });
 
-        Button testBtn = new Button(I18n.get("common.testConnection"));
-        testBtn.setOnAction(e -> testConnection());
-
-        getChildren().addAll(grid, testBtn);
+        getChildren().add(grid);
     }
 
     public void setConfig(MQConnectionConfig cfg) {
@@ -85,7 +89,7 @@ public class KafkaConfigEditor extends VBox {
 
     private MQConnectionConfig cfg() { return config; }
 
-    private void testConnection() {
+    public void testConnection() {
         Alert alert = new Alert(Alert.AlertType.INFORMATION,
                 I18n.get("kafka.testConnect", bootstrapField.getText()));
         alert.showAndWait();

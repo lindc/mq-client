@@ -5,7 +5,9 @@ import org.bear.mqclient.core.ui.FormLabels;
 import org.bear.mqclient.core.util.I18n;
 import javafx.geometry.Insets;
 import javafx.scene.control.*;
+import javafx.scene.layout.ColumnConstraints;
 import javafx.scene.layout.GridPane;
+import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 
 /**
@@ -24,11 +26,16 @@ public class ArtemisConfigEditor extends VBox {
     public ArtemisConfigEditor() {
         setPadding(new Insets(16));
         setSpacing(8);
-        setPrefWidth(400);
+        setPrefWidth(450); // 与各 MQ 编辑器统一宽度，输入框等长
 
         GridPane grid = new GridPane();
         grid.setHgap(8);
         grid.setVgap(6);
+        // label 列固定宽，输入列占满剩余空间（与各 MQ 编辑器统一后输入框等长）
+        ColumnConstraints labelCol = new ColumnConstraints(FormLabels.WIDTH);
+        ColumnConstraints inputCol = new ColumnConstraints();
+        inputCol.setHgrow(Priority.ALWAYS);
+        grid.getColumnConstraints().addAll(labelCol, inputCol);
 
         nameField     = new TextField();
         hostField     = new TextField("localhost");
@@ -49,14 +56,14 @@ public class ArtemisConfigEditor extends VBox {
         grid.addRow(3, FormLabels.label(I18n.get("common.username")), usernameField);
         grid.addRow(4, FormLabels.label(I18n.get("common.password")), passwordField);
 
-        Button testBtn = new Button(I18n.get("common.testConnection"));
-        testBtn.setOnAction(e -> {
-            Alert alert = new Alert(Alert.AlertType.INFORMATION,
-                    I18n.get("common.testingConnect", hostField.getText(), portField.getText()));
-            alert.showAndWait();
-        });
+        getChildren().add(grid);
+    }
 
-        getChildren().addAll(grid, testBtn);
+    /** 测试连接（由新建连接对话框底部的「测试连接」按钮触发） */
+    public void testConnection() {
+        Alert alert = new Alert(Alert.AlertType.INFORMATION,
+                I18n.get("common.testingConnect", hostField.getText(), portField.getText()));
+        alert.showAndWait();
     }
 
     public void setConfig(MQConnectionConfig cfg) {

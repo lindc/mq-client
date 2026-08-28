@@ -52,6 +52,11 @@ public class ArtemisUIProvider implements MQUIProvider {
     }
 
     @Override
+    public Runnable getTestAction(Node editor) {
+        return editor instanceof ArtemisConfigEditor ace ? ace::testConnection : null;
+    }
+
+    @Override
     public List<Menu> getMenus() {
         return mainPanel != null ? mainPanel.getMenus() : List.of();
     }

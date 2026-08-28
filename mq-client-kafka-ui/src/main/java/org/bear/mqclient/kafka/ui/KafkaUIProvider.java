@@ -52,6 +52,11 @@ public class KafkaUIProvider implements MQUIProvider {
     }
 
     @Override
+    public Runnable getTestAction(Node editor) {
+        return editor instanceof KafkaConfigEditor kce ? kce::testConnection : null;
+    }
+
+    @Override
     public List<Menu> getMenus() {
         return mainPanel != null ? mainPanel.getMenus() : List.of();
     }

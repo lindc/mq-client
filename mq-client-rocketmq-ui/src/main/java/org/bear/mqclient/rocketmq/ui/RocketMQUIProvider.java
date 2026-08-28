@@ -52,6 +52,11 @@ public class RocketMQUIProvider implements MQUIProvider {
     }
 
     @Override
+    public Runnable getTestAction(Node editor) {
+        return editor instanceof RocketMQConfigEditor rce ? rce::testConnection : null;
+    }
+
+    @Override
     public List<Menu> getMenus() {
         return mainPanel != null ? mainPanel.getMenus() : List.of();
     }

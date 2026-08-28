@@ -52,6 +52,11 @@ public class RabbitMQUIProvider implements MQUIProvider {
     }
 
     @Override
+    public Runnable getTestAction(Node editor) {
+        return editor instanceof RabbitMQConfigEditor rce ? rce::testConnection : null;
+    }
+
+    @Override
     public List<Menu> getMenus() {
         return mainPanel != null ? mainPanel.getMenus() : List.of();
     }

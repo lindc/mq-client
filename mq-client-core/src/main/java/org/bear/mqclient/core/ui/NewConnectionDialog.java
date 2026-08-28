@@ -30,6 +30,7 @@ public class NewConnectionDialog extends Dialog<MQConnectionConfig> {
     private String selectedType;
     private Node configEditor;
     private MQConnectionConfig config;
+    private final ButtonType testType;
 
     public NewConnectionDialog(Map<String, MQUIProvider> uiProviders) {
         this.uiProviders = uiProviders;
@@ -47,18 +48,19 @@ public class NewConnectionDialog extends Dialog<MQConnectionConfig> {
         setTitle(I18n.get("connection.dialog.title"));
         setHeaderText(I18n.get("connection.dialog.selectType"));
 
-        // 按钮
+        // 按钮：测试连接（行首）→ 下一步 → 取消；测试按钮点击不关闭对话框（converter 返回 null）
         ButtonType nextBtn = new ButtonType(I18n.get("common.next"), ButtonBar.ButtonData.NEXT_FORWARD);
         ButtonType cancelBtn = new ButtonType(I18n.get("common.cancel"), ButtonBar.ButtonData.CANCEL_CLOSE);
-        getDialogPane().getButtonTypes().addAll(nextBtn, cancelBtn);
+        this.testType = new ButtonType(I18n.get("common.testConnection"), ButtonBar.ButtonData.LEFT);
+        getDialogPane().getButtonTypes().addAll(nextBtn, cancelBtn, testType);
 
-        // 内容
+        // 内容：中心区包 ScrollPane，表单超高（如 IBM MQ 的 SSL 字段）时可滚动到按钮
         this.content = new BorderPane();
         content.setLeft(createTypeSelector());
         content.setCenter(new Label(I18n.get("connection.dialog.prompt")));
 
         getDialogPane().setContent(content);
-        getDialogPane().setPrefSize(650, 450);
+        getDialogPane().setPrefSize(650, 540);
 
         // 结果转换
         setResultConverter(btn -> {
@@ -109,7 +111,17 @@ public class NewConnectionDialog extends Dialog<MQConnectionConfig> {
             provider.applyConfig(configEditor, config);
         }
 
-        content.setCenter(configEditor);
+        // 内容包 ScrollPane：表单超高（如 IBM MQ 的 SSL 字段）时可滚动到按钮
+        ScrollPane scroll = new ScrollPane(configEditor);
+        scroll.setFitToWidth(true);
+        content.setCenter(scroll);
+
+        // 底部「测试连接」按钮绑定当前 MQ 编辑器的测试动作（对话框已显示，lookupButton 可用）
+        if (getDialogPane().lookupButton(testType) instanceof Button testButton) {
+            Runnable action = provider.getTestAction(configEditor);
+            testButton.setOnAction(e -> { if (action != null) action.run(); });
+        }
+
         setHeaderText(I18n.get("connection.dialog.header", provider.getDisplayName()));
     }
 }

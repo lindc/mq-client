@@ -5,8 +5,14 @@ import org.bear.mqclient.core.ui.FormLabels;
 import org.bear.mqclient.core.util.I18n;
 import javafx.geometry.Insets;
 import javafx.scene.control.*;
+import javafx.scene.layout.ColumnConstraints;
 import javafx.scene.layout.GridPane;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
+import javafx.stage.FileChooser;
+
+import java.io.File;
 
 /**
  * IBM MQ 连接配置编辑器。
@@ -38,6 +44,11 @@ public class IBMMQConfigEditor extends VBox {
         GridPane grid = new GridPane();
         grid.setHgap(8);
         grid.setVgap(6);
+        // label 列固定宽，输入列占满剩余空间（与各 MQ 编辑器统一后输入框等长）
+        ColumnConstraints labelCol = new ColumnConstraints(FormLabels.WIDTH);
+        ColumnConstraints inputCol = new ColumnConstraints();
+        inputCol.setHgrow(Priority.ALWAYS);
+        grid.getColumnConstraints().addAll(labelCol, inputCol);
 
         nameField    = new TextField();
         qmgrField    = new TextField();
@@ -61,11 +72,15 @@ public class IBMMQConfigEditor extends VBox {
                 "TLS_DHE_RSA_WITH_AES_256_GCM_SHA384");
         sslCombo.setValue("");
         sslCombo.setEditable(true);
+        sslCombo.setMaxWidth(Double.MAX_VALUE); // 与同列输入框等宽拉伸
         // 证书库按需填写：不填则走 JVM 默认信任库（公共 CA 或已导入 cacerts 的证书）
         sslTrustStoreField = new TextField();
-        sslTrustStorePwdField = new PasswordField();
         sslKeyStoreField = new TextField();
+        sslTrustStorePwdField = new PasswordField();
         sslKeyStorePwdField = new PasswordField();
+        // 路径用文件选择框选，不用手写
+        HBox trustStoreBox = filePicker(sslTrustStoreField);
+        HBox keyStoreBox = filePicker(sslKeyStoreField);
         usernameField = new TextField();
         passwordField = new PasswordField();
 
@@ -75,9 +90,9 @@ public class IBMMQConfigEditor extends VBox {
         grid.addRow(3, FormLabels.label(I18n.get("common.port")),            portField);
         grid.addRow(4, FormLabels.label(I18n.get("ibm.channel")),            channelField);
         grid.addRow(5, FormLabels.label("SSL CipherSuite:"), sslCombo);
-        grid.addRow(6, FormLabels.label(I18n.get("ibm.sslTrustStore")), sslTrustStoreField);
+        grid.addRow(6, FormLabels.label(I18n.get("ibm.sslTrustStore")), trustStoreBox);
         grid.addRow(7, FormLabels.label(I18n.get("ibm.sslTrustStorePassword")), sslTrustStorePwdField);
-        grid.addRow(8, FormLabels.label(I18n.get("ibm.sslKeyStore")), sslKeyStoreField);
+        grid.addRow(8, FormLabels.label(I18n.get("ibm.sslKeyStore")), keyStoreBox);
         grid.addRow(9, FormLabels.label(I18n.get("ibm.sslKeyStorePassword")), sslKeyStorePwdField);
         grid.addRow(10, FormLabels.label(I18n.get("common.username")),          usernameField);
         grid.addRow(11, FormLabels.label(I18n.get("common.password")),            passwordField);
@@ -96,10 +111,7 @@ public class IBMMQConfigEditor extends VBox {
         usernameField.textProperty().addListener((o, a, b) -> { if (config != null) cfg().setProperty("username", b); });
         passwordField.textProperty().addListener((o, a, b) -> { if (config != null) cfg().setProperty("password", b); });
 
-        Button testBtn = new Button(I18n.get("common.testConnection"));
-        testBtn.setOnAction(e -> testConnection());
-
-        getChildren().addAll(grid, testBtn);
+        getChildren().add(grid);
     }
 
     public void setConfig(MQConnectionConfig cfg) {
@@ -136,7 +148,22 @@ public class IBMMQConfigEditor extends VBox {
 
     private MQConnectionConfig cfg() { return config; }
 
-    private void testConnection() {
+    /** 文件选择框组合：文本框 + 浏览按钮，选中的路径写入文本框 */
+    private HBox filePicker(TextField field) {
+        HBox box = new HBox(4, field);
+        HBox.setHgrow(field, Priority.ALWAYS);
+        Button browseBtn = new Button(I18n.get("ibm.browse"));
+        browseBtn.setOnAction(e -> {
+            FileChooser chooser = new FileChooser();
+            chooser.setTitle(I18n.get("ibm.browse"));
+            File file = chooser.showOpenDialog(getScene() != null ? getScene().getWindow() : null);
+            if (file != null) field.setText(file.getAbsolutePath());
+        });
+        box.getChildren().add(browseBtn);
+        return box;
+    }
+
+    public void testConnection() {
         Alert alert = new Alert(Alert.AlertType.INFORMATION,
                 I18n.get("ibm.testNotImplemented", hostField.getText(), portField.getText(), qmgrField.getText()));
         alert.showAndWait();
