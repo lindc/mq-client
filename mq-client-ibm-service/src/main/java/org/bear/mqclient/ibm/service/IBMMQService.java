@@ -54,16 +54,21 @@ public class IBMMQService implements MQService {
                 props.put(MQConstants.CCSID_PROPERTY, 1208); // UTF-8
 
                 if (sslCipher != null && !sslCipher.isEmpty()) {
-                    // Disabling IBM cipher suite mapping due to
-                    // using Oracle Java and not IBM Java
+                    // 使用 Oracle/OpenJDK（非 IBM JRE）时需关闭 IBM cipher 名称映射
                     System.setProperty("com.ibm.mq.cfg.useIBMCipherMappings", "false");
-                    // Enabling SSL debug to view the communication
-                    //System.setProperty("javax.net.debug", "ssl:handshake");
-                    System.setProperty("javax.net.ssl.trustStore","client.jks");
-                    System.setProperty("javax.net.ssl.trustStorePassword","clientpass");
-                    System.setProperty("javax.net.ssl.keyStore","client.jks");
-                    System.setProperty("javax.net.ssl.keyStorePassword","clientpass");
-                    //props.put(MQConstants.SSL_CIPHER_SUITE_PROPERTY, "TLS_RSA_WITH_AES_128_CBC_SHA256");
+                    // 证书库按连接配置按需设置：不填则使用 JVM 默认信任库/密钥库
+                    String trustStore = cfg.getProperty("sslTrustStore");
+                    if (trustStore != null && !trustStore.isEmpty()) {
+                        System.setProperty("javax.net.ssl.trustStore", trustStore);
+                        System.setProperty("javax.net.ssl.trustStorePassword",
+                                cfg.getProperty("sslTrustStorePassword", ""));
+                    }
+                    String keyStore = cfg.getProperty("sslKeyStore");
+                    if (keyStore != null && !keyStore.isEmpty()) {
+                        System.setProperty("javax.net.ssl.keyStore", keyStore);
+                        System.setProperty("javax.net.ssl.keyStorePassword",
+                                cfg.getProperty("sslKeyStorePassword", ""));
+                    }
                     props.put(MQConstants.SSL_CIPHER_SUITE_PROPERTY, sslCipher);
                 }
 

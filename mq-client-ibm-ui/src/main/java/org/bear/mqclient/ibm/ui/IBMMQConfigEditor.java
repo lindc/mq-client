@@ -21,6 +21,10 @@ public class IBMMQConfigEditor extends VBox {
     private final TextField portField;
     private final TextField channelField;
     private final ComboBox<String> sslCombo;
+    private final TextField sslTrustStoreField;
+    private final PasswordField sslTrustStorePwdField;
+    private final TextField sslKeyStoreField;
+    private final PasswordField sslKeyStorePwdField;
     private final TextField usernameField;
     private final PasswordField passwordField;
 
@@ -57,6 +61,11 @@ public class IBMMQConfigEditor extends VBox {
                 "TLS_DHE_RSA_WITH_AES_256_GCM_SHA384");
         sslCombo.setValue("");
         sslCombo.setEditable(true);
+        // 证书库按需填写：不填则走 JVM 默认信任库（公共 CA 或已导入 cacerts 的证书）
+        sslTrustStoreField = new TextField();
+        sslTrustStorePwdField = new PasswordField();
+        sslKeyStoreField = new TextField();
+        sslKeyStorePwdField = new PasswordField();
         usernameField = new TextField();
         passwordField = new PasswordField();
 
@@ -66,8 +75,12 @@ public class IBMMQConfigEditor extends VBox {
         grid.addRow(3, FormLabels.label(I18n.get("common.port")),            portField);
         grid.addRow(4, FormLabels.label(I18n.get("ibm.channel")),            channelField);
         grid.addRow(5, FormLabels.label("SSL CipherSuite:"), sslCombo);
-        grid.addRow(6, FormLabels.label(I18n.get("common.username")),          usernameField);
-        grid.addRow(7, FormLabels.label(I18n.get("common.password")),            passwordField);
+        grid.addRow(6, FormLabels.label(I18n.get("ibm.sslTrustStore")), sslTrustStoreField);
+        grid.addRow(7, FormLabels.label(I18n.get("ibm.sslTrustStorePassword")), sslTrustStorePwdField);
+        grid.addRow(8, FormLabels.label(I18n.get("ibm.sslKeyStore")), sslKeyStoreField);
+        grid.addRow(9, FormLabels.label(I18n.get("ibm.sslKeyStorePassword")), sslKeyStorePwdField);
+        grid.addRow(10, FormLabels.label(I18n.get("common.username")),          usernameField);
+        grid.addRow(11, FormLabels.label(I18n.get("common.password")),            passwordField);
 
         // 字段变化时自动同步到 config
         nameField.textProperty().addListener((o, a, b) -> { if (config != null) config.setName(b); });
@@ -76,6 +89,10 @@ public class IBMMQConfigEditor extends VBox {
         portField.textProperty().addListener((o, a, b) -> { if (config != null) cfg().setProperty("port", b); });
         channelField.textProperty().addListener((o, a, b) -> { if (config != null) cfg().setProperty("channel", b); });
         sslCombo.valueProperty().addListener((o, a, b) -> { if (config != null) cfg().setProperty("sslCipherSuite", b); });
+        sslTrustStoreField.textProperty().addListener((o, a, b) -> { if (config != null) cfg().setProperty("sslTrustStore", b); });
+        sslTrustStorePwdField.textProperty().addListener((o, a, b) -> { if (config != null) cfg().setProperty("sslTrustStorePassword", b); });
+        sslKeyStoreField.textProperty().addListener((o, a, b) -> { if (config != null) cfg().setProperty("sslKeyStore", b); });
+        sslKeyStorePwdField.textProperty().addListener((o, a, b) -> { if (config != null) cfg().setProperty("sslKeyStorePassword", b); });
         usernameField.textProperty().addListener((o, a, b) -> { if (config != null) cfg().setProperty("username", b); });
         passwordField.textProperty().addListener((o, a, b) -> { if (config != null) cfg().setProperty("password", b); });
 
@@ -96,6 +113,10 @@ public class IBMMQConfigEditor extends VBox {
         // 已有连接可能存了列表外的值：editable 模式下 setValue 可显示任意文本；空/无则回到空项
         String ssl = cfg.getProperty("sslCipherSuite");
         sslCombo.setValue(ssl != null && !ssl.isEmpty() ? ssl : "");
+        sslTrustStoreField.setText(cfg.getProperty("sslTrustStore"));
+        sslTrustStorePwdField.setText(cfg.getProperty("sslTrustStorePassword"));
+        sslKeyStoreField.setText(cfg.getProperty("sslKeyStore"));
+        sslKeyStorePwdField.setText(cfg.getProperty("sslKeyStorePassword"));
         usernameField.setText(cfg.getProperty("username"));
         passwordField.setText(cfg.getProperty("password"));
         // 字段当前值（含构造时的默认值）同步回 config：未编辑过的字段也要进配置，
@@ -105,6 +126,10 @@ public class IBMMQConfigEditor extends VBox {
         cfg.setProperty("port", portField.getText());
         cfg.setProperty("channel", channelField.getText());
         cfg.setProperty("sslCipherSuite", sslCombo.getValue());
+        cfg.setProperty("sslTrustStore", sslTrustStoreField.getText());
+        cfg.setProperty("sslTrustStorePassword", sslTrustStorePwdField.getText());
+        cfg.setProperty("sslKeyStore", sslKeyStoreField.getText());
+        cfg.setProperty("sslKeyStorePassword", sslKeyStorePwdField.getText());
         cfg.setProperty("username", usernameField.getText());
         cfg.setProperty("password", passwordField.getText());
     }

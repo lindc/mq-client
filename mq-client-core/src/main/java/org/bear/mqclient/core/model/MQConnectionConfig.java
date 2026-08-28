@@ -38,6 +38,10 @@ public class MQConnectionConfig {
     public Map<String, String> getProperties() { return properties; }
 
     public String getProperty(String key) { return properties.get(key); }
+    public String getProperty(String key, String defaultValue) {
+        String v = properties.get(key);
+        return v != null ? v : defaultValue;
+    }
     public void setProperty(String key, String value) { properties.put(key, value); }
     public void setProperties(Map<String, String> props) {
         properties.clear();
