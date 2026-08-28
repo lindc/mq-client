@@ -16,3 +16,5 @@ Thumbs.db
 
 # Logs
 *.log
+# IBM MQ 客户端运行时日志（mqjms.log.0 / .1 ...）
+mqjms.log.*
