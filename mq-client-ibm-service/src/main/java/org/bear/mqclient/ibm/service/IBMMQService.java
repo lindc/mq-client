@@ -40,12 +40,15 @@ public class IBMMQService implements MQService {
                 String sslCipher = cfg.getProperty("sslCipherSuite");
 
                 Hashtable<String, Object> props = new Hashtable<>();
-                props.put("hostname", host != null ? host : "localhost");
-                props.put("port", portStr != null ? Integer.parseInt(portStr) : 1414);
-                props.put("channel", channel != null ? channel : "SYSTEM.DEF.SVRCONN");
-                props.put("userID", user != null && !user.isEmpty() ? user : "mqm");
-                if (pass != null && !pass.isEmpty()) {
-                    props.put("password", pass);
+
+                props.put(MQConstants.HOST_NAME_PROPERTY, host);
+                props.put(MQConstants.PORT_PROPERTY, Integer.parseInt(portStr));
+                props.put(MQConstants.CHANNEL_PROPERTY, channel);
+                if (user != null && !user.isEmpty()) {
+                    props.put(MQConstants.USER_ID_PROPERTY, user);
+                    if (pass != null && !pass.isEmpty()) {
+                        props.put(MQConstants.PASSWORD_PROPERTY, pass);
+                    }
                 }
                 props.put(MQConstants.USE_MQCSP_AUTHENTICATION_PROPERTY, true);
                 props.put(MQConstants.CCSID_PROPERTY, 1208); // UTF-8
