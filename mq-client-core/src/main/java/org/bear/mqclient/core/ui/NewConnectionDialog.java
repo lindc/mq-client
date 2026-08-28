@@ -10,6 +10,9 @@ import javafx.scene.control.*;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
+import javafx.stage.Modality;
+import javafx.stage.Stage;
+import javafx.stage.Window;
 
 import java.util.*;
 
@@ -30,6 +33,16 @@ public class NewConnectionDialog extends Dialog<MQConnectionConfig> {
 
     public NewConnectionDialog(Map<String, MQUIProvider> uiProviders) {
         this.uiProviders = uiProviders;
+
+        // 模态：WINDOW_MODAL + 依附主窗口。APPLICATION_MODAL 在 Wayland/XWayland 下
+        // 依赖全局 grab，窗口可能在 show 后立刻被隐藏（见 AboutDialog 的同类注释）。
+        initModality(Modality.WINDOW_MODAL);
+        for (Window w : Stage.getWindows()) {
+            if (w.isShowing()) {
+                initOwner(w);
+                break;
+            }
+        }
 
         setTitle(I18n.get("connection.dialog.title"));
         setHeaderText(I18n.get("connection.dialog.selectType"));
