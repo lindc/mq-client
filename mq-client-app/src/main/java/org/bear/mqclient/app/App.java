@@ -6,11 +6,7 @@ import atlantafx.base.controls.Spacer;
 import atlantafx.base.controls.Tab;
 import atlantafx.base.controls.TabLine;
 import atlantafx.base.controls.ToggleSwitch;
-import atlantafx.base.theme.PrimerDark;
-import atlantafx.base.theme.PrimerLight;
-import atlantafx.base.theme.Styles;
-import atlantafx.base.theme.Theme;
-import atlantafx.base.theme.Tweaks;
+import atlantafx.base.theme.*;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.beans.property.SimpleStringProperty;
@@ -28,7 +24,9 @@ import javafx.scene.control.Label;
 import javafx.scene.control.Menu;
 import javafx.scene.control.MenuBar;
 import javafx.scene.control.MenuItem;
+import javafx.scene.control.RadioMenuItem;
 import javafx.scene.control.SeparatorMenuItem;
+import javafx.scene.control.ToggleGroup;
 import javafx.scene.control.SplitPane;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
@@ -58,15 +56,28 @@ public class App extends Application {
     /** AtlantaFX 根字号默认 14px，这里整体调小一档。 */
     private static final double DEFAULT_FONT_SIZE = 12;
 
-    private static final Theme LIGHT = new PrimerLight();
-    private static final Theme DARK = new PrimerDark();
+    /** 菜单中可切换的 AtlantaFX 主题（顺序即菜单顺序）。 */
+    private static final Theme[] THEMES = {
+            new PrimerLight(),
+            new PrimerDark(),
+            new NordDark(),
+            new NordLight(),
+            new Dracula(),
+            new CupertinoLight(),
+            new CupertinoDark()
+    };
+
+    private static final Theme DEFAULT_THEME = THEMES[0];
 
     /** -Dmq.atlantafx=false 时用原生 Modena 观感，方便与 AtlantaFX 对比。 */
     private static final boolean USE_ATLANTAFX = !"false".equalsIgnoreCase(System.getProperty("mq.atlantafx"));
 
     private final BorderPane root = new BorderPane();
-    private Theme theme = LIGHT;
+    private Theme theme = DEFAULT_THEME;
     private double fontSize = DEFAULT_FONT_SIZE;
+
+    /** 主题菜单项索引：applyTheme 时同步选中态。 */
+    private final Map<Theme, RadioMenuItem> themeItems = new LinkedHashMap<>();
 
     private final TabLine tabs = new TabLine();
     private final StackPane tabContent = new StackPane();
@@ -80,7 +91,6 @@ public class App extends Application {
     private CheckMenuItem queryMenuItem;
     private CheckMenuItem navMenuItem;
     private CheckMenuItem aiMenuItem;
-    private CheckMenuItem darkMenuItem;
     private Label statusLabel;
     private Label summaryLabel;
 
@@ -161,8 +171,17 @@ public class App extends Application {
         aiMenuItem.setSelected(true);
         aiMenuItem.setOnAction(e -> aiPanel.setCollapsed(!aiMenuItem.isSelected()));
 
-        darkMenuItem = new CheckMenuItem("深色主题");
-        darkMenuItem.setOnAction(e -> applyTheme(darkMenuItem.isSelected() ? DARK : LIGHT));
+        // 主题切换：7 个 AtlantaFX 主题，单选互斥
+        Menu themeMenu = new Menu("主题");
+        ToggleGroup themeGroup = new ToggleGroup();
+        for (Theme t : THEMES) {
+            RadioMenuItem item = new RadioMenuItem(t.getName());
+            item.setToggleGroup(themeGroup);
+            item.setSelected(t == theme);
+            item.setOnAction(e -> applyTheme(t));
+            themeMenu.getItems().add(item);
+            themeItems.put(t, item);
+        }
 
         MenuItem zoomIn = new MenuItem("增大字号");
         zoomIn.setOnAction(e -> changeFontSize(1));
@@ -178,7 +197,7 @@ public class App extends Application {
         view.getItems().setAll(
                 navMenuItem,
                 aiMenuItem,
-                darkMenuItem,
+                themeMenu,
                 queryMenuItem,
                 item("刷新", "刷新（未接入）"),
                 new SeparatorMenuItem(),
@@ -207,8 +226,10 @@ public class App extends Application {
         Application.setUserAgentStylesheet(USE_ATLANTAFX
                 ? next.getUserAgentStylesheet()
                 : Application.STYLESHEET_MODENA);
-        if (darkMenuItem != null) {
-            darkMenuItem.setSelected(next.isDarkMode());
+        // 同步菜单选中态（菜单未创建时 themeItems 为空，跳过）
+        RadioMenuItem item = themeItems.get(next);
+        if (item != null) {
+            item.setSelected(true);
         }
         refreshSummary();
     }
