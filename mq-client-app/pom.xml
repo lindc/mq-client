@@ -12,7 +12,7 @@
 
     <artifactId>mq-client-app</artifactId>
     <name>MQ Client — Application</name>
-    <description>聚合运行模块，依赖所有 MQ 实现确保 SPI 正常加载</description>
+    <description>可运行模块，UI 入口</description>
 
     <dependencies>
         <!-- JavaFX Windows 平台本地库（javafx-maven-plugin 需要明确指定） -->
@@ -41,26 +41,16 @@
             <classifier>win</classifier>
         </dependency>
 
-        <!-- 依赖所有 UI 模块（传递依赖 service → core） -->
+        <!-- UI 主题 -->
         <dependency>
-            <groupId>org.bear.mqclient</groupId>
-            <artifactId>mq-client-rabbitmq-ui</artifactId>
+            <groupId>io.github.mkpaz</groupId>
+            <artifactId>atlantafx-base</artifactId>
+            <version>2.1.0</version>
         </dependency>
+
         <dependency>
             <groupId>org.bear.mqclient</groupId>
-            <artifactId>mq-client-ibm-ui</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.bear.mqclient</groupId>
-            <artifactId>mq-client-kafka-ui</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.bear.mqclient</groupId>
-            <artifactId>mq-client-artemis-ui</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.bear.mqclient</groupId>
-            <artifactId>mq-client-rocketmq-ui</artifactId>
+            <artifactId>mq-client-core</artifactId>
         </dependency>
     </dependencies>
 

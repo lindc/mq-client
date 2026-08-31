@@ -12,7 +12,7 @@
 
     <artifactId>mq-client-core</artifactId>
     <name>MQ Client — Core</name>
-    <description>Core framework: SPI, models, service interfaces, UI shell</description>
+    <description>Core: SPI, models, service interfaces</description>
 
     <dependencies>
         <dependency>
@@ -40,25 +40,10 @@
             <artifactId>logback-classic</artifactId>
         </dependency>
         <dependency>
-            <groupId>org.yaml</groupId>
-            <artifactId>snakeyaml</artifactId>
-        </dependency>
-        <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
             <scope>provided</scope>
         </dependency>
     </dependencies>
 
-    <build>
-        <plugins>
-            <plugin>
-                <groupId>org.openjfx</groupId>
-                <artifactId>javafx-maven-plugin</artifactId>
-                <configuration>
-                    <mainClass>org.bear.mqclient.core.ui.MainApp</mainClass>
-                </configuration>
-            </plugin>
-        </plugins>
-    </build>
 </project>
