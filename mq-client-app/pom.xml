@@ -48,6 +48,16 @@
             <version>2.1.0</version>
         </dependency>
 
+        <!-- 图标字体 -->
+        <dependency>
+            <groupId>org.kordamp.ikonli</groupId>
+            <artifactId>ikonli-javafx</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.kordamp.ikonli</groupId>
+            <artifactId>ikonli-material2-pack</artifactId>
+        </dependency>
+
         <dependency>
             <groupId>org.bear.mqclient</groupId>
             <artifactId>mq-client-core</artifactId>
@@ -62,6 +72,9 @@
                 <version>0.0.8</version>
                 <configuration>
                     <mainClass>org.bear.mqclient.app.App</mainClass>
+                    <options>
+                        <option>--enable-native-access=javafx.graphics</option>
+                    </options>
                 </configuration>
             </plugin>
             <plugin>
