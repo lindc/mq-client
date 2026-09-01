@@ -20,19 +20,23 @@ import javafx.scene.Node;
 import javafx.scene.Scene;
 import java.util.List;
 import javafx.scene.control.Alert;
+import javafx.scene.control.Button;
 import javafx.scene.control.CheckMenuItem;
 import javafx.scene.control.Label;
 import javafx.scene.control.Menu;
 import javafx.scene.control.MenuBar;
+import javafx.scene.control.MenuButton;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.control.SplitPane;
 import javafx.scene.control.TextInputControl;
+import javafx.scene.control.Tooltip;
 import javafx.scene.input.KeyCode;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.StackPane;
 import javafx.stage.Stage;
+import org.kordamp.ikonli.javafx.FontIcon;
 
 /**
  * 应用入口与主窗口骨架：菜单栏 / 左侧导航 / 中间工作区 / 底部状态栏。
@@ -66,18 +70,23 @@ public class App extends Application {
     private int themeIndex;
     private double fontSize = DEFAULT_FONT_SIZE;
     private Scene scene;
+    private Breadcrumb breadcrumb;
+    private AiDock aiDock;
 
     @Override
     public void start(Stage stage) {
         sidebar = new Sidebar(this::openPage, this::openThemeDialog);
+        breadcrumb = new Breadcrumb();
+        aiDock = new AiDock(this::toggleAiDock);
 
         var modalPane = new ModalPane();
         modalPane.setId(MODAL_PANE_ID);
 
-        content.setTop(createMenuBar());
+        content.setTop(createTopBar());
         var split = new SplitPane(sidebar, createWorkspace());
         split.setDividerPositions(0.2);
         content.setCenter(split);
+        content.setRight(aiDock);
         content.setBottom(createStatusBar());
 
         root.getChildren().setAll(modalPane, content);
@@ -105,9 +114,37 @@ public class App extends Application {
         stage.requestFocus();
     }
 
-    // ---------- 菜单栏 ----------
+    // ---------- 顶部栏：汉堡菜单 + 面包屑 + AI 面板开关 ----------
 
-    private MenuBar createMenuBar() {
+    /** 顶部栏：最左汉堡菜单（点击展开菜单/子菜单），其右面包屑，最右 AI 面板开关。 */
+    private Node createTopBar() {
+        var hamburger = new MenuButton();
+        hamburger.setGraphic(new FontIcon("mdmz-menu"));
+        hamburger.getStyleClass().addAll(Styles.FLAT, "hamburger");
+        hamburger.getItems().setAll(buildMenus());
+
+        var aiToggle = new Button();
+        aiToggle.setGraphic(new FontIcon("mdal-chat"));
+        aiToggle.getStyleClass().addAll(Styles.BUTTON_CIRCLE, Styles.FLAT, "ai-toggle");
+        aiToggle.setTooltip(new Tooltip("AI 助手"));
+        aiToggle.setOnAction(e -> toggleAiDock());
+
+        var bar = new HBox(8, hamburger, breadcrumb, new Spacer(), aiToggle);
+        bar.setId("top-bar");
+        bar.setAlignment(Pos.CENTER_LEFT);
+        bar.setPadding(new Insets(4, 10, 4, 10));
+        return bar;
+    }
+
+    /** 显示/隐藏右侧 AI 面板（最小化切换）。 */
+    private void toggleAiDock() {
+        boolean show = !aiDock.isManaged();
+        aiDock.setManaged(show);
+        aiDock.setVisible(show);
+    }
+
+    /** 构建汉堡菜单里的菜单与子菜单（沿用原有菜单结构）。 */
+    private List<Menu> buildMenus() {
         var exit = new MenuItem("退出");
         exit.setOnAction(e -> Platform.exit());
 
@@ -149,7 +186,7 @@ public class App extends Application {
         var help = new Menu("帮助");
         help.getItems().setAll(about);
 
-        return new MenuBar(file, edit, view, help);
+        return List.of(file, edit, view, help);
     }
 
     private MenuItem item(String text) {
@@ -231,6 +268,12 @@ public class App extends Application {
 
     private void openPage(NavTree.Item item) {
         setStatus("已打开 " + item.getValue().title() + "（内容区待接入）");
+        var parent = item.getParent();
+        if (parent != null && parent.getValue() != null) {
+            breadcrumb.setPath(parent.getValue().title(), item.getValue().title());
+        } else {
+            breadcrumb.setPath(item.getValue().title());
+        }
     }
 
     /** 正在输入框里打字时不触发 "/" 快捷键。 */

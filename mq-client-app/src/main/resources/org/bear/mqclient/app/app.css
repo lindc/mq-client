@@ -150,3 +150,50 @@
   -fx-border-color: -color-accent-emphasis;
   -fx-border-width: 2;
 }
+
+/* ---------- 顶部栏：汉堡菜单 + 面包屑 + AI 开关 ---------- */
+
+#top-bar {
+  -fx-background-color: -color-bg-inset;
+  -fx-border-color: -color-border-default;
+  -fx-border-width: 0 0 1 0;
+}
+
+#top-bar > .hamburger {
+  -fx-cursor: hand;
+}
+
+.breadcrumb .crumb {
+  -fx-text-fill: -color-fg-muted;
+}
+
+.breadcrumb .current {
+  -fx-text-fill: -color-fg-default;
+  -fx-font-weight: bold;
+}
+
+/* ---------- 右侧 AI 面板 ---------- */
+
+#ai-dock {
+  -fx-background-color: -color-bg-inset;
+  -fx-border-color: -color-border-default;
+  -fx-border-width: 0 0 0 1;
+}
+
+#ai-dock > .dock-header {
+  -fx-padding: 8 10 8 10;
+  -fx-border-color: -color-border-default;
+  -fx-border-width: 0 0 1 0;
+}
+
+#ai-dock > .output {
+  -fx-background-color: -color-bg-default;
+  -fx-border-width: 0;
+  -fx-padding: 8;
+  -fx-font-family: "Consolas", "Monospaced", monospace;
+}
+
+#ai-dock > .input-area {
+  -fx-border-color: -color-border-default;
+  -fx-border-width: 1 0 0 0;
+}

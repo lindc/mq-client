@@ -121,6 +121,7 @@ final class Sidebar extends VBox {
 
         var name = new Label(provider.getDisplayName());
         name.getStyleClass().add(Styles.TEXT_BOLD);
+        name.setStyle("-fx-font-size: 13px;");
 
         var dot = new Circle(4);
         dot.setStyle("-fx-fill: -color-success-fg;");
