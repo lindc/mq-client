@@ -7,6 +7,7 @@ import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
 import javafx.scene.image.ImageView;
+import javafx.scene.shape.Circle;
 import javafx.scene.control.ContentDisplay;
 import javafx.scene.control.Label;
 import javafx.scene.control.Tooltip;
@@ -96,7 +97,7 @@ final class Sidebar extends VBox {
 
     /** 为一个 MQ 提供者构建可展开分组（含其 nav 子页面）。 */
     private NavTree.Item createMqGroup(MQUIProvider provider) {
-        var group = NavTree.Item.group(provider.getDisplayName(), brandIcon(provider));
+        var group = NavTree.Item.group(provider.getDisplayName(), createMqGroupGraphic(provider));
         group.setExpanded(true);
 
         var children = provider.getNavPages().stream()
@@ -111,12 +112,53 @@ final class Sidebar extends VBox {
         return group;
     }
 
-    /** 取得品牌图标并缩放为导航栏合适的尺寸。 */
-    private static Node brandIcon(MQUIProvider provider) {
+    /**
+     * 构建 MQ 分组行的两行图形：左侧放大后的品牌图标，右侧第一行是 MQ 名称 + 状态圆点，
+     * 第二行是连接信息（host:port，目前用假数据占位）。
+     */
+    private static Node createMqGroupGraphic(MQUIProvider provider) {
+        var icon = brandIcon(provider, 30);
+
+        var name = new Label(provider.getDisplayName());
+        name.getStyleClass().add(Styles.TEXT_BOLD);
+
+        var dot = new Circle(4);
+        dot.setStyle("-fx-fill: -color-success-fg;");
+        dot.getStyleClass().add("status-dot");
+        dot.setManaged(true);
+
+        var line1 = new HBox(6, name, dot);
+        line1.setAlignment(Pos.CENTER_LEFT);
+
+        var conn = new Label(fakeConnection(provider));
+        conn.getStyleClass().addAll(Styles.TEXT_MUTED, Styles.TEXT_SMALL);
+
+        var lines = new VBox(2, line1, conn);
+        lines.setAlignment(Pos.CENTER_LEFT);
+
+        var box = new HBox(10, icon, lines);
+        box.setAlignment(Pos.CENTER_LEFT);
+        return box;
+    }
+
+    /** 各 MQ 的假连接信息（host:port），后续接入真实连接后替换。 */
+    private static String fakeConnection(MQUIProvider provider) {
+        return switch (provider.getType()) {
+            case "KAFKA" -> "localhost:9092";
+            case "RABBITMQ" -> "localhost:5672";
+            case "IBM_MQ" -> "localhost:1414";
+            case "ARTEMIS" -> "localhost:61616";
+            case "ROCKETMQ" -> "localhost:9876";
+            default -> "localhost:0";
+        };
+    }
+
+    /** 取得品牌图标并缩放为指定尺寸。 */
+    private static Node brandIcon(MQUIProvider provider, double size) {
         Node icon = provider.getIcon();
         if (icon instanceof ImageView iv) {
-            iv.setFitWidth(22);
-            iv.setFitHeight(22);
+            iv.setFitWidth(size);
+            iv.setFitHeight(size);
         }
         return icon;
     }

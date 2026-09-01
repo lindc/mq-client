@@ -101,12 +101,16 @@
   -color-cell-bg-selected-focused: -color-accent-subtle;
 }
 
-/* 分组：顶格、行高更大、右侧用自定义加减图标表示展开态 */
+/* 分组：两行（名称+状态 / 连接信息），行高更大，左侧品牌图标更大 */
 .nav-tree-cell:group > .container {
-  -fx-min-height: 2.5em;
-  -fx-pref-height: 2.5em;
-  -fx-max-height: 2.5em;
-  -fx-padding: 0 0 0 8px;
+  -fx-min-height: 3.8em;
+  -fx-pref-height: 3.8em;
+  -fx-max-height: 3.8em;
+  -fx-padding: 4px 6px 4px 8px;
+}
+
+.nav-tree-cell:group > .container .status-dot {
+  -fx-fill: -color-success-fg;
 }
 
 .nav-tree-cell:group > .container .ikonli-font-icon {

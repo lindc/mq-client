@@ -82,7 +82,9 @@ final class NavTree extends TreeView<Nav> {
                 titleLabel.setGraphic(null);
             } else {
                 setGraphic(root);
-                titleLabel.setText(nav.title());
+                // 分组行使用两行复合图形（品牌图标 + 名称/状态 + 连接信息），
+                // 名称已在图形内，这里不再重复设置文字。
+                titleLabel.setText(nav.isGroup() ? null : nav.title());
                 titleLabel.setGraphic(nav.graphic());
                 pseudoClassStateChanged(GROUP, nav.isGroup());
                 toggleVisibility(arrowIcon, nav.isGroup());
