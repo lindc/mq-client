@@ -3,6 +3,7 @@ package org.bear.mqclient.artemis.ui;
 import org.bear.mqclient.core.model.MQConnectionConfig;
 import org.bear.mqclient.core.service.MQService;
 import org.bear.mqclient.core.spi.MQUIProvider;
+import org.bear.mqclient.core.spi.MQNavPage;
 import javafx.scene.Node;
 import javafx.scene.control.Menu;
 import javafx.scene.image.Image;
@@ -31,6 +32,15 @@ public class ArtemisUIProvider implements MQUIProvider {
         icon.setFitHeight(28);
         icon.setPreserveRatio(true);
         return icon;
+    }
+
+    @Override
+    public List<MQNavPage> getNavPages() {
+        return List.of(
+                new MQNavPage("队列", "queues"),
+                new MQNavPage("地址", "addresses"),
+                new MQNavPage("连接", "connections")
+        );
     }
 
     @Override

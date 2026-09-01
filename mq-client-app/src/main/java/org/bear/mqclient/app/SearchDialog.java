@@ -149,23 +149,17 @@ final class SearchDialog extends ModalBox {
     private static final class ResultListCell extends ListCell<NavTree.Item> {
 
         private final HBox root;
-        private final Label parentLabel;
-        private final Label targetLabel;
+        private final Label titleLabel;
 
         ResultListCell() {
-            parentLabel = new Label();
-            parentLabel.getStyleClass().add(Styles.TEXT_MUTED);
-
-            var separator = new FontIcon(Material2AL.CHEVRON_RIGHT);
-            separator.getStyleClass().add("icon-subtle");
-
             var returnIcon = new FontIcon(Material2AL.KEYBOARD_RETURN);
             returnIcon.getStyleClass().add("icon-subtle");
 
-            targetLabel = new Label();
-            targetLabel.getStyleClass().add(Styles.TEXT_BOLD);
+            titleLabel = new Label();
+            titleLabel.getStyleClass().add(Styles.TEXT_BOLD);
+            titleLabel.setGraphicTextGap(8);
 
-            root = new HBox(parentLabel, separator, targetLabel, new Spacer(), returnIcon);
+            root = new HBox(titleLabel, new Spacer(), returnIcon);
             root.setAlignment(Pos.CENTER_LEFT);
         }
 
@@ -176,8 +170,8 @@ final class SearchDialog extends ModalBox {
             if (item == null || empty) {
                 setGraphic(null);
             } else {
-                parentLabel.setText(item.getParent().getValue().title());
-                targetLabel.setText(item.getValue().title());
+                titleLabel.setText(item.getValue().title());
+                titleLabel.setGraphic(item.getValue().graphic());
                 setGraphic(root);
             }
         }

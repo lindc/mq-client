@@ -3,6 +3,7 @@ package org.bear.mqclient.rabbitmq.ui;
 import org.bear.mqclient.core.model.MQConnectionConfig;
 import org.bear.mqclient.core.service.MQService;
 import org.bear.mqclient.core.spi.MQUIProvider;
+import org.bear.mqclient.core.spi.MQNavPage;
 import javafx.scene.Node;
 import javafx.scene.control.Menu;
 import javafx.scene.image.Image;
@@ -31,6 +32,17 @@ public class RabbitMQUIProvider implements MQUIProvider {
         icon.setFitHeight(28);
         icon.setPreserveRatio(true);
         return icon;
+    }
+
+    @Override
+    public List<MQNavPage> getNavPages() {
+        return List.of(
+                new MQNavPage("队列", "queues"),
+                new MQNavPage("交换机", "exchanges"),
+                new MQNavPage("绑定", "bindings"),
+                new MQNavPage("连接", "connections"),
+                new MQNavPage("发布", "publish")
+        );
     }
 
     @Override

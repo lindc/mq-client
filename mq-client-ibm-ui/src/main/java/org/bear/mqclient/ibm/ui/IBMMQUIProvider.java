@@ -3,6 +3,7 @@ package org.bear.mqclient.ibm.ui;
 import org.bear.mqclient.core.model.MQConnectionConfig;
 import org.bear.mqclient.core.service.MQService;
 import org.bear.mqclient.core.spi.MQUIProvider;
+import org.bear.mqclient.core.spi.MQNavPage;
 import javafx.scene.Node;
 import javafx.scene.control.Menu;
 import javafx.scene.image.Image;
@@ -31,6 +32,16 @@ public class IBMMQUIProvider implements MQUIProvider {
         icon.setFitHeight(28);
         icon.setPreserveRatio(true);
         return icon;
+    }
+
+    @Override
+    public List<MQNavPage> getNavPages() {
+        return List.of(
+                new MQNavPage("队列", "queues"),
+                new MQNavPage("主题", "topics"),
+                new MQNavPage("通道", "channels"),
+                new MQNavPage("监听器", "listeners")
+        );
     }
 
     @Override

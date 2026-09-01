@@ -4,7 +4,9 @@ import atlantafx.base.controls.Spacer;
 import atlantafx.base.theme.Styles;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.scene.Node;
 import javafx.scene.control.Button;
+import javafx.scene.image.ImageView;
 import javafx.scene.control.ContentDisplay;
 import javafx.scene.control.Label;
 import javafx.scene.control.Tooltip;
@@ -12,24 +14,33 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
-import org.kordamp.ikonli.Ikon;
+import org.bear.mqclient.core.spi.MQUIProvider;
 import org.kordamp.ikonli.javafx.FontIcon;
 import org.kordamp.ikonli.material2.Material2MZ;
 import org.kordamp.ikonli.material2.Material2OutlinedAL;
-import org.kordamp.ikonli.material2.Material2OutlinedMZ;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.ServiceLoader;
 import java.util.function.Consumer;
 
 /**
- * 左侧栏：Logo + 搜索按钮 + 导航树 + 底部版本。
+ * 左侧栏：Logo + 搜索按钮 + 导航树（按 MQ 类型分组的品牌图标）。
  * <p>
- * 结构与样式仿 AtlantaFX Sampler 的 Sidebar。
+ * 结构与样式仿 AtlantaFX Sampler 的 Sidebar。导航项由各 MQ 的 UI 模块通过
+ * {@link MQUIProvider#getIcon()} 提供品牌图片，而非字体图标。
  */
 final class Sidebar extends VBox {
 
+    /** 默认/首选宽度；用户可通过 SplitPane 分隔条拖动调整。 */
     static final double WIDTH = 270;
+    private static final double MIN_WIDTH = 200;
+    private static final double MAX_WIDTH = 460;
+
+    /** 导航展示顺序（按 MQ 类型），其余类型排在其后。 */
+    private static final List<String> PREFERRED_ORDER = List.of(
+            "KAFKA", "RABBITMQ", "IBM_MQ", "ARTEMIS", "ROCKETMQ");
 
     private final NavTree navTree;
     private final List<NavTree.Item> pages = new ArrayList<>();
@@ -41,8 +52,9 @@ final class Sidebar extends VBox {
         VBox.setVgrow(navTree, Priority.ALWAYS);
 
         setId("sidebar");
-        setMinWidth(WIDTH);
-        setMaxWidth(WIDTH);
+        setMinWidth(MIN_WIDTH);
+        setPrefWidth(WIDTH);
+        setMaxWidth(MAX_WIDTH);
         getChildren().setAll(new Header(onOpenTheme), navTree);
     }
 
@@ -61,58 +73,56 @@ final class Sidebar extends VBox {
     // 导航树内容                                                             //
     ///////////////////////////////////////////////////////////////////////////
 
+    /**
+     * 通过 SPI 发现所有 MQ UI 提供者，按固定顺序为每个 MQ 构建一个可展开分组，
+     * 分组的品牌图片来自 {@link MQUIProvider#getIcon()}，其下的子页面来自
+     * {@link MQUIProvider#getNavPages()}（由各 MQ 的 UI 模块自行决定）。
+     */
     private NavTree.Item createTree() {
-        var connections = NavTree.Item.group("连接", icon(Material2OutlinedMZ.SETTINGS_ETHERNET));
-        connections.getChildren().setAll(
-                page("全部连接", "connections"),
-                page("新建连接", "connection-new")
-        );
-        connections.setExpanded(true);
-
-        var destinations = NavTree.Item.group("队列与主题", icon(Material2OutlinedAL.LIST_ALT));
-        destinations.getChildren().setAll(
-                page("队列", "queues"),
-                page("主题", "topics"),
-                page("交换机", "exchanges")
-        );
-
-        var messages = NavTree.Item.group("消息", icon(Material2OutlinedAL.FORUM));
-        messages.getChildren().setAll(
-                page("浏览", "browse"),
-                page("发布", "publish"),
-                page("订阅", "subscribe")
-        );
-
-        var monitor = NavTree.Item.group("监控", icon(Material2OutlinedAL.ANALYTICS));
-        monitor.getChildren().setAll(
-                page("概览", "overview"),
-                page("积压", "backlog")
-        );
-
-        var settings = NavTree.Item.group("设置", icon(Material2OutlinedMZ.SETTINGS));
-        settings.getChildren().setAll(
-                page("外观", "appearance"),
-                page("日志", "logs")
-        );
-
         var root = NavTree.Item.root();
-        root.getChildren().setAll(connections, destinations, messages, monitor, settings);
+
+        var groups = ServiceLoader.load(MQUIProvider.class).stream()
+                .map(provider -> provider.get())
+                .sorted(Comparator.comparingInt(p -> {
+                    int idx = PREFERRED_ORDER.indexOf(p.getType());
+                    return idx < 0 ? Integer.MAX_VALUE : idx;
+                }))
+                .map(this::createMqGroup)
+                .toList();
+
+        root.getChildren().setAll(groups);
         return root;
     }
 
-    /** 建叶子节点并登记到 {@link #pages}，供搜索对话框过滤。 */
-    private NavTree.Item page(String title, String pageId) {
-        var item = NavTree.Item.page(title, pageId);
-        pages.add(item);
-        return item;
+    /** 为一个 MQ 提供者构建可展开分组（含其 nav 子页面）。 */
+    private NavTree.Item createMqGroup(MQUIProvider provider) {
+        var group = NavTree.Item.group(provider.getDisplayName(), brandIcon(provider));
+        group.setExpanded(true);
+
+        var children = provider.getNavPages().stream()
+                .map(page -> {
+                    var item = NavTree.Item.page(
+                            page.title(), null, provider.getType().toLowerCase() + ":" + page.pageId());
+                    pages.add(item);
+                    return item;
+                })
+                .toList();
+        group.getChildren().setAll(children);
+        return group;
     }
 
-    private static FontIcon icon(Ikon ikon) {
-        return new FontIcon(ikon);
+    /** 取得品牌图标并缩放为导航栏合适的尺寸。 */
+    private static Node brandIcon(MQUIProvider provider) {
+        Node icon = provider.getIcon();
+        if (icon instanceof ImageView iv) {
+            iv.setFitWidth(22);
+            iv.setFitHeight(22);
+        }
+        return icon;
     }
 
     ///////////////////////////////////////////////////////////////////////////
-    // Header / Footer                                                       //
+    // Header                                                                //
     ///////////////////////////////////////////////////////////////////////////
 
     private final class Header extends VBox {

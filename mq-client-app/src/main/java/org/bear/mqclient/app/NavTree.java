@@ -12,6 +12,7 @@ import javafx.scene.control.TreeItem;
 import javafx.scene.control.TreeView;
 import javafx.scene.input.MouseButton;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
 import org.kordamp.ikonli.javafx.FontIcon;
 
 import java.util.Objects;
@@ -55,7 +56,8 @@ final class NavTree extends TreeView<Nav> {
             root.setAlignment(Pos.CENTER_LEFT);
             root.setCursor(Cursor.HAND);
             root.getStyleClass().add("container");
-            root.setMaxWidth(Sidebar.WIDTH - 10);
+            root.setMaxWidth(Double.MAX_VALUE);
+            HBox.setHgrow(titleLabel, Priority.ALWAYS);
 
             root.setOnMouseClicked(e -> {
                 if (getTreeItem() instanceof Item item
@@ -115,7 +117,11 @@ final class NavTree extends TreeView<Nav> {
         }
 
         static Item page(String title, String pageId) {
-            return new Item(new Nav(title, null, pageId));
+            return page(title, null, pageId);
+        }
+
+        static Item page(String title, Node graphic, String pageId) {
+            return new Item(new Nav(title, graphic, pageId));
         }
     }
 }

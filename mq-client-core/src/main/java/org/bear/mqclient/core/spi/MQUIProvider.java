@@ -27,6 +27,14 @@ public interface MQUIProvider {
     default Node getIcon() { return null; }
 
     /**
+     * 左侧导航中该 MQ 分组下的页面列表（连接 / 队列 / 主题等具体选项）。
+     * <p>
+     * 由各 MQ 的 UI 模块自行决定提供哪些页面；core 据此把该 MQ 渲染为
+     * 一个可展开的分组，每个返回项成为一个可点击的叶子页面。
+     */
+    default List<MQNavPage> getNavPages() { return List.of(); }
+
+    /**
      * 创建右侧主操作面板（完全由 MQ 客户端控制布局和内容）。
      * core 将此 Node 放入右侧内容区。
      */

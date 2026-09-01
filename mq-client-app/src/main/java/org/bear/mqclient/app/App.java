@@ -26,6 +26,7 @@ import javafx.scene.control.Menu;
 import javafx.scene.control.MenuBar;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.SeparatorMenuItem;
+import javafx.scene.control.SplitPane;
 import javafx.scene.control.TextInputControl;
 import javafx.scene.input.KeyCode;
 import javafx.scene.layout.BorderPane;
@@ -74,8 +75,9 @@ public class App extends Application {
         modalPane.setId(MODAL_PANE_ID);
 
         content.setTop(createMenuBar());
-        content.setLeft(sidebar);
-        content.setCenter(createWorkspace());
+        var split = new SplitPane(sidebar, createWorkspace());
+        split.setDividerPositions(0.2);
+        content.setCenter(split);
         content.setBottom(createStatusBar());
 
         root.getChildren().setAll(modalPane, content);
