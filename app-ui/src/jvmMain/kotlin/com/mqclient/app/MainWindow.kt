@@ -12,6 +12,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -21,37 +24,37 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.mqclient.core.ModuleRegistry
-import dev.nucleusframework.macoscompose.components.Text
-import dev.nucleusframework.macoscompose.theme.AccentColor
-import dev.nucleusframework.macoscompose.theme.MacosTheme
 
 @Composable
 fun MainWindow() {
-    MacosTheme(darkTheme = false, accentColor = AccentColor.Blue) {
-        val services = remember { ModuleRegistry.services }
-        val uiByService = remember { ModuleRegistry.uis.associateBy { it.serviceId } }
+    val services = remember { ModuleRegistry.services }
+    val uiByService = remember { ModuleRegistry.uis.associateBy { it.serviceId } }
 
-        var selectedId by remember { mutableStateOf(services.firstOrNull()?.id) }
+    var selectedId by remember { mutableStateOf(services.firstOrNull()?.id) }
 
+    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Row(modifier = Modifier.fillMaxSize()) {
             // Sidebar built from the SPI-discovered services.
             Column(
-                modifier = Modifier
-                    .width(220.dp)
-                    .fillMaxHeight()
-                    .padding(12.dp),
+                modifier =
+                    Modifier
+                        .width(220.dp)
+                        .fillMaxHeight()
+                        .padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                Text("MQ Client")
+                Text("MQ Client", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(8.dp))
                 services.forEach { svc ->
                     val selected = svc.id == selectedId
                     Text(
                         text = svc.name,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { selectedId = svc.id }
-                            .padding(8.dp),
+                        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground,
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable { selectedId = svc.id }
+                                .padding(8.dp),
                     )
                 }
             }

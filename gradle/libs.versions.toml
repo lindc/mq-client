@@ -4,6 +4,10 @@ composeMultiplatform = "1.12.0"
 materialKolor = "5.0.1"
 composeMacosUi = "1.1.0"
 composeIcons = "1.1.1"
+# Pinned to whatever compose-macos-ui pulls in: the app's own window chrome
+# needs Platform/LinuxDesktopEnvironment, which compose-macos-ui only exposes
+# as a runtime dependency.
+nucleus = "2.5.2"
 
 [libraries]
 # Compose Multiplatform
@@ -16,6 +20,7 @@ compose-components-resources = { module = "org.jetbrains.compose.components:comp
 
 # macOS-style Compose UI library
 compose-macos-ui = { module = "dev.nucleusframework:compose-macos-ui", version.ref = "composeMacosUi" }
+nucleus-core-runtime = { module = "dev.nucleusframework:nucleus.core-runtime", version.ref = "nucleus" }
 
 # Material You dynamic color for Compose Multiplatform
 material-kolor = { module = "com.materialkolor:material-kolor", version.ref = "materialKolor" }

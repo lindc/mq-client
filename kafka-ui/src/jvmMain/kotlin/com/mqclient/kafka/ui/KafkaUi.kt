@@ -2,7 +2,7 @@ package com.mqclient.kafka.ui
 
 import androidx.compose.runtime.Composable
 import com.mqclient.core.BusinessUi
-import dev.nucleusframework.macoscompose.components.Text
+import androidx.compose.material3.Text
 
 object KafkaUi : BusinessUi {
     override val serviceId = "kafka"

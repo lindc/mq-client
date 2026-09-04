@@ -14,6 +14,7 @@ kotlin {
             implementation(libs.compose.runtime)
             implementation(libs.compose.foundation)
             implementation(libs.compose.macos.ui)
+            implementation(compose.material3)
         }
     }
 }

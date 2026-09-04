@@ -15,6 +15,7 @@ kotlin {
             implementation(libs.compose.foundation)
             implementation(libs.compose.macos.ui)
             implementation(libs.material.kolor)
+            implementation(compose.material3)
             implementation(libs.compose.icons.fontawesome)
             implementation(libs.compose.icons.simple)
             implementation(libs.compose.icons.tabler)
@@ -35,6 +36,7 @@ kotlin {
         }
         jvmMain.dependencies {
             implementation(compose.desktop.currentOs)
+            implementation(libs.nucleus.core.runtime)
         }
     }
 }

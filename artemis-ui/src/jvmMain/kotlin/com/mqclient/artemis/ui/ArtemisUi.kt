@@ -2,7 +2,7 @@ package com.mqclient.artemis.ui
 
 import androidx.compose.runtime.Composable
 import com.mqclient.core.BusinessUi
-import dev.nucleusframework.macoscompose.components.Text
+import androidx.compose.material3.Text
 
 object ArtemisUi : BusinessUi {
     override val serviceId = "artemis"
