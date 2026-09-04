@@ -21,3 +21,10 @@ mqjms.log.*
 
 # IBM MQ 故障转储（FFDC）
 FFDC/
+
+# Gradle
+.gradle/
+build/
+
+# Kotlin / Compose Multiplatform
+.kotlin/

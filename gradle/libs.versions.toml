@@ -1,0 +1,32 @@
+[versions]
+kotlin = "2.4.10"
+composeMultiplatform = "1.12.0"
+materialKolor = "5.0.1"
+composeMacosUi = "1.1.0"
+composeIcons = "1.1.1"
+
+[libraries]
+# Compose Multiplatform
+compose-runtime = { module = "org.jetbrains.compose.runtime:runtime", version.ref = "composeMultiplatform" }
+compose-foundation = { module = "org.jetbrains.compose.foundation:foundation", version.ref = "composeMultiplatform" }
+compose-ui = { module = "org.jetbrains.compose.ui:ui", version.ref = "composeMultiplatform" }
+compose-uiTooling = { module = "org.jetbrains.compose.ui:ui-tooling", version.ref = "composeMultiplatform" }
+compose-uiToolingPreview = { module = "org.jetbrains.compose.ui:ui-tooling-preview", version.ref = "composeMultiplatform" }
+compose-components-resources = { module = "org.jetbrains.compose.components:components-resources", version.ref = "composeMultiplatform" }
+
+# macOS-style Compose UI library
+compose-macos-ui = { module = "dev.nucleusframework:compose-macos-ui", version.ref = "composeMacosUi" }
+
+# Material You dynamic color for Compose Multiplatform
+material-kolor = { module = "com.materialkolor:material-kolor", version.ref = "materialKolor" }
+
+# Compose Icons packs (devsrsouza)
+compose-icons-fontawesome = { module = "br.com.devsrsouza.compose.icons:font-awesome", version.ref = "composeIcons" }
+compose-icons-simple = { module = "br.com.devsrsouza.compose.icons:simple-icons", version.ref = "composeIcons" }
+compose-icons-tabler = { module = "br.com.devsrsouza.compose.icons:tabler-icons", version.ref = "composeIcons" }
+
+[plugins]
+kotlinMultiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
+composeMultiplatform = { id = "org.jetbrains.compose", version.ref = "composeMultiplatform" }
+composeCompiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+kotlinJvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
