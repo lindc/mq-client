@@ -2,11 +2,8 @@
 kotlin = "2.4.10"
 composeMultiplatform = "1.12.0"
 materialKolor = "5.0.1"
-composeMacosUi = "1.1.0"
-composeIcons = "1.1.1"
-# Pinned to whatever compose-macos-ui pulls in: the app's own window chrome
-# needs Platform/LinuxDesktopEnvironment, which compose-macos-ui only exposes
-# as a runtime dependency.
+# Nucleus framework version used by the custom window chrome. Pinned to what the
+# old compose-macos-ui 1.1.0 dependency used to pull in transitively.
 nucleus = "2.5.2"
 
 [libraries]
@@ -18,21 +15,14 @@ compose-uiTooling = { module = "org.jetbrains.compose.ui:ui-tooling", version.re
 compose-uiToolingPreview = { module = "org.jetbrains.compose.ui:ui-tooling-preview", version.ref = "composeMultiplatform" }
 compose-components-resources = { module = "org.jetbrains.compose.components:components-resources", version.ref = "composeMultiplatform" }
 
-# macOS-style Compose UI library
-compose-macos-ui = { module = "dev.nucleusframework:compose-macos-ui", version.ref = "composeMacosUi" }
+# Nucleus windowing framework (Tao backend) — powers the custom DecoratedWindow
+# chrome (previously reached via the now-removed compose-macos-ui dependency).
 nucleus-core-runtime = { module = "dev.nucleusframework:nucleus.core-runtime", version.ref = "nucleus" }
+nucleus-window = { module = "dev.nucleusframework:nucleus.decorated-window-tao", version.ref = "nucleus" }
+nucleus-application = { module = "dev.nucleusframework:nucleus.nucleus-application", version.ref = "nucleus" }
 
 # Material You dynamic color for Compose Multiplatform
 material-kolor = { module = "com.materialkolor:material-kolor", version.ref = "materialKolor" }
-
-# Compose Icons packs (devsrsouza)
-# Note: the artifact names are not uniform - "linea" has no "-icons" suffix,
-# while tabler/eva/simple do.
-compose-icons-fontawesome = { module = "br.com.devsrsouza.compose.icons:font-awesome", version.ref = "composeIcons" }
-compose-icons-simple = { module = "br.com.devsrsouza.compose.icons:simple-icons", version.ref = "composeIcons" }
-compose-icons-tabler = { module = "br.com.devsrsouza.compose.icons:tabler-icons", version.ref = "composeIcons" }
-compose-icons-eva = { module = "br.com.devsrsouza.compose.icons:eva-icons", version.ref = "composeIcons" }
-compose-icons-linea = { module = "br.com.devsrsouza.compose.icons:linea", version.ref = "composeIcons" }
 
 [plugins]
 kotlinMultiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }

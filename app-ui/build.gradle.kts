@@ -13,14 +13,11 @@ kotlin {
             implementation(projects.appCore)
             implementation(libs.compose.runtime)
             implementation(libs.compose.foundation)
-            implementation(libs.compose.macos.ui)
+            implementation(libs.nucleus.core.runtime)
+            implementation(libs.nucleus.window)
+            implementation(libs.nucleus.application)
             implementation(libs.material.kolor)
             implementation(compose.material3)
-            implementation(libs.compose.icons.fontawesome)
-            implementation(libs.compose.icons.simple)
-            implementation(libs.compose.icons.tabler)
-            implementation(libs.compose.icons.eva)
-            implementation(libs.compose.icons.linea)
 
             // Business modules (discovered via SPI at runtime).
             implementation(projects.ibmMqService)
@@ -36,7 +33,6 @@ kotlin {
         }
         jvmMain.dependencies {
             implementation(compose.desktop.currentOs)
-            implementation(libs.nucleus.core.runtime)
         }
     }
 }
