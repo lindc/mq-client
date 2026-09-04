@@ -16,10 +16,11 @@ kotlin {
         // 通用代码（桌面与 JVM 共用）
         commonMain.dependencies {
             // Compose 基础（自动引入 UI、runtime、foundation 等）
-            implementation(compose.runtime)
-            implementation(compose.foundation)
-            implementation(compose.ui)
-            implementation(compose.components.resources)
+            implementation("org.jetbrains.compose.runtime:runtime:1.12.0")
+            implementation("org.jetbrains.compose.foundation:foundation:1.12.0")
+            implementation("org.jetbrains.compose.ui:ui:1.12.0")
+            implementation("org.jetbrains.compose.components:components-resources:1.12.0")
+            implementation("androidx.compose.material3:material3:1.4.0")
 
             // 添加 Material Kolor（注意别名）
             implementation(libs.material.kolor)
