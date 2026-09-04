@@ -21,9 +21,13 @@ compose-macos-ui = { module = "dev.nucleusframework:compose-macos-ui", version.r
 material-kolor = { module = "com.materialkolor:material-kolor", version.ref = "materialKolor" }
 
 # Compose Icons packs (devsrsouza)
+# Note: the artifact names are not uniform - "linea" has no "-icons" suffix,
+# while tabler/eva/simple do.
 compose-icons-fontawesome = { module = "br.com.devsrsouza.compose.icons:font-awesome", version.ref = "composeIcons" }
 compose-icons-simple = { module = "br.com.devsrsouza.compose.icons:simple-icons", version.ref = "composeIcons" }
 compose-icons-tabler = { module = "br.com.devsrsouza.compose.icons:tabler-icons", version.ref = "composeIcons" }
+compose-icons-eva = { module = "br.com.devsrsouza.compose.icons:eva-icons", version.ref = "composeIcons" }
+compose-icons-linea = { module = "br.com.devsrsouza.compose.icons:linea", version.ref = "composeIcons" }
 
 [plugins]
 kotlinMultiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }

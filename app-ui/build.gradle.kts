@@ -18,6 +18,8 @@ kotlin {
             implementation(libs.compose.icons.fontawesome)
             implementation(libs.compose.icons.simple)
             implementation(libs.compose.icons.tabler)
+            implementation(libs.compose.icons.eva)
+            implementation(libs.compose.icons.linea)
 
             // Business modules (discovered via SPI at runtime).
             implementation(projects.ibmMqService)

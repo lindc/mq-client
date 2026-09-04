@@ -25,6 +25,8 @@ FFDC/
 # Gradle
 .gradle/
 build/
+# Machine-specific SDK path (sdk.dir=...) - never commit this
+local.properties
 
 # Kotlin / Compose Multiplatform
 .kotlin/
