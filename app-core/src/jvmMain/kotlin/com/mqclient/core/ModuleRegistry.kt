@@ -11,12 +11,21 @@ import java.util.ServiceLoader
  */
 object ModuleRegistry {
     val services: List<BusinessService> by lazy {
-        runCatching { ServiceLoader.load(BusinessService::class.java).toList() }
+        val list = runCatching { ServiceLoader.load(BusinessService::class.java).toList() }
             .getOrDefault(emptyList())
+        println("[ModuleRegistry] services=${list.map { it.id }}")
+        list
     }
 
     val uis: List<BusinessUi> by lazy {
-        runCatching { ServiceLoader.load(BusinessUi::class.java).toList() }
+        val urls = BusinessUi::class.java.classLoader
+            .getResources("META-INF/services/com.mqclient.core.BusinessUi")
+            .toList()
+        println("[ModuleRegistry] BusinessUi service files found: ${urls.size}")
+        urls.forEachIndexed { i, u -> println("   [$i] $u") }
+        val list = runCatching { ServiceLoader.load(BusinessUi::class.java).toList() }
             .getOrDefault(emptyList())
+        println("[ModuleRegistry] uis=${list.map { it.serviceId }}")
+        list
     }
 }

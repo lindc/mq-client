@@ -63,14 +63,12 @@ fun main() = nucleusApplication {
                         )
                     }
                 },
-                // passThroughToContent keeps the sidebar entries living under
-                // the drag band clickable: a press they consume vetoes the
-                // window drag, one they don't still moves the window.
-                titleBarPlacement =
-                    TitleBarPlacement.Overlay(
-                        autoHideInFullscreen = false,
-                        passThroughToContent = true,
-                    ),
+                // Docked gives the title bar its own row, so the content (and the
+                // sidebar in it) starts *below* the drag band and stays clickable.
+                // Overlay paints the bar on top of the content, and its
+                // windowDragArea swallows clicks in the top strip — which is
+                // exactly where the sidebar's first items live.
+                titleBarPlacement = TitleBarPlacement.Docked,
             ) { _ ->
                 MainWindow()
             }
