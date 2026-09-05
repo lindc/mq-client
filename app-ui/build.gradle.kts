@@ -18,7 +18,6 @@ kotlin {
             implementation(libs.nucleus.application)
             implementation(libs.material.kolor)
             implementation(compose.material3)
-            implementation(libs.material3.adaptive.navigation.suite)
             implementation(compose.components.resources)
 
             // Business modules (discovered via SPI at runtime).

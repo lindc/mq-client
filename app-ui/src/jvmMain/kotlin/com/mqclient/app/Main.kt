@@ -164,17 +164,28 @@ private fun TitleBarPanel(
         MenuBarItem("文件", fileMenuExpanded, { fileMenuExpanded = it }) {
             DropdownMenuItem(
                 text = { Text("新建连接") },
-                onClick = onShowNewConnection,
+                // The menu only collapses through its expanded state; an item
+                // click does not dismiss it by itself.
+                onClick = {
+                    fileMenuExpanded = false
+                    onShowNewConnection()
+                },
             )
             DropdownMenuItem(
                 text = { Text("退出") },
-                onClick = onExit,
+                onClick = {
+                    fileMenuExpanded = false
+                    onExit()
+                },
             )
         }
         MenuBarItem("帮助", helpMenuExpanded, { helpMenuExpanded = it }) {
             DropdownMenuItem(
                 text = { Text("关于") },
-                onClick = { onShowAbout() },
+                onClick = {
+                    helpMenuExpanded = false
+                    onShowAbout()
+                },
             )
         }
         // Breadcrumb trail goes here.

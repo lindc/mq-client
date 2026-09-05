@@ -1,21 +1,22 @@
 package com.mqclient.app
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
-import androidx.compose.material3.adaptive.currentWindowDpSize
-import androidx.compose.material3.adaptive.navigationsuite.ExperimentalMaterial3AdaptiveNavigationSuiteApi
-import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
-import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -23,60 +24,123 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.mqclient.core.ModuleRegistry
 
 /**
- * Material's expanded-width breakpoint. At or above it the module list gets a
- * permanent drawer; below it the same list collapses into a navigation rail.
+ * Window widths at or above this get the full tree sidebar; narrower windows
+ * collapse the navigation to the [ModuleRail] pill column.
  */
-private val DrawerWidthThreshold = 840.dp
+private val WideSidebarThreshold = 840.dp
+
+private val TreeSidebarWidth = 280.dp
+private val RailSidebarWidth = 92.dp
 
 private val StatusBarHeight = 28.dp
 
-@OptIn(ExperimentalMaterial3AdaptiveApi::class, ExperimentalMaterial3AdaptiveNavigationSuiteApi::class)
 @Composable
 fun MainWindow(isNavigationVisible: Boolean) {
     val services = remember { ModuleRegistry.services }
     val uiByService = remember { ModuleRegistry.uis.associateBy { it.serviceId } }
 
-    var selectedId by remember { mutableStateOf(services.firstOrNull()?.id) }
+    var selection by remember {
+        mutableStateOf(services.firstOrNull()?.let { NavSelection(it.id) })
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        NavigationSuiteScaffold(
-            modifier = Modifier.weight(1f),
-            layoutType =
-                when {
-                    !isNavigationVisible -> NavigationSuiteType.None
-                    currentWindowDpSize().width >= DrawerWidthThreshold -> NavigationSuiteType.NavigationDrawer
-                    else -> NavigationSuiteType.NavigationRail
-                },
-            navigationSuiteItems = {
-                // Built from the SPI-discovered services.
-                services.forEach { svc ->
-                    item(
-                        selected = svc.id == selectedId,
-                        onClick = { selectedId = svc.id },
-                        // Icon slot is intentionally empty for now. The Material
-                        // Symbols pipeline is in place (Res.drawable.*), it just
-                        // needs the per-module artwork picked.
-                        icon = {},
-                        label = { Text(svc.name) },
-                    )
+        BoxWithConstraints(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            val wide = maxWidth >= WideSidebarThreshold
+            Row(modifier = Modifier.fillMaxSize()) {
+                if (isNavigationVisible && services.isNotEmpty()) {
+                    val sidebarModifier =
+                        Modifier
+                            .fillMaxHeight()
+                            .background(MaterialTheme.colorScheme.surfaceContainer)
+                    if (wide) {
+                        ModuleTree(
+                            services = services,
+                            selection = selection,
+                            onSelect = { selection = it },
+                            modifier = sidebarModifier.width(TreeSidebarWidth),
+                        )
+                    } else {
+                        ModuleRail(
+                            services = services,
+                            selection = selection,
+                            onSelect = { selection = it },
+                            modifier = sidebarModifier.width(RailSidebarWidth),
+                        )
+                    }
+                    VerticalDivider()
                 }
-            },
-        ) {
-            // Content area: renders the selected module's UI contribution.
-            Box(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-                val ui = selectedId?.let { uiByService[it] }
-                if (ui != null) {
-                    ui.content()
-                } else {
-                    Text("Select a module from the sidebar", modifier = Modifier.align(Alignment.Center))
+                // Content area: renders the module's own UI, or the placeholder
+                // workspace when an object type (queue/listener/topic) is picked.
+                Box(modifier = Modifier.weight(1f).fillMaxSize().padding(16.dp)) {
+                    val current = selection
+                    when {
+                        current == null -> {
+                            Text(
+                                "Select a module from the sidebar",
+                                modifier = Modifier.align(Alignment.Center),
+                            )
+                        }
+
+                        current.objectType == null -> {
+                            val ui = uiByService[current.serviceId]
+                            if (ui != null) {
+                                ui.content()
+                            } else {
+                                Text(
+                                    "Module UI missing for ${current.serviceId}",
+                                    modifier = Modifier.align(Alignment.Center),
+                                )
+                            }
+                        }
+
+                        else -> {
+                            val service = services.firstOrNull { it.id == current.serviceId }
+                            ObjectTypeWorkspace(
+                                serviceName = service?.name ?: current.serviceId,
+                                objectType = current.objectType,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
+                    }
                 }
             }
         }
-        StatusBar(currentModuleName = services.firstOrNull { it.id == selectedId }?.name)
+        StatusBar(currentModuleName = selection?.let { sel -> services.firstOrNull { it.id == sel.serviceId }?.name })
+    }
+}
+
+/**
+ * Placeholder workspace for a connection's object type
+ * (queue / listener / topic) until the real object views land.
+ */
+@Composable
+private fun ObjectTypeWorkspace(
+    serviceName: String,
+    objectType: String,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = "$serviceName / $objectType",
+            style = MaterialTheme.typography.titleMedium,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = "Objects of this type will be listed here.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
     }
 }
 
