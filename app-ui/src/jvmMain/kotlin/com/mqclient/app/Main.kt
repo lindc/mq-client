@@ -263,7 +263,7 @@ private fun AboutDialog(onDismiss: () -> Unit) {
                             .padding(end = 16.dp, bottom = 8.dp),
                     contentAlignment = Alignment.CenterEnd,
                 ) {
-                    TextButton(onClick = onDismiss) { Text("关闭") }
+                    PressableButton(onClick = onDismiss) { Text("关闭") }
                 }
             }
         }
@@ -392,7 +392,7 @@ private fun NewConnectionDialog(onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("关闭") }
+            PressableButton(onClick = onDismiss) { Text("关闭") }
         },
         title = { Text("新建连接") },
     )
