@@ -4,14 +4,20 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -60,11 +66,16 @@ fun main() = nucleusApplication {
                 // Lives here, not inside MainWindow, because the title bar's
                 // hamburger and the navigation suite are two halves of one toggle.
                 var navigationVisible by remember { mutableStateOf(true) }
+                var showAbout by remember { mutableStateOf(false) }
                 WindowScaffold(
                 modifier = Modifier.macOSLargeCornerRadius(),
                 titleBar = {
                     Box(Modifier.fillMaxWidth().height(TitleBarHeight).windowDragArea()) {
-                        TitleBarPanel(onToggleNavigation = { navigationVisible = !navigationVisible })
+                        TitleBarPanel(
+                            onToggleNavigation = { navigationVisible = !navigationVisible },
+                            onShowAbout = { showAbout = true },
+                            onExit = { exitApplication() },
+                        )
                         WindowControlButtons(
                             isActive = state.isActive,
                             isMaximized = state.isMaximized,
@@ -84,21 +95,31 @@ fun main() = nucleusApplication {
             ) { _ ->
                 MainWindow(isNavigationVisible = navigationVisible)
             }
+            if (showAbout) {
+                AboutDialog(onDismiss = { showAbout = false })
+            }
             }
         }
     }
 }
 
 /**
- * Left end of the title bar: the navigation toggle, a divider, and the stretch
- * the breadcrumb trail will grow into.
+ * Left end of the title bar: the navigation toggle, a divider, the menu bar
+ * (文件 / 帮助), and the stretch the breadcrumb trail will grow into.
  *
  * The row spans the full bar so the empty stretch stays part of the drag area,
- * while the [IconButton] still swallows its own clicks the same way the window
- * controls do.
+ * while the [IconButton] and [MenuBarItem]s still swallow their own clicks the
+ * same way the window controls do.
  */
 @Composable
-private fun TitleBarPanel(onToggleNavigation: () -> Unit) {
+private fun TitleBarPanel(
+    onToggleNavigation: () -> Unit,
+    onShowAbout: () -> Unit,
+    onExit: () -> Unit,
+) {
+    var fileMenuExpanded by remember { mutableStateOf(false) }
+    var helpMenuExpanded by remember { mutableStateOf(false) }
+
     Row(
         modifier = Modifier.fillMaxSize().padding(start = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -110,9 +131,63 @@ private fun TitleBarPanel(onToggleNavigation: () -> Unit) {
             )
         }
         VerticalDivider(modifier = Modifier.height(24.dp))
+        MenuBarItem("文件", fileMenuExpanded, { fileMenuExpanded = it }) {
+            DropdownMenuItem(
+                text = { Text("新建连接") },
+                onClick = {
+                    // TODO: open the new-connection flow.
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("退出") },
+                onClick = onExit,
+            )
+        }
+        MenuBarItem("帮助", helpMenuExpanded, { helpMenuExpanded = it }) {
+            DropdownMenuItem(
+                text = { Text("关于") },
+                onClick = { onShowAbout() },
+            )
+        }
         // Breadcrumb trail goes here.
         Box(Modifier.weight(1f))
     }
+}
+
+/**
+ * A single top-level menu button that opens a [DropdownMenu] on click. Lives in
+ * the title bar, so it behaves like a desktop menu bar item.
+ */
+@Composable
+private fun MenuBarItem(
+    label: String,
+    expanded: Boolean,
+    onExpandChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Box(modifier) {
+        TextButton(onClick = { onExpandChange(true) }) {
+            Text(label)
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { onExpandChange(false) },
+            content = content,
+        )
+    }
+}
+
+/** Empty About dialog — content is intentionally left blank for now. */
+@Composable
+private fun AboutDialog(onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("关闭") }
+        },
+        title = { Text("关于 MQ Client") },
+    )
 }
 
 /**
