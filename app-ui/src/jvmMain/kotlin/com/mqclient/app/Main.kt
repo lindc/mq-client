@@ -5,9 +5,14 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -35,6 +40,9 @@ import dev.nucleusframework.window.WindowScaffold
 import dev.nucleusframework.window.macOSLargeCornerRadius
 import dev.nucleusframework.window.utils.linux.linuxTitleBarIcons
 import dev.nucleusframework.window.windowDragArea
+import mq_client.app_ui.generated.resources.Res
+import mq_client.app_ui.generated.resources.ic_menu
+import org.jetbrains.compose.resources.painterResource
 
 /** Matches the title bar height `MacosDecoratedWindow` uses. */
 private val TitleBarHeight = 52.dp
@@ -49,10 +57,14 @@ fun main() = nucleusApplication {
                 // otherwise keeps its dark default (0xFF2B2B2B) and the frame
                 // shows up black. Pulled from the theme so they always match.
                 WindowBackground(MaterialTheme.colorScheme.background)
+                // Lives here, not inside MainWindow, because the title bar's
+                // hamburger and the navigation suite are two halves of one toggle.
+                var navigationVisible by remember { mutableStateOf(true) }
                 WindowScaffold(
                 modifier = Modifier.macOSLargeCornerRadius(),
                 titleBar = {
                     Box(Modifier.fillMaxWidth().height(TitleBarHeight).windowDragArea()) {
+                        TitleBarPanel(onToggleNavigation = { navigationVisible = !navigationVisible })
                         WindowControlButtons(
                             isActive = state.isActive,
                             isMaximized = state.isMaximized,
@@ -70,10 +82,36 @@ fun main() = nucleusApplication {
                 // exactly where the sidebar's first items live.
                 titleBarPlacement = TitleBarPlacement.Docked,
             ) { _ ->
-                MainWindow()
+                MainWindow(isNavigationVisible = navigationVisible)
             }
             }
         }
+    }
+}
+
+/**
+ * Left end of the title bar: the navigation toggle, a divider, and the stretch
+ * the breadcrumb trail will grow into.
+ *
+ * The row spans the full bar so the empty stretch stays part of the drag area,
+ * while the [IconButton] still swallows its own clicks the same way the window
+ * controls do.
+ */
+@Composable
+private fun TitleBarPanel(onToggleNavigation: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxSize().padding(start = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconButton(onClick = onToggleNavigation) {
+            Icon(
+                painter = painterResource(Res.drawable.ic_menu),
+                contentDescription = "Toggle navigation",
+            )
+        }
+        VerticalDivider(modifier = Modifier.height(24.dp))
+        // Breadcrumb trail goes here.
+        Box(Modifier.weight(1f))
     }
 }
 
