@@ -93,40 +93,40 @@ fun main() = nucleusApplication {
                 var showAbout by remember { mutableStateOf(false) }
                 var showNewConnection by remember { mutableStateOf(false) }
                 WindowScaffold(
-                modifier = Modifier.macOSLargeCornerRadius(),
-                titleBar = {
-                    Box(Modifier.fillMaxWidth().height(TitleBarHeight).windowDragArea()) {
-                        TitleBarPanel(
-                            onToggleNavigation = { navigationVisible = !navigationVisible },
-                            onShowAbout = { showAbout = true },
-                            onShowNewConnection = { showNewConnection = true },
-                            onExit = { exitApplication() },
-                        )
-                        WindowControlButtons(
-                            isActive = state.isActive,
-                            isMaximized = state.isMaximized,
-                            onMinimize = { nucleusWindow.setMinimized(true) },
-                            onToggleMaximize = { nucleusWindow.setMaximized(!state.isMaximized) },
-                            onCloseRequest = closeApp,
-                            modifier = Modifier.align(Alignment.TopEnd),
-                        )
-                    }
-                },
-                // Docked gives the title bar its own row, so the content (and the
-                // sidebar in it) starts *below* the drag band and stays clickable.
-                // Overlay paints the bar on top of the content, and its
-                // windowDragArea swallows clicks in the top strip — which is
-                // exactly where the sidebar's first items live.
-                titleBarPlacement = TitleBarPlacement.Docked,
-            ) { _ ->
-                MainWindow(isNavigationVisible = navigationVisible)
-            }
-            if (showAbout) {
-                AboutDialog(onDismiss = { showAbout = false })
-            }
-            if (showNewConnection) {
-                NewConnectionDialog(onDismiss = { showNewConnection = false })
-            }
+                    modifier = Modifier.macOSLargeCornerRadius(),
+                    titleBar = {
+                        Box(Modifier.fillMaxWidth().height(TitleBarHeight).windowDragArea()) {
+                            TitleBarPanel(
+                                onToggleNavigation = { navigationVisible = !navigationVisible },
+                                onShowAbout = { showAbout = true },
+                                onShowNewConnection = { showNewConnection = true },
+                                onExit = { exitApplication() },
+                            )
+                            WindowControlButtons(
+                                isActive = state.isActive,
+                                isMaximized = state.isMaximized,
+                                onMinimize = { nucleusWindow.setMinimized(true) },
+                                onToggleMaximize = { nucleusWindow.setMaximized(!state.isMaximized) },
+                                onCloseRequest = closeApp,
+                                modifier = Modifier.align(Alignment.TopEnd),
+                            )
+                        }
+                    },
+                    // Docked gives the title bar its own row, so the content (and the
+                    // sidebar in it) starts *below* the drag band and stays clickable.
+                    // Overlay paints the bar on top of the content, and its
+                    // windowDragArea swallows clicks in the top strip — which is
+                    // exactly where the sidebar's first items live.
+                    titleBarPlacement = TitleBarPlacement.Docked,
+                ) { _ ->
+                    MainWindow(isNavigationVisible = navigationVisible)
+                }
+                if (showAbout) {
+                    AboutDialog(onDismiss = { showAbout = false })
+                }
+                if (showNewConnection) {
+                    NewConnectionDialog(onDismiss = { showNewConnection = false })
+                }
             }
         }
     }
