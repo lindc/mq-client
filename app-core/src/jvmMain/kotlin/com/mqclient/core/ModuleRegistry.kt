@@ -10,22 +10,27 @@ import java.util.ServiceLoader
  * without any manual wiring.
  */
 object ModuleRegistry {
-    val services: List<BusinessService> by lazy {
-        val list = runCatching { ServiceLoader.load(BusinessService::class.java).toList() }
-            .getOrDefault(emptyList())
-        println("[ModuleRegistry] services=${list.map { it.id }}")
-        list
-    }
+    val services: List<BusinessService> by lazy { loadAll(BusinessService::class.java) }
 
-    val uis: List<BusinessUi> by lazy {
-        val urls = BusinessUi::class.java.classLoader
-            .getResources("META-INF/services/com.mqclient.core.BusinessUi")
-            .toList()
-        println("[ModuleRegistry] BusinessUi service files found: ${urls.size}")
-        urls.forEachIndexed { i, u -> println("   [$i] $u") }
-        val list = runCatching { ServiceLoader.load(BusinessUi::class.java).toList() }
-            .getOrDefault(emptyList())
-        println("[ModuleRegistry] uis=${list.map { it.serviceId }}")
-        list
+    val uis: List<BusinessUi> by lazy { loadAll(BusinessUi::class.java) }
+
+    /**
+     * Loads providers one by one.
+     *
+     * [ServiceLoader] aborts the whole iteration the moment a single provider
+     * fails (missing class, no public no-arg constructor, throwing `init`, …),
+     * which used to cost us every other module. Here a broken module is skipped
+     * and reported instead, so the rest of the app still comes up.
+     */
+    private fun <T : Any> loadAll(type: Class<T>): List<T> = buildList {
+        val providers = ServiceLoader.load(type).iterator()
+        while (providers.hasNext()) {
+            runCatching { providers.next() }
+                .onFailure {
+                    // ServiceConfigurationError is an Error, not an Exception.
+                    System.err.println("[ModuleRegistry] cannot load ${type.simpleName} provider: $it")
+                }
+                .onSuccess(::add)
+        }
     }
 }

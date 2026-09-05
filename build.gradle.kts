@@ -20,7 +20,6 @@ kotlin {
             implementation("org.jetbrains.compose.foundation:foundation:1.12.0")
             implementation("org.jetbrains.compose.ui:ui:1.12.0")
             implementation("org.jetbrains.compose.components:components-resources:1.12.0")
-            implementation("androidx.compose.material3:material3:1.4.0")
 
             // 添加 Material Kolor（注意别名）
             implementation(libs.material.kolor)

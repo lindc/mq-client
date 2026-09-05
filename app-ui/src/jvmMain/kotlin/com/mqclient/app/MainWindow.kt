@@ -1,20 +1,14 @@
 package com.mqclient.app
 
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
+import androidx.compose.material3.adaptive.currentWindowDpSize
+import androidx.compose.material3.adaptive.navigationsuite.ExperimentalMaterial3AdaptiveNavigationSuiteApi
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -25,6 +19,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.mqclient.core.ModuleRegistry
 
+/**
+ * Material's expanded-width breakpoint. At or above it the module list gets a
+ * permanent drawer; below it the same list collapses into a navigation rail.
+ */
+private val DrawerWidthThreshold = 840.dp
+
+@OptIn(ExperimentalMaterial3AdaptiveApi::class, ExperimentalMaterial3AdaptiveNavigationSuiteApi::class)
 @Composable
 fun MainWindow() {
     val services = remember { ModuleRegistry.services }
@@ -32,41 +33,35 @@ fun MainWindow() {
 
     var selectedId by remember { mutableStateOf(services.firstOrNull()?.id) }
 
-    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        Row(modifier = Modifier.fillMaxSize()) {
-            // Sidebar built from the SPI-discovered services.
-            Column(
-                modifier =
-                    Modifier
-                        .width(220.dp)
-                        .fillMaxHeight()
-                        .padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Text("MQ Client", style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.height(8.dp))
-                services.forEach { svc ->
-                    val selected = svc.id == selectedId
-                    Text(
-                        text = svc.name,
-                        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground,
-                        modifier =
-                            Modifier
-                                .fillMaxWidth()
-                                .clickable { selectedId = svc.id }
-                                .padding(8.dp),
-                    )
-                }
+    NavigationSuiteScaffold(
+        layoutType =
+            if (currentWindowDpSize().width >= DrawerWidthThreshold) {
+                NavigationSuiteType.NavigationDrawer
+            } else {
+                NavigationSuiteType.NavigationRail
+            },
+        navigationSuiteItems = {
+            // Built from the SPI-discovered services.
+            services.forEach { svc ->
+                item(
+                    selected = svc.id == selectedId,
+                    onClick = { selectedId = svc.id },
+                    // Icon slot is intentionally empty for now. The Material
+                    // Symbols pipeline is in place (Res.drawable.*), it just
+                    // needs the per-module artwork picked.
+                    icon = {},
+                    label = { Text(svc.name) },
+                )
             }
-
-            // Content area: renders the selected module's UI contribution.
-            Box(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-                val ui = selectedId?.let { uiByService[it] }
-                if (ui != null) {
-                    ui.content()
-                } else {
-                    Text("Select a module from the sidebar", modifier = Modifier.align(Alignment.Center))
-                }
+        },
+    ) {
+        // Content area: renders the selected module's UI contribution.
+        Box(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+            val ui = selectedId?.let { uiByService[it] }
+            if (ui != null) {
+                ui.content()
+            } else {
+                Text("Select a module from the sidebar", modifier = Modifier.align(Alignment.Center))
             }
         }
     }
