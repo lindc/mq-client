@@ -41,6 +41,7 @@ import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
+import com.mqclient.core.ModuleRegistry
 import dev.nucleusframework.application.DecoratedWindow
 import dev.nucleusframework.application.nucleusApplication
 import dev.nucleusframework.core.runtime.Platform
@@ -70,6 +71,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.window.Dialog
 import java.time.LocalTime
 import kotlin.math.cos
@@ -83,8 +85,13 @@ fun main() = nucleusApplication {
     val closeApp: () -> Unit = ::exitApplication
     DecoratedWindow(onCloseRequest = closeApp, title = "MQ Client") {
         // Drives LocalIsDarkTheme (the control icons follow it).
-        NucleusDecoratedWindowTheme(isDark = false) {
+            NucleusDecoratedWindowTheme(isDark = false) {
             AppTheme(isDarkTheme = false) {
+                // The title bar's breadcrumb and the sidebar both read this, so
+                // the selection lives above MainWindow.
+                var selection by remember {
+                    mutableStateOf(ModuleRegistry.services.firstOrNull()?.let { NavSelection(it.id) })
+                }
                 // Colour the native window's own background: the Tao backend
                 // otherwise keeps its dark default (0xFF2B2B2B) and the frame
                 // shows up black. Pulled from the theme so they always match.
@@ -100,6 +107,14 @@ fun main() = nucleusApplication {
                     titleBar = {
                         Box(Modifier.fillMaxWidth().height(TitleBarHeight).windowDragArea()) {
                             TitleBarPanel(
+                                breadcrumb =
+                                    selection?.let { sel ->
+                                        val name =
+                                            ModuleRegistry.services
+                                                .firstOrNull { it.id == sel.serviceId }
+                                                ?.name ?: sel.serviceId
+                                        listOfNotNull(name, sel.objectType)
+                                    } ?: emptyList(),
                                 onToggleNavigation = { navigationVisible = !navigationVisible },
                                 onShowNewConnection = { showNewConnection = true },
                                 onShowSettings = { showSettings = true },
@@ -123,7 +138,11 @@ fun main() = nucleusApplication {
                     // exactly where the sidebar's first items live.
                     titleBarPlacement = TitleBarPlacement.Docked,
                 ) { _ ->
-                    MainWindow(isNavigationVisible = navigationVisible)
+                    MainWindow(
+                        isNavigationVisible = navigationVisible,
+                        selection = selection,
+                        onSelect = { selection = it },
+                    )
                 }
                 if (showAbout) {
                     AboutDialog(onDismiss = { showAbout = false })
@@ -141,7 +160,7 @@ fun main() = nucleusApplication {
 
 /**
  * Left end of the title bar: the navigation toggle, a divider, the single
- * 文件 menu bar item, and the stretch the breadcrumb trail will grow into.
+ * 文件 menu bar item, and the breadcrumb trail that follows it.
  *
  * The row spans the full bar so the empty stretch stays part of the drag area,
  * while the [IconButton] and [MenuBarItem]s still swallow their own clicks the
@@ -149,6 +168,7 @@ fun main() = nucleusApplication {
  */
 @Composable
 private fun TitleBarPanel(
+    breadcrumb: List<String>,
     onToggleNavigation: () -> Unit,
     onShowNewConnection: () -> Unit,
     onShowSettings: () -> Unit,
@@ -200,8 +220,45 @@ private fun TitleBarPanel(
                 },
             )
         }
-        // Breadcrumb trail goes here.
-        Box(Modifier.weight(1f))
+        // Only separate the two while there is actually a trail to show.
+        if (breadcrumb.isNotEmpty()) {
+            VerticalDivider(modifier = Modifier.height(16.dp).padding(horizontal = 8.dp))
+        }
+        Box(Modifier.weight(1f)) {
+            BreadcrumbTrail(breadcrumb)
+        }
+    }
+}
+
+/**
+ * `连接 > 对象` trail for whatever the content area is showing: the connection
+ * name, plus the object type once a level-2 row (or its tab) is selected.
+ */
+@Composable
+private fun BreadcrumbTrail(segments: List<String>) {
+    Row(
+        modifier = Modifier.fillMaxSize().padding(start = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        segments.forEachIndexed { index, segment ->
+            if (index > 0) {
+                Text(
+                    text = ">",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 6.dp),
+                )
+            }
+            Text(
+                text = segment,
+                style = MaterialTheme.typography.labelLarge,
+                color =
+                    if (index == segments.lastIndex) MaterialTheme.colorScheme.onSurface
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
