@@ -34,7 +34,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -196,7 +195,12 @@ fun ModuleRail(
                     val moduleSelected = selection?.serviceId == svc.id && selection.objectType == null
                     DropdownMenuItem(
                         text = {
-                            Text(svc.name, fontWeight = if (moduleSelected) FontWeight.SemiBold else FontWeight.Normal)
+                            Text(
+                                svc.name,
+                                color =
+                                    if (moduleSelected) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.onSurface,
+                            )
                         },
                         onClick = {
                             menuForId = null
@@ -208,7 +212,12 @@ fun ModuleRail(
                         val selected = selection == NavSelection(svc.id, type)
                         DropdownMenuItem(
                             text = {
-                                Text(type, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
+                                Text(
+                                    type,
+                                    color =
+                                        if (selected) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.onSurface,
+                                )
                             },
                             onClick = {
                                 menuForId = null
