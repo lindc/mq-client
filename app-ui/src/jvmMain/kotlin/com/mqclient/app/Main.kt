@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -53,6 +55,7 @@ import dev.nucleusframework.window.utils.linux.linuxTitleBarIcons
 import dev.nucleusframework.window.windowDragArea
 import mq_client.app_ui.generated.resources.Res
 import mq_client.app_ui.generated.resources.ic_menu
+import mq_client.app_ui.generated.resources.logo
 import org.jetbrains.compose.resources.painterResource
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -61,8 +64,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.VerticalScrollbar
 import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
-import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
@@ -218,80 +219,192 @@ private fun MenuBarItem(
 }
 
 /**
- * Custom About dialog: top panel with the app name, a two-tab body, and a
- * bottom panel holding the close button at the bottom-right.
+ * Custom About dialog laid out like a product "about" card:
+ *   - header band with the title and a close (✕) button on the right
+ *   - a two-column body: the ticking clock (logo) on the left, app info +
+ *     the supported-middleware list + action buttons on the right
+ *   - a footer with the copyright line
  */
 @Composable
 private fun AboutDialog(onDismiss: () -> Unit) {
+    var showLicense by remember { mutableStateOf(false) }
     Dialog(
         onDismissRequest = onDismiss,
         properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
     ) {
-        Surface(
-            shape = MaterialTheme.shapes.medium,
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 6.dp,
-            modifier = Modifier.size(560.dp, 460.dp),
-        ) {
-            Column(Modifier.fillMaxSize()) {
-                // Top panel: app name.
-                Box(
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .height(56.dp)
-                            .background(MaterialTheme.colorScheme.primaryContainer)
-                            .padding(horizontal = 16.dp),
-                    contentAlignment = Alignment.CenterStart,
-                ) {
-                    Text(
-                        "MQClient",
-                        style = MaterialTheme.typography.titleLarge,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    )
-                }
+        // Root box so the license dialog can overlay the card.
+        Box {
+            Surface(
+                shape = MaterialTheme.shapes.medium,
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 6.dp,
+                modifier = Modifier.size(620.dp, 580.dp),
+            ) {
+                Column(Modifier.fillMaxSize()) {
+                    // Header band: title on the left, close button on the right.
+                    Box(
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .height(56.dp)
+                                .background(MaterialTheme.colorScheme.primaryContainer)
+                                .padding(horizontal = 8.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxSize(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                "关于 MQClient",
+                                style = MaterialTheme.typography.titleLarge,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.weight(1f).padding(start = 8.dp),
+                            )
+                            IconButton(onClick = onDismiss) {
+                                Text(
+                                    "✕",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                )
+                            }
+                        }
+                    }
 
-                var selectedTab by remember { mutableStateOf(0) }
-                PrimaryTabRow(selectedTabIndex = selectedTab) {
-                    Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("关于") })
-                    Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("使用库列表") })
-                }
+                    // Body: clock column + info column.
+                    Row(Modifier.weight(1f).fillMaxWidth().padding(16.dp)) {
+                        // Left column: the analog clock (logo) with a "时钟" caption.
+                        Column(
+                            modifier = Modifier.width(120.dp).fillMaxHeight(),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                        ) {
+                            AnalogClock(Modifier.size(96.dp))
+                            Spacer(Modifier.height(8.dp))
+                            Text("时钟", style = MaterialTheme.typography.labelMedium)
+                        }
 
-                // Tab body.
-                Box(Modifier.weight(1f).fillMaxWidth().padding(16.dp)) {
-                    when (selectedTab) {
-                        0 -> AboutTab()
-                        1 -> LibraryList()
+                        Spacer(Modifier.width(16.dp))
+
+                        // Right column: app info, supported middleware, actions.
+                        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                            // App icon on the left, 4 text lines on the right.
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Image(
+                                    painter = painterResource(Res.drawable.logo),
+                                    contentDescription = "MQClient 图标",
+                                    modifier = Modifier.size(72.dp),
+                                )
+                                Spacer(Modifier.width(16.dp))
+                                Column {
+                                    Text("MQClient", style = MaterialTheme.typography.headlineSmall)
+                                    Spacer(Modifier.height(2.dp))
+                                    Text(
+                                        "版本 1.0.0",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                    Text("一个跨平台的消息队列管理工具", style = MaterialTheme.typography.bodyMedium)
+                                    Text("支持 RabbitMQ、Kafka、IBM MQ 等多种中间件", style = MaterialTheme.typography.bodyMedium)
+                                }
+                            }
+                            Spacer(Modifier.height(12.dp))
+                            HorizontalDivider()
+                            Spacer(Modifier.height(12.dp))
+
+                            Text("支持的中间件", style = MaterialTheme.typography.titleSmall)
+                            Spacer(Modifier.height(8.dp))
+                            AboutMiddleware.forEach { lib ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(lib.name, modifier = Modifier.weight(1f), textAlign = TextAlign.Start)
+                                    VerticalDivider(
+                                        modifier =
+                                            Modifier
+                                                .height(20.dp)
+                                                .padding(horizontal = 12.dp),
+                                    )
+                                    Text(
+                                        lib.protocol,
+                                        modifier = Modifier.weight(1f),
+                                        textAlign = TextAlign.End,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+
+                            Spacer(Modifier.height(12.dp))
+                            HorizontalDivider()
+                            Spacer(Modifier.height(12.dp))
+
+                            // Action buttons: license viewer + close, equal width.
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End,
+                            ) {
+                                PressableButton(
+                                    onClick = { showLicense = true },
+                                    modifier = Modifier.weight(1f),
+                                ) { Text("查看开源许可证") }
+                                Spacer(Modifier.width(12.dp))
+                                PressableButton(
+                                    onClick = onDismiss,
+                                    modifier = Modifier.weight(1f),
+                                ) { Text("关闭") }
+                            }
+                        }
+                    }
+
+                    // Footer with the copyright line.
+                    Box(
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .height(40.dp)
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .padding(horizontal = 16.dp),
+                        contentAlignment = Alignment.CenterStart,
+                    ) {
+                        Text(
+                            "© 2026 Your Name. All rights reserved.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
+            }
 
-                // Bottom panel: close button, bottom-right.
-                Box(
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .height(56.dp)
-                            .padding(end = 16.dp, bottom = 8.dp),
-                    contentAlignment = Alignment.CenterEnd,
-                ) {
-                    PressableButton(onClick = onDismiss) { Text("关闭") }
-                }
+            if (showLicense) {
+                LicenseDialog(onDismiss = { showLicense = false })
             }
         }
     }
 }
 
+/** Middleware / protocols listed in the About dialog. */
+private val AboutMiddleware =
+    listOf(
+        Library("Apache Kafka", "Kafka Protocol"),
+        Library("RabbitMQ", "AMQP 0.9.1"),
+        Library("IBM MQ", "MQI"),
+        Library("Apache RocketMQ", "Remoting"),
+        Library("Apache Artemis", "AMQP / OpenWire"),
+    )
+
+/** Simple dialog listing the open-source middleware libraries this app supports. */
 @Composable
-private fun AboutTab() {
-    Row(Modifier.fillMaxSize()) {
-        AnalogClock(Modifier.size(180.dp).align(Alignment.CenterVertically))
-        Spacer(Modifier.width(16.dp))
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-            Text("软件说明", style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.height(8.dp))
-            Text("连接mq", style = MaterialTheme.typography.bodyMedium)
-        }
-    }
+private fun LicenseDialog(onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = { PressableButton(onClick = onDismiss) { Text("关闭") } },
+        title = { Text("开源许可证") },
+        text = { LibraryList(Modifier.size(380.dp, 300.dp)) },
+    )
 }
 
 /** Classic three-hand clock that ticks every second off the system clock. */
@@ -372,9 +485,9 @@ private val FakeLibraries =
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun LibraryList() {
+private fun LibraryList(modifier: Modifier = Modifier) {
     val scrollState = rememberScrollState()
-    Box(Modifier.fillMaxSize()) {
+    Box(modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().verticalScroll(scrollState)) {
             FakeLibraries.forEachIndexed { index, lib ->
                 Row(
