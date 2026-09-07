@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.AlertDialog
@@ -317,25 +318,44 @@ private fun AboutDialog(onDismiss: () -> Unit) {
 
                             Text("支持的中间件", style = MaterialTheme.typography.titleSmall)
                             Spacer(Modifier.height(8.dp))
-                            AboutMiddleware.forEach { lib ->
-                                Row(
-                                    modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
+                            // Bounded, scrollable area: the scrollbar only shows up
+                            // when the list outgrows the max height (otherwise hidden).
+                            Box(
+                                modifier = Modifier.fillMaxWidth().heightIn(max = 200.dp),
+                            ) {
+                                val listScroll = rememberScrollState()
+                                Column(
+                                    modifier =
+                                        Modifier
+                                            .fillMaxSize()
+                                            .padding(end = 10.dp)
+                                            .verticalScroll(listScroll),
                                 ) {
-                                    Text(lib.name, modifier = Modifier.weight(1f), textAlign = TextAlign.Start)
-                                    VerticalDivider(
-                                        modifier =
-                                            Modifier
-                                                .height(20.dp)
-                                                .padding(horizontal = 12.dp),
-                                    )
-                                    Text(
-                                        lib.protocol,
-                                        modifier = Modifier.weight(1f),
-                                        textAlign = TextAlign.End,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
+                                    AboutMiddleware.forEach { lib ->
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            Text(lib.name, modifier = Modifier.weight(1f), textAlign = TextAlign.Start)
+                                            VerticalDivider(
+                                                modifier =
+                                                    Modifier
+                                                        .height(20.dp)
+                                                        .padding(horizontal = 12.dp),
+                                            )
+                                            Text(
+                                                lib.protocol,
+                                                modifier = Modifier.weight(1f),
+                                                textAlign = TextAlign.End,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
+                                    }
                                 }
+                                VerticalScrollbar(
+                                    adapter = rememberScrollbarAdapter(listScroll),
+                                    modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
+                                )
                             }
 
                             Spacer(Modifier.height(12.dp))

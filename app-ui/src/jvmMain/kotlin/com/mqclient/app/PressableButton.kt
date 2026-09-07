@@ -23,20 +23,17 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
- * Shared colour for every action button in the app (dialog confirm/close,
- * About actions, etc.). Centralised here so all buttons stay in sync; the
- * native menu bar / dropdown menu items use Material's own styles and are
- * intentionally excluded.
- */
-val ButtonColor = Color(0xFF203701)
-val ButtonTextColor = Color.White
-
-/**
  * A raised button that drops its shadow and shrinks slightly while pressed —
  * like a physical key being pushed in — then springs back on release.
  *
  * The shadow is driven by [shadowElevation] (0 while pressed), and the shrink
  * by animating [Modifier.scale] off the button's [MutableInteractionSource].
+ *
+ * Buttons follow the theme: [containerColor] defaults to the primary role
+ * (Material's "p40" — primary palette, tone 40) and [contentColor] to its
+ * contrasting [androidx.compose.material3.ColorScheme.onPrimary]. Every action
+ * button in the app uses this component, so they all stay in sync; the native
+ * menu bar / dropdown menu items use Material's own styles and are excluded.
  */
 @Composable
 fun PressableButton(
@@ -45,8 +42,8 @@ fun PressableButton(
     enabled: Boolean = true,
     elevation: Dp = 2.dp,
     pressedScale: Float = 0.96f,
-    containerColor: Color = ButtonColor,
-    contentColor: Color = ButtonTextColor,
+    containerColor: Color = MaterialTheme.colorScheme.primary,
+    contentColor: Color = MaterialTheme.colorScheme.onPrimary,
     contentPadding: PaddingValues = ButtonDefaults.TextButtonContentPadding,
     content: @Composable RowScope.() -> Unit,
 ) {
