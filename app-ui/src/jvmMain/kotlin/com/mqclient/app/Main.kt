@@ -94,14 +94,16 @@ fun main() = nucleusApplication {
                 var navigationVisible by remember { mutableStateOf(true) }
                 var showAbout by remember { mutableStateOf(false) }
                 var showNewConnection by remember { mutableStateOf(false) }
+                var showSettings by remember { mutableStateOf(false) }
                 WindowScaffold(
                     modifier = Modifier.macOSLargeCornerRadius(),
                     titleBar = {
                         Box(Modifier.fillMaxWidth().height(TitleBarHeight).windowDragArea()) {
                             TitleBarPanel(
                                 onToggleNavigation = { navigationVisible = !navigationVisible },
-                                onShowAbout = { showAbout = true },
                                 onShowNewConnection = { showNewConnection = true },
+                                onShowSettings = { showSettings = true },
+                                onShowAbout = { showAbout = true },
                                 onExit = { exitApplication() },
                             )
                             WindowControlButtons(
@@ -129,14 +131,17 @@ fun main() = nucleusApplication {
                 if (showNewConnection) {
                     NewConnectionDialog(onDismiss = { showNewConnection = false })
                 }
+                if (showSettings) {
+                    SettingsDialog(onDismiss = { showSettings = false })
+                }
             }
         }
     }
 }
 
 /**
- * Left end of the title bar: the navigation toggle, a divider, the menu bar
- * (文件 / 帮助), and the stretch the breadcrumb trail will grow into.
+ * Left end of the title bar: the navigation toggle, a divider, the single
+ * 文件 menu bar item, and the stretch the breadcrumb trail will grow into.
  *
  * The row spans the full bar so the empty stretch stays part of the drag area,
  * while the [IconButton] and [MenuBarItem]s still swallow their own clicks the
@@ -145,12 +150,12 @@ fun main() = nucleusApplication {
 @Composable
 private fun TitleBarPanel(
     onToggleNavigation: () -> Unit,
-    onShowAbout: () -> Unit,
     onShowNewConnection: () -> Unit,
+    onShowSettings: () -> Unit,
+    onShowAbout: () -> Unit,
     onExit: () -> Unit,
 ) {
     var fileMenuExpanded by remember { mutableStateOf(false) }
-    var helpMenuExpanded by remember { mutableStateOf(false) }
 
     Row(
         modifier = Modifier.fillMaxSize().padding(start = 8.dp),
@@ -174,19 +179,24 @@ private fun TitleBarPanel(
                 },
             )
             DropdownMenuItem(
+                text = { Text("设置") },
+                onClick = {
+                    fileMenuExpanded = false
+                    onShowSettings()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("关于") },
+                onClick = {
+                    fileMenuExpanded = false
+                    onShowAbout()
+                },
+            )
+            DropdownMenuItem(
                 text = { Text("退出") },
                 onClick = {
                     fileMenuExpanded = false
                     onExit()
-                },
-            )
-        }
-        MenuBarItem("帮助", helpMenuExpanded, { helpMenuExpanded = it }) {
-            DropdownMenuItem(
-                text = { Text("关于") },
-                onClick = {
-                    helpMenuExpanded = false
-                    onShowAbout()
                 },
             )
         }
@@ -539,6 +549,18 @@ private fun NewConnectionDialog(onDismiss: () -> Unit) {
             PressableButton(onClick = onDismiss) { Text("关闭") }
         },
         title = { Text("新建连接") },
+    )
+}
+
+/** Empty Settings dialog — content is intentionally left blank for now. */
+@Composable
+private fun SettingsDialog(onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            PressableButton(onClick = onDismiss) { Text("关闭") }
+        },
+        title = { Text("设置") },
     )
 }
 
