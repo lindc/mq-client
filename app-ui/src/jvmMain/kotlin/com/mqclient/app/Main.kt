@@ -41,7 +41,7 @@ import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
-import com.mqclient.core.ModuleRegistry
+import com.mqclient.core.ConnectionStore
 import dev.nucleusframework.application.DecoratedWindow
 import dev.nucleusframework.application.nucleusApplication
 import dev.nucleusframework.core.runtime.Platform
@@ -90,7 +90,7 @@ fun main() = nucleusApplication {
                 // The title bar's breadcrumb and the sidebar both read this, so
                 // the selection lives above MainWindow.
                 var selection by remember {
-                    mutableStateOf(ModuleRegistry.services.firstOrNull()?.let { NavSelection(it.id) })
+                    mutableStateOf(ConnectionStore.connections.firstOrNull()?.let { NavSelection(it.id) })
                 }
                 // Colour the native window's own background: the Tao backend
                 // otherwise keeps its dark default (0xFF2B2B2B) and the frame
@@ -110,9 +110,9 @@ fun main() = nucleusApplication {
                                 breadcrumb =
                                     selection?.let { sel ->
                                         val name =
-                                            ModuleRegistry.services
-                                                .firstOrNull { it.id == sel.serviceId }
-                                                ?.name ?: sel.serviceId
+                                            ConnectionStore.connections
+                                                .firstOrNull { it.id == sel.connectionId }
+                                                ?.name ?: sel.connectionId
                                         listOfNotNull(name, sel.objectType)
                                     } ?: emptyList(),
                                 onToggleNavigation = { navigationVisible = !navigationVisible },

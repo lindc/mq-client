@@ -39,6 +39,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.mqclient.core.ConnectionStore
 import com.mqclient.core.ModuleRegistry
 
 /**
@@ -62,16 +63,16 @@ fun MainWindow(
     selection: NavSelection?,
     onSelect: (NavSelection) -> Unit,
 ) {
-    val services = remember { ModuleRegistry.services }
+    val connections = remember { ConnectionStore.connections }
     val uiByService = remember { ModuleRegistry.uis.associateBy { it.serviceId } }
 
     // Level-2 rows (queue/listener/topic) each get their own closable tab;
-    // level-1 rows keep showing the module's page directly.
+    // level-1 rows keep showing the connection's page directly.
     var openTabs by remember { mutableStateOf(listOf<NavSelection>()) }
     var activeTab by remember { mutableStateOf<NavSelection?>(null) }
 
-    val serviceName = { sel: NavSelection ->
-        services.firstOrNull { it.id == sel.serviceId }?.name ?: sel.serviceId
+    val connectionName = { sel: NavSelection ->
+        connections.firstOrNull { it.id == sel.connectionId }?.name ?: sel.connectionId
     }
 
     fun openTab(tab: NavSelection) {
@@ -83,17 +84,17 @@ fun MainWindow(
         val index = openTabs.indexOf(tab)
         openTabs = openTabs - tab
         if (activeTab != tab) return
-        // Fall back to the neighbour on the right, then to the module page.
+        // Fall back to the neighbour on the right, then to the connection page.
         val next = openTabs.getOrNull(index) ?: openTabs.lastOrNull()
         activeTab = next
-        onSelect(next ?: NavSelection(tab.serviceId))
+        onSelect(next ?: NavSelection(tab.connectionId))
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
         BoxWithConstraints(modifier = Modifier.weight(1f).fillMaxWidth()) {
             val wide = maxWidth >= WideSidebarThreshold
             Row(modifier = Modifier.fillMaxSize()) {
-                if (isNavigationVisible && services.isNotEmpty()) {
+                if (isNavigationVisible && connections.isNotEmpty()) {
                     val sidebarModifier =
                         Modifier
                             .fillMaxHeight()
@@ -104,14 +105,14 @@ fun MainWindow(
                     }
                     if (wide) {
                         ModuleTree(
-                            services = services,
+                            connections = connections,
                             selection = selection,
                             onSelect = onNavSelect,
                             modifier = sidebarModifier.width(TreeSidebarWidth),
                         )
                     } else {
                         ModuleRail(
-                            services = services,
+                            connections = connections,
                             selection = selection,
                             onSelect = onNavSelect,
                             modifier = sidebarModifier.width(RailSidebarWidth),
@@ -124,7 +125,7 @@ fun MainWindow(
                         ObjectTabStrip(
                             tabs = openTabs,
                             active = activeTab,
-                            tabTitle = { "${serviceName(it)} / ${it.objectType}" },
+                            tabTitle = { "${connectionName(it)} / ${it.objectType}" },
                             onSelect = {
                                 activeTab = it
                                 onSelect(it)
@@ -132,25 +133,27 @@ fun MainWindow(
                             onClose = ::closeTab,
                         )
                     }
-                    // Content area: renders the module's own UI, or the placeholder
-                    // workspace when an object type (queue/listener/topic) is picked.
+                    // Content area: renders the middleware module's own UI for a
+                    // connection, or the placeholder workspace when an object type
+                    // (queue/listener/topic) is picked.
                     Box(modifier = Modifier.weight(1f).fillMaxWidth().padding(16.dp)) {
                         val current = selection
                         when {
                             current == null -> {
                                 Text(
-                                    "Select a module from the sidebar",
+                                    "Select a connection from the sidebar",
                                     modifier = Modifier.align(Alignment.Center),
                                 )
                             }
 
                             current.objectType == null -> {
-                                val ui = uiByService[current.serviceId]
+                                val connection = connections.firstOrNull { it.id == current.connectionId }
+                                val ui = connection?.let { uiByService[it.serviceId] }
                                 if (ui != null) {
                                     ui.content()
                                 } else {
                                     Text(
-                                        "Module UI missing for ${current.serviceId}",
+                                        "Module UI missing for ${connection?.serviceId}",
                                         modifier = Modifier.align(Alignment.Center),
                                     )
                                 }
@@ -158,7 +161,7 @@ fun MainWindow(
 
                             else -> {
                                 ObjectTypeWorkspace(
-                                    serviceName = serviceName(current),
+                                    serviceName = connectionName(current),
                                     objectType = current.objectType,
                                     modifier = Modifier.fillMaxSize(),
                                 )
@@ -168,7 +171,7 @@ fun MainWindow(
                 }
             }
         }
-        StatusBar(currentModuleName = selection?.let { sel -> services.firstOrNull { it.id == sel.serviceId }?.name })
+        StatusBar(currentModuleName = selection?.let { connectionName(it) })
     }
 }
 
