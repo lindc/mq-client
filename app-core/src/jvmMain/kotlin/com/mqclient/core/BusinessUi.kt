@@ -7,11 +7,11 @@ import androidx.compose.runtime.Composable
  * Each `*-ui` module provides one implementation and registers it under
  * `META-INF/services/com.mqclient.core.BusinessUi`.
  *
- * [serviceId] must match the [BusinessService.id] of the related service module
+ * [serviceId] must match the [ServiceAdapter.id] of the related service module
  * so the UI can be attached to its metadata.
  */
 interface BusinessUi {
-    /** Must match the related [BusinessService.id]. */
+    /** Must match the related [ServiceAdapter.id]. */
     val serviceId: String
 
     /** Title shown for this module's content. */

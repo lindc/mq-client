@@ -15,7 +15,7 @@ enum class ConnectionStatus(val label: String) {
 
 /**
  * One saved MQ connection. A connection always belongs to a middleware module
- * ([serviceId] is a [BusinessService.id]), but several connections can share one
+ * ([serviceId] is a [ServiceAdapter.id]), but several connections can share one
  * module — the sidebar lists connections, not modules.
  */
 @Serializable

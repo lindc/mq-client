@@ -3,9 +3,9 @@ package com.mqclient.core
 /**
  * Pure (non-UI) descriptor of a business module, discovered automatically via
  * Java SPI ([java.util.ServiceLoader]). Each `*-service` module provides one
- * implementation and registers it under `META-INF/services/com.mqclient.core.BusinessService`.
+ * implementation and registers it under `META-INF/services/com.mqclient.core.ServiceAdapter`.
  */
-interface BusinessService {
+interface ServiceAdapter {
     /** Stable identifier, e.g. "ibm-mq". */
     val id: String
 

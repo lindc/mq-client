@@ -1,8 +1,8 @@
 package com.mqclient.rocketmq
 
-import com.mqclient.core.BusinessService
+import com.mqclient.core.ServiceAdapter
 
-class RocketMqService : BusinessService {
+class RocketMqServiceAdapter : ServiceAdapter {
     override val id = "rocketmq"
     override val name = "RocketMQ"
     override val description = "RocketMQ connection and management"

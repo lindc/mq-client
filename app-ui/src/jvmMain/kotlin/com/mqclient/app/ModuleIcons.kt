@@ -15,7 +15,7 @@ import org.jetbrains.compose.resources.painterResource
 /**
  * Middleware artwork lives here rather than in the `*-service` modules: those
  * are plain Kotlin modules without the Compose plugin, so they cannot carry
- * `composeResources`. Keyed by [com.mqclient.core.BusinessService.id].
+ * `composeResources`. Keyed by [com.mqclient.core.ServiceAdapter.id].
  */
 private val middlewareIcons: Map<String, DrawableResource> =
     mapOf(

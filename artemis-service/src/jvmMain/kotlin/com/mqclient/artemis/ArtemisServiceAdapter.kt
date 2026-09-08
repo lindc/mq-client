@@ -1,8 +1,8 @@
 package com.mqclient.artemis
 
-import com.mqclient.core.BusinessService
+import com.mqclient.core.ServiceAdapter
 
-class ArtemisService : BusinessService {
+class ArtemisServiceAdapter : ServiceAdapter {
     override val id = "artemis"
     override val name = "Artemis"
     override val description = "Artemis connection and management"

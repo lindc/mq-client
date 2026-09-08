@@ -1,8 +1,8 @@
 package com.mqclient.rabbitmq
 
-import com.mqclient.core.BusinessService
+import com.mqclient.core.ServiceAdapter
 
-class RabbitMqService : BusinessService {
+class RabbitMqServiceAdapter : ServiceAdapter {
     override val id = "rabbitmq"
     override val name = "RabbitMQ"
     override val description = "RabbitMQ connection and management"

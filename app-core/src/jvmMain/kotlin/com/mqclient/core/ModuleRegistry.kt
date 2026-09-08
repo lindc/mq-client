@@ -10,7 +10,7 @@ import java.util.ServiceLoader
  * without any manual wiring.
  */
 object ModuleRegistry {
-    val services: List<BusinessService> by lazy { loadAll(BusinessService::class.java) }
+    val services: List<ServiceAdapter> by lazy { loadAll(ServiceAdapter::class.java) }
 
     val uis: List<BusinessUi> by lazy { loadAll(BusinessUi::class.java) }
 
