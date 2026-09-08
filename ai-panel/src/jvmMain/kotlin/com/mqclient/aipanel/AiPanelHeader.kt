@@ -30,13 +30,12 @@ import com.mqclient.core.AiProvider
  * Header band: title + provider dropdown + close, plus a single info row
  * for the current selection context.
  *
- * The provider dropdown is the entry point for both switching the active
- * AI and opening the settings dialog — switching just picks a row, the
- * bottom-most "设置..." row opens the config modal. Providers come from
- * [com.mqclient.core.AiProviderRegistry] so adding a new one is a drop-in.
+ * The dropdown is a pure switcher — it lists every registered [AiProvider]
+ * (active one prefixed with "✓ ") and nothing else. Configuration lives
+ * in `~/.mqclient/config.json`; users edit it out-of-band.
  *
  * Glyphs are plain text (🤖 ✕ ▼) so the module doesn't pull in
- * material-icons-extended. — Buttons stay as [TextButton] — lightweight,
+ * material-icons-extended. Buttons stay as [TextButton] — lightweight,
  * no shadow / press-scale animation, so they don't fight the rest of the
  * title bar's chrome.
  */
@@ -46,7 +45,6 @@ fun AiPanelHeader(
     providers: List<AiProvider>,
     context: AiContext?,
     onProviderSelected: (AiProvider) -> Unit,
-    onOpenSettings: () -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -74,7 +72,6 @@ fun AiPanelHeader(
                 current = active,
                 providers = providers,
                 onProviderSelected = onProviderSelected,
-                onOpenSettings = onOpenSettings,
             )
             TextButton(onClick = onDismiss) {
                 Text("✕", style = MaterialTheme.typography.titleMedium)
@@ -90,14 +87,13 @@ fun AiPanelHeader(
 /**
  * The button shows the active provider's display name + a ▼ glyph. Click
  * opens a menu listing every registered provider (active marked with a
- * leading "✓ "), a divider, and a "设置..." row to open the config dialog.
+ * leading "✓ ") — pure switcher, no trailing entries.
  */
 @Composable
 private fun ProviderDropdownButton(
     current: AiProvider?,
     providers: List<AiProvider>,
     onProviderSelected: (AiProvider) -> Unit,
-    onOpenSettings: () -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
     TextButton(onClick = { expanded = true }) {
@@ -122,14 +118,6 @@ private fun ProviderDropdownButton(
                 },
             )
         }
-        HorizontalDivider()
-        DropdownMenuItem(
-            text = { Text("设置...") },
-            onClick = {
-                expanded = false
-                onOpenSettings()
-            },
-        )
     }
 }
 

@@ -1,4 +1,4 @@
-package com.mqclient.aipanel.providers
+package com.mqclient.ai.ollama
 
 import com.mqclient.core.AiProvider
 

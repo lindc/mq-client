@@ -1,4 +1,4 @@
-package com.mqclient.aipanel.providers
+package com.mqclient.ai.claude
 
 import com.mqclient.core.AiProvider
 

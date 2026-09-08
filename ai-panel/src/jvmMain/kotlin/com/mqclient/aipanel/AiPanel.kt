@@ -51,7 +51,6 @@ fun AiPanel(
                     providers = providers,
                     context = currentContext,
                     onProviderSelected = { picked -> state.updateConfig { it.copy(providerId = picked.id) } },
-                    onOpenSettings = { showSettings = true },
                     onDismiss = onDismiss,
                 )
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)

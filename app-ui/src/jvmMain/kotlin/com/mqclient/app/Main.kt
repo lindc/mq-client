@@ -261,17 +261,17 @@ private fun TitleBarPanel(
                 },
             )
             DropdownMenuItem(
-                text = { Text("关于") },
-                onClick = {
-                    fileMenuExpanded = false
-                    onShowAbout()
-                },
-            )
-            DropdownMenuItem(
                 text = { Text("AI 助手") },
                 onClick = {
                     fileMenuExpanded = false
                     onToggleAiPanel()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("关于") },
+                onClick = {
+                    fileMenuExpanded = false
+                    onShowAbout()
                 },
             )
             DropdownMenuItem(
