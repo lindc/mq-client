@@ -9,44 +9,109 @@ import kotlinx.serialization.Serializable
  */
 @Serializable
 data class Config(
+    val general: GeneralConfig = GeneralConfig(),
     val theme: ThemeConfig = ThemeConfig(),
     val ai: AiConfig = AiConfig(),
 )
 
 /**
- * Theme tuning. The bundled `lxgw_wen_kai_mono_regular` is always applied —
- * the system-font flags just layer extra faces on top of it for users who
- * want a Latin / monospace variant in the family.
+ * App-wide behaviour knobs that don't fit in either theme or AI.
+ */
+@Serializable
+data class GeneralConfig(
+    val language: Language = Language.SIMPLIFIED_CHINESE,
+    /** Past-N-days of history the app keeps around before pruning. */
+    val historyRetentionDays: Int = 90,
+)
+
+@Serializable
+enum class Language(val displayName: String) {
+    SIMPLIFIED_CHINESE("简体中文"),
+    ENGLISH("English"),
+}
+
+/**
+ * Theme tuning. The bundled `lxgw_wen_kai_mono` font is the source of truth
+ * — the renderer currently only consumes [fontFamily] (and falls back to
+ * the bundled face if the id is unknown).
+ *
+ * [themeMode] is a coarse switch over light/dark/system-follow; the actual
+ * palette generation happens in the UI module via MaterialKolor's
+ * dynamic theme.
  */
 @Serializable
 data class ThemeConfig(
-    /** Packed ARGB integer; default keeps the seed used since v0. */
-    val seedColor: Long = 0xFF68A500L,
-    val useSystemSerif: Boolean = false,
-    val useSystemSans: Boolean = false,
-    val useSystemMono: Boolean = false,
+    /** Packed ARGB integer. */
+    val seedColor: Long = DEFAULT_SEED_COLOR,
+    /** Stable id of the font to use; see [FONT_LXGW_WEN_KAI_MONO] etc. */
+    val fontFamily: String = FONT_LXGW_WEN_KAI_MONO,
+    /** Base font size in px (rendered as sp at the typography layer). */
+    val fontSize: Int = 14,
+    /** Light/dark/system-follow switch. Defaults to SYSTEM for new and existing installs. */
+    val themeMode: ThemeMode = ThemeMode.SYSTEM,
 )
 
 /**
- * User-tunable AI panel knobs. The system prompt is stored as Base64 so the
- * stored JSON stays valid no matter what characters the user typed (Chinese,
- / quotes, newlines, etc.) and we don't have to fight JSON escape rules.
+ * How the app should resolve light vs dark theme. SYSTEM defers to the
+ * platform's `isSystemInDarkTheme()`; the UI module reads this enum and
+ * computes the boolean it needs for MaterialKolor / NucleusDecoratedWindow.
+ */
+@Serializable
+enum class ThemeMode {
+    LIGHT,
+    DARK,
+    SYSTEM,
+}
+
+/** The default seed color; restored by the "恢复默认" button in settings. */
+const val DEFAULT_SEED_COLOR: Long = 0xFF68A500L
+
+/** Stable ids the settings dialog writes into [ThemeConfig.fontFamily]. */
+const val FONT_LXGW_WEN_KAI_MONO: String = "lxgw_wen_kai_mono"
+const val FONT_SYSTEM_SANS: String = "system_sans"
+const val FONT_SYSTEM_SERIF: String = "system_serif"
+const val FONT_SYSTEM_MONO: String = "system_mono"
+
+/**
+ * User-tunable AI panel knobs.
  *
- * [providerId] is a stable id from [AiProvider]; if no provider with that id
- * is registered at startup the panel falls back to the first available one.
+ * The dropdown the user sees in the panel header shows whatever providers
+ * are registered via the [AiProvider] SPI; each provider gets its own
+ * [AiProviderConfig] slot in [providerConfigs]. Missing entries just mean
+ * "user hasn't customised this one yet" — the renderer falls back to
+ * the provider's defaults.
+ *
+ * [historyLimit] governs how many past messages the panel loads from
+ * `ai-messages.json` on startup — defaults to 200 per the first-launch
+ * spec.
  */
 @Serializable
 data class AiConfig(
-    val providerId: String = "claude",
-    /** API endpoint. Reseeded from [AiProvider.defaultServerUrl] when the provider changes. */
-    val providerUrl: String = "https://api.anthropic.com",
-    /** Plaintext API key. Future: move into the encrypted connections store. */
-    val accessKey: String = "",
-    val model: String = "claude-3-5-sonnet-latest",
-    /** UTF-8 of [DEFAULT_SYSTEM_PROMPT] (or whatever the user entered) → Base64. */
-    val systemPromptBase64: String = "",
-    /** How many past messages to load from `ai-messages.json` on startup. */
+    /** Stable id of the active [AiProvider]; empty = first registered. */
+    val activeProviderId: String = "",
+    /** How many past messages to load on startup. UI clamps to 10-500. */
     val historyLimit: Int = 200,
+    /** Whether to attach the current connection/queue context to each user prompt. */
+    val autoAttachContext: Boolean = true,
+    /** One slot per AI provider — sparse; missing entries use provider defaults. */
+    val providerConfigs: List<AiProviderConfig> = emptyList(),
+)
+
+/**
+ * Per-provider overrides. [providerId] matches [AiProvider.id]; the URL,
+ * token, model and prompt are user-edited and override the provider's
+ * built-in defaults when present.
+ *
+ * [systemPrompt] is stored Base64 to keep the JSON file clean regardless
+ * of what the user types (CJK, quotes, newlines).
+ */
+@Serializable
+data class AiProviderConfig(
+    val providerId: String,
+    val providerUrl: String = "",
+    val accessToken: String = "",
+    val model: String = "",
+    val systemPromptBase64: String = "",
 )
 
 /** Default system prompt — bilingual is fine here since users only see it in the settings dialog. */

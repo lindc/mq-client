@@ -1,6 +1,7 @@
 package com.mqclient.aipanel
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -23,16 +24,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.mqclient.core.AiConfig
 import com.mqclient.core.AiProvider
 
 /**
  * Header band: title + provider dropdown + close, plus a single info row
  * for the current selection context.
  *
- * The dropdown is a pure switcher — it lists every registered [AiProvider]
- * (active one prefixed with "✓ ") and nothing else. Configuration lives
- * in `~/.mqclient/config.json`; users edit it out-of-band.
+ * The dropdown lists every AI provider registered through the
+ * [com.mqclient.core.AiProvider] SPI — pure switcher, no trailing entries.
+ * Selecting one writes its id back to [com.mqclient.core.AiConfig.activeProviderId].
  *
  * Glyphs are plain text (🤖 ✕ ▼) so the module doesn't pull in
  * material-icons-extended. Buttons stay as [TextButton] — lightweight,
@@ -41,14 +41,13 @@ import com.mqclient.core.AiProvider
  */
 @Composable
 fun AiPanelHeader(
-    config: AiConfig,
     providers: List<AiProvider>,
+    activeProviderId: String?,
     context: AiContext?,
     onProviderSelected: (AiProvider) -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val active = providers.firstOrNull { it.id == config.providerId } ?: providers.firstOrNull()
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -69,8 +68,8 @@ fun AiPanelHeader(
                 modifier = Modifier.weight(1f),
             )
             ProviderDropdownButton(
-                current = active,
                 providers = providers,
+                activeProviderId = activeProviderId,
                 onProviderSelected = onProviderSelected,
             )
             TextButton(onClick = onDismiss) {
@@ -91,26 +90,23 @@ fun AiPanelHeader(
  */
 @Composable
 private fun ProviderDropdownButton(
-    current: AiProvider?,
     providers: List<AiProvider>,
+    activeProviderId: String?,
     onProviderSelected: (AiProvider) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
+    val activeLabel = providers.firstOrNull { it.id == activeProviderId }?.displayName
+        ?: if (providers.isEmpty()) "无 AI 服务" else "选择 AI"
     TextButton(onClick = { expanded = true }) {
-        Text(
-            text = current?.displayName ?: "选择 AI",
-            style = MaterialTheme.typography.labelLarge,
-        )
+        Text(activeLabel, style = MaterialTheme.typography.labelLarge)
         Text(" ▼", style = MaterialTheme.typography.labelLarge)
     }
     DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
         providers.forEach { provider ->
-            val isActive = provider.id == current?.id
+            val isActive = provider.id == activeProviderId
             DropdownMenuItem(
                 text = {
-                    Text(
-                        if (isActive) "✓ ${provider.displayName}" else "   ${provider.displayName}",
-                    )
+                    Text(if (isActive) "✓ ${provider.displayName}" else "   ${provider.displayName}")
                 },
                 onClick = {
                     expanded = false

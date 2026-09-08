@@ -17,12 +17,12 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
 /**
- * Single source of truth for the AI panel. Owns the current [AiConfig] and
- * the persisted chat log, and brokers the streaming coroutine that fills the
- * in-flight assistant bubble.
+ * Single source of truth for the AI panel.
  *
- * Settings come from [AiConfig] (the shared config store). The system prompt
- * round-trips through Base64 in storage but is exposed here as plain text.
+ * Pulls the registered [AiProvider] list from the SPI registry and merges
+ * in the user-configured overrides from [AiConfig.providerConfigs]. The
+ * [activeProvider] is whatever provider matches [AiConfig.activeProviderId]
+ * (or the first registered one if nothing's set).
  */
 @Stable
 class AiPanelState internal constructor(
@@ -43,41 +43,44 @@ class AiPanelState internal constructor(
 
     val isStreaming: Boolean get() = streamingMessageId != null
 
-    /** Plaintext system prompt — decoded from [AiConfig.systemPromptBase64] on demand. */
-    val systemPrompt: String get() = decodePrompt(config.systemPromptBase64)
+    /** All registered AI providers (from SPI). Recomputed when [AiProviderRegistry] changes. */
+    val providers: List<AiProvider> = AiProviderRegistry.all
 
     /**
-     * Applies [transform] to the config, persists the result, and notifies
-     * Compose. Switching the provider reseeds both model and URL so a stale
-     * endpoint doesn't follow the user across providers.
+     * The provider the user picked via [AiConfig.activeProviderId], or the
+     * first registered one if nothing's set. Computed on every read so it
+     * stays in lockstep with [config] after [updateConfig].
      */
+    val activeProvider: AiProvider?
+        get() = providers.firstOrNull { it.id == config.activeProviderId }
+            ?: providers.firstOrNull()
+
+    /**
+     * The override (URL/token/model/prompt) for the active provider, or
+     * null when the user hasn't customised it yet — the runtime falls back
+     * to the provider's defaults.
+     */
+    val activeProviderOverride: com.mqclient.core.AiProviderConfig?
+        get() = config.providerConfigs.firstOrNull { it.providerId == activeProvider?.id }
+
+    val systemPrompt: String
+        get() = activeProviderOverride?.systemPromptBase64?.let(::decodePrompt) ?: DEFAULT_SYSTEM_PROMPT
+
     fun updateConfig(transform: (AiConfig) -> AiConfig) {
         val next = transform(config)
-        val resolved = if (next.providerId != config.providerId) {
-            val provider = AiProviderRegistry.findById(next.providerId)
-            if (provider != null) {
-                next.copy(model = provider.defaultModel, providerUrl = provider.defaultServerUrl)
-            } else {
-                next
-            }
-        } else {
-            next
-        }
-        config = resolved
-        ConfigStore.saveConfig(ConfigStore.loadConfig().copy(ai = resolved))
+        config = next
+        ConfigStore.saveConfig(ConfigStore.loadConfig().copy(ai = next))
     }
 
     /**
      * Sends [text] as a user message, then kicks off a streaming reply.
-     * The visible user bubble keeps the raw [text]; a hidden context prefix
-     * is added in the message we hand to the [ChatService] so attach-to-
-     * context settings actually reach the (future) real backend.
-     *
-     * No-op if [text] is blank or a previous turn is still streaming.
+     * No-op if [text] is blank, a previous turn is still streaming, or no
+     * provider has been configured yet.
      */
     fun sendUserMessage(text: String, context: AiContext?) {
         val trimmed = text.trim()
         if (trimmed.isEmpty() || isStreaming) return
+        if (activeProvider == null) return
 
         val userMsg = AiMessage(
             id = newId(),
@@ -86,8 +89,6 @@ class AiPanelState internal constructor(
             timestamp = System.currentTimeMillis(),
         )
 
-        // No UI-exposed attach flags anymore — defaults are baked in:
-        // connection + object type are always attached when context is set.
         val contextPrefix = buildContextPrefix(context)
         val wireContent = if (contextPrefix != null) "$contextPrefix\n\n$trimmed" else trimmed
         val historyForCall = messages + userMsg.copy(content = wireContent)
@@ -135,7 +136,7 @@ class AiPanelState internal constructor(
         messages = mutable
     }
 
-    /** Builds a `[CONTEXT] k=v ...` prefix from the current selection, or null if nothing to attach. */
+    /** Builds a `[CONTEXT] k=v =` prefix from the current selection, or null if nothing to attach. */
     private fun buildContextPrefix(context: AiContext?): String? {
         if (context == null) return null
         val parts = mutableListOf<String>()

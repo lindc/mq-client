@@ -54,6 +54,7 @@ import com.mqclient.aipanel.rememberAiPanelState
 import com.mqclient.core.ConfigStore
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.ModuleRegistry
+import com.mqclient.core.ThemeMode
 import com.mqclient.uicommon.PressableButton
 import dev.nucleusframework.application.DecoratedWindow
 import dev.nucleusframework.application.nucleusApplication
@@ -74,6 +75,7 @@ import mq_client.app_ui.generated.resources.logo
 import org.jetbrains.compose.resources.painterResource
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.VerticalScrollbar
@@ -100,13 +102,23 @@ fun main() = nucleusApplication {
     // encrypted connections.json if there isn't one yet. Both are no-ops on
     // every subsequent launch.
     ConfigStore.initOnStartup()
-    val appConfig = ConfigStore.loadConfig()
+    var appConfig by remember { mutableStateOf(ConfigStore.loadConfig()) }
 
     val closeApp: () -> Unit = ::exitApplication
     DecoratedWindow(onCloseRequest = closeApp, title = "MQ Client") {
+        // Resolve dark/light once at the top so the window-chrome theme
+        // (NucleusDecoratedWindowTheme) and the content theme (AppTheme)
+        // share a single source of truth — otherwise the title bar would
+        // pick one mode and the body the other. SYSTEM defers to the
+        // platform's isSystemInDarkTheme().
+        val isDark = when (appConfig.theme.themeMode) {
+            ThemeMode.LIGHT -> false
+            ThemeMode.DARK -> true
+            ThemeMode.SYSTEM -> isSystemInDarkTheme()
+        }
         // Drives LocalIsDarkTheme (the control icons follow it).
-            NucleusDecoratedWindowTheme(isDark = false) {
-            AppTheme(theme = appConfig.theme, isDarkTheme = false) {
+            NucleusDecoratedWindowTheme(isDark = isDark) {
+            AppTheme(theme = appConfig.theme, isDarkTheme = isDark) {
                 // The title bar's breadcrumb and the sidebar both read this, so
                 // the selection lives above MainWindow.
                 var selection by remember {
@@ -205,7 +217,26 @@ fun main() = nucleusApplication {
                     NewConnectionDialog(onDismiss = { showNewConnection = false })
                 }
                 if (showSettings) {
-                    SettingsDialog(onDismiss = { showSettings = false })
+                    com.mqclient.app.settings.SettingsDialog(
+                        initial = appConfig,
+                        onDismiss = { showSettings = false },
+                        // Returns null on success, or the reason the write
+                        // failed — the dialog stays open and surfaces it.
+                        onSave = { newConfig ->
+                            val failure = ConfigStore.saveConfig(newConfig).exceptionOrNull()
+                            if (failure == null) {
+                                // Only adopt the draft once it's on disk:
+                                // otherwise the UI would show settings the
+                                // next launch won't have.
+                                appConfig = newConfig
+                                showSettings = false
+                                null
+                            } else {
+                                "保存失败：无法写入 config.json" +
+                                    "（${failure.message ?: failure.javaClass.simpleName}）"
+                            }
+                        },
+                    )
                 }
             }
         }
@@ -784,18 +815,6 @@ private fun NewConnectionDialog(onDismiss: () -> Unit) {
             PressableButton(onClick = onDismiss) { Text("关闭") }
         },
         title = { Text("新建连接") },
-    )
-}
-
-/** Empty Settings dialog — content is intentionally left blank for now. */
-@Composable
-private fun SettingsDialog(onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        confirmButton = {
-            PressableButton(onClick = onDismiss) { Text("关闭") }
-        },
-        title = { Text("设置") },
     )
 }
 

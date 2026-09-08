@@ -1,30 +1,22 @@
 package com.mqclient.aipanel
 
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.mqclient.core.AiProviderRegistry
 
 /**
  * Right-side AI panel. Composed of three stacked bands: header (title +
- * provider-dropdown + close), scrollable message list, and input area.
- * The header dropdown opens the settings dialog via its "设置..." entry.
+ * service-dropdown + close), scrollable message list, and input area.
  *
  * Width is fixed at 360 dp so the main content never gets squeezed off
  * screen by an over-eager side panel.
@@ -36,9 +28,6 @@ fun AiPanel(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var showSettings by remember { mutableStateOf(false) }
-    val providers = remember { AiProviderRegistry.all }
-
     Row(modifier = modifier.width(360.dp).fillMaxHeight()) {
         VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         Surface(
@@ -47,10 +36,10 @@ fun AiPanel(
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
                 AiPanelHeader(
-                    config = state.config,
-                    providers = providers,
+                    providers = state.providers,
+                    activeProviderId = state.activeProvider?.id,
                     context = currentContext,
-                    onProviderSelected = { picked -> state.updateConfig { it.copy(providerId = picked.id) } },
+                    onProviderSelected = { picked -> state.updateConfig { it.copy(activeProviderId = picked.id) } },
                     onDismiss = onDismiss,
                 )
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -67,17 +56,5 @@ fun AiPanel(
                 )
             }
         }
-    }
-
-    if (showSettings) {
-        AiSettingsDialog(
-            initial = state.config,
-            onDismiss = { showSettings = false },
-            onSave = { newConfig ->
-                state.updateConfig { newConfig }
-                showSettings = false
-            },
-            onClearHistory = { state.clearHistory() },
-        )
     }
 }

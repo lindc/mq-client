@@ -3,7 +3,6 @@
 
 package com.mqclient.app
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.Typography
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
@@ -71,13 +70,18 @@ private fun TextStyle.with(family: FontFamily): TextStyle =
 
 /**
  * Top-level theme wrapper. [theme] controls the seed color and which system
- * fonts (if any) get layered onto the bundled LXGW family; everything else
- * uses Material defaults via MaterialKolor's dynamic palette.
+ * fonts (if any) get layered onto the bundled LXGW family; [isDarkTheme]
+ * is the resolved light/dark choice — pass the result of
+ * [com.mqclient.core.ThemeMode] + `isSystemInDarkTheme()` from the call site
+ * so the title bar ([NucleusDecoratedWindowTheme]) and content can share
+ * one resolved value.
+ *
+ * Everything else uses Material defaults via MaterialKolor's dynamic palette.
  */
 @Composable
 fun AppTheme(
     theme: ThemeConfig = ThemeConfig(),
-    isDarkTheme: Boolean = isSystemInDarkTheme(),
+    isDarkTheme: Boolean,
     content: @Composable () -> Unit,
 ) {
     val dynamicThemeState =

@@ -22,4 +22,13 @@ interface AiProvider {
 
     /** Default API endpoint when this provider is first picked. */
     val defaultServerUrl: String
+
+    /**
+     * Curated list of model identifiers offered to the settings UI as a
+     * dropdown; empty means the UI falls back to a free-text input (the
+     * "custom" branch in the dialog). Implementation is optional — the
+     * default getter returns `emptyList()`.
+     */
+    val models: List<String>
+        get() = emptyList()
 }
