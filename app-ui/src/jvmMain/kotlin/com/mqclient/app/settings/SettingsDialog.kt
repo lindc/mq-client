@@ -11,13 +11,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.rememberScrollbarAdapter
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -31,16 +29,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.rememberDialogState
 import com.mqclient.core.Config
 import com.mqclient.uicommon.PressableButton
+import dev.nucleusframework.application.DecoratedDialog
 
 /** Tabs the side nav can select. Order matches visual order top → bottom. */
 internal enum class SettingsTab(val title: String, val tabName: String) {
-    GENERAL("⚙️ 通用", "通用"),
-    APPEARANCE("🎨 外观", "外观"),
-    AI("🤖 AI", "AI"),
+    GENERAL("\u2699\uFE0F \u901A\u7528", "\u901A\u7528"),
+    APPEARANCE("\uD83C\uDFA8 \u5916\u89C2", "\u5916\u89C2"),
+    AI("\uD83E\uDD16 AI", "AI"),
 }
 
 /**
@@ -48,12 +48,12 @@ internal enum class SettingsTab(val title: String, val tabName: String) {
  * right pane shows the corresponding composable, bottom row holds the
  * global Save / Cancel actions.
  *
- * Holds a local draft [Config] so edits don't leak back until the user
- * hits Save; Cancel (and clicking outside, via the platform dialog) just
+ * Holds a local draft [Config] so edits don\'t leak back until the user
+ * hits Save; Cancel (via the title-bar close button) just
  * drops the draft.
  *
  * [onSave] returns `null` when the write actually landed (the caller then
- * closes us), or a user-facing message when it didn't — in which case we
+ * closes us), or a user-facing message when it didn\'t - in which case we
  * stay open and show the message instead of pretending it worked.
  */
 @Composable
@@ -66,16 +66,17 @@ fun SettingsDialog(
     var selectedTab by remember { mutableStateOf(SettingsTab.GENERAL) }
     var saveError by remember { mutableStateOf<String?>(null) }
 
-    Dialog(onDismissRequest = onDismiss) {
+    // A real (Nucleus) window instead of the old fixed-size popup, so the user
+    // can drag any edge or corner to resize it. The Surface fills the whole
+    // window, so its content tracks whatever size is picked.
+    DecoratedDialog(
+        onCloseRequest = onDismiss,
+        state = rememberDialogState(size = DpSize(760.dp, 600.dp)),
+        title = "\u8BBE\u7F6E",
+        resizable = true,
+    ) {
         Surface(
-            modifier = Modifier
-                .widthIn(min = 720.dp, max = 760.dp)
-                // Tall enough to show the whole AI tab on a typical 1080p monitor
-                // (the AI tab has the active provider's card + dropdowns/pickers).
-                // On smaller windows the heightIn(max = ...) still kicks in and
-                // the scroll inside [TabContent] gives access to the rest.
-                .heightIn(min = 480.dp, max = 880.dp),
-            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier.fillMaxSize(),
             color = MaterialTheme.colorScheme.surface,
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
@@ -103,7 +104,7 @@ fun SettingsDialog(
                     onCancel = onDismiss,
                     onSave = {
                         // Clear the previous error so a second successful
-                        // attempt doesn't leave a stale banner behind.
+                        // attempt doesn\'t leave a stale banner behind.
                         saveError = onSave(draft)
                     },
                     errorMessage = saveError,
@@ -122,7 +123,7 @@ private fun HeaderBar(selectedTab: SettingsTab, onClose: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = "设置 - ${selectedTab.tabName}",
+            text = "\u8BBE\u7F6E - ${selectedTab.tabName}",
             style = MaterialTheme.typography.titleLarge,
             modifier = Modifier.weight(1f),
         )
@@ -130,7 +131,7 @@ private fun HeaderBar(selectedTab: SettingsTab, onClose: () -> Unit) {
             onClick = onClose,
             containerColor = MaterialTheme.colorScheme.surfaceVariant,
             contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-        ) { Text("✕") }
+        ) { Text("\u2715") }
     }
 }
 
@@ -177,7 +178,7 @@ private fun TabContent(
 ) {
     // Scroll inside the tab so longer content (especially AI tab with one card
     // per SPI provider) is reachable even on monitors shorter than the
-    // dialog's max heightIn.
+    // dialog\'s max heightIn.
     val scrollState = rememberScrollState()
     Box(modifier = Modifier.fillMaxSize()) {
         Column(
@@ -201,8 +202,8 @@ private fun TabContent(
                 )
             }
         }
-        // Scrollbar only appears when there's something to scroll (i.e. when
-        // content height exceeds the visible area). It's pinned to the right
+        // Scrollbar only appears when there\'s something to scroll (i.e. when
+        // content height exceeds the visible area). It\'s pinned to the right
         // edge, 8 dp wide, the same convention the message list uses.
         VerticalScrollbar(
             adapter = rememberScrollbarAdapter(scrollState),
@@ -216,8 +217,8 @@ private fun TabContent(
 
 /**
  * Save / Cancel row. When [errorMessage] is non-null the save failed and the
- * dialog is still open — show why, above the buttons and in the error role,
- * so the user isn't left with a silently-closed dialog and lost edits.
+ * dialog is still open - show why, above the buttons and in the error role,
+ * so the user isn\'t left with a silently-closed dialog and lost edits.
  */
 @Composable
 private fun FooterActions(
@@ -247,9 +248,9 @@ private fun FooterActions(
                 onClick = onCancel,
                 containerColor = MaterialTheme.colorScheme.surfaceVariant,
                 contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-            ) { Text("取消") }
+            ) { Text("\u53D6\u6D88") }
             Spacer(Modifier.width(8.dp))
-            PressableButton(onClick = onSave) { Text("保存") }
+            PressableButton(onClick = onSave) { Text("\u4FDD\u5B58") }
         }
     }
 }
