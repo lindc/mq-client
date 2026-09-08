@@ -39,6 +39,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.mqclient.aipanel.AiContext
+import com.mqclient.aipanel.AiPanel
+import com.mqclient.aipanel.AiPanelState
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.ModuleRegistry
 
@@ -62,6 +65,10 @@ fun MainWindow(
     isNavigationVisible: Boolean,
     selection: NavSelection?,
     onSelect: (NavSelection) -> Unit,
+    aiPanelVisible: Boolean,
+    aiPanelState: AiPanelState,
+    aiContext: AiContext?,
+    onDismissAiPanel: () -> Unit,
 ) {
     val connections = remember { ConnectionStore.connections }
     val uiByService = remember { ModuleRegistry.uis.associateBy { it.serviceId } }
@@ -168,6 +175,13 @@ fun MainWindow(
                             }
                         }
                     }
+                }
+                if (aiPanelVisible) {
+                    AiPanel(
+                        state = aiPanelState,
+                        currentContext = aiContext,
+                        onDismiss = onDismissAiPanel,
+                    )
                 }
             }
         }

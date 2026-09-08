@@ -31,6 +31,8 @@ dependencyResolutionManagement {
 include(
     ":app-core",
     ":app-ui",
+    ":ai-panel",
+    ":ui-common",
     ":ibm-mq-service", ":ibm-mq-ui",
     ":kafka-service", ":kafka-ui",
     ":artemis-service", ":artemis-ui",

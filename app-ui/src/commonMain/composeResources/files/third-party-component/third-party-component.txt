@@ -2,3 +2,7 @@ LxgwWenKai,SIL Open Font License 1.1,"Copyright 2024 The LXGW WenKai Project Aut
 (https://github.com/lxgw/LxgwWenkaiTC)"
 MaterialKolorBuilder,MIT,"Copyright (c) 2024 Jordon de Hoog
 (https://github.com/jordond/MaterialKolorBuilder)"
+SQLite,Public Domain (No Copyright), "The author disclaims copyright to this source code.
+(https://sqlite.org/copyright.html)"
+SQLDelight, Apache License 2.0, "Copyright 2016 Square, Inc.
+(https://github.com/square/sqldelight)"

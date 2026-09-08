@@ -1,4 +1,4 @@
-package com.mqclient.app
+package com.mqclient.uicommon
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.interaction.MutableInteractionSource

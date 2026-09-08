@@ -20,6 +20,13 @@ kotlin {
             implementation(compose.material3)
             implementation(compose.components.resources)
 
+            // Shared UI primitives (PressableButton, …) — both :app-ui and
+            // :ai-panel consume these so they stay visually consistent.
+            implementation(projects.uiCommon)
+
+            // Right-side AI assistant panel.
+            implementation(projects.aiPanel)
+
             // Business modules (discovered via SPI at runtime).
             implementation(projects.ibmMqService)
             implementation(projects.ibmMqUi)

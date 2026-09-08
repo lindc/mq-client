@@ -37,12 +37,24 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
+import com.mqclient.aipanel.AiContext
+import com.mqclient.aipanel.AiPanel
+import com.mqclient.aipanel.rememberAiPanelState
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.ModuleRegistry
+import com.mqclient.uicommon.PressableButton
 import dev.nucleusframework.application.DecoratedWindow
 import dev.nucleusframework.application.nucleusApplication
 import dev.nucleusframework.core.runtime.Platform
@@ -104,8 +116,37 @@ fun main() = nucleusApplication {
                 var showAbout by remember { mutableStateOf(false) }
                 var showNewConnection by remember { mutableStateOf(false) }
                 var showSettings by remember { mutableStateOf(false) }
+                // Right-side AI assistant panel — default hidden, toggled by
+                // Cmd/Ctrl+Shift+A or via the menu entry below.
+                var aiPanelVisible by remember { mutableStateOf(false) }
+                val aiPanelState = rememberAiPanelState()
+
+                // Project the current main-UI selection into the small DTO the
+                // AI panel expects, so the panel doesn't need to know about
+                // NavSelection / ConnectionStore.
+                val aiContext: AiContext? = selection?.let { sel ->
+                    val conn = ConnectionStore.connections.firstOrNull { it.id == sel.connectionId }
+                    AiContext(
+                        connectionName = conn?.name ?: sel.connectionId,
+                        serviceId = conn?.serviceId,
+                        objectType = sel.objectType,
+                    )
+                }
                 WindowScaffold(
-                    modifier = Modifier.macOSLargeCornerRadius(),
+                    modifier = Modifier.macOSLargeCornerRadius().onPreviewKeyEvent { event ->
+                        // Cmd+Shift+A on macOS, Ctrl+Shift+A elsewhere — toggles
+                        // the AI panel no matter which sub-component has focus.
+                        if (event.type == KeyEventType.KeyDown &&
+                            event.key == Key.A &&
+                            event.isShiftPressed &&
+                            (event.isMetaPressed || event.isCtrlPressed)
+                        ) {
+                            aiPanelVisible = !aiPanelVisible
+                            true
+                        } else {
+                            false
+                        }
+                    },
                     titleBar = {
                         Box(Modifier.fillMaxWidth().height(TitleBarHeight).windowDragArea()) {
                             TitleBarPanel(
@@ -121,6 +162,7 @@ fun main() = nucleusApplication {
                                 onShowNewConnection = { showNewConnection = true },
                                 onShowSettings = { showSettings = true },
                                 onShowAbout = { showAbout = true },
+                                onToggleAiPanel = { aiPanelVisible = !aiPanelVisible },
                                 onExit = { exitApplication() },
                             )
                             WindowControlButtons(
@@ -144,6 +186,10 @@ fun main() = nucleusApplication {
                         isNavigationVisible = navigationVisible,
                         selection = selection,
                         onSelect = { selection = it },
+                        aiPanelVisible = aiPanelVisible,
+                        aiPanelState = aiPanelState,
+                        aiContext = aiContext,
+                        onDismissAiPanel = { aiPanelVisible = false },
                     )
                 }
                 if (showAbout) {
@@ -175,6 +221,7 @@ private fun TitleBarPanel(
     onShowNewConnection: () -> Unit,
     onShowSettings: () -> Unit,
     onShowAbout: () -> Unit,
+    onToggleAiPanel: () -> Unit,
     onExit: () -> Unit,
 ) {
     var fileMenuExpanded by remember { mutableStateOf(false) }
@@ -212,6 +259,13 @@ private fun TitleBarPanel(
                 onClick = {
                     fileMenuExpanded = false
                     onShowAbout()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("AI 助手") },
+                onClick = {
+                    fileMenuExpanded = false
+                    onToggleAiPanel()
                 },
             )
             DropdownMenuItem(
