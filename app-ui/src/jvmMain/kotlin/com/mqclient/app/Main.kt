@@ -42,6 +42,7 @@ import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import com.mqclient.core.ConnectionStore
+import com.mqclient.core.ModuleRegistry
 import dev.nucleusframework.application.DecoratedWindow
 import dev.nucleusframework.application.nucleusApplication
 import dev.nucleusframework.core.runtime.Platform
@@ -67,6 +68,7 @@ import androidx.compose.foundation.VerticalScrollbar
 import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -398,7 +400,7 @@ private fun AboutDialog(onDismiss: () -> Unit) {
                                             .padding(end = 10.dp)
                                             .verticalScroll(listScroll),
                                 ) {
-                                    AboutMiddleware.forEach { lib ->
+                                    aboutMiddleware.forEach { lib ->
                                         Row(
                                             modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
                                             verticalAlignment = Alignment.CenterVertically,
@@ -473,25 +475,133 @@ private fun AboutDialog(onDismiss: () -> Unit) {
     }
 }
 
-/** Middleware / protocols listed in the About dialog. */
-private val AboutMiddleware =
-    listOf(
-        Library("Apache Kafka", "Kafka Protocol"),
-        Library("RabbitMQ", "AMQP 0.9.1"),
-        Library("IBM MQ", "MQI"),
-        Library("Apache RocketMQ", "Remoting"),
-        Library("Apache Artemis", "AMQP / OpenWire"),
-    )
+/**
+ * Middleware / protocols listed in the About dialog.
+ *
+ * Sourced from [ModuleRegistry] (Java SPI) instead of being hardcoded here, so
+ * adding a new `<mq>-service` module — together with its `protocol` field —
+ * shows up in the About dialog automatically. Sorted by display name so the
+ * ordering is stable across runs (SPI discovery order is not guaranteed).
+ */
+private val aboutMiddleware: List<Library> by lazy {
+    ModuleRegistry.services
+        .sortedBy { it.name }
+        .map { Library(it.name, it.protocol) }
+}
 
-/** Simple dialog listing the open-source middleware libraries this app supports. */
+/** Simple dialog listing the open-source components this app bundles. */
 @Composable
 private fun LicenseDialog(onDismiss: () -> Unit) {
+    // Load the third-party list lazily from the packaged resource. The file is
+    // bundled under composeResources/files/ so the Compose Resources Gradle
+    // plugin picks it up; each line is "name,license,copyright".
+    val components by produceState<List<ThirdPartyComponent>>(initialValue = emptyList()) {
+        value = loadThirdPartyComponents()
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = { PressableButton(onClick = onDismiss) { Text("关闭") } },
         title = { Text("开源许可证") },
-        text = { LibraryList(Modifier.size(380.dp, 300.dp)) },
+        text = { LibraryList(components, Modifier.size(380.dp, 300.dp)) },
     )
+}
+
+/** Path to the bundled third-party-component manifest inside composeResources. */
+private const val ThirdPartyComponentPath = "files/third-party-component/third-party-component.txt"
+
+/**
+ * Parses the third-party-component manifest into [ThirdPartyComponent] rows.
+ *
+ * Uses an RFC 4180 subset: a field wrapped in double quotes may contain
+ * commas and newlines; a literal `"` inside a quoted field is escaped as `""`.
+ * Records that don't split into the three expected fields are skipped so a
+ * stray blank line or a malformed entry never crashes the dialog.
+ */
+private suspend fun loadThirdPartyComponents(): List<ThirdPartyComponent> =
+    try {
+        parseComponents(Res.readBytes(ThirdPartyComponentPath).decodeToString())
+    } catch (_: Exception) {
+        emptyList()
+    }
+
+/**
+ * State machine over a small CSV dialect. `inQuotes` flips when we see the
+ * matching `"`, which lets commas and newlines pass through inside a quoted
+ * field; a doubled `""` inside quotes becomes a single `"`. Records whose
+ * field count isn't exactly three are dropped by the caller.
+ */
+private fun parseComponents(raw: String): List<ThirdPartyComponent> {
+    val records = mutableListOf<List<String>>()
+    val record = mutableListOf<String>()
+    val field = StringBuilder()
+    var inQuotes = false
+
+    fun endField() {
+        record.add(field.toString().trim())
+        field.setLength(0)
+    }
+
+    fun endRecord() {
+        endField()
+        if (record.any { it.isNotEmpty() }) records.add(record.toList())
+        record.clear()
+    }
+
+    var i = 0
+    while (i < raw.length) {
+        val c = raw[i]
+        if (inQuotes) {
+            when (c) {
+                '"' -> {
+                    // Doubled quote inside a quoted field is a literal `"`.
+                    if (i + 1 < raw.length && raw[i + 1] == '"') {
+                        field.append('"')
+                        i += 2
+                    } else {
+                        inQuotes = false
+                        i++
+                    }
+                }
+                else -> {
+                    // Inside quotes we keep everything verbatim, including the
+                    // newlines and commas the parser otherwise treats as
+                    // delimiters.
+                    field.append(c)
+                    i++
+                }
+            }
+        } else {
+            when (c) {
+                '"' -> {
+                    inQuotes = true
+                    i++
+                }
+                ',' -> {
+                    endField()
+                    i++
+                }
+                '\n' -> {
+                    endRecord()
+                    i++
+                }
+                '\r' -> {
+                    endRecord()
+                    i++
+                    if (i < raw.length && raw[i] == '\n') i++
+                }
+                else -> {
+                    field.append(c)
+                    i++
+                }
+            }
+        }
+    }
+    // Flush a trailing record if the file doesn't end with a newline.
+    if (field.isNotEmpty() || record.isNotEmpty()) endRecord()
+
+    return records
+        .filter { it.size == 3 && it[0].isNotEmpty() }
+        .map { ThirdPartyComponent(name = it[0], license = it[1], copyright = it[2]) }
 }
 
 /** Classic three-hand clock that ticks every second off the system clock. */
@@ -547,46 +657,54 @@ private fun AnalogClock(modifier: Modifier = Modifier) {
     }
 }
 
+/** One row in the "支持的中间件" list inside the About dialog. */
 private data class Library(
     val name: String,
     val protocol: String,
 )
 
-private val FakeLibraries =
-    listOf(
-        Library("Apache Kafka", "Kafka Protocol"),
-        Library("RabbitMQ", "AMQP 0.9.1"),
-        Library("Apache ActiveMQ", "OpenWire / JMS"),
-        Library("IBM MQ", "MQI"),
-        Library("Apache RocketMQ", "Remoting"),
-        Library("Apache Artemis", "AMQP / OpenWire"),
-        Library("Apache Pulsar", "Pulsar Protocol"),
-        Library("NATS", "NATS Protocol"),
-        Library("ZeroMQ", "ZMQ"),
-        Library("Apache Qpid", "AMQP"),
-    )
+/** One row in the open-source licenses dialog (loaded from the manifest file). */
+private data class ThirdPartyComponent(
+    val name: String,
+    val license: String,
+    val copyright: String,
+)
 
 /**
- * Library list with alternating row backgrounds. The scrollbar only shows up
- * when the rows outgrow the body (Scrollbar hides itself otherwise).
+ * Library list with alternating row backgrounds. Each component occupies a
+ * 3-line block (name / copyright / license) so the dialog reads as the
+ * attribution card the mockup calls for. The scrollbar only shows up when the
+ * list outgrows the body (Scrollbar hides itself otherwise).
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun LibraryList(modifier: Modifier = Modifier) {
+private fun LibraryList(components: List<ThirdPartyComponent>, modifier: Modifier = Modifier) {
     val scrollState = rememberScrollState()
     Box(modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().verticalScroll(scrollState)) {
-            FakeLibraries.forEachIndexed { index, lib ->
-                Row(
+            components.forEachIndexed { index, lib ->
+                Column(
                     modifier =
                         Modifier
                             .fillMaxWidth()
                             .background(if (index % 2 == 0) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surfaceVariant)
                             .padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(lib.name, Modifier.weight(1f), textAlign = TextAlign.Start)
-                    Text(lib.protocol, Modifier.weight(1f), textAlign = TextAlign.End)
+                    Text(
+                        text = lib.name,
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = lib.copyright,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        text = "License: ${lib.license}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         }

@@ -14,4 +14,11 @@ interface BusinessService {
 
     /** Short description of what the module does. */
     val description: String
+
+    /**
+     * Wire protocol the module speaks, e.g. "AMQP 0.9.1" or "Kafka Protocol".
+     * Surfaced in the About dialog so users know which transports are bundled
+     * without the UI needing to know about individual service modules.
+     */
+    val protocol: String
 }

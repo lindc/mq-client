@@ -6,4 +6,5 @@ class KafkaService : BusinessService {
     override val id = "kafka"
     override val name = "Kafka"
     override val description = "Kafka connection and management"
+    override val protocol = "Kafka Protocol"
 }
