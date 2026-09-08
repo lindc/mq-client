@@ -6,3 +6,7 @@ SQLite,Public Domain (No Copyright), "The author disclaims copyright to this sou
 (https://sqlite.org/copyright.html)"
 SQLDelight, Apache License 2.0, "Copyright 2016 Square, Inc.
 (https://github.com/square/sqldelight)"
+Nucleus, MIT, "Copyright (c) 2026 Elie Gambache.
+(https://github.com/NucleusFramework/Nucleus)"
+compose-multiplatform,Apache License 2.0," Copyright 2020-2021 JetBrains s.r.o.
+(https://github.com/JetBrains/compose-multiplatform)"

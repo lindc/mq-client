@@ -50,9 +50,7 @@ import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import com.mqclient.aipanel.AiContext
-import com.mqclient.aipanel.AiPanel
 import com.mqclient.aipanel.rememberAiPanelState
-import com.mqclient.core.Config
 import com.mqclient.core.ConfigStore
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.ModuleRegistry
