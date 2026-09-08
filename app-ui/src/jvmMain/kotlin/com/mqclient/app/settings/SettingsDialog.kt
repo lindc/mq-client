@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.rememberDialogState
 import com.mqclient.core.Config
+import dev.nucleusframework.application.LocalNucleusWindow
 import com.mqclient.uicommon.PressableButton
 import dev.nucleusframework.application.DecoratedDialog
 
@@ -75,6 +76,10 @@ fun SettingsDialog(
         title = "\u8BBE\u7F6E",
         resizable = true,
     ) {
+        // Keep the window usable: don't let it shrink below what the side rail
+        // + tab content need.
+        LocalNucleusWindow.current.setMinimumSize(DpSize(720.dp, 480.dp))
+
         Surface(
             modifier = Modifier.fillMaxSize(),
             color = MaterialTheme.colorScheme.surface,
