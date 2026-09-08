@@ -11,22 +11,20 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.mqclient.core.AiProviderRegistry
 
 /**
  * Right-side AI panel. Composed of three stacked bands: header (title +
- * service/context controls), scrollable message list, and input area. A
- * dedicated settings glyph in the header opens [AiSettingsDialog].
+ * provider-dropdown + close), scrollable message list, and input area.
+ * The header dropdown opens the settings dialog via its "设置..." entry.
  *
  * Width is fixed at 360 dp so the main content never gets squeezed off
  * screen by an over-eager side panel.
@@ -39,6 +37,7 @@ fun AiPanel(
     modifier: Modifier = Modifier,
 ) {
     var showSettings by remember { mutableStateOf(false) }
+    val providers = remember { AiProviderRegistry.all }
 
     Row(modifier = modifier.width(360.dp).fillMaxHeight()) {
         VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -48,9 +47,10 @@ fun AiPanel(
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
                 AiPanelHeader(
-                    settings = state.settings,
+                    config = state.config,
+                    providers = providers,
                     context = currentContext,
-                    onProviderSelected = { picked -> state.updateSettings { it.copy(provider = picked) } },
+                    onProviderSelected = { picked -> state.updateConfig { it.copy(providerId = picked.id) } },
                     onOpenSettings = { showSettings = true },
                     onDismiss = onDismiss,
                 )
@@ -72,10 +72,10 @@ fun AiPanel(
 
     if (showSettings) {
         AiSettingsDialog(
-            initial = state.settings,
+            initial = state.config,
             onDismiss = { showSettings = false },
-            onSave = { newSettings ->
-                state.updateSettings { newSettings }
+            onSave = { newConfig ->
+                state.updateConfig { newConfig }
                 showSettings = false
             },
             onClearHistory = { state.clearHistory() },

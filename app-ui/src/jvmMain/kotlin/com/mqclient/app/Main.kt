@@ -52,6 +52,8 @@ import androidx.compose.ui.unit.dp
 import com.mqclient.aipanel.AiContext
 import com.mqclient.aipanel.AiPanel
 import com.mqclient.aipanel.rememberAiPanelState
+import com.mqclient.core.Config
+import com.mqclient.core.ConfigStore
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.ModuleRegistry
 import com.mqclient.uicommon.PressableButton
@@ -96,11 +98,17 @@ import kotlinx.coroutines.delay
 private val TitleBarHeight = 52.dp
 
 fun main() = nucleusApplication {
+    // Startup: make sure ~/.mqclient/secret.key exists and seed an empty
+    // encrypted connections.json if there isn't one yet. Both are no-ops on
+    // every subsequent launch.
+    ConfigStore.initOnStartup()
+    val appConfig = ConfigStore.loadConfig()
+
     val closeApp: () -> Unit = ::exitApplication
     DecoratedWindow(onCloseRequest = closeApp, title = "MQ Client") {
         // Drives LocalIsDarkTheme (the control icons follow it).
             NucleusDecoratedWindowTheme(isDark = false) {
-            AppTheme(isDarkTheme = false) {
+            AppTheme(theme = appConfig.theme, isDarkTheme = false) {
                 // The title bar's breadcrumb and the sidebar both read this, so
                 // the selection lives above MainWindow.
                 var selection by remember {
@@ -119,7 +127,7 @@ fun main() = nucleusApplication {
                 // Right-side AI assistant panel — default hidden, toggled by
                 // Cmd/Ctrl+Shift+A or via the menu entry below.
                 var aiPanelVisible by remember { mutableStateOf(false) }
-                val aiPanelState = rememberAiPanelState()
+                val aiPanelState = rememberAiPanelState(appConfig.ai)
 
                 // Project the current main-UI selection into the small DTO the
                 // AI panel expects, so the panel doesn't need to know about

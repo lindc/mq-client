@@ -7,26 +7,31 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import com.mqclient.core.AiConfig
+import com.mqclient.core.AiProvider
+import com.mqclient.core.AiProviderRegistry
+import com.mqclient.core.ConfigStore
+import com.mqclient.core.DEFAULT_SYSTEM_PROMPT
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
 /**
- * Single source of truth for the AI panel. Owns the current [AiSettings] and
+ * Single source of truth for the AI panel. Owns the current [AiConfig] and
  * the persisted chat log, and brokers the streaming coroutine that fills the
  * in-flight assistant bubble.
  *
- * Compose observes [settings] / [messages] / [streamingMessageId] directly,
- * so any mutation triggers a recomposition of just the dependent subviews.
+ * Settings come from [AiConfig] (the shared config store). The system prompt
+ * round-trips through Base64 in storage but is exposed here as plain text.
  */
 @Stable
 class AiPanelState internal constructor(
-    initialSettings: AiSettings,
+    initialConfig: AiConfig,
     initialMessages: List<AiMessage>,
     private val chat: ChatService,
     private val scope: CoroutineScope,
 ) {
-    var settings: AiSettings by mutableStateOf(initialSettings)
+    var config: AiConfig by mutableStateOf(initialConfig)
         private set
 
     var messages: List<AiMessage> by mutableStateOf(initialMessages)
@@ -38,32 +43,35 @@ class AiPanelState internal constructor(
 
     val isStreaming: Boolean get() = streamingMessageId != null
 
+    /** Plaintext system prompt — decoded from [AiConfig.systemPromptBase64] on demand. */
+    val systemPrompt: String get() = decodePrompt(config.systemPromptBase64)
+
     /**
-     * Applies [transform] to the settings, persists the result, and notifies
-     * Compose. Switching [AiSettings.provider] also resets both
-     * [AiSettings.model] and [AiSettings.serverUrl] to that provider's
-     * defaults so a stale model name or endpoint doesn't follow the user
-     * across providers.
+     * Applies [transform] to the config, persists the result, and notifies
+     * Compose. Switching the provider reseeds both model and URL so a stale
+     * endpoint doesn't follow the user across providers.
      */
-    fun updateSettings(transform: (AiSettings) -> AiSettings) {
-        val next = transform(settings)
-        val resolved = if (next.provider != settings.provider) {
-            next.copy(
-                model = next.provider.defaultModel,
-                serverUrl = next.provider.defaultServerUrl,
-            )
+    fun updateConfig(transform: (AiConfig) -> AiConfig) {
+        val next = transform(config)
+        val resolved = if (next.providerId != config.providerId) {
+            val provider = AiProviderRegistry.findById(next.providerId)
+            if (provider != null) {
+                next.copy(model = provider.defaultModel, providerUrl = provider.defaultServerUrl)
+            } else {
+                next
+            }
         } else {
             next
         }
-        settings = resolved
-        AiStore.saveSettings(resolved)
+        config = resolved
+        ConfigStore.saveConfig(ConfigStore.loadConfig().copy(ai = resolved))
     }
 
     /**
      * Sends [text] as a user message, then kicks off a streaming reply.
      * The visible user bubble keeps the raw [text]; a hidden context prefix
-     * is added in the message we hand to the [ChatService] so that
-     * attach-to-context settings actually reach the (future) real backend.
+     * is added in the message we hand to the [ChatService] so attach-to-
+     * context settings actually reach the (future) real backend.
      *
      * No-op if [text] is blank or a previous turn is still streaming.
      */
@@ -78,7 +86,9 @@ class AiPanelState internal constructor(
             timestamp = System.currentTimeMillis(),
         )
 
-        val contextPrefix = buildContextPrefix(settings, context)
+        // No UI-exposed attach flags anymore — defaults are baked in:
+        // connection + object type are always attached when context is set.
+        val contextPrefix = buildContextPrefix(context)
         val wireContent = if (contextPrefix != null) "$contextPrefix\n\n$trimmed" else trimmed
         val historyForCall = messages + userMsg.copy(content = wireContent)
 
@@ -93,7 +103,7 @@ class AiPanelState internal constructor(
 
         scope.launch {
             try {
-                chat.streamReply(historyForCall, settings, context) { chunk ->
+                chat.streamReply(historyForCall, config, context) { chunk ->
                     appendToMessage(assistantMsg.id, chunk)
                 }
             } finally {
@@ -104,7 +114,7 @@ class AiPanelState internal constructor(
     }
 
     /** Records 👍/👎 feedback on an assistant bubble. In-memory only — not persisted yet. */
-    fun recordFeedback(messageId: String, useful: Boolean?) {
+    fun recordFeedback(messageId: String, useful: Boolean) {
         val idx = messages.indexOfLast { it.id == messageId }
         if (idx < 0) return
         val current = messages[idx]
@@ -125,34 +135,46 @@ class AiPanelState internal constructor(
         messages = mutable
     }
 
-    /** Builds a `[CONTEXT] k=v ...` prefix string from enabled settings, or null if nothing to attach. */
-    private fun buildContextPrefix(settings: AiSettings, context: AiContext?): String? {
+    /** Builds a `[CONTEXT] k=v ...` prefix from the current selection, or null if nothing to attach. */
+    private fun buildContextPrefix(context: AiContext?): String? {
         if (context == null) return null
         val parts = mutableListOf<String>()
-        if (settings.attachConnection) {
-            context.connectionName?.let { parts += "connection=$it" }
-            context.serviceId?.let { parts += "service=$it" }
-        }
-        if (settings.attachObjectType) context.objectType?.let { parts += "objectType=$it" }
+        context.connectionName?.let { parts += "connection=$it" }
+        context.serviceId?.let { parts += "service=$it" }
+        context.objectType?.let { parts += "objectType=$it" }
         if (parts.isEmpty()) return null
         return "[CONTEXT] ${parts.joinToString(" ")}"
     }
 
     private fun newId(): String = UUID.randomUUID().toString()
+
+    private fun decodePrompt(b64: String): String =
+        try {
+            if (b64.isBlank()) DEFAULT_SYSTEM_PROMPT
+            else String(java.util.Base64.getDecoder().decode(b64), Charsets.UTF_8)
+        } catch (_: Throwable) {
+            DEFAULT_SYSTEM_PROMPT
+        }
+
+    companion object {
+        /** Encode any user-entered prompt text into the Base64 storage form. */
+        fun encodePrompt(plain: String): String =
+            java.util.Base64.getEncoder().encodeToString(plain.toByteArray(Charsets.UTF_8))
+    }
 }
 
 /**
- * Compose entry point. Loads persisted settings + history off the calling
- * thread, then wires them into a stable [AiPanelState] tied to the local
- * coroutine scope.
+ * Compose entry point. Loads the chat log off disk (sliced to
+ * [AiConfig.historyLimit] most-recent messages) and wires the persisted
+ * [AiConfig] into a stable [AiPanelState] tied to the local coroutine scope.
  */
 @Composable
-fun rememberAiPanelState(): AiPanelState {
+fun rememberAiPanelState(initialConfig: AiConfig = ConfigStore.loadConfig().ai): AiPanelState {
     val scope = rememberCoroutineScope()
-    val state = remember {
+    val state = remember(initialConfig) {
         AiPanelState(
-            initialSettings = AiStore.loadSettings(),
-            initialMessages = AiStore.loadMessages(),
+            initialConfig = initialConfig,
+            initialMessages = AiStore.loadMessages(initialConfig.historyLimit),
             chat = MockChatService(),
             scope = scope,
         )

@@ -1,5 +1,7 @@
 package com.mqclient.aipanel
 
+import com.mqclient.core.AiConfig
+
 /**
  * Tiny DTO describing the user's current focus in the main UI. We pass this
  * rather than a `com.mqclient.core.Connection` so `:ai-panel` stays decoupled
@@ -25,7 +27,7 @@ interface ChatService {
      */
     suspend fun streamReply(
         history: List<AiMessage>,
-        settings: AiSettings,
+        config: AiConfig,
         context: AiContext?,
         onChunk: (String) -> Unit,
     )

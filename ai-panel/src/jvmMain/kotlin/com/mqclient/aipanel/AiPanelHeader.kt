@@ -1,8 +1,6 @@
 package com.mqclient.aipanel
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -25,25 +23,34 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.mqclient.core.AiConfig
+import com.mqclient.core.AiProvider
 
 /**
- * Header band: title + close, plus two info rows for service and context.
- * The service row is a click target that opens a dropdown to swap [Provider].
+ * Header band: title + provider dropdown + close, plus a single info row
+ * for the current selection context.
  *
- * Glyphs are plain text (🤖 / ✕ / ▼) so the module doesn't pull in
- * material-icons-extended. The settings and close buttons both live inside
- * the same Row at the trailing edge so they line up and their hit areas
- * don't overlap.
+ * The provider dropdown is the entry point for both switching the active
+ * AI and opening the settings dialog — switching just picks a row, the
+ * bottom-most "设置..." row opens the config modal. Providers come from
+ * [com.mqclient.core.AiProviderRegistry] so adding a new one is a drop-in.
+ *
+ * Glyphs are plain text (🤖 ✕ ▼) so the module doesn't pull in
+ * material-icons-extended. — Buttons stay as [TextButton] — lightweight,
+ * no shadow / press-scale animation, so they don't fight the rest of the
+ * title bar's chrome.
  */
 @Composable
 fun AiPanelHeader(
-    settings: AiSettings,
+    config: AiConfig,
+    providers: List<AiProvider>,
     context: AiContext?,
-    onProviderSelected: (Provider) -> Unit,
+    onProviderSelected: (AiProvider) -> Unit,
     onOpenSettings: () -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val active = providers.firstOrNull { it.id == config.providerId } ?: providers.firstOrNull()
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -55,10 +62,7 @@ fun AiPanelHeader(
                 .padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                "🤖",
-                style = MaterialTheme.typography.titleMedium,
-            )
+            Text("🤖", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.width(8.dp))
             Text(
                 "AI 助手",
@@ -66,62 +70,66 @@ fun AiPanelHeader(
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f),
             )
-            TextButton(onClick = onOpenSettings) {
-                Text("⚙", style = MaterialTheme.typography.titleMedium)
-            }
+            ProviderDropdownButton(
+                current = active,
+                providers = providers,
+                onProviderSelected = onProviderSelected,
+                onOpenSettings = onOpenSettings,
+            )
             TextButton(onClick = onDismiss) {
                 Text("✕", style = MaterialTheme.typography.titleMedium)
             }
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-            ServiceRow(settings = settings, onProviderSelected = onProviderSelected)
-            Spacer(Modifier.height(4.dp))
             ContextRow(context = context)
         }
     }
 }
 
+/**
+ * The button shows the active provider's display name + a ▼ glyph. Click
+ * opens a menu listing every registered provider (active marked with a
+ * leading "✓ "), a divider, and a "设置..." row to open the config dialog.
+ */
 @Composable
-private fun ServiceRow(settings: AiSettings, onProviderSelected: (Provider) -> Unit) {
+private fun ProviderDropdownButton(
+    current: AiProvider?,
+    providers: List<AiProvider>,
+    onProviderSelected: (AiProvider) -> Unit,
+    onOpenSettings: () -> Unit,
+) {
     var expanded by remember { mutableStateOf(false) }
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    TextButton(onClick = { expanded = true }) {
         Text(
-            "服务:",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            text = current?.displayName ?: "选择 AI",
+            style = MaterialTheme.typography.labelLarge,
         )
-        Spacer(Modifier.width(6.dp))
-        Box {
-            Row(
-                modifier = Modifier
-                    .clickable { expanded = true }
-                    .padding(end = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    "${settings.provider.displayName} (${settings.model})",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-                Text(
-                    " ▼",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
-            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                Provider.entries.forEach { p ->
-                    DropdownMenuItem(
-                        text = { Text("${p.displayName} — ${p.defaultModel}") },
-                        onClick = {
-                            expanded = false
-                            onProviderSelected(p)
-                        },
+        Text(" ▼", style = MaterialTheme.typography.labelLarge)
+    }
+    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+        providers.forEach { provider ->
+            val isActive = provider.id == current?.id
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        if (isActive) "✓ ${provider.displayName}" else "   ${provider.displayName}",
                     )
-                }
-            }
+                },
+                onClick = {
+                    expanded = false
+                    if (!isActive) onProviderSelected(provider)
+                },
+            )
         }
+        HorizontalDivider()
+        DropdownMenuItem(
+            text = { Text("设置...") },
+            onClick = {
+                expanded = false
+                onOpenSettings()
+            },
+        )
     }
 }
 

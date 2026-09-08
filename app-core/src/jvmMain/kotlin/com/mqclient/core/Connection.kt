@@ -1,8 +1,11 @@
 package com.mqclient.core
 
+import kotlinx.serialization.Serializable
+
 /**
  * Live state of a connection, as shown by the sidebar's status dot and label.
  */
+@Serializable
 enum class ConnectionStatus(val label: String) {
     Connected("已连接"),
     Connecting("连接中..."),
@@ -15,6 +18,7 @@ enum class ConnectionStatus(val label: String) {
  * ([serviceId] is a [BusinessService.id]), but several connections can share one
  * module — the sidebar lists connections, not modules.
  */
+@Serializable
 data class ConnectionInfo(
     val id: String,
     /** User-facing name, e.g. "生产环境". */
@@ -30,50 +34,18 @@ data class ConnectionInfo(
 }
 
 /**
- * In-memory connection list, standing in until real connection management
- * (create / edit / persist) lands. Counts are placeholder too: only a connected
- * endpoint can report how many objects of a type it holds.
+ * In-memory connection list backed by the encrypted `~/.mqclient/connections.json`.
+ *
+ * The list is loaded once at class-init time via [ConfigStore.loadConnections];
+ * if you need the UI to react to edits, refresh through
+ * [reloadFromDisk] (currently nothing in the app mutates this list, so the
+ * lazy lookup stays cheap).
  */
 object ConnectionStore {
-    val connections: List<ConnectionInfo> =
-        listOf(
-            ConnectionInfo(
-                id = "mq-01",
-                name = "生产环境",
-                serviceId = "rabbitmq",
-                mqName = "rabbit@mq-01",
-                host = "192.168.1.100",
-                port = 5672,
-                status = ConnectionStatus.Connected,
-            ),
-            ConnectionInfo(
-                id = "mq-02",
-                name = "预发布环境",
-                serviceId = "rabbitmq",
-                mqName = "rabbit@mq-02",
-                host = "192.168.1.102",
-                port = 5672,
-                status = ConnectionStatus.Failed,
-            ),
-            ConnectionInfo(
-                id = "mq-03",
-                name = "测试环境",
-                serviceId = "kafka",
-                mqName = "kafka@mq-03",
-                host = "192.168.1.103",
-                port = 5672,
-                status = ConnectionStatus.Connecting,
-            ),
-            ConnectionInfo(
-                id = "mq-04",
-                name = "本地开发",
-                serviceId = "ibm-mq",
-                mqName = "qm@mq-04",
-                host = "192.168.1.104",
-                port = 5672,
-                status = ConnectionStatus.Disconnected,
-            ),
-        )
+
+    /** Cached snapshot. Mutating this directly won't persist — go through [saveAll]. */
+    var connections: List<ConnectionInfo> = ConfigStore.loadConnections()
+        private set
 
     private val objectCounts: Map<String, Map<String, Int>> =
         mapOf(
@@ -83,4 +55,15 @@ object ConnectionStore {
     /** Number of objects of [objectType] behind [connectionId]; 0 when unknown. */
     fun countOf(connectionId: String, objectType: String): Int =
         objectCounts[connectionId]?.get(objectType) ?: 0
+
+    /** Re-reads the encrypted connections file. No-op if [ConfigStore] errors out. */
+    fun reloadFromDisk() {
+        connections = ConfigStore.loadConnections()
+    }
+
+    /** Encrypts and writes [list] to disk; updates the cached snapshot. */
+    fun saveAll(list: List<ConnectionInfo>) {
+        ConfigStore.saveConnections(list)
+        connections = list
+    }
 }

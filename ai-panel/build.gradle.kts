@@ -11,6 +11,7 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
+            implementation(projects.appCore)
             implementation(projects.uiCommon)
             implementation(libs.compose.runtime)
             implementation(libs.compose.foundation)

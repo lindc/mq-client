@@ -1,0 +1,3 @@
+com.mqclient.aipanel.providers.ClaudeProvider
+com.mqclient.aipanel.providers.OpenAiProvider
+com.mqclient.aipanel.providers.OllamaProvider

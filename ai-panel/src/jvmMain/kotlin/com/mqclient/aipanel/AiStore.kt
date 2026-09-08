@@ -8,11 +8,14 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 
 /**
- * Filesystem-backed persistence for the AI panel's settings and chat history.
+ * Filesystem-backed persistence for the AI panel's chat history.
  *
- * Both files live under `~/.config/mq-client/` and are created lazily on first
- * write. Missing or unreadable files fall back to defaults — the panel must
- * still come up if the user has never launched the app before.
+ * Settings (provider / model / URL / key / system prompt / history limit)
+ * live in the shared `~/.mqclient/config.json` managed by [com.mqclient.core.ConfigStore];
+ * only the chat history — which the other modules don't care about — stays here.
+ *
+ * File location: `~/.mqclient/ai-messages.json`. Missing or unparsable files
+ * fall back to an empty list so a corrupted log never crashes the panel.
  */
 object AiStore {
     private val json = Json {
@@ -21,28 +24,17 @@ object AiStore {
         encodeDefaults = true
     }
 
-    private val settingsFile: File by lazy { configDir().resolve("ai-settings.json").toFile() }
     private val messagesFile: File by lazy { configDir().resolve("ai-messages.json").toFile() }
 
-    fun loadSettings(): AiSettings =
-        try {
-            if (!settingsFile.exists()) AiSettings()
-            else json.decodeFromString(AiSettings.serializer(), settingsFile.readText(Charsets.UTF_8))
-        } catch (t: Throwable) {
-            System.err.println("[AiStore] failed to read settings (${settingsFile}): $t")
-            AiSettings()
-        }
-
-    fun saveSettings(settings: AiSettings) {
-        try {
-            settingsFile.parentFile.mkdirs()
-            settingsFile.writeText(json.encodeToString(AiSettings.serializer(), settings), Charsets.UTF_8)
-        } catch (t: Throwable) {
-            System.err.println("[AiStore] failed to write settings (${settingsFile}): $t")
-        }
+    /** Returns the persisted chat history, sliced to at most [limit] entries (most recent). */
+    fun loadMessages(limit: Int = Int.MAX_VALUE): List<AiMessage> {
+        val all = readAll()
+        if (limit >= all.size) return all
+        return all.takeLast(limit)
     }
 
-    fun loadMessages(): List<AiMessage> =
+    /** Returns the entire persisted chat history, unsliced. */
+    fun readAll(): List<AiMessage> =
         try {
             if (!messagesFile.exists()) emptyList()
             else json.decodeFromString(ListSerializer(AiMessage.serializer()), messagesFile.readText(Charsets.UTF_8))
@@ -53,7 +45,7 @@ object AiStore {
 
     fun saveMessages(messages: List<AiMessage>) {
         try {
-            messagesFile.parentFile.mkdirs()
+            messagesFile.parentFile?.mkdirs()
             messagesFile.writeText(
                 json.encodeToString(ListSerializer(AiMessage.serializer()), messages),
                 Charsets.UTF_8,
@@ -63,10 +55,9 @@ object AiStore {
         }
     }
 
-    /** Per-user config dir. ~ expansion isn't done by the JVM, so resolve relative to `user.home`. */
-    private fun configDir(): Path = Paths.get(System.getProperty("user.home"), ".config", "mq-client")
+    /** Per-user dir, under the shared `~/.mqclient/` root used by ConfigStore. */
+    private fun configDir(): Path = Paths.get(System.getProperty("user.home"), ".mqclient")
 
-    /** Used by tests / settings dialog reset button. */
     @Suppress("unused")
     fun configDirPath(): String = configDir().toString()
 

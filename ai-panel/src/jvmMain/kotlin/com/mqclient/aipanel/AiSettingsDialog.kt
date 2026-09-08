@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -33,9 +32,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import com.mqclient.core.AiConfig
+import com.mqclient.core.AiProvider
+import com.mqclient.core.AiProviderRegistry
+import com.mqclient.core.DEFAULT_SYSTEM_PROMPT
 import com.mqclient.uicommon.PressableButton
 
 /**
@@ -43,17 +49,34 @@ import com.mqclient.uicommon.PressableButton
  * panel state only updates with a deliberate commit. Reset only clears the
  * chat history — settings are left alone.
  *
- * Uses plain text glyphs (✕ ▼) instead of Material icons to avoid pulling
- * in the icons-extended artifact.
+ * The dialog binds to [AiConfig] (the shared config type from app-core).
+ * The system prompt field shows plaintext to the user but the storage form
+ * is Base64 — encoding/decoding happens here so the panel state never sees
+ * raw bytes.
  */
 @Composable
 fun AiSettingsDialog(
-    initial: AiSettings,
+    initial: AiConfig,
     onDismiss: () -> Unit,
-    onSave: (AiSettings) -> Unit,
+    onSave: (AiConfig) -> Unit,
     onClearHistory: () -> Unit,
 ) {
-    var draft by remember { mutableStateOf(initial) }
+    // Decoded view of the prompt, plus everything else straight from config.
+    var draftProviderId by remember { mutableStateOf(initial.providerId) }
+    var draftAccessKey by remember { mutableStateOf(initial.accessKey) }
+    var draftProviderUrl by remember { mutableStateOf(initial.providerUrl) }
+    var draftModel by remember { mutableStateOf(initial.model) }
+    var draftSystemPrompt by remember {
+        mutableStateOf(
+            try {
+                if (initial.systemPromptBase64.isBlank()) DEFAULT_SYSTEM_PROMPT
+                else String(java.util.Base64.getDecoder().decode(initial.systemPromptBase64), Charsets.UTF_8)
+            } catch (_: Throwable) {
+                DEFAULT_SYSTEM_PROMPT
+            },
+        )
+    }
+    var draftHistoryLimit by remember { mutableStateOf(initial.historyLimit.toString()) }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -83,17 +106,20 @@ fun AiSettingsDialog(
                 Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
                     FieldLabel("服务提供商")
                     ProviderDropdown(
-                        selected = draft.provider,
+                        selected = AiProviderRegistry.findById(draftProviderId)
+                            ?: AiProviderRegistry.all.firstOrNull(),
                         onSelected = { picked ->
-                            draft = draft.copy(provider = picked, model = picked.defaultModel, serverUrl = picked.defaultServerUrl)
+                            draftProviderId = picked.id
+                            draftModel = picked.defaultModel
+                            draftProviderUrl = picked.defaultServerUrl
                         },
                     )
                     Spacer(Modifier.height(12.dp))
 
-                    FieldLabel("API Key")
+                    FieldLabel("Access Key")
                     OutlinedTextField(
-                        value = draft.apiKey,
-                        onValueChange = { draft = draft.copy(apiKey = it) },
+                        value = draftAccessKey,
+                        onValueChange = { draftAccessKey = it },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
                         visualTransformation = PasswordVisualTransformation(),
@@ -103,8 +129,8 @@ fun AiSettingsDialog(
 
                     FieldLabel("服务端 URL")
                     OutlinedTextField(
-                        value = draft.serverUrl,
-                        onValueChange = { draft = draft.copy(serverUrl = it) },
+                        value = draftProviderUrl,
+                        onValueChange = { draftProviderUrl = it },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
                         placeholder = { Text("https://...") },
@@ -113,8 +139,8 @@ fun AiSettingsDialog(
 
                     FieldLabel("模型")
                     OutlinedTextField(
-                        value = draft.model,
-                        onValueChange = { draft = draft.copy(model = it) },
+                        value = draftModel,
+                        onValueChange = { draftModel = it },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
                     )
@@ -122,23 +148,27 @@ fun AiSettingsDialog(
 
                     FieldLabel("系统提示词")
                     OutlinedTextField(
-                        value = draft.systemPrompt,
-                        onValueChange = { draft = draft.copy(systemPrompt = it) },
+                        value = draftSystemPrompt,
+                        onValueChange = { draftSystemPrompt = it },
                         modifier = Modifier.fillMaxWidth().height(120.dp),
                         singleLine = false,
                     )
                     Spacer(Modifier.height(12.dp))
 
-                    FieldLabel("上下文附加")
-                    ContextToggle("自动附加当前连接信息", draft.attachConnection) {
-                        draft = draft.copy(attachConnection = it)
-                    }
-                    ContextToggle("自动附加当前对象类型", draft.attachObjectType) {
-                        draft = draft.copy(attachObjectType = it)
-                    }
-                    ContextToggle("自动附加当前消息内容", draft.attachMessages) {
-                        draft = draft.copy(attachMessages = it)
-                    }
+                    FieldLabel("历史记录条数")
+                    OutlinedTextField(
+                        value = draftHistoryLimit,
+                        onValueChange = { newValue ->
+                            // Accept digits only; clamp to a sane range on commit.
+                            if (newValue.all { it.isDigit() } && newValue.length <= 6) {
+                                draftHistoryLimit = newValue
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        placeholder = { Text("200") },
+                    )
                 }
 
                 Spacer(Modifier.height(16.dp))
@@ -156,7 +186,20 @@ fun AiSettingsDialog(
                             containerColor = MaterialTheme.colorScheme.surfaceVariant,
                             contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                         ) { Text("取消") }
-                        PressableButton(onClick = { onSave(draft) }) { Text("保存") }
+                        PressableButton(
+                            onClick = {
+                                onSave(
+                                    initial.copy(
+                                        providerId = draftProviderId,
+                                        accessKey = draftAccessKey,
+                                        providerUrl = draftProviderUrl,
+                                        model = draftModel,
+                                        systemPromptBase64 = AiPanelState.encodePrompt(draftSystemPrompt),
+                                        historyLimit = draftHistoryLimit.toIntOrNull()?.coerceIn(0, 999_999) ?: initial.historyLimit,
+                                    ),
+                                )
+                            },
+                        ) { Text("保存") }
                     }
                 }
             }
@@ -175,8 +218,9 @@ private fun FieldLabel(text: String) {
 }
 
 @Composable
-private fun ProviderDropdown(selected: Provider, onSelected: (Provider) -> Unit) {
+private fun ProviderDropdown(selected: AiProvider?, onSelected: (AiProvider) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
+    val current = selected ?: AiProviderRegistry.all.firstOrNull()
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -187,14 +231,14 @@ private fun ProviderDropdown(selected: Provider, onSelected: (Provider) -> Unit)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                "${selected.displayName} — ${selected.defaultModel}",
+                if (current != null) "${current.displayName} — ${current.defaultModel}" else "选择 AI",
                 modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.bodyMedium,
             )
             Text("▼", style = MaterialTheme.typography.bodyMedium)
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            Provider.entries.forEach { p ->
+            AiProviderRegistry.all.forEach { p ->
                 DropdownMenuItem(
                     text = { Text("${p.displayName} — ${p.defaultModel}") },
                     onClick = {
@@ -204,19 +248,5 @@ private fun ProviderDropdown(selected: Provider, onSelected: (Provider) -> Unit)
                 )
             }
         }
-    }
-}
-
-@Composable
-private fun ContextToggle(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onCheckedChange(!checked) }
-            .padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Checkbox(checked = checked, onCheckedChange = onCheckedChange)
-        Text(label, style = MaterialTheme.typography.bodyMedium)
     }
 }

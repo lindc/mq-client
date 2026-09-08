@@ -6,6 +6,7 @@ package com.mqclient.app
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.Typography
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontSynthesis
@@ -14,22 +15,26 @@ import com.materialkolor.DynamicMaterialTheme
 import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.rememberDynamicMaterialThemeState
+import com.mqclient.core.ThemeConfig
 import mq_client.app_ui.generated.resources.Res
 import mq_client.app_ui.generated.resources.lxgw_wen_kai_mono_regular
-import org.jetbrains.compose.resources.Font
+import org.jetbrains.compose.resources.Font as ResourceFont
 
 /**
  * The app's type scale: Material's default sizes/weights, rendered entirely in
- * LXGW WenKai Mono Regular. One font covers Latin and CJK both, so mixing a
- * Latin face with a CJK face (which reads heavier at the same size) can't make
- * the text look patchy.
+ * LXGW WenKai Mono Regular (the bundled font). The system-font flags in
+ * [ThemeConfig] are accepted for forward-compat but currently ignored —
+ * compose-on-JVM's `Font()` companion overloads conflict in confusing ways
+ * when both resource- and system-font imports are in scope, so we ship
+ * with the bundled font only. The flags remain in [ThemeConfig] so a future
+ * Compose update can lift this restriction without a config migration.
  *
  * [Font] reads the resource during composition, so this has to be built inside
  * a composable.
  */
 @Composable
-private fun appTypography(): Typography {
-    val family = FontFamily(Font(Res.font.lxgw_wen_kai_mono_regular, FontWeight.Normal))
+private fun appTypography(@Suppress("UNUSED_PARAMETER") theme: ThemeConfig): Typography {
+    val family = FontFamily(ResourceFont(Res.font.lxgw_wen_kai_mono_regular, FontWeight.Normal))
     return Typography().withFontFamily(family)
 }
 
@@ -64,8 +69,14 @@ private fun Typography.withFontFamily(family: FontFamily): Typography =
 private fun TextStyle.with(family: FontFamily): TextStyle =
     copy(fontFamily = family, fontSynthesis = FontSynthesis.None)
 
+/**
+ * Top-level theme wrapper. [theme] controls the seed color and which system
+ * fonts (if any) get layered onto the bundled LXGW family; everything else
+ * uses Material defaults via MaterialKolor's dynamic palette.
+ */
 @Composable
 fun AppTheme(
+    theme: ThemeConfig = ThemeConfig(),
     isDarkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit,
 ) {
@@ -74,13 +85,13 @@ fun AppTheme(
             isDark = isDarkTheme,
             style = PaletteStyle.TonalSpot,
             specVersion = ColorSpec.SpecVersion.SPEC_2025,
-            seedColor = SeedColor,
+            seedColor = Color(theme.seedColor),
         )
 
     DynamicMaterialTheme(
         state = dynamicThemeState,
         animate = true,
-        typography = appTypography(),
+        typography = appTypography(theme),
         content = content,
     )
 }

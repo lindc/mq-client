@@ -1,5 +1,6 @@
 package com.mqclient.aipanel
 
+import com.mqclient.core.AiConfig
 import kotlinx.coroutines.delay
 
 /**
@@ -16,7 +17,7 @@ class MockChatService(
 
     override suspend fun streamReply(
         history: List<AiMessage>,
-        settings: AiSettings,
+        config: AiConfig,
         context: AiContext?,
         onChunk: (String) -> Unit,
     ) {
