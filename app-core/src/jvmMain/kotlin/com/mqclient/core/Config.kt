@@ -43,7 +43,14 @@ enum class Language(val displayName: String) {
 data class ThemeConfig(
     /** Packed ARGB integer. */
     val seedColor: Long = DEFAULT_SEED_COLOR,
-    /** Stable id of the font to use; see [FONT_LXGW_WEN_KAI_MONO] etc. */
+    /**
+     * Font id persisted from the settings dialog: one of the FONT_* constants
+     * below for the built-ins, or a **system font family name** as reported by
+     * the OS (e.g. "Microsoft YaHei") once the font dropdown started listing
+     * installed fonts. Rendering does not consume this yet — the UI layer
+     * resolves ids to actual font faces when the message-bus rework lands;
+     * unknown/uninstalled values then fall back to the default.
+     */
     val fontFamily: String = FONT_LXGW_WEN_KAI_MONO,
     /** Base font size in px (rendered as sp at the typography layer). */
     val fontSize: Int = 14,
@@ -66,7 +73,12 @@ enum class ThemeMode {
 /** The default seed color; restored by the "恢复默认" button in settings. */
 const val DEFAULT_SEED_COLOR: Long = 0xFF68A500L
 
-/** Stable ids the settings dialog writes into [ThemeConfig.fontFamily]. */
+/**
+ * Stable ids the settings dialog writes into [ThemeConfig.fontFamily] for the
+ * four built-in choices (bundled font + the three generic system families).
+ * Anything else persisted in [ThemeConfig.fontFamily] is a system font family
+ * name coming from the system-font enumeration in the UI module.
+ */
 const val FONT_LXGW_WEN_KAI_MONO: String = "lxgw_wen_kai_mono"
 const val FONT_SYSTEM_SANS: String = "system_sans"
 const val FONT_SYSTEM_SERIF: String = "system_serif"
