@@ -3,15 +3,35 @@ package com.mqclient.core
 import kotlinx.serialization.Serializable
 
 /**
- * Root config persisted at `~/.mqclient/config.json`. Plaintext (no secrets
- * live here) — the secret-bearing piece, the list of MQ connections, lives
- * in `connections.json` encrypted with `secret.key`.
+ * Root config persisted at `~/.mqclient/config.json`.
+ *
+ * Single-file layout (since the ConfigManager migration): everything —
+ * including the connection list — lives in this one plaintext-JSON file.
+ * Sensitive string fields (marked with [Sensitive] and/or matching the
+ * sensitive-name keywords in [ConfigManager]) are stored encrypted, each
+ * value as `enc:v1:Base64(iv):Base64(ct+tag)` under the AES key from
+ * `~/.mqclient/secret.key`. Nothing else lives in the config dir anymore.
+ *
+ * Unknown keys in older/newer files are tolerated on read
+ * ([kotlinx.serialization.json.Json] ignoreUnknownKeys) and every field has
+ * a default, so a missing/partial file degrades gracefully.
  */
 @Serializable
 data class Config(
     val general: GeneralConfig = GeneralConfig(),
     val theme: ThemeConfig = ThemeConfig(),
     val ai: AiConfig = AiConfig(),
+    /** Saved MQ connections — one entry per middleware endpoint. */
+    val connections: List<ConnectionInfo> = emptyList(),
+    /** File-layout version info, for future format migrations. */
+    val metadata: ConfigMetadata = ConfigMetadata(),
+)
+
+/** Version / format bookkeeping stored in [Config.metadata]. */
+@Serializable
+data class ConfigMetadata(
+    /** Bump when the on-disk layout changes in a way readers must detect. */
+    val version: Int = 1,
 )
 
 /**
@@ -70,20 +90,6 @@ enum class ThemeMode {
     SYSTEM,
 }
 
-/** The default seed color; restored by the "恢复默认" button in settings. */
-const val DEFAULT_SEED_COLOR: Long = 0xFF68A500L
-
-/**
- * Stable ids the settings dialog writes into [ThemeConfig.fontFamily] for the
- * four built-in choices (bundled font + the three generic system families).
- * Anything else persisted in [ThemeConfig.fontFamily] is a system font family
- * name coming from the system-font enumeration in the UI module.
- */
-const val FONT_LXGW_WEN_KAI_MONO: String = "lxgw_wen_kai_mono"
-const val FONT_SYSTEM_SANS: String = "system_sans"
-const val FONT_SYSTEM_SERIF: String = "system_serif"
-const val FONT_SYSTEM_MONO: String = "system_mono"
-
 /**
  * User-tunable AI panel knobs.
  *
@@ -121,10 +127,60 @@ data class AiConfig(
 data class AiProviderConfig(
     val providerId: String,
     val providerUrl: String = "",
+    /** API key — encrypted at rest by ConfigManager (name-matched + [Sensitive]). */
+    @Sensitive
     val accessToken: String = "",
     val model: String = "",
     val systemPromptBase64: String = "",
 )
+
+/**
+ * One saved MQ connection. A connection always belongs to a middleware module
+ * ([serviceId] is a [ServiceAdapter.id]), but several connections can share one
+ * module — the sidebar lists connections, not modules.
+ *
+ * The concrete credential fields a middleware needs are decided by its own
+ * service module (per the single-file spec, connections live in config.json);
+ * any field a service adds whose name matches the sensitive keywords
+ * (password, apiKey, …) is encrypted automatically by [ConfigManager].
+ */
+@Serializable
+data class ConnectionInfo(
+    val id: String,
+    /** User-facing name, e.g. "生产环境". */
+    val name: String,
+    val serviceId: String,
+    /** Name of the MQ endpoint itself, e.g. "rabbit@mq-01". */
+    val mqName: String,
+    val host: String,
+    val port: Int,
+    val status: ConnectionStatus = ConnectionStatus.Disconnected,
+) {
+    val endpoint: String get() = "$host:$port"
+}
+
+/** Live state of a connection, as shown by the sidebar's status dot and label. */
+@Serializable
+enum class ConnectionStatus(val label: String) {
+    Connected("已连接"),
+    Connecting("连接中..."),
+    Failed("连接失败"),
+    Disconnected("未连接"),
+}
+
+/** The default seed color; restored by the "恢复默认" button in settings. */
+const val DEFAULT_SEED_COLOR: Long = 0xFF68A500L
+
+/**
+ * Stable ids the settings dialog writes into [ThemeConfig.fontFamily] for the
+ * four built-in choices (bundled font + the three generic system families).
+ * Anything else persisted in [ThemeConfig.fontFamily] is a system font family
+ * name coming from the system-font enumeration in the UI module.
+ */
+const val FONT_LXGW_WEN_KAI_MONO: String = "lxgw_wen_kai_mono"
+const val FONT_SYSTEM_SANS: String = "system_sans"
+const val FONT_SYSTEM_SERIF: String = "system_serif"
+const val FONT_SYSTEM_MONO: String = "system_mono"
 
 /** Default system prompt — bilingual is fine here since users only see it in the settings dialog. */
 const val DEFAULT_SYSTEM_PROMPT: String =
