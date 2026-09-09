@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.mqclient.core.AiProvider
+import com.mqclient.uicommon.i18n.stringResource
 
 /**
  * Header band: title + provider dropdown + close, plus a single info row
@@ -62,7 +63,7 @@ fun AiPanelHeader(
             Text("🤖", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.width(8.dp))
             Text(
-                "AI 助手",
+                stringResource("ai_panel_title"),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f),
@@ -96,7 +97,7 @@ private fun ProviderDropdownButton(
 ) {
     var expanded by remember { mutableStateOf(false) }
     val activeLabel = providers.firstOrNull { it.id == activeProviderId }?.displayName
-        ?: if (providers.isEmpty()) "无 AI 服务" else "选择 AI"
+        ?: if (providers.isEmpty()) stringResource("ai_provider_none") else stringResource("ai_provider_pick")
     TextButton(onClick = { expanded = true }) {
         Text(activeLabel, style = MaterialTheme.typography.labelLarge)
         Text(" ▼", style = MaterialTheme.typography.labelLarge)
@@ -121,7 +122,7 @@ private fun ProviderDropdownButton(
 private fun ContextRow(context: AiContext?) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
-            "上下文:",
+            stringResource("ai_context_label"),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -142,7 +143,7 @@ private fun ContextRow(context: AiContext?) {
             }
         } else {
             Text(
-                "未选中连接",
+                stringResource("ai_context_none"),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

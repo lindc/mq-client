@@ -29,6 +29,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import com.mqclient.core.GeneralConfig
 import com.mqclient.core.Language
+import com.mqclient.uicommon.i18n.stringResource
 
 /**
  * General settings tab — language and history-retention window.
@@ -43,21 +44,29 @@ internal fun GeneralSettingsPane(
     onChange: (GeneralConfig) -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
-        Text("通用", style = MaterialTheme.typography.titleMedium)
+        Text(stringResource("settings_tab_general"), style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(16.dp))
 
         LanguageRow(value.language) { onChange(value.copy(language = it)) }
         HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
 
         NumberRow(
-            label = "历史数据保留 [${value.historyRetentionDays}] 天（超出后自动清理）",
-            suffix = "天",
+            label = stringResource("history_retention_label") +
+                " [${value.historyRetentionDays}] " + stringResource("unit_days") +
+                " " + stringResource("history_retention_note"),
+            suffix = stringResource("unit_days"),
             value = value.historyRetentionDays,
             min = 7,
             max = 365,
             onChange = { onChange(value.copy(historyRetentionDays = it)) },
         )
     }
+}
+
+/** Enum → string key mapping, so the language labels follow the loaded language table. */
+private fun languageLabel(lang: Language): String = when (lang) {
+    Language.SIMPLIFIED_CHINESE -> stringResource("language_simplified_chinese")
+    Language.ENGLISH -> stringResource("language_english")
 }
 
 @Composable
@@ -68,7 +77,7 @@ private fun LanguageRow(
     var expanded by remember { mutableStateOf(false) }
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
-            text = "语言",
+            text = stringResource("settings_general_language"),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -86,7 +95,7 @@ private fun LanguageRow(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = current.displayName,
+                    text = languageLabel(current),
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.weight(1f),
                 )
@@ -101,7 +110,7 @@ private fun LanguageRow(
                     DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                         Language.entries.forEach { lang ->
                             DropdownMenuItem(
-                                text = { Text(lang.displayName) },
+                                text = { Text(languageLabel(lang)) },
                                 onClick = {
                                     expanded = false
                                     onChange(lang)
@@ -153,7 +162,7 @@ internal fun NumberRow(
             )
             Spacer(Modifier.width(8.dp))
             Text(
-                text = "$suffix (范围 $min-$max)",
+                text = "$suffix ${stringResource("common_range_format").format(min, max)}",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

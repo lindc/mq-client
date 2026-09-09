@@ -31,6 +31,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import com.mqclient.uicommon.i18n.stringResource
 
 /**
  * Bottom band: multi-line prompt + send button + a small context-attachment
@@ -76,7 +77,7 @@ fun AiInputArea(
                             false
                         }
                     },
-                placeholder = { Text("输入你的问题...") },
+                placeholder = { Text(stringResource("ai_input_placeholder")) },
                 enabled = !isStreaming,
                 singleLine = false,
                 maxLines = 4,
@@ -115,9 +116,9 @@ fun AiInputArea(
         Spacer(Modifier.height(4.dp))
         Text(
             text = if (context?.connectionName != null) {
-                "📎 上下文: 当前连接自动附加"
+                stringResource("ai_context_attached")
             } else {
-                "📎 未选中连接,不会附加上下文"
+                stringResource("ai_context_missing")
             },
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,

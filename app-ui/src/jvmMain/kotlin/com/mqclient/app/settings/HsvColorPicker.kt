@@ -14,6 +14,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import com.mqclient.uicommon.i18n.stringResource
 import kotlin.math.abs
 
 /**
@@ -45,15 +46,15 @@ internal fun HsvColorPicker(
     if (!expanded) return
 
     Column(modifier = Modifier.fillMaxWidth()) {
-        SliderRow("色相 (H)", h, 0f, 360f) {
+        SliderRow(stringResource("hsv_hue"), h, 0f, 360f) {
             h = it
             emit()
         }
-        SliderRow("饱和度 (S)", s, 0f, 1f) {
+        SliderRow(stringResource("hsv_saturation"), s, 0f, 1f) {
             s = it
             emit()
         }
-        SliderRow("明度 (V)", v, 0f, 1f) {
+        SliderRow(stringResource("hsv_value"), v, 0f, 1f) {
             v = it
             emit()
         }

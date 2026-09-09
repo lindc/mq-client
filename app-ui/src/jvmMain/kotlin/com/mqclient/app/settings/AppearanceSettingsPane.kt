@@ -44,15 +44,13 @@ import com.mqclient.core.FONT_SYSTEM_SERIF
 import com.mqclient.core.ThemeConfig
 import com.mqclient.core.ThemeMode
 import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.i18n.stringResource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import mq_client.app_ui.generated.resources.Res
 import mq_client.app_ui.generated.resources.lxgw_wen_kai_mono_regular
 import androidx.compose.ui.text.platform.Font as PlatformFont
 import org.jetbrains.compose.resources.Font as ResourceFont
-
-/** Display label of the bundled font — the only built-in entry, pinned first in the dropdown. */
-private const val LXGW_LABEL = "霞鹜文楷 Mono"
 
 /**
  * Display-only labels for font ids that older builds could persist into
@@ -67,11 +65,11 @@ private val LegacyFontLabels: Map<String, String> = mapOf(
     FONT_SYSTEM_MONO to "System Mono",
 )
 
-/** Display labels for [ThemeMode] in the dropdown. */
+/** String-table keys for [ThemeMode] options, resolved at render time. */
 private val ThemeModeChoices: List<Pair<ThemeMode, String>> = listOf(
-    ThemeMode.SYSTEM to "跟随系统",
-    ThemeMode.LIGHT to "浅色",
-    ThemeMode.DARK to "深色",
+    ThemeMode.SYSTEM to "theme_mode_system",
+    ThemeMode.LIGHT to "theme_mode_light",
+    ThemeMode.DARK to "theme_mode_dark",
 )
 
 /**
@@ -85,7 +83,7 @@ internal fun AppearanceSettingsPane(
     onChange: (ThemeConfig) -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
-        Text("外观", style = MaterialTheme.typography.titleMedium)
+        Text(stringResource("settings_tab_appearance"), style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(16.dp))
 
         ThemeModeRow(value.themeMode) { onChange(value.copy(themeMode = it)) }
@@ -102,8 +100,8 @@ internal fun AppearanceSettingsPane(
         Spacer(Modifier.height(20.dp))
 
         NumberRow(
-            label = "字号",
-            suffix = "px",
+            label = stringResource("font_size_label"),
+            suffix = stringResource("unit_px"),
             value = value.fontSize,
             min = 12,
             max = 18,
@@ -121,10 +119,11 @@ internal fun AppearanceSettingsPane(
 @Composable
 private fun ThemeModeRow(current: ThemeMode, onChange: (ThemeMode) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
-    val display = ThemeModeChoices.firstOrNull { it.first == current }?.second ?: current.name
+    val display = ThemeModeChoices.firstOrNull { it.first == current }?.second
+        ?.let(::stringResource) ?: current.name
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
-            text = "主题",
+            text = stringResource("theme_label"),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -145,9 +144,9 @@ private fun ThemeModeRow(current: ThemeMode, onChange: (ThemeMode) -> Unit) {
                 expanded = expanded,
                 onDismissRequest = { expanded = false },
             ) {
-                ThemeModeChoices.forEach { (mode, label) ->
+                ThemeModeChoices.forEach { (mode, key) ->
                     androidx.compose.material3.DropdownMenuItem(
-                        text = { Text(label) },
+                        text = { Text(stringResource(key)) },
                         onClick = {
                             expanded = false
                             onChange(mode)
@@ -185,7 +184,7 @@ private fun ColorSeedSection(
             .padding(12.dp),
     ) {
         Text(
-            text = "颜色种子",
+            text = stringResource("color_seed_label"),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -208,7 +207,8 @@ private fun ColorSeedSection(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = if (advancedExpanded) "▴ 收起更多颜色" else "▾ 更多颜色...",
+                text = (if (advancedExpanded) "▴ " else "▾ ") +
+                    stringResource(if (advancedExpanded) "color_less" else "color_more"),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary,
             )
@@ -252,7 +252,7 @@ private fun ColorSeedSection(
             )
             Spacer(Modifier.width(8.dp))
             Text(
-                text = "当前: ${formatHex(currentColor)}",
+                text = stringResource("color_current_prefix") + " ${formatHex(currentColor)}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.weight(1f),
@@ -261,7 +261,7 @@ private fun ColorSeedSection(
                 onClick = { onChange(Color(DEFAULT_SEED_COLOR)) },
                 containerColor = MaterialTheme.colorScheme.surfaceVariant,
                 contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-            ) { Text("恢复默认") }
+            ) { Text(stringResource("color_reset")) }
         }
     }
 }
@@ -278,7 +278,7 @@ private fun PresetPaletteGrid(
 ) {
     if (palette.isEmpty()) {
         Text(
-            text = "（色板配置未加载）",
+            text = stringResource("palette_not_loaded"),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -352,7 +352,7 @@ private fun FontRow(
 
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
-            text = "字体",
+            text = stringResource("font_label"),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -369,7 +369,7 @@ private fun FontRow(
             // name — a persisted system family is self-describing, and legacy
             // system_sans/serif/mono ids map to their old display labels.
             val display = when (current) {
-                FONT_LXGW_WEN_KAI_MONO -> LXGW_LABEL
+                FONT_LXGW_WEN_KAI_MONO -> stringResource("font_lxgw_label")
                 else -> LegacyFontLabels[current] ?: current
             }
             Text(
@@ -397,7 +397,7 @@ private fun FontRow(
                         .fillMaxWidth()
                         .padding(horizontal = 12.dp, vertical = 2.dp),
                     singleLine = true,
-                    placeholder = { Text("搜索字体…") },
+                    placeholder = { Text(stringResource("font_search_placeholder")) },
                 )
                 // 枚举完成前 filteredSystem 为空列表占位, 加载态由下方分支单独处理。
                 val shownSystem = filteredSystem ?: emptyList<FontEntry>()
@@ -416,7 +416,7 @@ private fun FontRow(
                     // while a search filter is active.
                     item(key = "lxgw_wen_kai_mono") {
                         FontDropDownItem(
-                            label = LXGW_LABEL,
+                            label = stringResource("font_lxgw_label"),
                             previewFamily = bundledFamily,
                             selected = current == FONT_LXGW_WEN_KAI_MONO,
                             onClick = {
@@ -428,11 +428,12 @@ private fun FontRow(
                     }
                     when {
                         systemEntries == null -> item(key = "loading") {
-                            FontDropDownItem(label = "正在枚举系统字体…", enabled = false) {}
+                            FontDropDownItem(label = stringResource("font_enum_in_progress"), enabled = false) {}
                         }
                         shownSystem.isEmpty() -> item(key = "empty") {
                             FontDropDownItem(
-                                label = if (searching) "没有匹配的字体" else "未发现系统字体",
+                                label = if (searching) stringResource("font_no_match")
+                                else stringResource("font_not_found"),
                                 enabled = false,
                             ) {}
                         }
@@ -513,7 +514,7 @@ private fun FontPreviewRow(fontSize: Int) {
     val family = FontFamily(ResourceFont(Res.font.lxgw_wen_kai_mono_regular, FontWeight.Normal))
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
-            text = "示例文字预览",
+            text = stringResource("font_preview_label"),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

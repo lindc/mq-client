@@ -53,9 +53,12 @@ import com.mqclient.aipanel.AiContext
 import com.mqclient.aipanel.rememberAiPanelState
 import com.mqclient.core.ConfigStore
 import com.mqclient.core.ConnectionStore
+import com.mqclient.core.Language
 import com.mqclient.core.ModuleRegistry
 import com.mqclient.core.ThemeMode
 import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.i18n.LanguageResources
+import com.mqclient.uicommon.i18n.stringResource
 import dev.nucleusframework.application.DecoratedWindow
 import dev.nucleusframework.application.nucleusApplication
 import dev.nucleusframework.core.runtime.Platform
@@ -93,16 +96,27 @@ import java.time.LocalTime
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
 
 /** Matches the title bar height `MacosDecoratedWindow` uses. */
 private val TitleBarHeight = 52.dp
+
+/** Maps the persisted [Language] enum to the string-table language code used as the resource file suffix. */
+private fun Language.toLanguageCode(): String = when (this) {
+    Language.ENGLISH -> LanguageResources.LANGUAGE_EN_US
+    Language.SIMPLIFIED_CHINESE -> LanguageResources.LANGUAGE_ZH_CN
+}
 
 fun main() = nucleusApplication {
     // Startup: make sure ~/.mqclient/secret.key exists and seed an empty
     // encrypted connections.json if there isn't one yet. Both are no-ops on
     // every subsequent launch.
     ConfigStore.initOnStartup()
-    var appConfig by remember { mutableStateOf(ConfigStore.loadConfig()) }
+    // i18n 基础设施: 启动即按 config.json 的 language 载入字符串表(zh-CN 缺省)。
+    // 这里只装载、不消费 —— 文案替换与语言切换的实时刷新等事件总线改造就绪后再接入。
+    val initialConfig = ConfigStore.loadConfig()
+    runBlocking { LanguageResources.load(initialConfig.general.language.toLanguageCode()) }
+    var appConfig by remember { mutableStateOf(initialConfig) }
 
     val closeApp: () -> Unit = ::exitApplication
     DecoratedWindow(onCloseRequest = closeApp, title = "MQ Client") {
@@ -232,8 +246,9 @@ fun main() = nucleusApplication {
                                 showSettings = false
                                 null
                             } else {
-                                "保存失败：无法写入 config.json" +
-                                    "（${failure.message ?: failure.javaClass.simpleName}）"
+                                stringResource("settings_save_failed").format(
+                                    failure.message ?: failure.javaClass.simpleName,
+                                )
                             }
                         },
                     )
@@ -274,9 +289,9 @@ private fun TitleBarPanel(
             )
         }
         VerticalDivider(modifier = Modifier.height(24.dp))
-        MenuBarItem("文件", fileMenuExpanded, { fileMenuExpanded = it }) {
+        MenuBarItem(stringResource("menu_file"), fileMenuExpanded, { fileMenuExpanded = it }) {
             DropdownMenuItem(
-                text = { Text("新建连接") },
+                text = { Text(stringResource("menu_new_connection")) },
                 // The menu only collapses through its expanded state; an item
                 // click does not dismiss it by itself.
                 onClick = {
@@ -285,28 +300,28 @@ private fun TitleBarPanel(
                 },
             )
             DropdownMenuItem(
-                text = { Text("设置") },
+                text = { Text(stringResource("menu_settings")) },
                 onClick = {
                     fileMenuExpanded = false
                     onShowSettings()
                 },
             )
             DropdownMenuItem(
-                text = { Text("AI 助手") },
+                text = { Text(stringResource("menu_ai_assistant")) },
                 onClick = {
                     fileMenuExpanded = false
                     onToggleAiPanel()
                 },
             )
             DropdownMenuItem(
-                text = { Text("关于") },
+                text = { Text(stringResource("menu_about")) },
                 onClick = {
                     fileMenuExpanded = false
                     onShowAbout()
                 },
             )
             DropdownMenuItem(
-                text = { Text("退出") },
+                text = { Text(stringResource("menu_exit")) },
                 onClick = {
                     fileMenuExpanded = false
                     onExit()
@@ -416,7 +431,7 @@ private fun AboutDialog(onDismiss: () -> Unit) {
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
-                                "关于 MQClient",
+                                stringResource("about_title"),
                                 style = MaterialTheme.typography.titleLarge,
                                 color = MaterialTheme.colorScheme.onPrimaryContainer,
                                 modifier = Modifier.weight(1f).padding(start = 8.dp),
@@ -441,7 +456,7 @@ private fun AboutDialog(onDismiss: () -> Unit) {
                         ) {
                             AnalogClock(Modifier.size(96.dp))
                             Spacer(Modifier.height(8.dp))
-                            Text("时钟", style = MaterialTheme.typography.labelMedium)
+                            Text(stringResource("titlebar_clock"), style = MaterialTheme.typography.labelMedium)
                         }
 
                         Spacer(Modifier.width(16.dp))
@@ -455,7 +470,7 @@ private fun AboutDialog(onDismiss: () -> Unit) {
                             ) {
                                 Image(
                                     painter = painterResource(Res.drawable.logo),
-                                    contentDescription = "MQClient 图标",
+                                    contentDescription = stringResource("about_logo_description"),
                                     modifier = Modifier.size(72.dp),
                                 )
                                 Spacer(Modifier.width(16.dp))
@@ -463,20 +478,20 @@ private fun AboutDialog(onDismiss: () -> Unit) {
                                     Text("MQClient", style = MaterialTheme.typography.headlineSmall)
                                     Spacer(Modifier.height(2.dp))
                                     Text(
-                                        "版本 1.0.0",
+                                        stringResource("about_version"),
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                     Spacer(Modifier.height(4.dp))
-                                    Text("一个跨平台的消息队列管理工具", style = MaterialTheme.typography.bodyMedium)
-                                    Text("支持 RabbitMQ、Kafka、IBM MQ 等多种中间件", style = MaterialTheme.typography.bodyMedium)
+                                    Text(stringResource("about_description_line1"), style = MaterialTheme.typography.bodyMedium)
+                                    Text(stringResource("about_description_line2"), style = MaterialTheme.typography.bodyMedium)
                                 }
                             }
                             Spacer(Modifier.height(12.dp))
                             HorizontalDivider()
                             Spacer(Modifier.height(12.dp))
 
-                            Text("支持的中间件", style = MaterialTheme.typography.titleSmall)
+                            Text(stringResource("about_supported_middleware"), style = MaterialTheme.typography.titleSmall)
                             Spacer(Modifier.height(8.dp))
                             // Bounded, scrollable area: the scrollbar only shows up
                             // when the list outgrows the max height (otherwise hidden).
@@ -530,12 +545,12 @@ private fun AboutDialog(onDismiss: () -> Unit) {
                                 PressableButton(
                                     onClick = { showLicense = true },
                                     modifier = Modifier.weight(1f),
-                                ) { Text("查看开源许可证") }
+                                ) { Text(stringResource("license_view")) }
                                 Spacer(Modifier.width(12.dp))
                                 PressableButton(
                                     onClick = onDismiss,
                                     modifier = Modifier.weight(1f),
-                                ) { Text("关闭") }
+                                ) { Text(stringResource("common_close")) }
                             }
                         }
                     }
@@ -591,8 +606,8 @@ private fun LicenseDialog(onDismiss: () -> Unit) {
     }
     AlertDialog(
         onDismissRequest = onDismiss,
-        confirmButton = { PressableButton(onClick = onDismiss) { Text("关闭") } },
-        title = { Text("开源许可证") },
+        confirmButton = { PressableButton(onClick = onDismiss) { Text(stringResource("common_close")) } },
+        title = { Text(stringResource("license_title")) },
         text = { LibraryList(components, Modifier.size(380.dp, 300.dp)) },
     )
 }
@@ -814,7 +829,7 @@ private fun NewConnectionDialog(onDismiss: () -> Unit) {
         confirmButton = {
             PressableButton(onClick = onDismiss) { Text("关闭") }
         },
-        title = { Text("新建连接") },
+        title = { Text(stringResource("menu_new_connection")) },
     )
 }
 

@@ -13,6 +13,16 @@ kotlin {
             implementation(libs.compose.runtime)
             implementation(libs.compose.foundation)
             implementation(compose.material3)
+            // Compose resources packaging (i18n JSON tables under
+            // composeResources/files/i18n/).
+            implementation(compose.components.resources)
+            // JSON parsing for LanguageResources (runtime only — no
+            // @Serializable classes, so no serialization compiler plugin).
+            implementation(libs.kotlinx.serialization.json)
+        }
+        // jvmTest: kotlin.test + JUnit4 runner for the i18n behaviour tests.
+        jvmTest.dependencies {
+            implementation(kotlin("test"))
         }
     }
 }

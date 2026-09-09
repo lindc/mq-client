@@ -35,13 +35,18 @@ import androidx.compose.ui.window.rememberDialogState
 import com.mqclient.core.Config
 import dev.nucleusframework.application.LocalNucleusWindow
 import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.i18n.stringResource
 import dev.nucleusframework.application.DecoratedDialog
 
 /** Tabs the side nav can select. Order matches visual order top → bottom. */
-internal enum class SettingsTab(val title: String, val tabName: String) {
-    GENERAL("\u2699\uFE0F \u901A\u7528", "\u901A\u7528"),
-    APPEARANCE("\uD83C\uDFA8 \u5916\u89C2", "\u5916\u89C2"),
-    AI("\uD83E\uDD16 AI", "AI"),
+internal enum class SettingsTab(val icon: String, val key: String) {
+    GENERAL("\u2699\uFE0F", "settings_tab_general"),
+    APPEARANCE("\uD83C\uDFA8", "settings_tab_appearance"),
+    AI("\uD83E\uDD16", "settings_tab_ai"),
+    ;
+
+    val title: String get() = "$icon ${stringResource(key)}"
+    val tabName: String get() = stringResource(key)
 }
 
 /**
@@ -73,7 +78,7 @@ fun SettingsDialog(
     DecoratedDialog(
         onCloseRequest = onDismiss,
         state = rememberDialogState(size = DpSize(760.dp, 600.dp)),
-        title = "\u8BBE\u7F6E",
+        title = stringResource("settings_title"),
         resizable = true,
     ) {
         // Keep the window usable: don't let it shrink below what the side rail
@@ -128,7 +133,7 @@ private fun HeaderBar(selectedTab: SettingsTab, onClose: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = "\u8BBE\u7F6E - ${selectedTab.tabName}",
+            text = "${stringResource("settings_title")} - ${selectedTab.tabName}",
             style = MaterialTheme.typography.titleLarge,
             modifier = Modifier.weight(1f),
         )
@@ -253,9 +258,9 @@ private fun FooterActions(
                 onClick = onCancel,
                 containerColor = MaterialTheme.colorScheme.surfaceVariant,
                 contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-            ) { Text("\u53D6\u6D88") }
+            ) { Text(stringResource("common_cancel")) }
             Spacer(Modifier.width(8.dp))
-            PressableButton(onClick = onSave) { Text("\u4FDD\u5B58") }
+            PressableButton(onClick = onSave) { Text(stringResource("common_save")) }
         }
     }
 }

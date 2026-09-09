@@ -34,6 +34,7 @@ import com.mqclient.core.AiConfig
 import com.mqclient.core.AiProvider
 import com.mqclient.core.AiProviderConfig
 import com.mqclient.core.AiProviderRegistry
+import com.mqclient.uicommon.i18n.stringResource
 import java.util.Base64
 
 /**
@@ -62,7 +63,7 @@ internal fun AiSettingsPane(
     }
 
     Column(modifier = Modifier.fillMaxWidth()) {
-        Text("AI", style = MaterialTheme.typography.titleMedium)
+        Text(stringResource("settings_tab_ai"), style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(16.dp))
 
         ActiveProviderRow(
@@ -73,8 +74,8 @@ internal fun AiSettingsPane(
         Spacer(Modifier.height(16.dp))
 
         NumberRow(
-            label = "历史记录条数",
-            suffix = "条",
+            label = stringResource("ai_history_limit_label"),
+            suffix = stringResource("unit_items"),
             value = value.historyLimit,
             min = 10,
             max = 500,
@@ -83,14 +84,14 @@ internal fun AiSettingsPane(
         Spacer(Modifier.height(12.dp))
 
         ToggleRow(
-            label = "附加上下文",
-            description = "自动附加当前连接/队列信息到提问",
+            label = stringResource("ai_attach_context"),
+            description = stringResource("ai_attach_context_desc"),
             checked = value.autoAttachContext,
             onCheckedChange = { onChange(value.copy(autoAttachContext = it)) },
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            text = "关闭后 AI 将不会感知当前选中的资源",
+            text = stringResource("ai_attach_off_note"),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(start = 4.dp),
@@ -108,7 +109,7 @@ internal fun AiSettingsPane(
             HorizontalDivider()
             Spacer(Modifier.height(16.dp))
             Text(
-                text = "当前服务配置: ${activeProvider.displayName}",
+                text = stringResource("ai_provider_card_prefix") + " ${activeProvider.displayName}",
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.primary,
             )
@@ -127,7 +128,7 @@ internal fun AiSettingsPane(
             HorizontalDivider()
             Spacer(Modifier.height(16.dp))
             Text(
-                text = "请先在上方选择一个 AI 服务。",
+                text = stringResource("ai_select_service_first"),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -136,7 +137,7 @@ internal fun AiSettingsPane(
             HorizontalDivider()
             Spacer(Modifier.height(16.dp))
             Text(
-                text = "未注册任何 AI 插件。",
+                text = stringResource("ai_no_providers"),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -155,13 +156,13 @@ private fun ActiveProviderRow(
     var expanded by remember { mutableStateOf(false) }
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
-            text = "默认 AI 服务",
+            text = stringResource("ai_default_service"),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(4.dp))
         val currentLabel = if (activeId.isBlank()) {
-            "(未选择)"
+            stringResource("ai_not_selected")
         } else {
             providers.firstOrNull { it.id == activeId }?.displayName ?: activeId
         }
@@ -266,7 +267,7 @@ private fun ProviderCard(
             .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
             .padding(12.dp),
     ) {
-        LabeledField("服务 URL") {
+        LabeledField(stringResource("ai_field_url")) {
             OutlinedTextField(
                 value = url,
                 onValueChange = {
@@ -280,7 +281,7 @@ private fun ProviderCard(
         }
         Spacer(Modifier.height(8.dp))
 
-        LabeledField("API Key") {
+        LabeledField(stringResource("ai_field_api_key")) {
             OutlinedTextField(
                 value = token,
                 onValueChange = {
@@ -311,7 +312,7 @@ private fun ProviderCard(
         }
         Spacer(Modifier.height(8.dp))
 
-        LabeledField("模型") {
+        LabeledField(stringResource("ai_field_model")) {
             ModelComboBox(
                 provider = provider,
                 model = model,
@@ -323,7 +324,7 @@ private fun ProviderCard(
         }
         Spacer(Modifier.height(8.dp))
 
-        LabeledField("系统提示词") {
+        LabeledField(stringResource("ai_field_system_prompt")) {
             OutlinedTextField(
                 value = prompt,
                 onValueChange = {
@@ -334,7 +335,7 @@ private fun ProviderCard(
                     .fillMaxWidth()
                     .height(96.dp),
                 singleLine = false,
-                placeholder = { Text("可选，用于设定 AI 的角色和行为") },
+                placeholder = { Text(stringResource("ai_system_prompt_placeholder")) },
             )
         }
     }
