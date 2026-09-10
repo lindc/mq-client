@@ -15,9 +15,9 @@ import java.nio.file.Paths
  *   - [loadConnections] / [saveConnections] — read / rewrite the
  *     `connections` section of the same single file.
  *
- * Failure semantics match the old implementation: reads swallow errors and
- * return safe defaults (logging to stderr); writes surface failures via
- * [Result] where the old API did.
+ * Failure semantics: reads swallow errors and return safe defaults (logging to
+ * stderr); **both writes** ([saveConfig] / [saveConnections]) surface failures
+ * via [Result], so no caller has to guess whether an edit landed on disk.
  */
 object ConfigStore {
 
@@ -70,15 +70,13 @@ object ConfigStore {
      * Replaces the `connections` section and rewrites config.json, preserving
      * every other section as it currently sits on disk.
      */
-    fun saveConnections(connections: List<ConnectionInfo>) {
+    fun saveConnections(connections: List<ConnectionInfo>): Result<Unit> {
         // 读-改-写：配置读不出来时 [loadConfig] 会静默给出默认值，拿它写回会
-        // 抹掉配置里的其它段，所以这里必须走 loadConfigOrNull 并在 null 时放弃。
+        // 抹掉配置里的其它段，所以这里必须走 [loadConfigOrNull]，读不出来就
+        // 直接以失败返回 —— 不写、也不假装成功。
         val current = loadConfigOrNull()
-        if (current == null) {
-            System.err.println("[ConfigStore] refused to write connections: config.json unreadable")
-            return
-        }
-        saveConfig(current.copy(connections = connections))
+            ?: return Result.failure(IllegalStateException("config.json is unreadable; connections were not written"))
+        return saveConfig(current.copy(connections = connections))
     }
 
     /**

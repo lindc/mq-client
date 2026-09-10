@@ -73,8 +73,9 @@ class ConfigManagerTest {
         writeRaw("this is not json")
         val corrupted = readRaw()
 
-        ConfigStore.saveConnections(listOf(connection("mq-02", "second")))
+        val result = ConfigStore.saveConnections(listOf(connection("mq-02", "second")))
 
+        assertTrue(result.isFailure, "配置读不出来时必须以失败返回，而不是假装成功")
         assertEquals(corrupted, readRaw(), "连接列表写不进去可以接受，把其它配置段抹掉不行")
     }
 

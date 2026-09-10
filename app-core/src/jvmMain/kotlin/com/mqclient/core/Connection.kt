@@ -38,9 +38,17 @@ object ConnectionStore {
         _connections.value = ConfigStore.loadConnections()
     }
 
-    /** Persists [list] into config.json and publishes the new snapshot. */
-    fun saveAll(list: List<ConnectionInfo>) {
-        ConfigStore.saveConnections(list)
-        _connections.value = list
+    /**
+     * Persists [list] into config.json and — only if that write succeeded —
+     * publishes the new snapshot.
+     *
+     * 快照必须等落盘成功再换：否则界面会显示一份磁盘上没有的连接列表，下次启动
+     * 又变回去。失败通过 [Result] 交给调用方决定是提示还是忽略（设置对话框已经
+     * 能消费这个结果）。
+     */
+    fun saveAll(list: List<ConnectionInfo>): Result<Unit> {
+        val result = ConfigStore.saveConnections(list)
+        if (result.isSuccess) _connections.value = list
+        return result
     }
 }
