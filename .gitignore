@@ -30,3 +30,11 @@ local.properties
 
 # Kotlin / Compose Multiplatform
 .kotlin/
+
+# Windows 上 `echo x > nul;` 这类命令的误产物（内容是本机路径），别入库
+nul;
+
+# 素材库：字体 / Logo 全量素材，代码零引用（真正打包的是 app-ui 的 composeResources）。
+# 必须用 /resources/ 锚定仓库根：不加前导斜杠会连各模块的 src/jvmMain/resources/
+# （SPI 的 META-INF/services 就在那里）一起忽略掉。
+/resources/

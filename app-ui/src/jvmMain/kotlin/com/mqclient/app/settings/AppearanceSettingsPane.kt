@@ -21,6 +21,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -29,6 +30,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -221,16 +223,23 @@ private fun ColorSeedSection(
                 onChange = onChange,
             )
             Spacer(Modifier.height(8.dp))
-            // Hex input — typed escape hatch. Any valid hex resets the HSV
-            // sliders (via re-emit through onChange).
-            var hexText by remember(current) { mutableStateOf(formatHex(currentColor)) }
+            // Hex input — typed escape hatch. 输入期间 text 是唯一真相：合法前缀一出现
+            // 就会被重置成 8 位规范形式，正在敲的字符会被冲掉（parseHex 只认 6 / 8 位）。
+            var hexText by remember { mutableStateOf(formatHex(currentColor)) }
+            var hexFocus by remember { mutableStateOf(false) }
+            LaunchedEffect(current, hexFocus) {
+                if (!hexFocus) hexText = formatHex(currentColor)
+            }
             OutlinedTextField(
                 value = hexText,
                 onValueChange = { input ->
                     hexText = input
+                    // 合法 hex 仍然实时回写（HSV 滑杆跟着动），但不再回灌到文本框。
                     parseHex(input)?.let(onChange)
                 },
-                modifier = Modifier.width(220.dp),
+                modifier = Modifier
+                    .width(220.dp)
+                    .onFocusChanged { hexFocus = it.isFocused },
                 singleLine = true,
                 placeholder = { Text("#FF68A500") },
                 label = { Text("Hex") },

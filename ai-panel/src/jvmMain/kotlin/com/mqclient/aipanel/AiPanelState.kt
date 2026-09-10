@@ -1,6 +1,7 @@
 package com.mqclient.aipanel
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -13,6 +14,7 @@ import com.mqclient.core.AiProviderRegistry
 import com.mqclient.core.ConfigStore
 import com.mqclient.core.DEFAULT_SYSTEM_PROMPT
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
@@ -39,6 +41,10 @@ class AiPanelState internal constructor(
 
     /** Id of the assistant message currently being streamed, or null. */
     var streamingMessageId: String? by mutableStateOf(null)
+        private set
+
+    /** 上一次失败的说明（请求异常等）；界面提示条读取后调 [dismissError]。 */
+    var panelError: String? by mutableStateOf(null)
         private set
 
     val isStreaming: Boolean get() = streamingMessageId != null
@@ -70,6 +76,19 @@ class AiPanelState internal constructor(
         val next = transform(config)
         config = next
         ConfigStore.saveConfig(ConfigStore.loadConfig().copy(ai = next))
+    }
+
+    /**
+     * 外部（设置对话框）传来的新配置：只同步内存值，**不落盘** —— 盘上已经是新值了
+     * （那条路径自己写过 config.json）。
+     */
+    fun applyConfig(config: AiConfig) {
+        this.config = config
+    }
+
+    /** 关闭失败提示条。 */
+    fun dismissError() {
+        panelError = null
     }
 
     /**
@@ -107,6 +126,18 @@ class AiPanelState internal constructor(
                 chat.streamReply(historyForCall, config, context) { chunk ->
                     appendToMessage(assistantMsg.id, chunk)
                 }
+            } catch (cancellation: CancellationException) {
+                // 取消不是失败，必须原样抛出（吞掉会让 scope 的取消失效）。
+                throw cancellation
+            } catch (error: Throwable) {
+                // 失败必须看得见：否则界面上只剩一个永远“…”的空气泡。未捕获异常逃出
+                // 这里会直接把 scope 的 Job 弄失败，整个面板之后 launch 全部被取消。
+                // 刻意不写进 messages —— 那会被 AiStore 落盘、下一轮还会当 history 发给模型。
+                panelError = error.message ?: error.javaClass.simpleName
+                if (messages.lastOrNull { it.id == assistantMsg.id }?.content.isNullOrEmpty()) {
+                    // 一个字都没流出来：撤掉空气泡，提示条已经说明了原因。
+                    messages = messages.filterNot { it.id == assistantMsg.id }
+                }
             } finally {
                 streamingMessageId = null
                 AiStore.saveMessages(messages)
@@ -114,12 +145,16 @@ class AiPanelState internal constructor(
         }
     }
 
-    /** Records 👍/👎 feedback on an assistant bubble. In-memory only — not persisted yet. */
-    fun recordFeedback(messageId: String, useful: Boolean) {
+    /**
+     * 记录 👍/👎 评价；[useful] 为 null 表示撤销评价。评价挂在消息上，随
+     * [AiStore.saveMessages] 一起落盘。
+     */
+    fun recordFeedback(messageId: String, useful: Boolean?) {
         val idx = messages.indexOfLast { it.id == messageId }
         if (idx < 0) return
         val current = messages[idx]
-        messages = messages.toMutableList().also { it[idx] = current.copy() }
+        if (current.feedback == useful) return
+        messages = messages.toMutableList().also { it[idx] = current.copy(feedback = useful) }
     }
 
     /** Drops every message and clears the on-disk log. */
@@ -172,7 +207,10 @@ class AiPanelState internal constructor(
 @Composable
 fun rememberAiPanelState(initialConfig: AiConfig = ConfigStore.loadConfig().ai): AiPanelState {
     val scope = rememberCoroutineScope()
-    val state = remember(initialConfig) {
+    // 刻意不给 remember 带 key：带上 initialConfig 会在每次保存设置时重建 state ——
+    // 正在流式的回复被遗弃在旧对象上（新 state 的 streamingMessageId 为空，界面看上去
+    // 停止了、用户还能再点发送 → 两个流并发），聊天记录也会被重新读盘覆盖。
+    val state = remember {
         AiPanelState(
             initialConfig = initialConfig,
             initialMessages = AiStore.loadMessages(initialConfig.historyLimit),
@@ -180,5 +218,7 @@ fun rememberAiPanelState(initialConfig: AiConfig = ConfigStore.loadConfig().ai):
             scope = scope,
         )
     }
+    // 设置保存后把新配置同步进来（只赋值，不再写盘）。
+    LaunchedEffect(initialConfig) { state.applyConfig(initialConfig) }
     return state
 }

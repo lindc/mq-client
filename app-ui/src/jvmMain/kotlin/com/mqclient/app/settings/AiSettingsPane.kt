@@ -236,12 +236,15 @@ private fun ProviderCard(
     override: AiProviderConfig?,
     onChange: (AiProviderConfig) -> Unit,
 ) {
-    var url by remember(override) { mutableStateOf(override?.providerUrl ?: "") }
-    var token by remember(override) { mutableStateOf(override?.accessToken ?: "") }
-    var model by remember(override) {
+    // 键用 provider.id，不用 override：flush() 每敲一个键就会回写一个新 override，
+    // 拿 override 当键等于每键重建输入状态（IME 合成被打断、model 字段清不空）。
+    // 切 provider 时 id 变 → 自然重建；同一张卡内不再被外部值冲掉。
+    var url by remember(provider.id) { mutableStateOf(override?.providerUrl ?: "") }
+    var token by remember(provider.id) { mutableStateOf(override?.accessToken ?: "") }
+    var model by remember(provider.id) {
         mutableStateOf(override?.model?.takeIf { it.isNotBlank() } ?: provider.defaultModel)
     }
-    var prompt by remember(override) {
+    var prompt by remember(provider.id) {
         mutableStateOf(decodePrompt(override?.systemPromptBase64))
     }
     // API key is masked by default; the eye toggle reveals it for pasting

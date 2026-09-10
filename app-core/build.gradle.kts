@@ -14,6 +14,9 @@ kotlin {
         commonMain.dependencies {
             // Only the Compose runtime is needed for the @Composable contract.
             implementation(libs.compose.runtime)
+            // 事件总线 (core/event/EventBus.kt) 的公开签名里有 CoroutineScope / Job /
+            // SharedFlow, 必须 api 暴露, 否则 app-ui 与各业务模块看不到这些类型。
+            api(libs.kotlinx.coroutines.core)
             // Serialization for Config + ConnectionInfo (persisted as JSON).
             implementation(libs.kotlinx.serialization.json)
             // okio for ConfigManager's file reads / atomic writes.
@@ -27,6 +30,9 @@ kotlin {
         jvmMain.dependencies {
             // JDBC SQLite driver (JdbcSqliteDriver) — desktop only.
             implementation(libs.sqldelight.sqlite.driver)
+        }
+        jvmTest.dependencies {
+            implementation(kotlin("test"))
         }
     }
 }

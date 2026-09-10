@@ -42,7 +42,7 @@ import androidx.compose.ui.unit.sp
 import com.mqclient.aipanel.AiContext
 import com.mqclient.aipanel.AiPanel
 import com.mqclient.aipanel.AiPanelState
-import com.mqclient.core.ConnectionStore
+import com.mqclient.core.ConnectionInfo
 import com.mqclient.core.ModuleRegistry
 
 /**
@@ -63,6 +63,7 @@ private val TabMaxWidth = 180.dp
 @Composable
 fun MainWindow(
     isNavigationVisible: Boolean,
+    connections: List<ConnectionInfo>,
     selection: NavSelection?,
     onSelect: (NavSelection) -> Unit,
     aiPanelVisible: Boolean,
@@ -70,7 +71,8 @@ fun MainWindow(
     aiContext: AiContext?,
     onDismissAiPanel: () -> Unit,
 ) {
-    val connections = remember { ConnectionStore.connections }
+    // 连接列表由调用方（Main.kt 里 collectAsState 一次）传进来 —— 这里原来是
+    // `remember { ConnectionStore.connections }`，会把快照 remember 死，连接变化永远看不到。
     val uiByService = remember { ModuleRegistry.uis.associateBy { it.serviceId } }
 
     // Level-2 rows (queue/listener/topic) each get their own closable tab;

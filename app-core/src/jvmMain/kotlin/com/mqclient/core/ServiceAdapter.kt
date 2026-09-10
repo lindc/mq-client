@@ -1,5 +1,7 @@
 package com.mqclient.core
 
+import com.mqclient.core.spi.ServiceContext
+
 /**
  * Pure (non-UI) descriptor of a business module, discovered automatically via
  * Java SPI ([java.util.ServiceLoader]). Each `*-service` module provides one
@@ -21,4 +23,12 @@ interface ServiceAdapter {
      * without the UI needing to know about individual service modules.
      */
     val protocol: String
+
+    /**
+     * 模块初始化钩子：由 [ModuleRegistry.initializeServices] 在启动时调用，模块在这里
+     * 注册自己的事件订阅（见 [ServiceContext]）。
+     *
+     * 默认空实现 —— 纯描述性的模块什么都不用写，新增模块也不需要修改启动代码。
+     */
+    fun initialize(context: ServiceContext) {}
 }

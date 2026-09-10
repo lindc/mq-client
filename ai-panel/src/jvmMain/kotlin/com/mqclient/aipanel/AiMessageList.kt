@@ -25,7 +25,7 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun AiMessageList(
     messages: List<AiMessage>,
-    onFeedback: (messageId: String, useful: Boolean) -> Unit,
+    onFeedback: (messageId: String, useful: Boolean?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scrollState = rememberScrollState()

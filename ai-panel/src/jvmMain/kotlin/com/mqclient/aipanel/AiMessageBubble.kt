@@ -17,10 +17,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,7 +36,7 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun AiMessageBubble(
     message: AiMessage,
-    onFeedback: (Boolean) -> Unit,
+    onFeedback: (Boolean?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val isUser = message.role == Role.USER
@@ -72,6 +68,7 @@ fun AiMessageBubble(
             Spacer(Modifier.height(4.dp))
             BubbleActions(
                 content = message.content,
+                feedback = message.feedback,
                 onFeedback = onFeedback,
             )
         }
@@ -79,9 +76,14 @@ fun AiMessageBubble(
 }
 
 @Composable
-private fun BubbleActions(content: String, onFeedback: (Boolean) -> Unit) {
+private fun BubbleActions(
+    content: String,
+    feedback: Boolean?,
+    onFeedback: (Boolean?) -> Unit,
+) {
     val clipboard = LocalClipboardManager.current
-    var useful by remember { mutableStateOf<Boolean?>(null) }
+    // 评价状态以 message.feedback 为准（不是本气泡的局部状态）：这样列表回收 /
+    // 流式追加导致气泡重建时，👍/👎 的高亮不会丢。
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -95,32 +97,26 @@ private fun BubbleActions(content: String, onFeedback: (Boolean) -> Unit) {
             Text("复制", style = MaterialTheme.typography.labelSmall)
         }
         TextButton(
-            onClick = {
-                useful = if (useful == true) null else true
-                onFeedback(useful == true)
-            },
+            onClick = { onFeedback(if (feedback == true) null else true) },
             contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
         ) {
             Text(
                 "👍",
                 style = MaterialTheme.typography.labelSmall,
-                color = if (useful == true) MaterialTheme.colorScheme.primary
+                color = if (feedback == true) MaterialTheme.colorScheme.primary
                     else MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.width(4.dp))
             Text("有用", style = MaterialTheme.typography.labelSmall)
         }
         TextButton(
-            onClick = {
-                useful = if (useful == false) null else false
-                onFeedback(useful == true)
-            },
+            onClick = { onFeedback(if (feedback == false) null else false) },
             contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
         ) {
             Text(
                 "👎",
                 style = MaterialTheme.typography.labelSmall,
-                color = if (useful == false) MaterialTheme.colorScheme.error
+                color = if (feedback == false) MaterialTheme.colorScheme.error
                     else MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.width(4.dp))

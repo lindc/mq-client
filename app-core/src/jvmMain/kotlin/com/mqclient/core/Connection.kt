@@ -1,19 +1,28 @@
 package com.mqclient.core
 
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+
 /**
  * In-memory connection list backed by the `connections` section of the
  * single `~/.mqclient/config.json` (see [ConfigManager]).
  *
- * The list is loaded once at class-init time via [ConfigStore.loadConnections];
- * if you need the UI to react to edits, refresh through
- * [reloadFromDisk] (currently nothing in the app mutates this list, so the
- * lazy lookup stays cheap).
+ * The list is loaded once at init time via [ConfigStore.loadConnections] and then
+ * kept as **observable state**: [connections] is a [StateFlow], so the UI
+ * (`collectAsState()`) re-renders on [saveAll] / [reloadFromDisk] without anyone
+ * having to remember to refresh. Core deliberately exposes coroutines' StateFlow
+ * instead of Compose's State — app-core stays free of the UI framework.
+ *
+ * 与事件总线的分工：`core.connection.added/deleted` 是「发生了什么」（事件），
+ * 这里是「现在有哪些」（状态），订阅方收到事件后再决定要不要落盘。
  */
 object ConnectionStore {
 
-    /** Cached snapshot. Mutating this directly won't persist — go through [saveAll]. */
-    var connections: List<ConnectionInfo> = ConfigStore.loadConnections()
-        private set
+    private val _connections = MutableStateFlow(ConfigStore.loadConnections())
+
+    /** 可观测快照；UI 用 `collectAsState()` 订阅。直接改它无效 —— 走 [saveAll]。 */
+    val connections: StateFlow<List<ConnectionInfo>> = _connections.asStateFlow()
 
     private val objectCounts: Map<String, Map<String, Int>> =
         mapOf(
@@ -26,12 +35,12 @@ object ConnectionStore {
 
     /** Re-reads the connections section from disk. No-op if [ConfigStore] errors out. */
     fun reloadFromDisk() {
-        connections = ConfigStore.loadConnections()
+        _connections.value = ConfigStore.loadConnections()
     }
 
-    /** Persists [list] into config.json and updates the cached snapshot. */
+    /** Persists [list] into config.json and publishes the new snapshot. */
     fun saveAll(list: List<ConnectionInfo>) {
         ConfigStore.saveConnections(list)
-        connections = list
+        _connections.value = list
     }
 }

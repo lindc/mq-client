@@ -28,6 +28,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -51,11 +52,14 @@ import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import com.mqclient.aipanel.AiContext
 import com.mqclient.aipanel.rememberAiPanelState
+import com.mqclient.core.Config
 import com.mqclient.core.ConfigStore
 import com.mqclient.core.ConnectionStore
+import com.mqclient.core.CoreModule
 import com.mqclient.core.Language
 import com.mqclient.core.ModuleRegistry
 import com.mqclient.core.ThemeMode
+import com.mqclient.core.event.EventNames
 import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.i18n.LanguageResources
 import com.mqclient.uicommon.i18n.stringResource
@@ -95,7 +99,12 @@ import androidx.compose.ui.window.Dialog
 import java.time.LocalTime
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 
 /** Matches the title bar height `MacosDecoratedWindow` uses. */
@@ -107,18 +116,48 @@ private fun Language.toLanguageCode(): String = when (this) {
     Language.SIMPLIFIED_CHINESE -> LanguageResources.LANGUAGE_ZH_CN
 }
 
-fun main() = nucleusApplication {
-    // Startup: make sure ~/.mqclient/secret.key exists and seed an empty
-    // encrypted connections.json if there isn't one yet. Both are no-ops on
-    // every subsequent launch.
+fun main() {
+    // 启动准备放在窗口创建之前：这里的同步 IO（生成密钥 / 读配置 / 载字符串表）
+    // 不该进组合体 —— 组合发生在窗口创建之后、首帧之前（会卡首帧），而且组合体
+    // 不保证只执行一次（重组会重跑），更不该顺手在里面做文件 IO。
     ConfigStore.initOnStartup()
-    // i18n 基础设施: 启动即按 config.json 的 language 载入字符串表(zh-CN 缺省)。
-    // 这里只装载、不消费 —— 文案替换与语言切换的实时刷新等事件总线改造就绪后再接入。
-    val initialConfig = ConfigStore.loadConfig()
-    runBlocking { LanguageResources.load(initialConfig.general.language.toLanguageCode()) }
-    var appConfig by remember { mutableStateOf(initialConfig) }
+    val bootConfig = ConfigStore.loadConfig()
+    runBlocking { LanguageResources.load(bootConfig.general.language.toLanguageCode()) }
 
-    val closeApp: () -> Unit = ::exitApplication
+    nucleusApplication { AppRoot(bootConfig, onExit = { exitApplication() }) }
+}
+
+/**
+ * 窗口内容的根节点。走到这里说明窗口已经建好、正要出首帧，
+ * 所以启动 IO 已经在 [main] 里做完了。
+ *
+ * [onExit] 由调用方传入（`ApplicationScope.exitApplication()` 是接收者函数，
+ * 抽到普通 @Composable 里就取不到了）。
+ */
+@Composable
+private fun AppRoot(bootConfig: Config, onExit: () -> Unit) {
+    // 事件总线接线：只在首次组合时跑一次（@Composable lambda 会随重组重复执行）。
+    remember { bootstrapEvents() }
+    // 语言热切换：设置保存时 Main 会广播 core.language.changed，这里重载字符串表。
+    // LanguageResources 换表时会 bump 内部的 Compose state，所以所有
+    // stringResource() 读取方（整棵界面树）自动重组，不需要让全树换 key。
+    LaunchedEffect(Unit) {
+        CoreModule.eventBus.on(EventNames.LANGUAGE_CHANGED, this) { event ->
+            val language = event.payload["language"] as? Language ?: return@on
+            LanguageResources.load(language.toLanguageCode())
+        }
+    }
+    var appConfig by remember { mutableStateOf(bootConfig) }
+    // 连接列表只在这一处 collect（原来 Main.kt 读三次、MainWindow 还 remember 死了一次），
+    // 往下按参数传，谁都不再隐式读全局快照。
+    val connections by ConnectionStore.connections.collectAsState()
+
+    // 关窗即退出：先收掉所有事件订阅与模块 scope（应用 scope 由 CoreModule 持有），
+    // 再结束进程。
+    val closeApp: () -> Unit = {
+        CoreModule.shutdown()
+        onExit()
+    }
     DecoratedWindow(onCloseRequest = closeApp, title = "MQ Client") {
         // Resolve dark/light once at the top so the window-chrome theme
         // (NucleusDecoratedWindowTheme) and the content theme (AppTheme)
@@ -136,7 +175,7 @@ fun main() = nucleusApplication {
                 // The title bar's breadcrumb and the sidebar both read this, so
                 // the selection lives above MainWindow.
                 var selection by remember {
-                    mutableStateOf(ConnectionStore.connections.firstOrNull()?.let { NavSelection(it.id) })
+                    mutableStateOf(connections.firstOrNull()?.let { NavSelection(it.id) })
                 }
                 // Colour the native window's own background: the Tao backend
                 // otherwise keeps its dark default (0xFF2B2B2B) and the frame
@@ -157,7 +196,7 @@ fun main() = nucleusApplication {
                 // AI panel expects, so the panel doesn't need to know about
                 // NavSelection / ConnectionStore.
                 val aiContext: AiContext? = selection?.let { sel ->
-                    val conn = ConnectionStore.connections.firstOrNull { it.id == sel.connectionId }
+                    val conn = connections.firstOrNull { it.id == sel.connectionId }
                     AiContext(
                         connectionName = conn?.name ?: sel.connectionId,
                         serviceId = conn?.serviceId,
@@ -185,7 +224,7 @@ fun main() = nucleusApplication {
                                 breadcrumb =
                                     selection?.let { sel ->
                                         val name =
-                                            ConnectionStore.connections
+                                            connections
                                                 .firstOrNull { it.id == sel.connectionId }
                                                 ?.name ?: sel.connectionId
                                         listOfNotNull(name, sel.objectType)
@@ -195,7 +234,7 @@ fun main() = nucleusApplication {
                                 onShowSettings = { showSettings = true },
                                 onShowAbout = { showAbout = true },
                                 onToggleAiPanel = { aiPanelVisible = !aiPanelVisible },
-                                onExit = { exitApplication() },
+                                onExit = closeApp,
                             )
                             WindowControlButtons(
                                 isActive = state.isActive,
@@ -216,6 +255,7 @@ fun main() = nucleusApplication {
                 ) { _ ->
                     MainWindow(
                         isNavigationVisible = navigationVisible,
+                        connections = connections,
                         selection = selection,
                         onSelect = { selection = it },
                         aiPanelVisible = aiPanelVisible,
@@ -242,8 +282,21 @@ fun main() = nucleusApplication {
                                 // Only adopt the draft once it's on disk:
                                 // otherwise the UI would show settings the
                                 // next launch won't have.
+                                val previous = appConfig
                                 appConfig = newConfig
                                 showSettings = false
+                                // 广播设置变更（核心事件）：主题 / i18n / 需要重载配置的模块
+                                // 自己订阅就行，设置对话框不需要认识这些消费者。
+                                CoreModule.eventBus.emit(
+                                    name = EventNames.SETTINGS_CHANGED,
+                                    payload = mapOf("config" to newConfig),
+                                )
+                                if (previous.general.language != newConfig.general.language) {
+                                    CoreModule.eventBus.emit(
+                                        name = EventNames.LANGUAGE_CHANGED,
+                                        payload = mapOf("language" to newConfig.general.language),
+                                    )
+                                }
                                 null
                             } else {
                                 stringResource("settings_save_failed").format(
@@ -255,6 +308,25 @@ fun main() = nucleusApplication {
                 }
             }
         }
+    }
+}
+
+/**
+ * 打开事件总线并完成启动接线：
+ *  1. 建应用级 scope（SupervisorJob + Dispatchers.Default，不用 GlobalScope）；
+ *  2. CoreModule 拿到总线，之后模块读 CoreModule.eventBus 或注入的 ServiceContext；
+ *  3. 各业务模块（SPI 发现）用 ServiceContext 注册自己的事件订阅 —— 新增模块不需要
+ *     改这里；
+ *  4. 等订阅真正开始收集后再广播 core.app.started：replay=0 时早于订阅者开始收集
+ *     的事件会被丢弃（见 EventBus 的注释）。
+ */
+private fun bootstrapEvents() {
+    val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("app"))
+    CoreModule.initialize(scope)
+    ModuleRegistry.initializeServices(CoreModule.eventBus, scope)
+    scope.launch {
+        CoreModule.eventBus.awaitSubscribers()
+        CoreModule.eventBus.emit(EventNames.APP_STARTED)
     }
 }
 
