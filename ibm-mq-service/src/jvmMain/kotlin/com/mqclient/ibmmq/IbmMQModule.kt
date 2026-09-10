@@ -75,7 +75,14 @@ object IbmMQModule {
             // 跨模块：新连接建好后给它配一套自己的任务（每条连接一组，互不影响）。
             context.onEvent(EventNames.CONNECTION_ADDED) { event ->
                 val connectionId = event.getString("connectionId") ?: return@onEvent
-                if (event.getString("type") != context.moduleId) return@onEvent
+                // 和上面 DELETED 分支同一套判定：核心按文档只放 `type`，模块经
+                // ServiceContext.emit 转发时 payload 里只有 `moduleId`（没有 `type`），
+                // 两个都认才不会漏。只看 `type` 的话，后者永远进不来。
+                if (event.getString(MODULE_ID_KEY) != context.moduleId &&
+                    event.getString("type") != context.moduleId
+                ) {
+                    return@onEvent
+                }
                 registerJobsForConnection(jobScheduler, created, connectionId)
             },
         )
@@ -98,18 +105,33 @@ object IbmMQModule {
     }
 
     /** 已初始化的业务门面；未初始化时为 null。 */
+    @Synchronized
     fun serviceOrNull(): IbmMQService? = service
 
-    /** 模块销毁：取消订阅、按前缀停掉本模块的全部定时任务，并停掉在跑的扫描。 */
+    /**
+     * 模块销毁：取消订阅、按前缀停掉本模块的全部定时任务，并释放服务资源。
+     *
+     * 先把状态摘干净再逐个释放：释放过程中抛错也不会让本对象停在「半关闭」状态，
+     * try/finally 保证后面几步照样执行。
+     */
     @Synchronized
     fun shutdown() {
-        subscriptions.forEach(Job::cancel)
+        val subscriptionsToCancel = subscriptions
+        val schedulerToStop = scheduler
+        val serviceToClose = service
         subscriptions = emptyList()
-        // 任务 ID 的第一段就是模块名，所以「本模块的任务」= `ibm-mq.` 前缀。
-        scheduler?.cancelByPrefix("$MODULE_ID.")
         scheduler = null
-        service?.close()
         service = null
+        try {
+            subscriptionsToCancel.forEach(Job::cancel)
+        } finally {
+            try {
+                // 任务 ID 的第一段就是模块名，所以「本模块的任务」= `ibm-mq.` 前缀。
+                schedulerToStop?.cancelByPrefix("$MODULE_ID.")
+            } finally {
+                serviceToClose?.close()
+            }
+        }
     }
 
     /**

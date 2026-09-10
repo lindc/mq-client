@@ -64,6 +64,10 @@ class EventSubscription internal constructor(
  *
  * 默认实现打印到 stdout（commonMain 没有 `System.err`）；JVM 侧想写 stderr 或日志
  * 文件，在 `CoreModule.initialize(scope, errorReporter = …)` 里换掉即可。
+ *
+ * ⚠️ 上报口**不要**改成「往同一条总线发错误事件」：handler 抛错 → 发事件 → 该事件的
+ * 订阅者又抛错 → 又触发上报…… 会变成无界的事件风暴（[emit] 是异步的，栈上检测不到）。
+ * 需要让用户看见，走 `CoreModule.lastError` 这种**状态**通道，不要走事件。
  */
 fun interface EventBusErrorReporter {
     fun onHandlerError(event: AppEvent, subscription: EventSubscription, error: Throwable)

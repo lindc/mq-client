@@ -1,6 +1,7 @@
 package com.mqclient.core
 
 import com.mqclient.core.event.EventBus
+import com.mqclient.core.event.EventNames
 import com.mqclient.core.scheduler.JobScheduler
 import com.mqclient.core.spi.ServiceContext
 import java.util.ServiceLoader
@@ -34,8 +35,18 @@ object ModuleRegistry {
         services.onEach { adapter ->
             val context = ServiceContext.of(adapter.id, eventBus, parentScope, jobScheduler)
             runCatching { adapter.initialize(context) }
-                .onFailure {
-                    System.err.println("[ModuleRegistry] cannot initialize module '${adapter.id}': $it")
+                .onFailure { error ->
+                    System.err.println("[ModuleRegistry] cannot initialize module '${adapter.id}': $error")
+                    // 控制台日志打包后看不见，用户至少要在界面里能看到这条。
+                    eventBus.emit(
+                        name = EventNames.ERROR_OCCURRED,
+                        payload = mapOf(
+                            "message" to "模块 '${adapter.id}' 初始化失败：${error.message ?: error::class.simpleName}",
+                            "moduleId" to adapter.id,
+                            "error" to error::class.simpleName,
+                        ),
+                        source = "core",
+                    )
                     context.coroutineScope.cancel()
                 }
         }

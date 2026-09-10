@@ -25,9 +25,6 @@ object EventNames {
     /** 应用已启动；订阅者都注册完、开始收集之后才发出（见 EventBus.awaitSubscribers）。 */
     const val APP_STARTED = "core.app.started"
 
-    /** 应用正在关闭；需要优雅收尾的模块订阅它。 */
-    const val APP_CLOSING = "core.app.closing"
-
     /** 设置已保存；payload: `config`(Config) / `languageChanged`(Boolean)。 */
     const val SETTINGS_CHANGED = "core.settings.changed"
 
@@ -68,18 +65,4 @@ object EventNames {
 
     /** payload: `connectionId` / `type`。模块订阅它来清理自己的数据。 */
     const val CONNECTION_DELETED = "core.connection.deleted"
-
-    /** payload: `connectionId` / `status`(connected / disconnected / failed) */
-    const val CONNECTION_STATUS = "core.connection.status"
-
-    // ---- UI 事件 ----
-
-    /** payload: `connectionId` */
-    const val UI_CONNECTION_SELECTED = "ui.connection.selected"
-
-    /** payload: `connectionId` / `objectType` */
-    const val UI_TAB_OPENED = "ui.tab.opened"
-
-    /** payload: `connectionId` / `objectType` */
-    const val UI_TAB_CLOSED = "ui.tab.closed"
 }

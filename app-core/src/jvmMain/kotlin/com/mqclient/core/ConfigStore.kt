@@ -57,14 +57,28 @@ object ConfigStore {
      */
     fun saveConfig(config: Config): Result<Unit> = ConfigManager.save(config)
 
-    /** Returns the `connections` section of the current config; [] when unreadable. */
-    fun loadConnections(): List<ConnectionInfo> =
-        try {
-            loadConfig().connections
-        } catch (t: Throwable) {
-            System.err.println("[ConfigStore] failed to read connections: $t")
-            emptyList()
-        }
+    /**
+     * 读 `connections` 段。
+     *
+     * 失败不再「假装没有连接」：[loadConfig] 在读不出来时会静默给出默认值，拿它当结果
+     * 用会让界面上的连接全部凭空消失（用户会以为连接被删了）。这里用 [loadConfigOrNull]
+     * 把两种情况分开：
+     *  - 文件不存在（首次启动）→ 空列表，正常；
+     *  - 文件在但读不出来（损坏 / 密钥丢失）→ `failure`，同时通过 [CoreModule.reportError]
+     *    上报，让调用方和用户都能知道。
+     */
+    fun loadConnections(): Result<List<ConnectionInfo>> {
+        val config = loadConfigOrNull()
+        if (config != null) return Result.success(config.connections)
+
+        val failure = IllegalStateException("config.json 存在但读不出来（连接没有丢，只是这次没读到）")
+        CoreModule.reportError(
+            message = failure.message ?: "读取连接列表失败",
+            source = "core.config",
+            error = failure,
+        )
+        return Result.failure(failure)
+    }
 
     /**
      * Replaces the `connections` section and rewrites config.json, preserving

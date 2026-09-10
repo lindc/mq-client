@@ -5,6 +5,7 @@ package com.mqclient.app
 
 import androidx.compose.material3.Typography
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -33,8 +34,11 @@ import org.jetbrains.compose.resources.Font as ResourceFont
  */
 @Composable
 private fun appTypography(@Suppress("UNUSED_PARAMETER") theme: ThemeConfig): Typography {
-    val family = FontFamily(ResourceFont(Res.font.lxgw_wen_kai_mono_regular, FontWeight.Normal))
-    return Typography().withFontFamily(family)
+    // [Font] 是 @Composable（要读资源），但 FontFamily / Typography 没必要每次重组都重建：
+    // 重建会让 MaterialTheme.typography 换一个身份，把整棵读样式的界面推着重算。
+    val font = ResourceFont(Res.font.lxgw_wen_kai_mono_regular, FontWeight.Normal)
+    val family = remember(font) { FontFamily(font) }
+    return remember(family) { Typography().withFontFamily(family) }
 }
 
 /**

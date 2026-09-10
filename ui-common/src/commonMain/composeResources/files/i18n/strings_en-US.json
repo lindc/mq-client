@@ -15,6 +15,8 @@
   "about_supported_middleware": "Supported middleware",
   "license_title": "Open-source Licenses",
   "license_view": "View open-source licenses",
+  "error_dialog_title": "Something went wrong",
+  "new_connection_todo": "Creating connections isn't implemented yet.",
   "common_close": "Close",
   "titlebar_clock": "Clock",
 

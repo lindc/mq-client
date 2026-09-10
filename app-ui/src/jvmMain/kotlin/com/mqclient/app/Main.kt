@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import com.mqclient.aipanel.AiContext
 import com.mqclient.aipanel.rememberAiPanelState
+import com.mqclient.core.AppError
 import com.mqclient.core.Config
 import com.mqclient.core.ConfigStore
 import com.mqclient.core.ConnectionStore
@@ -59,6 +60,8 @@ import com.mqclient.core.CoreModule
 import com.mqclient.core.Language
 import com.mqclient.core.ModuleRegistry
 import com.mqclient.core.ThemeMode
+import com.mqclient.core.database.DatabaseManager
+import com.mqclient.core.database.DriverFactory
 import com.mqclient.core.event.EventNames
 import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.i18n.LanguageResources
@@ -136,8 +139,10 @@ fun main() {
  */
 @Composable
 private fun AppRoot(bootConfig: Config, onExit: () -> Unit) {
-    // 事件总线接线：只在首次组合时跑一次（@Composable lambda 会随重组重复执行）。
-    remember { bootstrapEvents() }
+    // 事件总线接线放在 effect 里而不是组合体内：组合应当无副作用（重组会重跑组合体，
+    // effect 只在首次组合提交后跑一次）。声明顺序有意义 —— 它必须排在所有读
+    // CoreModule.eventBus 的 effect 之前（比如下面重载字符串表那个）。
+    LaunchedEffect(Unit) { bootstrapEvents() }
     // 语言热切换：设置保存时 Main 会广播 core.language.changed，这里重载字符串表。
     // LanguageResources 换表时会 bump 内部的 Compose state，所以所有
     // stringResource() 读取方（整棵界面树）自动重组，不需要让全树换 key。
@@ -151,11 +156,17 @@ private fun AppRoot(bootConfig: Config, onExit: () -> Unit) {
     // 连接列表只在这一处 collect（原来 Main.kt 读三次、MainWindow 还 remember 死了一次），
     // 往下按参数传，谁都不再隐式读全局快照。
     val connections by ConnectionStore.connections.collectAsState()
+    // 应用级错误提示：CoreModule.reportError 写状态，这里只负责展示。用状态而不是只
+    // 听事件，是因为启动早期（读配置 / 模块初始化）的错误会早于订阅、被总线直接丢掉。
+    val appError by CoreModule.lastError.collectAsState()
 
     // 关窗即退出：先收掉所有事件订阅与模块 scope（应用 scope 由 CoreModule 持有），
     // 再结束进程。
     val closeApp: () -> Unit = {
         CoreModule.shutdown()
+        // 顺序有意义：调度器与订阅都停了之后再关库，否则关闭途中还在跑的查询会打在
+        // 已关的连接上（见 DatabaseManager.close 的注释）。
+        DatabaseManager.close()
         onExit()
     }
     DecoratedWindow(onCloseRequest = closeApp, title = "MQ Client") {
@@ -270,6 +281,9 @@ private fun AppRoot(bootConfig: Config, onExit: () -> Unit) {
                 if (showNewConnection) {
                     NewConnectionDialog(onDismiss = { showNewConnection = false })
                 }
+                appError?.let { error ->
+                    ErrorDialog(error = error, onDismiss = { CoreModule.clearLastError() })
+                }
                 if (showSettings) {
                     com.mqclient.app.settings.SettingsDialog(
                         initial = appConfig,
@@ -314,7 +328,8 @@ private fun AppRoot(bootConfig: Config, onExit: () -> Unit) {
 /**
  * 打开事件总线并完成启动接线：
  *  1. 建应用级 scope（SupervisorJob + Dispatchers.Default，不用 GlobalScope）；
- *  2. CoreModule 拿到总线，之后模块读 CoreModule.eventBus 或注入的 ServiceContext；
+ *  2. CoreModule 拿到总线，数据库也在这里初始化（JDBC 单连接 → 单槽 IO 调度器串行化），
+ *     之后模块读 CoreModule.eventBus / DatabaseManager 或注入的 ServiceContext；
  *  3. 各业务模块（SPI 发现）用 ServiceContext 注册自己的事件订阅 —— 新增模块不需要
  *     改这里；
  *  4. 等订阅真正开始收集后再广播 core.app.started：replay=0 时早于订阅者开始收集
@@ -323,6 +338,17 @@ private fun AppRoot(bootConfig: Config, onExit: () -> Unit) {
 private fun bootstrapEvents() {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("app"))
     CoreModule.initialize(scope)
+    // 数据库：JDBC 单连接必须串行，所以给它配一个「同时只跑一个任务」的 IO 调度器
+    // （Dispatchers.IO 是 JVM 专有，所以接线在这里而不是 commonMain 的 DatabaseManager 里）。
+    // 初始化失败（目录不可写等）不该拖垮启动 —— 报到错误通道，界面会提示用户。
+    runCatching { DatabaseManager.initialize(DriverFactory(), Dispatchers.IO.limitedParallelism(1)) }
+        .onFailure { error ->
+            CoreModule.reportError(
+                message = "数据库初始化失败，依赖历史数据的功能不可用：${error.message ?: error::class.simpleName}",
+                source = "core.database",
+                error = error,
+            )
+        }
     ModuleRegistry.initializeServices(CoreModule.eventBus, scope, CoreModule.jobScheduler)
     scope.launch {
         CoreModule.eventBus.awaitSubscribers()
@@ -698,7 +724,13 @@ private const val ThirdPartyComponentPath = "files/third-party-component/third-p
 private suspend fun loadThirdPartyComponents(): List<ThirdPartyComponent> =
     try {
         parseComponents(Res.readBytes(ThirdPartyComponentPath).decodeToString())
-    } catch (_: Exception) {
+    } catch (error: Exception) {
+        // 读不出来 = 对话框空白，用户只会当成程序坏了 —— 报到错误通道上去。
+        CoreModule.reportError(
+            message = "第三方组件清单读取失败，许可证列表暂时为空",
+            source = "app-ui",
+            error = error,
+        )
         emptyList()
     }
 
@@ -893,15 +925,45 @@ private fun LibraryList(components: List<ThirdPartyComponent>, modifier: Modifie
     }
 }
 
-/** Empty New-connection dialog — content is intentionally left blank for now. */
+/**
+ * Application-level error dialog. Its data source is [CoreModule.lastError] — a state,
+ * not an event, so errors raised during startup (before the UI subscribes) still show up.
+ */
+@Composable
+private fun ErrorDialog(error: AppError, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            PressableButton(onClick = onDismiss) { Text(stringResource("common_close")) }
+        },
+        title = { Text(stringResource("error_dialog_title")) },
+        text = {
+            Column {
+                Text(error.message, style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = error.source + (error.cause?.let { " · $it" } ?: ""),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+    )
+}
+
+/**
+ * 新建连接对话框：功能还没实现，所以先把话说清楚 —— 空窗口会让人以为是界面坏了。
+ * TODO 接上连接表单（写入 `config.connections` 并广播 `core.connection.added`）。
+ */
 @Composable
 private fun NewConnectionDialog(onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
-            PressableButton(onClick = onDismiss) { Text("关闭") }
+            PressableButton(onClick = onDismiss) { Text(stringResource("common_close")) }
         },
         title = { Text(stringResource("menu_new_connection")) },
+        text = { Text(stringResource("new_connection_todo")) },
     )
 }
 

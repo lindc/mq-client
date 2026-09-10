@@ -23,6 +23,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -82,8 +83,9 @@ fun SettingsDialog(
         resizable = true,
     ) {
         // Keep the window usable: don't let it shrink below what the side rail
-        // + tab content need.
-        LocalNucleusWindow.current.setMinimumSize(DpSize(720.dp, 480.dp))
+        // + tab content need. 放 effect 里：组合体会随重组反复执行，窗口副作用不该在那儿。
+        val nucleusWindow = LocalNucleusWindow.current
+        LaunchedEffect(nucleusWindow) { nucleusWindow.setMinimumSize(DpSize(720.dp, 480.dp)) }
 
         Surface(
             modifier = Modifier.fillMaxSize(),

@@ -92,9 +92,9 @@ internal fun AppearanceSettingsPane(
         Spacer(Modifier.height(20.dp))
 
         ColorSeedSection(value.seedColor) { newColor ->
-            // Color.value is ULong with RGBA packed in the high 32 bits;
-            // widen to Long so we can mask with `and 0xFFFFFFFFL` (Long).
-            onChange(value.copy(seedColor = (newColor.value shr 32).toLong() and 0xFFFFFFFFL))
+            // seedColor 存的是 0xAARRGGBB（读取方 `Color(seedColor)` 就按这个解），
+            // 所以打包也走同一个 helper —— 别再自己拆 `Color.value` 的位域。
+            onChange(value.copy(seedColor = newColor.toPackedArgb()))
         }
         Spacer(Modifier.height(20.dp))
 

@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.graphics.Color
+import com.mqclient.core.CoreModule
 import mq_client.app_ui.generated.resources.Res
 
 /** Path to the bundled preset-palette manifest inside composeResources. */
@@ -44,8 +45,13 @@ internal fun rememberPresetPalette(): List<PresetColor> {
 private suspend fun loadPalette(): List<PresetColor> =
     try {
         parsePalette(Res.readBytes(PalettePath).decodeToString())
-    } catch (t: Exception) {
-        System.err.println("[PresetPalette] failed to read palette: $t")
+    } catch (error: Exception) {
+        // 预设色块整个消失不是小事情 —— 用户会以为主题选色坏了，要说清楚原因。
+        CoreModule.reportError(
+            message = "预设调色板读取失败，颜色列表暂时为空",
+            source = "app-ui",
+            error = error,
+        )
         emptyList()
     }
 

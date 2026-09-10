@@ -8,12 +8,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import com.mqclient.uicommon.i18n.stringResource
 import kotlin.math.abs
 
@@ -37,6 +39,19 @@ internal fun HsvColorPicker(
     var h by remember { mutableStateOf(rgbToHue(initial)) }
     var s by remember { mutableStateOf(rgbToSaturation(initial)) }
     var v by remember { mutableStateOf(rgbToValue(initial)) }
+
+    // 外部换了颜色（例如点了预设色板）时，把滑块同步过去。
+    //
+    // 比较用打包后的 ARGB（8 位量化）而不是 Color 本身：自己拖动时父层存回来的正是
+    // `hsvToColor(...)` 的量化结果，比 Color 的话 hsv→rgb→hsv 的往返误差会让这个 effect
+    // 每次都把滑块「掰」回量化值，拖动手感发飘。
+    LaunchedEffect(initial) {
+        if (hsvToColor(h, s, v).toPackedArgb() != initial.toPackedArgb()) {
+            h = rgbToHue(initial)
+            s = rgbToSaturation(initial)
+            v = rgbToValue(initial)
+        }
+    }
 
     // Re-emit on any slider move. Push the current h/s/v back to the caller.
     fun emit() {
@@ -126,7 +141,16 @@ internal fun hsvToColor(h: Float, s: Float, v: Float): Color {
     return Color(r1 + m, g1 + m, b1 + m)
 }
 
-/** Compose's `Color.value` is a ULong; top 32 bits hold RGBA, low 32 hold the
- *  float-channel bits we don't need for opaque seed storage. */
+/**
+ * 把 [Color] 打包成 `ThemeConfig.seedColor` 存的那个 0xAARRGGBB Long —— 也就是
+ * `Color(argb)` 能原样读回来的表示。
+ *
+ * 不能拿 `Color.value` 做位移取色：它是 ULong 位域（低 6 位色空间 id、10 位 alpha、
+ * 再往上三个 16 位通道），`value shr 32` 拿到的是绿/蓝通道的位，既不是 ARGB 也不是
+ * 0，存进去就成了一个跟实际颜色无关的值。走 [toArgb] 做一次正规转换。
+ */
+internal fun Color.toPackedArgb(): Long = toArgb().toLong() and 0xFFFFFFFFL
+
+/** `#AARRGGBB`（界面预览 / 日志用）。 */
 internal fun formatHex(color: Color): String =
-    "#%08X".format((color.value shr 32).toLong() and 0xFFFFFFFFL)
+    "#%08X".format(color.toPackedArgb())

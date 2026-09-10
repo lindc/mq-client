@@ -1,9 +1,12 @@
 package com.mqclient.aipanel
 
+import com.mqclient.core.ConfigStore
+import com.mqclient.core.CoreModule
 import java.io.File
+import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.Paths
+import java.nio.file.StandardCopyOption
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 
@@ -24,7 +27,7 @@ object AiStore {
         encodeDefaults = true
     }
 
-    private val messagesFile: File by lazy { configDir().resolve("ai-messages.json").toFile() }
+    private val messagesFile: File by lazy { configDir().resolve(FILE_NAME).toFile() }
 
     /** Returns the persisted chat history, sliced to at most [limit] entries (most recent). */
     fun loadMessages(limit: Int = Int.MAX_VALUE): List<AiMessage> {
@@ -38,31 +41,50 @@ object AiStore {
         try {
             if (!messagesFile.exists()) emptyList()
             else json.decodeFromString(ListSerializer(AiMessage.serializer()), messagesFile.readText(Charsets.UTF_8))
-        } catch (t: Throwable) {
-            System.err.println("[AiStore] failed to read messages (${messagesFile}): $t")
+        } catch (error: Throwable) {
+            // 读不出来 = 界面上历史凭空消失（用户会以为记录丢了）。保持原行为返回空列表，
+            // 但报到错误通道，让用户知道是读失败而不是真的没记录。
+            CoreModule.reportError(
+                message = "聊天记录读取失败，历史暂时显示为空",
+                source = "ai-panel",
+                error = error,
+            )
             emptyList()
         }
 
+    /**
+     * 写回聊天记录。用「临时文件 + 原子改名」，而不是直接覆写：写到一半崩掉时磁盘上
+     * 要么是完整的旧文件、要么是完整的新文件，不会留下半截 JSON 让下次启动直接读失败。
+     */
     fun saveMessages(messages: List<AiMessage>) {
+        val payload = json.encodeToString(ListSerializer(AiMessage.serializer()), messages)
         try {
-            messagesFile.parentFile?.mkdirs()
-            messagesFile.writeText(
-                json.encodeToString(ListSerializer(AiMessage.serializer()), messages),
-                Charsets.UTF_8,
+            val target = messagesFile.toPath()
+            Files.createDirectories(target.parent)
+            val tmp = target.resolveSibling(target.fileName.toString() + TMP_SUFFIX)
+            Files.write(tmp, payload.toByteArray(Charsets.UTF_8))
+            try {
+                Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+            } catch (_: AtomicMoveNotSupportedException) {
+                // 少数文件系统不支持原子改名（如某些 Windows / 网络盘）：退化成普通覆盖。
+                Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING)
+            }
+        } catch (error: Throwable) {
+            CoreModule.reportError(
+                message = "聊天记录保存失败，本次对话不会留下来",
+                source = "ai-panel",
+                error = error,
             )
-        } catch (t: Throwable) {
-            System.err.println("[AiStore] failed to write messages (${messagesFile}): $t")
         }
     }
 
-    /** Per-user dir, under the shared `~/.mqclient/` root used by ConfigStore. */
-    private fun configDir(): Path = Paths.get(System.getProperty("user.home"), ".mqclient")
+    /**
+     * 聊天记录的目录：和 `config.json` 同一个 `~/.mqclient/`，因此也尊重
+     * `mqclient.config.dir` 覆盖。之前这里自己拼 `user.home`，覆盖目录的测试 / 便携模式
+     * 会写到另一个目录去。
+     */
+    private fun configDir(): Path = ConfigStore.configDir()
 
-    @Suppress("unused")
-    fun configDirPath(): String = configDir().toString()
-
-    @Suppress("unused")
-    private fun touch(path: Path) {
-        Files.createDirectories(path)
-    }
+    private const val FILE_NAME = "ai-messages.json"
+    private const val TMP_SUFFIX = ".tmp"
 }

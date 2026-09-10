@@ -19,7 +19,7 @@ import kotlinx.coroutines.flow.asStateFlow
  */
 object ConnectionStore {
 
-    private val _connections = MutableStateFlow(ConfigStore.loadConnections())
+    private val _connections = MutableStateFlow(ConfigStore.loadConnections().getOrElse { emptyList() })
 
     /** 可观测快照；UI 用 `collectAsState()` 订阅。直接改它无效 —— 走 [saveAll]。 */
     val connections: StateFlow<List<ConnectionInfo>> = _connections.asStateFlow()
@@ -33,9 +33,12 @@ object ConnectionStore {
     fun countOf(connectionId: String, objectType: String): Int =
         objectCounts[connectionId]?.get(objectType) ?: 0
 
-    /** Re-reads the connections section from disk. No-op if [ConfigStore] errors out. */
+    /**
+     * 重新读盘。**读失败时保留当前列表**：把失败当成空列表会让用户的连接在界面上
+     * 凭空消失（他可能以为被删了，接着重新添加一遍）。失败原因由 [ConfigStore] 上报。
+     */
     fun reloadFromDisk() {
-        _connections.value = ConfigStore.loadConnections()
+        ConfigStore.loadConnections().onSuccess { _connections.value = it }
     }
 
     /**

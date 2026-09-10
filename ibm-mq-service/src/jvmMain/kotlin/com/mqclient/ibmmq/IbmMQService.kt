@@ -1,8 +1,11 @@
 package com.mqclient.ibmmq
 
+import com.mqclient.core.event.EventNames
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.emit
 import com.mqclient.ibmmq.event.IbmMQEvents
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -27,12 +30,26 @@ class IbmMQService(private val context: ServiceContext) {
     /** 同一模块内多次扫描串行执行，避免重叠扫描互相覆盖结果。 */
     private val scanLock = Mutex()
 
-    private var scanJob: Job? = null
+    /**
+     * 当前手动扫描的协程。
+     *
+     * 用 [AtomicReference] 而不是裸 `var`：[startScan] 从界面线程调、[close] 从退出线程
+     * 调，「读旧值 → 写新值」这种 check-then-act 没有同步时会丢更新（旧协程漏取消，
+     * 继续在后台扫）。
+     */
+    private val scanJob = AtomicReference<Job?>(null)
+
+    /**
+     * 需要显式释放的句柄（真实连接 / 会话 / 消费者 / 通道），key 通常用 connectionId。
+     *
+     * 仓库里还没有真 MQ 依赖，所以现在它是空的；接真库时在建立连接后调
+     * [registerResource] 登记，[close] 负责逐个关掉 —— 「谁负责关」永远只有一个答案。
+     */
+    private val resources = ConcurrentHashMap<String, AutoCloseable>()
 
     /** 触发一次扫描；重复调用会取消上一次未完成的扫描。 */
     fun startScan(connectionId: String) {
-        scanJob?.cancel()
-        scanJob = context.coroutineScope.launch {
+        val started = context.coroutineScope.launch {
             scanLock.withLock {
                 // 事件名来自 IbmMQEvents，payload 里的 moduleId / source 由
                 // ServiceContext.emit 自动补上。
@@ -61,6 +78,9 @@ class IbmMQService(private val context: ServiceContext) {
                 }
             }
         }
+        // 先登记新协程、再取消旧的：getAndSet 是原子的，两个线程同时调 startScan 也
+        // 只有一方能拿到「上一个」并取消它，不会留下两条并行扫描。
+        scanJob.getAndSet(started)?.cancel()
     }
 
     /**
@@ -131,10 +151,49 @@ class IbmMQService(private val context: ServiceContext) {
         }
     }
 
-    /** 模块销毁：停掉还没跑完的扫描（订阅的取消由 IbmMQModule 负责）。 */
+    /**
+     * 登记一个要在 [close] 时释放的句柄（真实连接 / 消费者 / 通道）。
+     *
+     * 同一个 key 重复登记会先把旧句柄关掉 —— 重连场景下不能让上一个连接漏在那里。
+     */
+    fun registerResource(key: String, resource: AutoCloseable) {
+        resources.put(key, resource)?.let { previous ->
+            try {
+                previous.close()
+            } catch (error: Throwable) {
+                reportResourceFailure(key, error)
+            }
+        }
+    }
+
+    /**
+     * 模块销毁：停掉扫描协程，再逐个释放登记过的资源（订阅的取消由 [IbmMQModule] 负责）。
+     *
+     * 每个句柄单独 try/catch：一个关不掉不该让其余资源跟着漏掉（这正是 try/finally 要
+     * 保证的语义）。失败上报到错误通道，而不是只打一行控制台日志 —— 打包后没人看得到。
+     */
     fun close() {
-        scanJob?.cancel()
-        scanJob = null
+        scanJob.getAndSet(null)?.cancel()
+        resources.keys.toList().forEach { key ->
+            val handle = resources.remove(key) ?: return@forEach
+            try {
+                handle.close()
+            } catch (error: Throwable) {
+                reportResourceFailure(key, error)
+            }
+        }
+    }
+
+    private fun reportResourceFailure(key: String, error: Throwable) {
+        context.eventBus.emit(
+            name = EventNames.ERROR_OCCURRED,
+            payload = mapOf(
+                "message" to "释放资源 '$key' 失败：${error.message ?: error::class.simpleName ?: "unknown"}",
+                "moduleId" to context.moduleId,
+                "error" to error::class.simpleName,
+            ),
+            source = context.moduleId,
+        )
     }
 
     /**

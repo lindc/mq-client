@@ -34,6 +34,7 @@ import com.mqclient.core.AiConfig
 import com.mqclient.core.AiProvider
 import com.mqclient.core.AiProviderConfig
 import com.mqclient.core.AiProviderRegistry
+import com.mqclient.core.CoreModule
 import com.mqclient.uicommon.i18n.stringResource
 import java.util.Base64
 
@@ -437,7 +438,14 @@ private fun decodePrompt(b64: String?): String =
     try {
         if (b64.isNullOrBlank()) ""
         else String(Base64.getDecoder().decode(b64), Charsets.UTF_8)
-    } catch (_: Throwable) {
+    } catch (error: Throwable) {
+        // 存进去的自定义提示词读不出来：界面只能显示空串，但不能让用户以为提示词是自己
+        // 被清掉的 —— 上报到错误通道（同一消息重复上报时状态值相等，不会反复弹）。
+        CoreModule.reportError(
+            message = "自定义系统提示词解析失败，已按空提示词显示",
+            source = "app-ui",
+            error = error,
+        )
         ""
     }
 

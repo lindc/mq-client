@@ -4,19 +4,26 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import com.mqclient.core.AiConfig
 import com.mqclient.core.AiProvider
 import com.mqclient.core.AiProviderRegistry
 import com.mqclient.core.ConfigStore
+import com.mqclient.core.CoreModule
 import com.mqclient.core.DEFAULT_SYSTEM_PROMPT
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Single source of truth for the AI panel.
@@ -36,8 +43,19 @@ class AiPanelState internal constructor(
     var config: AiConfig by mutableStateOf(initialConfig)
         private set
 
-    var messages: List<AiMessage> by mutableStateOf(initialMessages)
-        private set
+    /**
+     * 当前会话的全部消息（含正在流式追加的那一条）。
+     *
+     * 底层是 [SnapshotStateList]：流式时每个分片只改「那一条」的下标，读它的气泡才会
+     * 重组 —— 之前每个分片都 `messages.toMutableList()` 复制整段历史再整体替换，
+     * 整棵消息列表（每个气泡）都会被重算。
+     */
+    private val messageList: SnapshotStateList<AiMessage> = mutableStateListOf<AiMessage>().apply {
+        addAll(initialMessages)
+    }
+
+    /** 消息的只读视图。内容随状态变化，不要把它缓存下来。 */
+    val messages: List<AiMessage> get() = messageList
 
     /** Id of the assistant message currently being streamed, or null. */
     var streamingMessageId: String? by mutableStateOf(null)
@@ -134,14 +152,28 @@ class AiPanelState internal constructor(
             content = "",
             timestamp = System.currentTimeMillis(),
         )
-        messages = messages + userMsg + assistantMsg
+        messageList.add(userMsg)
+        messageList.add(assistantMsg)
         streamingMessageId = assistantMsg.id
 
         scope.launch {
+            // onChunk 可能来自任意线程（真实 provider 会从 HTTP/SSE 回调），而 Compose
+            // 状态只能在面板自己的调度器上写。用一条无界 channel 把分片转进本协程里串行
+            // 追加：顺序天然保真，写状态的一定是面板的调度器。
+            val chunks = Channel<String>(Channel.UNLIMITED)
             try {
-                chat.streamReply(historyForCall, config, context) { chunk ->
+                val producer = async {
+                    try {
+                        chat.streamReply(historyForCall, config, context) { chunk -> chunks.trySend(chunk) }
+                    } finally {
+                        chunks.close()
+                    }
+                }
+                for (chunk in chunks) {
                     appendToMessage(assistantMsg.id, chunk)
                 }
+                // 生产端的异常在这里浮上来（join 不会重抛，await 会）。
+                producer.await()
             } catch (cancellation: CancellationException) {
                 // 取消不是失败，必须原样抛出（吞掉会让 scope 的取消失效）。
                 throw cancellation
@@ -150,9 +182,9 @@ class AiPanelState internal constructor(
                 // 这里会直接把 scope 的 Job 弄失败，整个面板之后 launch 全部被取消。
                 // 刻意不写进 messages —— 那会被 AiStore 落盘、下一轮还会当 history 发给模型。
                 panelError = error.message ?: error.javaClass.simpleName
-                if (messages.lastOrNull { it.id == assistantMsg.id }?.content.isNullOrEmpty()) {
+                if (messageList.lastOrNull { it.id == assistantMsg.id }?.content.isNullOrEmpty()) {
                     // 一个字都没流出来：撤掉空气泡，提示条已经说明了原因。
-                    messages = messages.filterNot { it.id == assistantMsg.id }
+                    messageList.removeAll { it.id == assistantMsg.id }
                 }
             } finally {
                 streamingMessageId = null
@@ -166,25 +198,36 @@ class AiPanelState internal constructor(
      * [AiStore.saveMessages] 一起落盘。
      */
     fun recordFeedback(messageId: String, useful: Boolean?) {
-        val idx = messages.indexOfLast { it.id == messageId }
+        val idx = messageList.indexOfLast { it.id == messageId }
         if (idx < 0) return
-        val current = messages[idx]
+        val current = messageList[idx]
         if (current.feedback == useful) return
-        messages = messages.toMutableList().also { it[idx] = current.copy(feedback = useful) }
+        // 只改这一条的下标：别的气泡不会因此重组。
+        messageList[idx] = current.copy(feedback = useful)
     }
 
     /** Drops every message and clears the on-disk log. */
     fun clearHistory() {
-        messages = emptyList()
+        messageList.clear()
         AiStore.saveMessages(emptyList())
     }
 
+    /**
+     * 把磁盘上的历史灌回来（由 [rememberAiPanelState] 在 IO 调度器上读完再调）。
+     *
+     * 只在面板还是空的时候接受：读盘那一小段时间里用户可能已经发了第一条消息 ——
+     * 那次会话不该被旧记录盖掉（流式进行中同理）。
+     */
+    internal fun restoreHistory(loaded: List<AiMessage>) {
+        if (messageList.isNotEmpty() || isStreaming) return
+        messageList.addAll(loaded)
+    }
+
     private fun appendToMessage(messageId: String, chunk: String) {
-        val mutable = messages.toMutableList()
-        val idx = mutable.indexOfLast { it.id == messageId }
+        val idx = messageList.indexOfLast { it.id == messageId }
         if (idx < 0) return
-        mutable[idx] = mutable[idx].copy(content = mutable[idx].content + chunk)
-        messages = mutable
+        // 只改这一条：列表身份不变，只有读它的气泡重组。
+        messageList[idx] = messageList[idx].copy(content = messageList[idx].content + chunk)
     }
 
     /** Builds a `[CONTEXT] k=v =` prefix from the current selection, or null if nothing to attach. */
@@ -204,7 +247,14 @@ class AiPanelState internal constructor(
         try {
             if (b64.isBlank()) DEFAULT_SYSTEM_PROMPT
             else String(java.util.Base64.getDecoder().decode(b64), Charsets.UTF_8)
-        } catch (_: Throwable) {
+        } catch (error: Throwable) {
+            // 解不出来就回退默认提示词，但要让用户知道：否则他只会发现「我的提示词不见了」。
+            // 重复上报同一条消息时 AppError 值相等 → lastError 不重复发射，不会刷屏。
+            CoreModule.reportError(
+                message = "自定义系统提示词解析失败，已回退到默认提示词",
+                source = "ai-panel",
+                error = error,
+            )
             DEFAULT_SYSTEM_PROMPT
         }
 
@@ -229,10 +279,17 @@ fun rememberAiPanelState(initialConfig: AiConfig = ConfigStore.loadConfig().ai):
     val state = remember {
         AiPanelState(
             initialConfig = initialConfig,
-            initialMessages = AiStore.loadMessages(initialConfig.historyLimit),
+            // 历史在下面的 effect 里读：`remember { }` 在组合期间同步执行，直接
+            // readText() 会卡在组合（= UI 线程）上。
+            initialMessages = emptyList(),
             chat = MockChatService(),
             scope = scope,
         )
+    }
+    // 读盘放在 IO，读完再灌进 state：面板先以空列表渲染，不阻塞首帧。
+    LaunchedEffect(Unit) {
+        val loaded = withContext(Dispatchers.IO) { AiStore.loadMessages(initialConfig.historyLimit) }
+        state.restoreHistory(loaded)
     }
     // 设置保存后把新配置同步进来（只赋值，不再写盘）。
     LaunchedEffect(initialConfig) { state.applyConfig(initialConfig) }

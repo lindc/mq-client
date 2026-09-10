@@ -1,4 +1,6 @@
 rootProject.name = "mq-client"
+// Gradle 9.7.1 仍需这个预览开关：删掉之后各 build.gradle.kts 里的 `projects.appCore`
+// 之类类型安全项目访问器会直接「Unresolved reference」（实测）。
 enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
 
 pluginManagement {

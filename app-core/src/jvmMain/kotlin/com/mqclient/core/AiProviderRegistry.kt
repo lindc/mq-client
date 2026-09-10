@@ -22,8 +22,15 @@ object AiProviderRegistry {
         val providers = ServiceLoader.load(AiProvider::class.java).iterator()
         while (providers.hasNext()) {
             runCatching { providers.next() }
-                .onFailure {
-                    System.err.println("[AiProviderRegistry] cannot load provider: $it")
+                .onFailure { error ->
+                    System.err.println("[AiProviderRegistry] cannot load provider: $error")
+                    // 少一个 provider 用户是看得见的（下拉里没有它），原因却只在控制台里 ——
+                    // 报到错误通道上，别让「为什么没有 OpenAI」变成猜谜。
+                    CoreModule.reportError(
+                        message = "AI provider 加载失败：${error.message ?: error::class.simpleName}",
+                        source = "core",
+                        error = error,
+                    )
                 }
                 .onSuccess(::add)
         }
