@@ -35,6 +35,9 @@ object ModuleRegistry {
                 }
         }
 
+    /** [loadFrom] with the real [ServiceLoader] iterator. */
+    private fun <T : Any> loadAll(type: Class<T>): List<T> = loadFrom(type) { ServiceLoader.load(type).iterator() }
+
     /**
      * Loads providers one by one.
      *
@@ -42,10 +45,25 @@ object ModuleRegistry {
      * fails (missing class, no public no-arg constructor, throwing `init`, …),
      * which used to cost us every other module. Here a broken module is skipped
      * and reported instead, so the rest of the app still comes up.
+     *
+     * `hasNext()` 同样会炸（配置文件损坏 / 编码非法时抛
+     * `ServiceConfigurationError`），而且它是 `Error` 不是 `Exception`，
+     * 放在 `runCatching` 之外会一路逃出 `by lazy` —— `lazy` 不缓存异常，
+     * 之后每次访问都会重抛。所以两步都要兜住；枚举失败时**停**而不是继续：
+     * 同一个坏迭代器只会反复抛同一个错，继续循环等于死循环。
+     *
+     * [iteratorFactory] 是可注入的迭代器工厂：真实的 SPI 故障（配置文件损坏）
+     * 很难在测试里稳定复现，测试靠它灌入一个会抛错的假迭代器。
      */
-    private fun <T : Any> loadAll(type: Class<T>): List<T> = buildList {
-        val providers = ServiceLoader.load(type).iterator()
-        while (providers.hasNext()) {
+    internal fun <T : Any> loadFrom(type: Class<T>, iteratorFactory: () -> Iterator<T>): List<T> = buildList {
+        val providers = iteratorFactory()
+        while (true) {
+            val hasNext = runCatching { providers.hasNext() }
+                .onFailure {
+                    System.err.println("[ModuleRegistry] cannot enumerate ${type.simpleName} providers: $it")
+                }
+                .getOrNull() ?: break
+            if (!hasNext) break
             runCatching { providers.next() }
                 .onFailure {
                     // ServiceConfigurationError is an Error, not an Exception.
