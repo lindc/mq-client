@@ -1,7 +1,10 @@
 package com.mqclient.ibmmq
 
+import com.mqclient.core.ConnectionStore
 import com.mqclient.core.event.EventNames
 import com.mqclient.core.event.getString
+import com.mqclient.core.scheduler.JobScheduler
+import com.mqclient.core.scheduler.ScheduledJob
 import com.mqclient.core.spi.MODULE_ID_KEY
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.onEvent
@@ -13,17 +16,34 @@ import kotlin.jvm.Synchronized
  * IBM MQ 模块的初始化入口。
  *
  * 由 SPI 发现后经 `IbmMqServiceAdapter.initialize(context)` 调用（`ModuleRegistry` 在
- * 启动时逐个初始化模块），做两件事：
+ * 启动时逐个初始化模块），做三件事：
  *  1. 用**前缀订阅**收自己的事件（`ibm-mq.*`），交给 [IbmMQEventHandler]；
- *  2. 订阅别的模块 / 核心的事件 —— 这里监听 `core.connection.deleted`，把本模块为
- *     那条连接留下的数据清掉。
+ *  2. 订阅别的模块 / 核心的事件 —— `core.connection.added` 给新连接建任务，
+ *     `core.connection.deleted` 把那条连接留下的任务和数据一起收掉；
+ *  3. 给每条连接注册两条周期性扫描任务（消息数量 / 对象列表）。
  *
- * 两条订阅都挂在 `context.coroutineScope`（模块自己的 scope）上，返回的 [Job] 由本
- * 对象持有，[shutdown] 时统一 cancel —— 即「模块销毁时取消自己的订阅」。
+ * 订阅挂在 `context.coroutineScope`（模块自己的 scope）上，返回的 [Job] 由本对象持有；
+ * 定时任务挂在 `context.jobScheduler` 上，用任务 ID 前缀 `ibm-mq.` 圈住。[shutdown]
+ * 时两者一起取消 —— 即「模块销毁时取消自己的订阅与任务」。
  */
 object IbmMQModule {
 
+    /** 本模块任务 ID 的第一段，等于 `ServiceAdapter.id`。 */
+    private const val MODULE_ID = "ibm-mq"
+
+    /** 任务类型（ID 的第三段）：`ibm-mq.<connectionId>.scan.messages`。 */
+    private const val JOB_SCAN_MESSAGES = "scan.messages"
+    private const val JOB_SCAN_OBJECTS = "scan.objects"
+
+    /** 消息数量变化快，对象列表变化慢 —— 两个间隔差着两个数量级。 */
+    private const val INTERVAL_5S = 5_000L
+    private const val INTERVAL_10MIN = 10 * 60 * 1_000L
+
+    /** 对象列表晚 10 秒起步：先把 5 秒那条链路让出来，别在启动瞬间挤在一起。 */
+    private const val OBJECTS_FIRST_DELAY = 10_000L
+
     private var service: IbmMQService? = null
+    private var scheduler: JobScheduler? = null
     private var subscriptions: List<Job> = emptyList()
 
     /**
@@ -34,6 +54,8 @@ object IbmMQModule {
         service?.let { return it }
 
         val handler = IbmMQEventHandler()
+        val created = IbmMQService(context)
+        val jobScheduler = context.jobScheduler
 
         subscriptions = listOf(
             // 自己发、自己收：只有 ibm-mq.* 会进这里。
@@ -44,26 +66,81 @@ object IbmMQModule {
                 if (event.getString(MODULE_ID_KEY) == context.moduleId ||
                     event.getString("type") == context.moduleId
                 ) {
+                    // 连接没了，它的定时任务也一起停：按前缀一次收干净，
+                    // 不用把任务 id 一个个记下来再 cancel。
+                    jobScheduler.cancelByPrefix(ScheduledJob.prefixFor(context.moduleId, connectionId))
                     handler.cleanConnectionData(connectionId)
                 }
             },
+            // 跨模块：新连接建好后给它配一套自己的任务（每条连接一组，互不影响）。
+            context.onEvent(EventNames.CONNECTION_ADDED) { event ->
+                val connectionId = event.getString("connectionId") ?: return@onEvent
+                if (event.getString("type") != context.moduleId) return@onEvent
+                registerJobsForConnection(jobScheduler, created, connectionId)
+            },
         )
 
-        val created = IbmMQService(context)
+        // 启动时已经在配置里的连接：[ConnectionStore] 是「现在有哪些」，而
+        // `core.connection.added` 是「刚发生了什么」。只订阅事件的话，重启之后要等
+        // 用户再新建一条连接才会有定时任务，所以这里按当前状态补一遍。
+        // （登记是幂等的：同 ID 重复注册只会顶掉旧的，不会跑两条协程。）
+        ConnectionStore.connections.value
+            .filter { it.serviceId == context.moduleId }
+            .forEach { connection -> registerJobsForConnection(jobScheduler, created, connection.id) }
+
         service = created
-        println("[ibm-mq] module initialized (moduleId=${context.moduleId})")
+        scheduler = jobScheduler
+        println(
+            "[ibm-mq] module initialized (moduleId=${context.moduleId}, " +
+                "jobs=${jobScheduler.getActiveJobs().filter { it.startsWith("$MODULE_ID.") }})",
+        )
         return created
     }
 
     /** 已初始化的业务门面；未初始化时为 null。 */
     fun serviceOrNull(): IbmMQService? = service
 
-    /** 模块销毁：取消自己注册的全部订阅，并停掉在跑的扫描。 */
+    /** 模块销毁：取消订阅、按前缀停掉本模块的全部定时任务，并停掉在跑的扫描。 */
     @Synchronized
     fun shutdown() {
         subscriptions.forEach(Job::cancel)
         subscriptions = emptyList()
+        // 任务 ID 的第一段就是模块名，所以「本模块的任务」= `ibm-mq.` 前缀。
+        scheduler?.cancelByPrefix("$MODULE_ID.")
+        scheduler = null
         service?.close()
         service = null
+    }
+
+    /**
+     * 给一条连接注册它的全部定时任务。
+     *
+     * 幂等：同 ID 重复注册会顶掉旧的（见 [JobScheduler.schedule]），所以「启动时补注册」
+     * 和「事件触发的注册」可以并存，不会出现两条协程跑同一个任务。
+     */
+    private fun registerJobsForConnection(
+        scheduler: JobScheduler,
+        service: IbmMQService,
+        connectionId: String,
+    ) {
+        // 任务 1：每 5 秒扫一次消息数量 —— UI 最关心的数字，变化快。
+        scheduler.schedule(
+            ScheduledJob(
+                id = ScheduledJob.idFor(MODULE_ID, connectionId, JOB_SCAN_MESSAGES),
+                intervalMs = INTERVAL_5S,
+                runOnStart = true,
+                action = { service.scanMessageCounts(connectionId) },
+            ),
+        )
+
+        // 任务 2：每 10 分钟扫一次对象列表（队列 / 主题 / 监听器）—— 变化慢。
+        scheduler.schedule(
+            ScheduledJob(
+                id = ScheduledJob.idFor(MODULE_ID, connectionId, JOB_SCAN_OBJECTS),
+                intervalMs = INTERVAL_10MIN,
+                initialDelayMs = OBJECTS_FIRST_DELAY,
+                action = { service.scanObjects(connectionId) },
+            ),
+        )
     }
 }

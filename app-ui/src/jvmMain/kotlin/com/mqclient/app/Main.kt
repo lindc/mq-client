@@ -323,7 +323,7 @@ private fun AppRoot(bootConfig: Config, onExit: () -> Unit) {
 private fun bootstrapEvents() {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("app"))
     CoreModule.initialize(scope)
-    ModuleRegistry.initializeServices(CoreModule.eventBus, scope)
+    ModuleRegistry.initializeServices(CoreModule.eventBus, scope, CoreModule.jobScheduler)
     scope.launch {
         CoreModule.eventBus.awaitSubscribers()
         CoreModule.eventBus.emit(EventNames.APP_STARTED)

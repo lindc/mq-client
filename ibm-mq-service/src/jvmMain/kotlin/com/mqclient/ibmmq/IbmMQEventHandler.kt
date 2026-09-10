@@ -27,6 +27,11 @@ class IbmMQEventHandler {
             IbmMQEvents.SCAN_STARTED -> handleScanStarted(event)
             IbmMQEvents.SCAN_COMPLETED -> handleScanCompleted(event)
             IbmMQEvents.SCAN_FAILED -> handleScanFailed(event)
+            // 定时任务（JobScheduler）触发的扫描：和手动扫描分开记，一眼能看出是哪条链路。
+            IbmMQEvents.MESSAGES_SCANNED -> handleMessagesScanned(event)
+            IbmMQEvents.OBJECTS_SCANNED -> handleObjectsScanned(event)
+            // 两类定时扫描的失败 payload 形状一致（connectionId / message），复用同一个处理。
+            IbmMQEvents.MESSAGES_SCAN_FAILED, IbmMQEvents.OBJECTS_SCAN_FAILED -> handleScanFailed(event)
             // 未知事件忽略即可：新事件在 IbmMQEvents 里加一行常量、这里加一个分支，
             // 事件总线不需要注册任何东西。
             else -> Unit
@@ -58,6 +63,25 @@ class IbmMQEventHandler {
         println(
             "[ibm-mq] scan failed: connection=$connectionId " +
                 "reason=${event.getString("message") ?: "unknown"}",
+        )
+    }
+
+    /** 定时扫描完消息数量：顺手把队列数记下来，和手动扫描共用同一份记账。 */
+    private fun handleMessagesScanned(event: AppEvent) {
+        val connectionId = event.getString("connectionId") ?: return
+        val queueCount = event.getInt("queueCount") ?: 0
+        queueCounts[connectionId] = queueCount
+        println(
+            "[ibm-mq] scheduled scan (messages): connection=$connectionId " +
+                "queues=$queueCount messages=${event.getInt("totalMessages") ?: 0}",
+        )
+    }
+
+    private fun handleObjectsScanned(event: AppEvent) {
+        println(
+            "[ibm-mq] scheduled scan (objects): connection=${event.getString("connectionId") ?: "?"} " +
+                "queues=${event.getInt("queueCount") ?: 0} topics=${event.getInt("topicCount") ?: 0} " +
+                "listeners=${event.getInt("listenerCount") ?: 0}",
         )
     }
 }

@@ -37,6 +37,30 @@ object EventNames {
     /** 任意模块上报了错误；payload: `message`(String) / `moduleId`(String)。 */
     const val ERROR_OCCURRED = "core.error.occurred"
 
+    // ---- 定时任务调度器事件（JobScheduler） ----
+
+    /** 调度器开始执行某个任务；payload: `jobId`(String)。 */
+    const val SCHEDULER_JOB_STARTED = "core.scheduler.job.started"
+
+    /**
+     * 任务执行成功；payload: `jobId`(String) / `durationMs`(Long)。
+     *
+     * ⚠️ 与 [SCHEDULER_JOB_STARTED] 一样属于高频事件：一个 5 秒的任务每分钟发 24 条，
+     * 订阅方（调试面板之类）自己按 `jobId` 过滤，别把它当状态用。
+     */
+    const val SCHEDULER_JOB_COMPLETED = "core.scheduler.job.completed"
+
+    /**
+     * 任务执行失败；payload: `jobId`(String) / `message`(String) / `error`(String，异常类名)。
+     *
+     * 与 [SCHEDULER_ERROR] 描述的是同一次失败（前者是任务级生命周期，后者是调度器的
+     * 统一错误口），订阅其中一个即可。
+     */
+    const val SCHEDULER_JOB_FAILED = "core.scheduler.job.failed"
+
+    /** 调度器统一错误上报；payload 同 [SCHEDULER_JOB_FAILED]。 */
+    const val SCHEDULER_ERROR = "core.scheduler.error"
+
     // ---- 连接通用事件（跨模块，各 MQ 模块共用） ----
 
     /** payload: `connectionId` / `type`(模块 id) / `name` */

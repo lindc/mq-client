@@ -2,13 +2,15 @@ package com.mqclient.core.spi
 
 import com.mqclient.core.event.AppEvent
 import com.mqclient.core.event.EventBus
+import com.mqclient.core.scheduler.JobScheduler
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 
 /**
- * 每个业务模块拿到的运行时上下文：一条事件总线 + 一个属于它自己的 scope。
+ * 每个业务模块拿到的运行时上下文：一条事件总线 + 一个应用级定时任务调度器 +
+ * 一个属于它自己的 scope。
  *
  * 模块只依赖这个接口，不依赖 `CoreModule` 单例，也不依赖启动代码 —— 新增模块时
  * 只要实现 `ServiceAdapter.initialize(context)`（SPI 自动发现）并在这里注册自己的
@@ -25,6 +27,15 @@ interface ServiceContext {
     /** 应用级事件总线（全进程一个实例）。 */
     val eventBus: EventBus
 
+    /**
+     * 应用级定时任务调度器（全进程一个实例）。
+     *
+     * 共享同一个调度器而不是每个模块一个，是为了让「当前有哪些任务在跑」是一个能一眼
+     * 看全的总账，也让 `cancelByPrefix` 能跨模块按连接收任务。任务 ID 里带模块名
+     * （`ibm-mq.<connectionId>.scan.messages`），所以共享不会让谁的任务被别人误取消。
+     */
+    val jobScheduler: JobScheduler
+
     /** 模块自己的 scope：随应用退出级联取消，模块内部协程崩了不牵连别的模块。 */
     val coroutineScope: CoroutineScope
 
@@ -32,9 +43,17 @@ interface ServiceContext {
         /**
          * 用父 scope 建一个模块上下文（[coroutineScope] 由 [moduleScope] 派生）。
          * 生产代码里由 `ModuleRegistry` 在 SPI 初始化时调用。
+         *
+         * [jobScheduler] 显式传入而不是在这里查 `CoreModule`：上下文工厂不依赖全局
+         * 单例，测试里可以喂一个挂在受控 scope 上的调度器。
          */
-        fun of(moduleId: String, eventBus: EventBus, parentScope: CoroutineScope): ServiceContext =
-            DefaultServiceContext(moduleId, eventBus, moduleScope(parentScope, moduleId))
+        fun of(
+            moduleId: String,
+            eventBus: EventBus,
+            parentScope: CoroutineScope,
+            jobScheduler: JobScheduler,
+        ): ServiceContext =
+            DefaultServiceContext(moduleId, eventBus, jobScheduler, moduleScope(parentScope, moduleId))
 
         /**
          * 模块 scope：父 Job 是 [parentScope]（应用退出时级联取消），自己带
@@ -52,6 +71,7 @@ interface ServiceContext {
 private class DefaultServiceContext(
     override val moduleId: String,
     override val eventBus: EventBus,
+    override val jobScheduler: JobScheduler,
     override val coroutineScope: CoroutineScope,
 ) : ServiceContext
 

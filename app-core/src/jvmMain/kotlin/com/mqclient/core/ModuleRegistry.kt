@@ -1,6 +1,7 @@
 package com.mqclient.core
 
 import com.mqclient.core.event.EventBus
+import com.mqclient.core.scheduler.JobScheduler
 import com.mqclient.core.spi.ServiceContext
 import java.util.ServiceLoader
 import kotlinx.coroutines.CoroutineScope
@@ -25,9 +26,13 @@ object ModuleRegistry {
      * 容错策略与 [loadAll] 一致：单个模块初始化失败只跳过它自己（并取消它的 scope，
      * 释放已启动的订阅协程），其余模块照常启动 —— 一个写坏的模块不该拖垮整个应用。
      */
-    fun initializeServices(eventBus: EventBus, parentScope: CoroutineScope): List<ServiceAdapter> =
+    fun initializeServices(
+        eventBus: EventBus,
+        parentScope: CoroutineScope,
+        jobScheduler: JobScheduler,
+    ): List<ServiceAdapter> =
         services.onEach { adapter ->
-            val context = ServiceContext.of(adapter.id, eventBus, parentScope)
+            val context = ServiceContext.of(adapter.id, eventBus, parentScope, jobScheduler)
             runCatching { adapter.initialize(context) }
                 .onFailure {
                     System.err.println("[ModuleRegistry] cannot initialize module '${adapter.id}': $it")

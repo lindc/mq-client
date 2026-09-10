@@ -21,4 +21,20 @@ object IbmMQEvents {
 
     /** 扫描失败；payload: `connectionId` / `message` */
     const val SCAN_FAILED = "ibm-mq.scan.failed"
+
+    // ---- 定时任务扫描事件（由 JobScheduler 周期性触发）----
+    // 与上面的手动扫描分开命名：订阅方（UI）能区分「用户点的」和「定时自己跑的」，
+    // 后者不该抢用户当前视图的焦点。
+
+    /** 定时扫完消息数量；payload: `connectionId` / `queueCount` / `totalMessages` */
+    const val MESSAGES_SCANNED = "ibm-mq.scan.messages.completed"
+
+    /** 消息数量扫描失败；payload: `connectionId` / `message` */
+    const val MESSAGES_SCAN_FAILED = "ibm-mq.scan.messages.failed"
+
+    /** 定时扫完对象列表；payload: `connectionId` / `queueCount` / `topicCount` / `listenerCount` */
+    const val OBJECTS_SCANNED = "ibm-mq.scan.objects.completed"
+
+    /** 对象列表扫描失败；payload: `connectionId` / `message` */
+    const val OBJECTS_SCAN_FAILED = "ibm-mq.scan.objects.failed"
 }
