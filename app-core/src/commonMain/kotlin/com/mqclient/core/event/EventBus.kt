@@ -1,8 +1,10 @@
 package com.mqclient.core.event
 
+import kotlin.concurrent.Volatile
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -30,7 +32,14 @@ class EventSubscription internal constructor(
     val mode: EventMatchMode,
     internal val handler: suspend (AppEvent) -> Unit,
 ) {
-    /** 收集协程，由 [EventBus] 在订阅时写入；[EventBus.cancelAll] 靠它取消。 */
+    /**
+     * 收集协程，由 [EventBus] 在订阅时写入；[EventBus.cancelAll] 靠它取消。
+     *
+     * 必须 `@Volatile`：写发生在订阅线程、读可能发生在调用 [EventBus.cancelAll] 的
+     * 线程（应用退出 / 测试收尾），没有 happens-before 关系时读到 null 会让那条
+     * 订阅永远取消不掉。
+     */
+    @Volatile
     internal var job: Job? = null
 
     /** 事件名是否命中本条订阅。 */
@@ -125,7 +134,11 @@ class EventBus(
      *
      * `tryEmit` 是同步的，所以同一个调用线程里连续 [emit] 的顺序是保真的；
      * 只有缓冲区被填满（有订阅者落后 64 条以上）时才退化成挂起入队 —— 这条路径
-     * 在极端压力下不保证多次 emit 之间的相对顺序，但**不丢事件**。
+     * 在极端压力下不保证多次 emit 之间的相对顺序。
+     *
+     * ⚠️ 降级路径借用总线的 scope，所以**总线 scope 已取消时（退出途中）这次 emit
+     * 会被静默丢弃**。要「一定入队」的场合（启动广播、测试里的确定顺序）用
+     * [emitSync]，它挂起直到事件进缓冲区，失败会抛而不是丢。
      */
     fun emit(name: String, payload: Map<String, Any?> = emptyMap(), source: String? = null) {
         emit(AppEvent(name = name, payload = payload, source = source))
@@ -194,8 +207,10 @@ class EventBus(
      *
      * `replay = 0` 时，订阅从 `launch` 到真正进入 `collect` 之间有一小段窗口，
      * 这期间发出的事件它收不到。启动阶段的「先注册、后广播」就靠它兜住：返回 true
-     * 之后 [emitSync] 的事件一定能落到所有订阅者手里。某些订阅的 scope 已经取消
-     * （永远不会开始收集）时会超时返回 false。
+     * 之后 [emitSync] 的事件一定能落到所有订阅者手里。
+     *
+     * 期望值取自调用瞬间的注册表快照，所以等待期间若有订阅被取消（计数回落），
+     * 可能等不到而超时返回 false —— 调用方按 false 处理即可，不要假设它一定是 true。
      */
     suspend fun awaitSubscribers(timeoutMillis: Long = 2_000L): Boolean {
         val expected = registry.value.size
@@ -208,21 +223,51 @@ class EventBus(
     /**
      * 取消所有注册的订阅（应用退出、测试收尾）。
      *
-     * 订阅注册与 [cancelAll] 预期都由同一个生命周期线程触发（模块初始化 / 应用
-     * 退出），不做跨线程的注册竞争处理。
+     * 取走和清空必须是原子的：先读一张快照再赋值空表，中间并发注册进来的订阅会被
+     * 那次赋值抹掉 —— 它们既不在注册表里、job 也没被取消，变成谁也收不掉的漏网
+     * 协程。所以这里用 CAS 把两步合成一步（[takeAllSubscriptions]）。
      */
     fun cancelAll() {
-        val all = registry.value
-        registry.value = emptyList()
+        val all = takeAllSubscriptions()
         all.forEach { it.job?.cancel() }
+    }
+
+    /**
+     * 原子地「取出并清空」注册表。
+     *
+     * [MutableStateFlow] 只保证了单次读写的原子性，所以这里用 CAS 循环把两步合成
+     * 一步；commonMain 里也没有 `getAndUpdate` 可用。
+     */
+    private fun takeAllSubscriptions(): List<EventSubscription> {
+        while (true) {
+            val current = registry.value
+            if (registry.compareAndSet(current, emptyList())) return current
+        }
     }
 
     // ---------------------------------------------------------------- 内部
 
     private fun subscribe(subscription: EventSubscription, subscriberScope: CoroutineScope): Job {
-        // 先入注册表再启动收集：否则协程可能先结束，finally 里的移除会把这条订阅残留下来。
-        registry.update { it + subscription }
-        val job = subscriberScope.launch(CoroutineName("EventBus:$subscription")) {
+        // UNDISPATCHED：协程体在当前调用栈上一直执行到第一个挂起点（也就是进入
+        // collect 之前），所以「写 job + 注册」跟调用方是同一帧完成的 —— 紧接着
+        // 调 awaitSubscribers 也能看到这条订阅。
+        //
+        // 同时它带 ATOMIC 语义：即使 scope 已经取消，协程体也一定执行，finally 也
+        // 一定跑到。换成 DEFAULT 或 LAZY 的话，已取消 scope 上的协程体根本不执行
+        // （实测如此），注册表里就留下一条永远不会开始收集、也永远等不到 finally
+        // 摘除的「幻影订阅」—— 它让 awaitSubscribers 的期望值永远达不到，每次启动
+        // 白等 2s，而 APP_STARTED 在 replay=0 下照旧被丢掉。
+        //
+        // replay=0 意味着新订阅者不会拿到任何积压事件，所以 collect 会立刻挂起：
+        // 这段同步执行的代码只有两次 StateFlow 更新，不会在调用线程上跑 handler。
+        return subscriberScope.launch(
+            CoroutineName("EventBus:$subscription"),
+            start = CoroutineStart.UNDISPATCHED,
+        ) {
+            // job 先就位再注册：反过来写的话，并发的 cancelAll 可能拿到一条
+            // job 仍是 null 的订阅，那条就取消不掉了。
+            subscription.job = coroutineContext[Job]
+            registry.update { it + subscription }
             try {
                 _events.collect { event ->
                     if (subscription.matches(event.name)) deliver(subscription, event)
@@ -231,8 +276,6 @@ class EventBus(
                 registry.update { it - subscription }
             }
         }
-        subscription.job = job
-        return job
     }
 
     /**

@@ -11,6 +11,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -187,6 +188,40 @@ class EventBusTest {
 
         await { seen.size == 1 }
         assertEquals("null|7|QUEUE1", seen.first())
+    }
+
+    @Test
+    fun `subscribing with a cancelled scope leaves no phantom subscription`() = withBus { bus ->
+        val dead = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        dead.cancel() // 协程体永远不会执行 → 不该进注册表
+        bus.on("phantom", dead) { }
+
+        delay(100)
+        assertEquals(0, bus.subscriptionCount, "幻影订阅会常驻注册表，并把 awaitSubscribers 拖到超时")
+        assertTrue(bus.awaitSubscribers(1_000L))
+    }
+
+    @Test
+    fun `a racing cancelAll never orphans a subscription`() = withBus { bus ->
+        val subscriberScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val jobs = CopyOnWriteArrayList<Job>()
+        // 注册和 cancelAll 并发跑，逼出「取快照」与「清空表」之间的空窗。
+        val registrars = (1..8).map {
+            launch(Dispatchers.Default) {
+                repeat(200) { jobs += bus.on("race", subscriberScope) { } }
+            }
+        }
+        val canceller = launch(Dispatchers.Default) { repeat(500) { bus.cancelAll() } }
+        registrars.forEach { it.join() }
+        canceller.join()
+
+        bus.cancelAll() // 收尾：并发期间之后才注册进来的，这一下全收
+
+        // 每一条订阅要么被某次 cancelAll 取消，要么还留在注册表里等着被取消。
+        // 漏网的那些是「已被移出注册表、job 却没被取消」，只能靠下面的断言发现。
+        assertTrue(jobs.all { it.isCancelled }, "有 ${jobs.count { !it.isCancelled }} 条订阅成了漏网协程")
+
+        subscriberScope.cancel()
     }
 
     @Test
