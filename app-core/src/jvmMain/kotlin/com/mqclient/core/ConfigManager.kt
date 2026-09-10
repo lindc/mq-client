@@ -20,10 +20,11 @@ import okio.Path.Companion.toOkioPath
  * config directory contains exactly two files:
  *
  *   ~/.mqclient/
- *     ├── secret.key   32 random bytes, Base64-encoded (AES-256 key)
- *     └── config.json  pretty JSON: general / theme / ai / connections /
- *                      metadata, sensitive string fields stored as
- *                      `enc:v1:<iv>:<ct+tag>` ciphertext
+ *     ├── secret.key       32 random bytes, Base64-encoded (AES-256 key)
+ *     ├── config.json      pretty JSON: general / theme / ai / connections /
+ *                          metadata, sensitive string fields stored as
+ *                          `enc:v1:<iv>:<ct+tag>` ciphertext
+ *     └── config.json.bak  上一版 config.json，每次 [save] 成功写入前留一份
  *
  * Sensitive-field handling: ConfigManager walks the serialized JSON tree and
  * encrypts/decrypts every **string** value under a key whose (lowercased)
@@ -42,6 +43,7 @@ import okio.Path.Companion.toOkioPath
 object ConfigManager {
 
     private const val CONFIG_FILE_NAME = "config.json"
+    private const val BACKUP_FILE_NAME = "config.json.bak"
     private const val SECRET_KEY_FILE_NAME = "secret.key"
     private const val LEGACY_CONNECTIONS_FILE_NAME = "connections.json"
     private const val TMP_SUFFIX = ".tmp"
@@ -87,6 +89,7 @@ object ConfigManager {
     }
 
     private fun configFile(): Path = configDir().resolve(CONFIG_FILE_NAME)
+    private fun backupFile(): Path = configDir().resolve(BACKUP_FILE_NAME)
     private fun secretKeyFile(): Path = configDir().resolve(SECRET_KEY_FILE_NAME)
     private fun legacyConnectionsFile(): Path = configDir().resolve(LEGACY_CONNECTIONS_FILE_NAME)
 
@@ -129,12 +132,25 @@ object ConfigManager {
     /* -------------------------------- loading ------------------------------ */
 
     /**
-     * Reads and decrypts `config.json` into a [Config]. Missing or unreadable
-     * file → [Config] defaults; an undecryptable sensitive value (wrong key,
-     * tampered ciphertext) stays as its raw text with a stderr log, so one
-     * bad field can't take down the whole config.
+     * Reads and decrypts `config.json` into a [Config], **把「文件不存在」和
+     * 「文件存在但读不出来」压成同一个结果**：两者都得到 [Config] 默认值。
+     *
+     * 只适合启动首帧这种「读不到就用默认值、之后立刻会被真实值覆盖」的场合。
+     * 凡是「读-改-写」路径（读出来 → copy 改一个字段 → 写回）都必须改用
+     * [loadOrNull]：默认值里其它配置段是空的，拿它去 copy 再落盘会把用户的
+     * 连接列表整段抹掉。
+     *
+     * 单个敏感字段解密失败仍保留原文 + stderr 日志（见 [decryptTree]），
+     * 一个坏字段不会拖垮整个配置。
      */
-    fun load(): Config {
+    fun load(): Config = loadOrNull() ?: Config()
+
+    /**
+     * [load] 的「读不出来就明说」版本：文件缺失或为空属于首次启动，返回
+     * [Config] 默认值；文件在但读不出来（损坏 / 被占用 / 整体解密失败）返回
+     * `null`，调用方据此放弃写入，不要拿默认值覆盖磁盘上的真实配置。
+     */
+    fun loadOrNull(): Config? {
         val path = configFile()
         if (!fs.exists(path)) return Config()
         return try {
@@ -146,7 +162,7 @@ object ConfigManager {
             json.decodeFromString(Config.serializer(), plain.toString())
         } catch (t: Throwable) {
             System.err.println("[ConfigManager] failed to read config: $t")
-            Config()
+            null
         }
     }
 
@@ -156,16 +172,35 @@ object ConfigManager {
      * Encrypts [config]'s sensitive fields and writes it to `config.json`
      * through a temp file + atomic rename, so a crash mid-write can never
      * leave a half-written file behind.
+     *
+     * 写入前先把当前 `config.json` 复制成 `config.json.bak`：写入是原子的、
+     * 不可撤销的，而 [load] 的容错会让一次读失败变成「用默认值整段覆盖」，
+     * 留一份上一版是这条错误链上唯一的后悔药。
      */
     fun save(config: Config): Result<Unit> =
         runCatching {
             val key = ensureSecretKey()
             val element = json.encodeToJsonElement(Config.serializer(), config)
             val encrypted = encryptTree(element, key)
+            backupCurrentConfig()
             writeFileAtomically(configFile(), prettyPrintJson(encrypted))
         }.onFailure { t ->
             System.err.println("[ConfigManager] failed to write config: $t")
         }
+
+    /**
+     * 把当前 `config.json` 复制成 `config.json.bak`（只保留一份，每次保存覆盖）。
+     * 备份失败不能连累保存本身 —— 它只是保险，缺了它写入依然是正确的。
+     */
+    private fun backupCurrentConfig() {
+        val current = configFile()
+        if (!fs.exists(current)) return
+        try {
+            fs.copy(current, backupFile())
+        } catch (t: Throwable) {
+            System.err.println("[ConfigManager] failed to back up config.json: $t")
+        }
+    }
 
     /* ------------------------- legacy connections.json --------------------- */
 
@@ -202,7 +237,8 @@ object ConfigManager {
     private fun importLegacyConnectionsIfAny() {
         if (!fs.exists(legacyConnectionsFile())) return
         val legacy = readLegacyConnections() ?: return // unreadable — keep the file
-        val current = load()
+        // 读-改-写：读不出来就不落盘，宁可把 legacy 文件留到下次启动再迁。
+        val current = loadOrNull() ?: return
         val existingIds = current.connections.mapTo(mutableSetOf()) { it.id }
         val fresh = legacy.filter { it.id !in existingIds }
         val merged = current.copy(connections = current.connections + fresh)

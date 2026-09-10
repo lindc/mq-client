@@ -18,5 +18,8 @@ kotlin {
             implementation(compose.material3)
             implementation(libs.kotlinx.serialization.json)
         }
+        jvmTest.dependencies {
+            implementation(kotlin("test"))
+        }
     }
 }

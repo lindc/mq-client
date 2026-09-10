@@ -72,10 +72,26 @@ class AiPanelState internal constructor(
     val systemPrompt: String
         get() = activeProviderOverride?.systemPromptBase64?.let(::decodePrompt) ?: DEFAULT_SYSTEM_PROMPT
 
+    /**
+     * 改一项 AI 设置并落盘。
+     *
+     * 这是「读-改-写」路径：盘上是整份 `config.json`（连接列表也在里面），所以
+     * 必须先用 [ConfigStore.loadConfigOrNull] 读到真实内容再写回 —— 用
+     * [ConfigStore.loadConfig] 的话，配置一旦读不出来它会静默给出默认值，拿默认值
+     * 去 copy 再落盘会把连接列表整段抹掉。读不出来时只改内存值、不碰磁盘，并把
+     * 原因交给 [panelError]。
+     */
     fun updateConfig(transform: (AiConfig) -> AiConfig) {
         val next = transform(config)
         config = next
-        ConfigStore.saveConfig(ConfigStore.loadConfig().copy(ai = next))
+        val current = ConfigStore.loadConfigOrNull()
+        if (current == null) {
+            panelError = "配置读取失败，本次修改未保存到磁盘"
+            return
+        }
+        ConfigStore.saveConfig(current.copy(ai = next)).onFailure { error ->
+            panelError = "设置保存失败：${error.message ?: error.javaClass.simpleName}"
+        }
     }
 
     /**

@@ -42,6 +42,15 @@ object ConfigStore {
     fun loadConfig(): Config = ConfigManager.load()
 
     /**
+     * [loadConfig] 的「读不出来就明说」版本：配置文件在但读不出来时返回
+     * `null`（[ConfigManager.loadOrNull]）。
+     *
+     * 凡是「读-改-写」路径都必须用它并在 `null` 时放弃写入 —— [loadConfig] 的
+     * 默认值里其它配置段是空的，拿它去 copy 再落盘会抹掉用户的连接列表。
+     */
+    fun loadConfigOrNull(): Config? = ConfigManager.loadOrNull()
+
+    /**
      * Encrypts sensitive fields and writes [config] to `config.json`
      * (temp file + atomic rename). Returns a [Result] so callers can
      * surface a failed "保存" instead of silently dropping edits.
@@ -62,10 +71,11 @@ object ConfigStore {
      * every other section as it currently sits on disk.
      */
     fun saveConnections(connections: List<ConnectionInfo>) {
-        val current = try {
-            loadConfig()
-        } catch (t: Throwable) {
-            System.err.println("[ConfigStore] failed to write connections: $t")
+        // 读-改-写：配置读不出来时 [loadConfig] 会静默给出默认值，拿它写回会
+        // 抹掉配置里的其它段，所以这里必须走 loadConfigOrNull 并在 null 时放弃。
+        val current = loadConfigOrNull()
+        if (current == null) {
+            System.err.println("[ConfigStore] refused to write connections: config.json unreadable")
             return
         }
         saveConfig(current.copy(connections = connections))
