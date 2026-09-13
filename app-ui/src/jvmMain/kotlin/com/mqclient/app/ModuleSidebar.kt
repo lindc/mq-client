@@ -38,6 +38,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -189,7 +190,7 @@ private fun ConnectionRow(
         Text(
             text = connection.status.label,
             style = MaterialTheme.typography.labelSmall,
-            color = statusTextColor(connection.status),
+            color = statusColor(connection.status),
         )
     }
 }
@@ -241,43 +242,46 @@ private fun ObjectTypeRow(
 }
 
 /**
- * Coloured dot for a connection state: green connected, red failed, amber
- * connecting, white (outlined, so it stays visible on a light surface)
- * disconnected.
+ * 状态色：绿 / 黄 / 红 / 灰，状态点 [StatusDot] 和状态文字共用同一份。
+ *
+ * 刻意不从 [MaterialTheme.colorScheme] 取 —— 语义色里没有「成功 / 警告」，而
+ * `primary` / `error` 会被用户在设置里挑的种子色带跑，状态就没法一眼认了。
+ *
+ * 但固定色值必须按底色的明暗挑亮度档：浅底用 700 档、深底用 400 档。原来写死
+ * `0xFF15803D`，深色模式下它就是一块看不见的黑绿。判据取**实际生效的背景亮度**
+ * 而不是 `isSystemInDarkTheme()` —— 用户在设置里强制深色、而系统是浅色时，后者
+ * 会判反。
+ */
+@Composable
+private fun statusColor(status: ConnectionStatus): Color {
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    return when (status) {
+        ConnectionStatus.Connected -> if (dark) Color(0xFF4ADE80) else Color(0xFF15803D)
+        ConnectionStatus.Connecting -> if (dark) Color(0xFFFACC15) else Color(0xFFA16207)
+        ConnectionStatus.Failed -> if (dark) Color(0xFFF87171) else Color(0xFFB91C1C)
+        ConnectionStatus.Disconnected -> if (dark) Color(0xFF9AA0A6) else Color(0xFF6B7280)
+    }
+}
+
+/**
+ * 状态点：绿 connected、黄 connecting、红 failed、disconnected 画成空心圈。
+ *
+ * 空心而不是白底 + 灰边：白点在浅底上需要描边才看得见（原来那圈 `0xFF9AA0A6` 就是
+ * 为它加的），换成透明底 + 同色描边之后两种主题下都成立。
  */
 @Composable
 private fun StatusDot(status: ConnectionStatus) {
-    val color =
-        when (status) {
-            ConnectionStatus.Connected -> Color(0xFF22C55E)
-            ConnectionStatus.Connecting -> Color(0xFFFACC15)
-            ConnectionStatus.Failed -> Color(0xFFEF4444)
-            ConnectionStatus.Disconnected -> Color.White
-        }
+    val color = statusColor(status)
+    val hollow = status == ConnectionStatus.Disconnected
     Box(
         modifier =
             Modifier
                 .size(9.dp)
                 .clip(CircleShape)
-                .background(color)
-                .then(
-                    // A white dot needs a ring, or it disappears into the row.
-                    if (status == ConnectionStatus.Disconnected) {
-                        Modifier.border(1.dp, Color(0xFF9AA0A6), CircleShape)
-                    } else {
-                        Modifier
-                    },
-                ),
+                .background(if (hollow) Color.Transparent else color)
+                .then(if (hollow) Modifier.border(1.dp, color, CircleShape) else Modifier),
     )
 }
-
-private fun statusTextColor(status: ConnectionStatus): Color =
-    when (status) {
-        ConnectionStatus.Connected -> Color(0xFF15803D)
-        ConnectionStatus.Connecting -> Color(0xFFA16207)
-        ConnectionStatus.Failed -> Color(0xFFB91C1C)
-        ConnectionStatus.Disconnected -> Color(0xFF9AA0A6)
-    }
 
 /**
  * Collapsed navigation for narrow windows: one pill per connection. Clicking
