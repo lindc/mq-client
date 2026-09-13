@@ -109,8 +109,11 @@ object DatabaseManager {
     /**
      * 关闭共享连接（应用退出时调；重复调用安全）。
      *
-     * ⚠️ 调用点必须在「不再有人发起 DB 访问」之后：先停调度器与事件订阅（`CoreModule.shutdown()`），
-     * 再关库 —— 否则关闭途中还在跑的查询会打在已关的连接上（那条查询会抛异常，不影响库本身）。
+     * ⚠️ 调用点必须在「不再有人发起 DB 访问」之后，退出三步的顺序是：
+     * `ModuleRegistry.disposeServices()`（先停模块资源）→ `CoreModule.shutdown()`
+     * （再停调度器与事件订阅）→ `DatabaseManager.close()`（最后关库，就是这里）。
+     * 提前关库的话，关闭途中还在跑的查询会打在已关的连接上（那条查询会抛异常，
+     * 不影响库本身）。
      */
     fun close() {
         synchronized(this) {

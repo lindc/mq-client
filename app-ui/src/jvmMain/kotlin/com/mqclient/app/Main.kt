@@ -160,12 +160,17 @@ private fun AppRoot(bootConfig: Config, onExit: () -> Unit) {
     // 听事件，是因为启动早期（读配置 / 模块初始化）的错误会早于订阅、被总线直接丢掉。
     val appError by CoreModule.lastError.collectAsState()
 
-    // 关窗即退出：先收掉所有事件订阅与模块 scope（应用 scope 由 CoreModule 持有），
-    // 再结束进程。
+    // 关窗即退出，三步顺序有讲究（和 DatabaseManager.close 的注释一致）：
+    // 先停模块资源，再停调度器/订阅，最后关库。
     val closeApp: () -> Unit = {
+        // 1. 模块资源：连接 / 会话 / 订阅 / 定时任务（SPI 初始化逆序，见 disposeServices）。
+        //    排在 CoreModule.shutdown() 之前 —— 这时总线与调度器还活着，
+        //    模块收尾时发的事件、上报的失败才有人收。
+        ModuleRegistry.disposeServices()
+        // 2. 调度器与全部事件订阅（应用 scope 由 CoreModule 持有，随之级联取消）。
         CoreModule.shutdown()
-        // 顺序有意义：调度器与订阅都停了之后再关库，否则关闭途中还在跑的查询会打在
-        // 已关的连接上（见 DatabaseManager.close 的注释）。
+        // 3. 最后关库：调度器与订阅都停了之后再关，否则关闭途中还在跑的查询会打在
+        //    已关的连接上（见 DatabaseManager.close 的注释）。
         DatabaseManager.close()
         onExit()
     }

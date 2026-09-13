@@ -16,4 +16,12 @@ class IbmMqServiceAdapter : ServiceAdapter {
     override fun initialize(context: ServiceContext) {
         IbmMQModule.initialize(context)
     }
+
+    /**
+     * SPI 模块销毁：应用退出时由 ModuleRegistry 在 CoreModule 停机之前调用，
+     * 转给 [IbmMQModule.shutdown] 取消本模块的订阅、定时任务并释放服务资源。
+     */
+    override fun dispose() {
+        IbmMQModule.shutdown()
+    }
 }

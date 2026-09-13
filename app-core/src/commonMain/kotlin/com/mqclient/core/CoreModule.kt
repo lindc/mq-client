@@ -37,6 +37,13 @@ object CoreModule {
     val eventBus: EventBus
         get() = bus ?: error("CoreModule.initialize(scope) 必须先于 CoreModule.eventBus 调用")
 
+    /**
+     * [eventBus] 的「没有就给 null」版本：调用点只是**顺带**广播时用它 ——
+     * 「先问 [isInitialized] 再取」中间隔着一次并发 [shutdown] 的话，
+     * 第二次读取会抛异常；这里的读写只有一次。
+     */
+    val eventBusOrNull: EventBus? get() = bus
+
     /** 应用级 scope —— 所有模块 scope 的父节点。 */
     val scope: CoroutineScope
         get() = appScope ?: error("CoreModule.initialize(scope) 必须先于 CoreModule.scope 调用")
@@ -123,6 +130,9 @@ object CoreModule {
      *
      * 顺序有讲究：任务执行时会往总线上发事件，先取消订阅的话这些事件就发到空气里了；
      * 反过来先停任务，退出过程中不会再有人往总线上投递。
+     *
+     * 模块自己的资源（连接 / 会话 / 各模块的定时任务与订阅）不归这里管：调用点要**先**调
+     * `ModuleRegistry.disposeServices()`（见 app-ui 的 Main.kt closeApp），本方法排在它后面。
      */
     fun shutdown() {
         scheduler?.cancelAll()

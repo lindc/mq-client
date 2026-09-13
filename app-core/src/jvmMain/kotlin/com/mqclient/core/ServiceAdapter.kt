@@ -31,4 +31,20 @@ interface ServiceAdapter {
      * 默认空实现 —— 纯描述性的模块什么都不用写，新增模块也不需要修改启动代码。
      */
     fun initialize(context: ServiceContext) {}
+
+    /**
+     * 模块销毁钩子：由 [ModuleRegistry.disposeServices] 在应用退出时**按初始化逆序**调用，
+     * 模块在这里释放自己持有的资源：真实连接 / 会话 / 消费者 / 订阅 / 定时任务。
+     *
+     * 调用点在 `CoreModule.shutdown()` 与 `DatabaseManager.close()` **之前**（见 app-ui 的
+     * `Main.kt` closeApp）：这时总线与调度器还活着，dispose 里发事件、用模块 scope 都还成立。
+     *
+     * 契约：
+     *  - 默认空实现 —— 纯描述性的模块不用写；
+     *  - 必须**幂等**，且能容忍「[initialize] 没跑过或跑了一半」：失败过的模块正是需要
+     *    收尾的那个，销毁路径照样会调它；
+     *  - 抛出的异常只影响它自己（[ModuleRegistry.disposeServices] 逐个兜住），
+     *    但不要依赖这一点 —— 没关掉的资源就是泄漏。
+     */
+    fun dispose() {}
 }

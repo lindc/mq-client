@@ -25,12 +25,28 @@ object ModuleRegistry {
     val uis: List<BusinessUi> by lazy { loadAll(BusinessUi::class.java) }
 
     /**
+     * 本次初始化过的模块：`initializeServices` 拿到的那份全量列表（含初始化失败的 ——
+     * 失败的那个正是需要收尾的），供 [disposeServices] 逆序销毁。
+     */
+    private var initializedServices: List<ServiceAdapter> = emptyList()
+
+    /**
+     * 初始化时拿到的总线：销毁失败要报到错误通道上，而 [disposeServices] 的调用点
+     * （应用退出）刻意排在 `CoreModule.shutdown()` 之前，所以这条通道仍然活着。
+     */
+    private var initializedBus: EventBus? = null
+
+    /**
      * 逐个初始化已发现的 service 模块：给每个模块一个自己的 scope 与 [ServiceContext]，
      * 让它在 [ServiceAdapter.initialize] 里注册自己的事件订阅。
      *
      * 容错策略与 [loadAll] 一致：单个模块初始化失败只跳过它自己（并取消它的 scope，
      * 释放已启动的订阅协程），其余模块照常启动 —— 一个写坏的模块不该拖垮整个应用。
+     *
+     * 初始化过的模块被记下来，应用退出时由 [disposeServices] 按逆序调
+     * [ServiceAdapter.dispose] 收尾 —— 两个钩子成对，别只调其中一个。
      */
+    @Synchronized
     fun initializeServices(
         eventBus: EventBus,
         parentScope: CoroutineScope,
@@ -55,8 +71,59 @@ object ModuleRegistry {
                 }
         }
 
+        initializedServices = initialized
+        initializedBus = eventBus
         reportUnknownUiServiceIds(eventBus)
         return initialized
+    }
+
+    /**
+     * 应用退出：按**初始化逆序**逐个调 [ServiceAdapter.dispose]，让模块释放自己的资源
+     * （真实连接 / 会话 / 消费者 / 订阅 / 定时任务）。
+     *
+     * 调用点必须在 `CoreModule.shutdown()` 与 `DatabaseManager.close()` **之前**
+     * （见 app-ui 的 `Main.kt` closeApp）：这时总线与调度器还活着，模块收尾时发的事件
+     * 有人收、上报的失败能到界面上；库也还开着，模块可以读完自己最后一份数据。
+     *
+     * 容错策略与 [initializeServices] 对称：单个模块销毁失败只跳过它自己（日志 + 错误通道），
+     * 其余模块照常收尾 —— 一个关不掉的模块不该让别的模块跟着泄漏。
+     *
+     * 幂等：调用后清空记录，重复调用（菜单「退出」和关窗请求走同一个回调）是 no-op；
+     * 从未初始化过时同样是 no-op。
+     */
+    @Synchronized
+    fun disposeServices() {
+        val adapters = initializedServices
+        val bus = initializedBus
+        initializedServices = emptyList()
+        initializedBus = null
+
+        disposeAll(adapters) { adapter, error ->
+            Log.error(LOG_TAG, "cannot dispose module '${adapter.id}': $error")
+            bus?.emit(
+                name = EventNames.ERROR_OCCURRED,
+                payload = mapOf(
+                    "message" to "模块 '${adapter.id}' 销毁失败：${error.message ?: error::class.simpleName}",
+                    "moduleId" to adapter.id,
+                    "error" to error::class.simpleName,
+                ),
+                source = "core",
+            )
+        }
+    }
+
+    /**
+     * 逆序逐个销毁 —— 后初始化的先销毁，它更可能压在先初始化的模块之上。
+     * 单个模块抛出的异常交给 [onFailure] 收走，不中断循环（否则第一个坏模块就能让
+     * 后面所有模块的资源全部泄漏）。抽成纯函数是为了可测（见 ModuleRegistryTest）。
+     */
+    internal fun disposeAll(
+        adapters: List<ServiceAdapter>,
+        onFailure: (ServiceAdapter, Throwable) -> Unit,
+    ) {
+        adapters.asReversed().forEach { adapter ->
+            runCatching { adapter.dispose() }.onFailure { error -> onFailure(adapter, error) }
+        }
     }
 
     /**
