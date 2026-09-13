@@ -28,19 +28,30 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun AiMessageList(
     messages: List<AiMessage>,
+    streamingMessageId: String?,
     onFeedback: (messageId: String, useful: Boolean?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
     val last = messages.lastOrNull()
+    val streaming = last != null && last.id == streamingMessageId
 
-    // Re-fire when either the list size grows or the last message's length
-    // changes (i.e. an assistant message is streaming in).
-    LaunchedEffect(messages.size, last?.content?.length) {
-        if (messages.isNotEmpty()) {
+    // 「新消息 / 换了最后一条」→ 动画滚到底。正在流的那条交给下面，避免两条滚动
+    // 互相打断。
+    LaunchedEffect(messages.size, last?.id) {
+        if (messages.isNotEmpty() && !streaming) {
             // 偏移给个超大值会被夹到列表末尾 —— 于是增长中的末条消息停在它的**底部**，
             // 而不是把这条消息的首行滚到视口顶部。
             listState.animateScrollToItem(messages.lastIndex, scrollOffset = Int.MAX_VALUE)
+        }
+    }
+
+    // 流式追加：末条的内容每来一个分片就变长，但**不能**用动画跟 —— 动画会在每个
+    // 分片（十几毫秒一个）被取消重启动，末条越长越滚不到位。这里用无动画的
+    // scrollToItem 贴住底部，动画只留给「新消息」那条路径。
+    LaunchedEffect(last?.content?.length) {
+        if (streaming) {
+            listState.scrollToItem(messages.lastIndex, scrollOffset = Int.MAX_VALUE)
         }
     }
 

@@ -51,6 +51,7 @@ fun AiPanel(
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 AiMessageList(
                     messages = state.messages,
+                    streamingMessageId = state.streamingMessageId,
                     onFeedback = { id, useful -> state.recordFeedback(id, useful) },
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                 )
