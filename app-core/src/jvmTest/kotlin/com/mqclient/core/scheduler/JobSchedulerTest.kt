@@ -16,13 +16,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 
 /**
  * 调度器的行为契约测试：
  *  - `runOnStart` / `initialDelayMs` / 默认首次延迟三种首次执行语义；
- *  - 同 ID 重新注册会顶掉旧任务，不会两条协程并行；
+ *  - 同 ID 重新注册会顶掉旧任务（并发注册也不会漏出取消不到的协程）；
  *  - `cancel` / `cancelByPrefix` / `cancelAll` 的取消范围；
  *  - 任务抛异常后自己照常进入下一轮，且不影响别的任务，同时上报失败事件；
  *  - scope 已取消时不留下清不掉的僵尸登记。
@@ -105,6 +106,35 @@ class JobSchedulerTest {
 
         assertEquals(settled, first.get(), "同 ID 重新注册后旧任务必须停止")
         assertEquals(1, scheduler.activeJobCount, "同 ID 只该留一条登记")
+    }
+
+    @Test
+    fun `racing schedules of the same id never orphan a running job`() = withScheduler { scheduler, bus ->
+        val started = AtomicInteger()
+        bus.on(EventNames.SCHEDULER_JOB_STARTED) { started.incrementAndGet() }
+        await { bus.subscriptionCount == 1 }
+        assertTrue(bus.awaitSubscribers(1_000L))
+
+        // 多线程抢着注册同一个 ID。旧实现把「取消旧的」和「登记新的」分成了两步
+        // （先 cancel(id) 再 update），并发下会有一条活协程被挤出注册表 —— 它既不在
+        // getActiveJobs 里、cancelAll 也够不着。只能靠「取消之后还在跑」把它逼出来。
+        val racers = (1..8).map {
+            launch(Dispatchers.Default) {
+                repeat(150) {
+                    scheduler.schedule(ScheduledJob(id = "raced", intervalMs = 2L, runOnStart = true) { })
+                }
+            }
+        }
+        racers.forEach { it.join() }
+
+        assertEquals(listOf("raced"), scheduler.getActiveJobs(), "并发注册之后表里只该留一条")
+
+        scheduler.cancelAll()
+        delay(200L) // 等在途事件投递完
+        val settled = started.get()
+        delay(300L) // 漏网协程的间隔只有 2ms，够它再跑几十轮
+
+        assertEquals(settled, started.get(), "cancelAll 之后还在跑，说明有协程没被登记也没被取消")
     }
 
     @Test

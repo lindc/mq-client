@@ -3,6 +3,7 @@ package com.mqclient.core.scheduler
 import com.mqclient.core.event.EventBus
 import com.mqclient.core.event.EventNames
 import com.mqclient.core.log.Log
+import kotlin.coroutines.coroutineContext
 import kotlin.time.TimeSource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineName
@@ -12,6 +13,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /** 本组件的日志 tag。 */
@@ -75,15 +77,18 @@ class JobScheduler(
     // ---------------------------------------------------------------- 注册
 
     /**
-     * 注册一个定时任务；**同一个 ID 会先取消旧的**（等价于「换一份新配置」，
-     * 不会出现两条同 ID 的协程同时跑）。
+     * 注册一个定时任务；**同一个 ID 会先取消旧的**（等价于「换一份新配置」）。
      *
      * 非阻塞：登记完就返回，第一次执行按 [ScheduledJob.runOnStart] / `initialDelayMs`
      * 的规则稍后发生。
+     *
+     * ⚠️ 「换掉旧任务」的粒度是**协作式取消**能给的粒度：[Job.cancel] 不会打断一个
+     * 不挂起的 action，正在跑的那一轮一定会跑完；能保证的只是它跑完后不会进下一轮
+     * （[runLoop] 的循环条件查 `isActive`，且 `delay` 会立刻抛 `CancellationException`）。
+     * 所以严格说两条同 ID 的协程可能**首尾相接**地各跑一段 —— 想要「旧的彻底停下来
+     * 才启动新的」，得由 action 自己配合检查 `isActive`，本调度器不替它做线程打断。
      */
     fun schedule(job: ScheduledJob) {
-        cancel(job.id)
-
         // LAZY 起步：协程体不会在 schedule() 的调用线程上内联执行（runOnStart 的任务
         // 可能很重），但登记与启动的先后顺序仍然由下面两行显式控制。
         val launched = scope.launch(
@@ -100,14 +105,23 @@ class JobScheduler(
             }
         }
 
+        // 「登记新的 + 取出同 ID 旧的」必须一次 CAS 完成。分成两步（先 cancel(id)
+        // 再 update）的话，两个并发的 schedule 会一起穿过中间的空窗：两条协程都还
+        // 活着，但表里只剩后登记的那条 —— 先登记的那条谁也取消不到（getActiveJobs
+        // 看不见、cancelAll 也够不着），变成一条永久泄漏的周期循环。
+        val previous = replace(job.id, launched)
+        // 先停旧的、再启动新的：反过来会留一小段两条同 ID 协程并存的窗口。
+        previous?.cancel()
+
         // 先登记、再启动：反过来的话，一个立即执行的任务可能在自己的 finally 里
         // 先摘表、后登记，于是表里留下一条已经跑完的僵尸记录。
-        registry.update { current -> current + (job.id to launched) }
         launched.start()
 
         // scope 已经取消时协程体根本不会执行（也就没有 finally），上面那条登记会变成
         // 谁也清不掉的僵尸任务 —— 这里补一次身份校验主动摘掉。
-        if (!launched.isActive) {
+        // 「还是表里那一条」这个条件不能少：被并发的 schedule 顶掉之后协程同样会
+        // isActive == false，但那时表里已经是新任务了，没有僵尸要清，也不该报警。
+        if (!launched.isActive && registry.value[job.id] === launched) {
             registry.update { current -> if (current[job.id] === launched) current - job.id else current }
             Log.warn(LOG_TAG, "job '${job.id}' was not started: scope is no longer active")
         }
@@ -165,7 +179,10 @@ class JobScheduler(
         }
         if (firstDelay > 0L) delay(firstDelay)
 
-        while (true) {
+        // isActive 而不是 true：delay() 在间隔为 0 时是直接返回的，并不检查取消，
+        // 光靠它兜不住「已取消但间隔为 0」的循环。有了这个条件，取消之后本循环
+        // 不会再开新的一轮 —— 正在跑的那一轮仍会跑完（见 [schedule] 的注释）。
+        while (coroutineContext.isActive) {
             runJobSafely(job)
             delay(job.intervalMs)
         }
@@ -207,6 +224,19 @@ class JobScheduler(
             eventBus.emit(EventNames.SCHEDULER_JOB_FAILED, payload)
             eventBus.emit(EventNames.SCHEDULER_ERROR, payload)
             Log.error(LOG_TAG, "job '${job.id}' failed: $error")
+        }
+    }
+
+    /**
+     * 原子地用 [job] 替换 [jobId] 上的登记，返回被换下来的那条协程（原来没有则 null）。
+     *
+     * [MutableStateFlow] 只保证单次读写的原子性，也没有 `getAndUpdate`，所以自己转
+     * CAS 循环 —— 和 [takeMatching] 同一套做法。
+     */
+    private fun replace(jobId: String, job: Job): Job? {
+        while (true) {
+            val current = registry.value
+            if (registry.compareAndSet(current, current + (jobId to job))) return current[jobId]
         }
     }
 
