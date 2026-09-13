@@ -165,6 +165,10 @@ object IbmMQModule {
      *
      * 幂等：同 ID 重复注册会顶掉旧的（见 [JobScheduler.schedule]），所以「启动时补注册」
      * 和「事件触发的注册」可以并存，不会出现两条协程跑同一个任务。
+     *
+     * 两条任务一快一慢：消息数量是**心跳**（5 秒、注册后立刻跑，成功 / 失败顺便上报
+     * 连接状态），对象列表是**慢扫**（10 分钟、晚 10 秒起步）。两者共用 IbmMQService
+     * 里那把 scanLock，所以不会同时压到同一条连接上。
      */
     private fun registerJobsForConnection(
         scheduler: JobScheduler,

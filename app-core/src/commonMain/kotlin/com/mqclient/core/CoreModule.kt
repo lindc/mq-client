@@ -51,6 +51,9 @@ object CoreModule {
     /**
      * 应用级定时任务调度器 —— 全进程一个实例，所有模块的任务都登记在它这里，
      * [shutdown] 时统一取消。这样「谁在跑什么」有一个总账，见 [JobScheduler.getActiveJobs]。
+     *
+     * 具体语义（固定延迟 / 一个任务一条协程 / 按 id 与前缀取消 / 不是任务队列）见
+     * [JobScheduler] 的类注释；任务的注册与取消时机由模块自己定（比如连接建立 / 删除时）。
      */
     val jobScheduler: JobScheduler
         get() = scheduler ?: error("CoreModule.initialize(scope) 必须先于 CoreModule.jobScheduler 调用")

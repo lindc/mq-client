@@ -20,6 +20,15 @@ private const val LOG_TAG = "job-scheduler"
 /**
  * 轻量级定时任务调度器：各业务模块把自己的周期性任务注册进来，协程生命周期由这里统一管。
  *
+ * ⚠️ **它不是任务队列**：任务之间不排队、不共享执行槽位，也没有「错过的轮次补跑」——
+ * 每个任务自己一条固定延迟的循环，谁都不挡谁。要限并发 / 排队 / 失败重试，就在 action
+ * 里自己解决（或者另起一个组件），本类不掺和；它只负责「隔多久跑一次」和「谁负责停掉它」。
+ *
+ * 任务的来源与归宿由**注册方**决定：调度器只认 id，不判断某个任务「该不该存在」。
+ * 应用的用法是「连接出现 → 注册一组任务；连接消失 → 按前缀收掉」（见 `IbmMQModule`），
+ * 退出时再兜两层：模块自己的 `shutdown`（由 `ModuleRegistry.disposeServices` 触发）
+ * 按前缀取消，`CoreModule.shutdown` 最后 `cancelAll` 收尾。
+ *
  * 设计要点：
  *  1. **一个任务一条协程**：任务之间互不影响。某个任务的 action 抛异常只会上报、
  *     不会终止它自己的循环，更不会波及其它任务；
@@ -29,7 +38,9 @@ private const val LOG_TAG = "job-scheduler"
  *  3. **固定延迟**：循环是「执行 → 等 [ScheduledJob.intervalMs] → 执行」，所以同一个
  *     任务不会和自己重叠。想要「不管跑多久都按点触发」的任务类型，本调度器不提供；
  *  4. **不持有业务状态**：唯一的内部状态是 id → 协程的注册表（为了取消和调试）；
- *  5. **事件驱动**：执行结果走 [EventBus] 广播，调度器不认识任何订阅方，模块之间
+ *  5. **事件驱动**：执行结果走 [EventBus] 广播（[EventNames.SCHEDULER_JOB_STARTED] /
+ *     [EventNames.SCHEDULER_JOB_COMPLETED] / [EventNames.SCHEDULER_JOB_FAILED]，失败同时
+ *     走统一错误口 [EventNames.SCHEDULER_ERROR]），调度器不认识任何订阅方，模块之间
  *     也不互相依赖。
  *
  * 线程安全：注册表是 [MutableStateFlow] + CAS 整表替换。commonMain 里拿不到
@@ -145,6 +156,8 @@ class JobScheduler(
      * 只有取消才能结束它（action 的异常在 [runJobSafely] 里就被吃掉了）。
      */
     private suspend fun runLoop(job: ScheduledJob) {
+        // 首次延迟的三取一规则（runOnStart 优先 > initialDelayMs > 等满一轮）见
+        // ScheduledJob 的类注释；这里只负责把它落成一个毫秒数。
         val firstDelay = when {
             job.runOnStart -> 0L
             job.initialDelayMs > 0L -> job.initialDelayMs

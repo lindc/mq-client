@@ -335,8 +335,8 @@ private fun AppRoot(bootConfig: Config, onExit: () -> Unit) {
  *  1. 建应用级 scope（SupervisorJob + Dispatchers.Default，不用 GlobalScope）；
  *  2. CoreModule 拿到总线，数据库也在这里初始化（JDBC 单连接 → 单槽 IO 调度器串行化），
  *     之后模块读 CoreModule.eventBus / DatabaseManager 或注入的 ServiceContext；
- *  3. 各业务模块（SPI 发现）用 ServiceContext 注册自己的事件订阅 —— 新增模块不需要
- *     改这里；
+ *  3. 各业务模块（SPI 发现）用 ServiceContext 注册自己的事件订阅与定时任务
+ *     （`ServiceContext.jobScheduler`，全进程一个调度器）—— 新增模块不需要改这里；
  *  4. 等订阅真正开始收集后再广播 core.app.started：replay=0 时早于订阅者开始收集
  *     的事件会被丢弃（见 EventBus 的注释）。
  */
