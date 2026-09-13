@@ -3,7 +3,11 @@ package com.mqclient.core
 import java.util.ServiceConfigurationError
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 import kotlin.test.fail
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 
 /**
  * 覆盖 SPI 枚举的容错：`ServiceConfigurationError` 是 `Error`，`hasNext()` 和
@@ -75,35 +79,48 @@ class ModuleRegistryTest {
     @Test
     fun `dispose runs in reverse initialization order`() {
         val disposed = mutableListOf<String>()
-        val adapters = listOf(
-            FakeAdapter("a") { disposed += "a" },
-            FakeAdapter("b") { disposed += "b" },
-            FakeAdapter("c") { disposed += "c" },
+        val modules = modules(
+            "a" to { disposed += "a" },
+            "b" to { disposed += "b" },
+            "c" to { disposed += "c" },
         )
 
-        ModuleRegistry.disposeAll(adapters) { adapter, error -> fail("不该有失败：${adapter.id} $error") }
+        ModuleRegistry.disposeAll(modules) { adapter, error -> fail("不该有失败：${adapter.id} $error") }
 
         assertEquals(listOf("c", "b", "a"), disposed, "后初始化的先销毁")
+        assertTrue(modules.all { it.second.isCancelled }, "每个模块的 scope 都要跟着取消")
     }
 
     @Test
     fun `a module that throws on dispose does not stop the others`() {
         val disposed = mutableListOf<String>()
         val failures = mutableListOf<String>()
-        val adapters = listOf(
-            FakeAdapter("a") { disposed += "a" },
-            FakeAdapter("b") {
+        val modules = modules(
+            "a" to { disposed += "a" },
+            "b" to {
                 disposed += "b"
                 throw IllegalStateException("cannot close")
             },
-            FakeAdapter("c") { disposed += "c" },
+            "c" to { disposed += "c" },
         )
 
-        ModuleRegistry.disposeAll(adapters) { adapter, _ -> failures += adapter.id }
+        ModuleRegistry.disposeAll(modules) { adapter, _ -> failures += adapter.id }
 
         assertEquals(listOf("c", "b", "a"), disposed, "抛错的那个也在链条里，后面的模块照常收尾")
         assertEquals(listOf("b"), failures, "失败交给回调上报，不中断循环")
+        assertTrue(
+            modules.all { it.second.isCancelled },
+            "dispose 抛错的模块 scope 照样要取消 —— 否则它留下的订阅和定时任务全漏",
+        )
     }
+
+    /** 造「适配器 + 它的模块 scope」对：[ModuleRegistry.disposeAll] 收的就是这个。 */
+    private fun modules(vararg specs: Pair<String, () -> Unit>): List<Pair<ServiceAdapter, CoroutineScope>> =
+        specs.map { (id, onDispose) ->
+            FakeAdapter(id, onDispose) to CoroutineScope(SupervisorJob())
+        }
+
+    private val CoroutineScope.isCancelled: Boolean get() = coroutineContext[Job]?.isCancelled == true
 
     /** 只关心 dispose 的假适配器：描述字段填默认值，initialize 不做事。 */
     private class FakeAdapter(

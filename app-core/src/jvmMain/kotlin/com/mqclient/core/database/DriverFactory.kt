@@ -29,12 +29,22 @@ actual class DriverFactory {
 
         // 3. 执行优化配置。WAL 写进库文件本身、是持久的；其余都是连接级 PRAGMA，
         //    每次建连接都要重放一遍（重复执行幂等）。读一下 .value，确保语句真的跑了。
-        driver.execute(null, "PRAGMA journal_mode=WAL", 0).value
-        driver.execute(null, "PRAGMA synchronous=NORMAL", 0).value
-        driver.execute(null, "PRAGMA cache_size=20000", 0).value
-        // 写锁被别的连接 / 进程占着时等 5 秒再报 SQLITE_BUSY，而不是立刻失败。
-        driver.execute(null, "PRAGMA busy_timeout=5000", 0).value
-        driver.execute(null, "PRAGMA foreign_keys=ON", 0).value
+        //
+        //    任一条失败都要先关掉 driver 再抛：它已经把文件句柄打开了，可异常一抛
+        //    调用方（DatabaseManager.initialize）根本拿不到这个对象，也就没人能关它 ——
+        //    一条 PRAGMA 打错字就漏一个 JDBC 连接。
+        try {
+            driver.execute(null, "PRAGMA journal_mode=WAL", 0).value
+            driver.execute(null, "PRAGMA synchronous=NORMAL", 0).value
+            driver.execute(null, "PRAGMA cache_size=20000", 0).value
+            // 写锁被别的连接 / 进程占着时等 5 秒再报 SQLITE_BUSY，而不是立刻失败。
+            driver.execute(null, "PRAGMA busy_timeout=5000", 0).value
+            driver.execute(null, "PRAGMA foreign_keys=ON", 0).value
+        } catch (cause: Throwable) {
+            // 关库失败不能盖掉真正的病因，所以兜住它（只留日志级的沉默）。
+            runCatching { driver.close() }
+            throw cause
+        }
 
         return driver
     }

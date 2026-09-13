@@ -25,10 +25,14 @@ object ModuleRegistry {
     val uis: List<BusinessUi> by lazy { loadAll(BusinessUi::class.java) }
 
     /**
-     * 本次初始化过的模块：`initializeServices` 拿到的那份全量列表（含初始化失败的 ——
-     * 失败的那个正是需要收尾的），供 [disposeServices] 逆序销毁。
+     * 本次初始化过的模块：`initializeServices` 拿到的全量「适配器 + 它的模块 scope」
+     * （含初始化失败的 —— 失败的那个正是需要收尾的），供 [disposeServices] 逆序销毁。
+     *
+     * scope 必须跟着适配器一起留下来：[ServiceContext] 建完就丢的话，[disposeServices]
+     * 手里就只剩适配器，而 [ServiceAdapter.dispose] 默认是空实现 —— 模块忘了自己取消
+     * scope，它注册的订阅 / 定时任务就没人收得掉。
      */
-    private var initializedServices: List<ServiceAdapter> = emptyList()
+    private var initializedServices: List<Pair<ServiceAdapter, CoroutineScope>> = emptyList()
 
     /**
      * 初始化时拿到的总线：销毁失败要报到错误通道上，而 [disposeServices] 的调用点
@@ -43,8 +47,8 @@ object ModuleRegistry {
      * 容错策略与 [loadAll] 一致：单个模块初始化失败只跳过它自己（并取消它的 scope，
      * 释放已启动的订阅协程），其余模块照常启动 —— 一个写坏的模块不该拖垮整个应用。
      *
-     * 初始化过的模块被记下来，应用退出时由 [disposeServices] 按逆序调
-     * [ServiceAdapter.dispose] 收尾 —— 两个钩子成对，别只调其中一个。
+     * 初始化过的模块**连同它的 scope**被记下来，应用退出时由 [disposeServices] 按逆序
+     * 调 [ServiceAdapter.dispose] 并取消 scope —— 两个动作成对，别只做其中一个。
      */
     @Synchronized
     fun initializeServices(
@@ -52,7 +56,7 @@ object ModuleRegistry {
         parentScope: CoroutineScope,
         jobScheduler: JobScheduler,
     ): List<ServiceAdapter> {
-        val initialized = services.onEach { adapter ->
+        val initialized = services.map { adapter ->
             val context = ServiceContext.of(adapter.id, eventBus, parentScope, jobScheduler)
             runCatching { adapter.initialize(context) }
                 .onFailure { error ->
@@ -69,17 +73,18 @@ object ModuleRegistry {
                     )
                     context.coroutineScope.cancel()
                 }
+            adapter to context.coroutineScope
         }
 
         initializedServices = initialized
         initializedBus = eventBus
         reportUnknownUiServiceIds(eventBus)
-        return initialized
+        return initialized.map { it.first }
     }
 
     /**
-     * 应用退出：按**初始化逆序**逐个调 [ServiceAdapter.dispose]，让模块释放自己的资源
-     * （真实连接 / 会话 / 消费者 / 订阅 / 定时任务）。
+     * 应用退出：按**初始化逆序**逐个调 [ServiceAdapter.dispose] 并取消它的模块 scope，
+     * 让模块释放自己的资源（真实连接 / 会话 / 消费者 / 订阅 / 定时任务）。
      *
      * 调用点必须在 `CoreModule.shutdown()` 与 `DatabaseManager.close()` **之前**
      * （见 app-ui 的 `Main.kt` closeApp）：这时总线与调度器还活着，模块收尾时发的事件
@@ -116,13 +121,18 @@ object ModuleRegistry {
      * 逆序逐个销毁 —— 后初始化的先销毁，它更可能压在先初始化的模块之上。
      * 单个模块抛出的异常交给 [onFailure] 收走，不中断循环（否则第一个坏模块就能让
      * 后面所有模块的资源全部泄漏）。抽成纯函数是为了可测（见 ModuleRegistryTest）。
+     *
+     * 每个模块两步：先 [ServiceAdapter.dispose]（这时 scope 还活着，模块还能发事件、
+     * 起协程收尾），再取消 scope。取消放在 `runCatching` **外面** —— dispose 抛错的
+     * 那条也一定要把 scope 收掉，否则它注册的订阅和定时任务会一直挂着。
      */
     internal fun disposeAll(
-        adapters: List<ServiceAdapter>,
+        initialized: List<Pair<ServiceAdapter, CoroutineScope>>,
         onFailure: (ServiceAdapter, Throwable) -> Unit,
     ) {
-        adapters.asReversed().forEach { adapter ->
+        initialized.asReversed().forEach { (adapter, scope) ->
             runCatching { adapter.dispose() }.onFailure { error -> onFailure(adapter, error) }
+            scope.cancel()
         }
     }
 
