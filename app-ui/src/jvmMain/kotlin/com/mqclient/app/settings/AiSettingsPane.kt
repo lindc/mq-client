@@ -1,6 +1,5 @@
 package com.mqclient.app.settings
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -154,45 +153,18 @@ private fun ActiveProviderRow(
     activeId: String,
     onChange: (String) -> Unit,
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Text(
-            text = stringResource("ai_default_service"),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(4.dp))
-        val currentLabel = if (activeId.isBlank()) {
-            stringResource("ai_not_selected")
-        } else {
-            providers.firstOrNull { it.id == activeId }?.displayName ?: activeId
-        }
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
-                .clickable { expanded = true }
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(currentLabel, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-            Text("▼", style = MaterialTheme.typography.bodyMedium)
-        }
-        androidx.compose.material3.DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-        ) {
-            providers.forEach { p ->
-                androidx.compose.material3.DropdownMenuItem(
-                    text = { Text(p.displayName) },
-                    onClick = {
-                        expanded = false
-                        onChange(p.id)
-                    },
-                )
-            }
-        }
+    val currentLabel = if (activeId.isBlank()) {
+        stringResource("ai_not_selected")
+    } else {
+        providers.firstOrNull { it.id == activeId }?.displayName ?: activeId
     }
+    SettingsDropdownRow(
+        label = stringResource("ai_default_service"),
+        currentLabel = currentLabel,
+        options = providers,
+        optionLabel = { it.displayName },
+        onPick = { onChange(it.id) },
+    )
 }
 
 /* -------------------------------- Toggle row -------------------------------- */

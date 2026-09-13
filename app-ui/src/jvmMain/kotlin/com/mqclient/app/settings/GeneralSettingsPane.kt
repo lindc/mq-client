@@ -1,8 +1,5 @@
 package com.mqclient.app.settings
 
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -10,12 +7,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -76,54 +70,13 @@ private fun LanguageRow(
     current: Language,
     onChange: (Language) -> Unit,
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Text(
-            text = stringResource("settings_general_language"),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(4.dp))
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 2.dp),
-            color = MaterialTheme.colorScheme.surface,
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = languageLabel(current),
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.weight(1f),
-                )
-                Box {
-                    Text(
-                        text = "▼",
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier
-                            .padding(start = 8.dp)
-                            .clickableSimple { expanded = true },
-                    )
-                    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                        Language.entries.forEach { lang ->
-                            DropdownMenuItem(
-                                text = { Text(languageLabel(lang)) },
-                                onClick = {
-                                    expanded = false
-                                    onChange(lang)
-                                },
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
+    SettingsDropdownRow(
+        label = stringResource("settings_general_language"),
+        currentLabel = languageLabel(current),
+        options = Language.entries,
+        optionLabel = ::languageLabel,
+        onPick = onChange,
+    )
 }
 
 /**
@@ -191,8 +144,3 @@ internal fun NumberRow(
         }
     }
 }
-
-/* local convenience to dodge a fully-qualified call every time */
-@Composable
-private fun Modifier.clickableSimple(onClick: () -> Unit): Modifier =
-    this.clickable { onClick() }

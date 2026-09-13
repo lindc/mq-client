@@ -154,3 +154,17 @@ internal fun Color.toPackedArgb(): Long = toArgb().toLong() and 0xFFFFFFFFL
 /** `#AARRGGBB`（界面预览 / 日志用）。 */
 internal fun formatHex(color: Color): String =
     "#%08X".format(color.toPackedArgb())
+
+/**
+ * [formatHex] 的反函数：把用户敲的 hex 解析成 [toPackedArgb] 那个 0xAARRGGBB Long。
+ *
+ * 认 6 位（补 FF alpha）和 8 位两种长度，允许 `#` / `0x` 前缀；其余一律返回 null，
+ * 由调用方决定是忽略还是提示。共用一份是为了让「调色板文件」和「hex 输入框」对
+ * 同一串字符给出同一个结果 —— 之前两处各写一份，函数体完全一样。
+ */
+internal fun parseHexArgb(input: String): Long? {
+    val cleaned = input.trim().removePrefix("#").removePrefix("0x").removePrefix("0X")
+    if (cleaned.length != 6 && cleaned.length != 8) return null
+    val parsed = cleaned.toLongOrNull(16) ?: return null
+    return if (cleaned.length == 6) (0xFF000000L or parsed) else parsed
+}

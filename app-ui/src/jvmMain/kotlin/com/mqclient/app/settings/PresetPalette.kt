@@ -65,16 +65,8 @@ private fun parsePalette(raw: String): List<PresetColor> =
         .map { it.split('\t') }
         .filter { it.size == 3 }
         .mapNotNull { (name, hex, group) ->
-            val argb = parseArgb(hex) ?: return@mapNotNull null
+            val argb = parseHexArgb(hex) ?: return@mapNotNull null
             val cleanName = name.trim()
             if (cleanName.isEmpty()) null else PresetColor(cleanName, argb, group.trim())
         }
         .toList()
-
-/** Tolerates `#`, `0x`, and a missing alpha channel (defaults to opaque). */
-private fun parseArgb(hex: String): Long? {
-    val cleaned = hex.trim().removePrefix("#").removePrefix("0x").removePrefix("0X")
-    if (cleaned.length != 6 && cleaned.length != 8) return null
-    val parsed = cleaned.toLongOrNull(16) ?: return null
-    return if (cleaned.length == 6) (0xFF000000L or parsed) else parsed
-}

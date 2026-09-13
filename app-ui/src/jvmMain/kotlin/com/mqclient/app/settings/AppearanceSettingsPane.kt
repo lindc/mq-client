@@ -120,44 +120,15 @@ internal fun AppearanceSettingsPane(
  */
 @Composable
 private fun ThemeModeRow(current: ThemeMode, onChange: (ThemeMode) -> Unit) {
-    var expanded by remember { mutableStateOf(false) }
     val display = ThemeModeChoices.firstOrNull { it.first == current }?.second
         ?.let(::stringResource) ?: current.name
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Text(
-            text = stringResource("theme_label"),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(4.dp))
-        Box {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
-                    .clickable { expanded = true }
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(display, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                Text("▼", style = MaterialTheme.typography.bodyMedium)
-            }
-            androidx.compose.material3.DropdownMenu(
-                expanded = expanded,
-                onDismissRequest = { expanded = false },
-            ) {
-                ThemeModeChoices.forEach { (mode, key) ->
-                    androidx.compose.material3.DropdownMenuItem(
-                        text = { Text(stringResource(key)) },
-                        onClick = {
-                            expanded = false
-                            onChange(mode)
-                        },
-                    )
-                }
-            }
-        }
-    }
+    SettingsDropdownRow(
+        label = stringResource("theme_label"),
+        currentLabel = display,
+        options = ThemeModeChoices,
+        optionLabel = { (_, key) -> stringResource(key) },
+        onPick = { (mode, _) -> onChange(mode) },
+    )
 }
 
 /**
@@ -235,7 +206,7 @@ private fun ColorSeedSection(
                 onValueChange = { input ->
                     hexText = input
                     // 合法 hex 仍然实时回写（HSV 滑杆跟着动），但不再回灌到文本框。
-                    parseHex(input)?.let(onChange)
+                    parseHexArgb(input)?.let { onChange(Color(it)) }
                 },
                 modifier = Modifier
                     .width(220.dp)
@@ -539,10 +510,3 @@ private fun FontPreviewRow(fontSize: Int) {
 
 /* ---------- hex helpers (tolerate `#`, `0x`, missing alpha) ---------- */
 
-private fun parseHex(input: String): Color? {
-    val cleaned = input.trim().removePrefix("#").removePrefix("0x").removePrefix("0X")
-    if (cleaned.length != 6 && cleaned.length != 8) return null
-    val parsed = cleaned.toLongOrNull(16) ?: return null
-    val argb = if (cleaned.length == 6) (0xFF000000L or parsed) else parsed
-    return Color(argb.toInt())
-}
