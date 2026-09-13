@@ -1,5 +1,6 @@
 package com.mqclient.ibmmq
 
+import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.event.EventNames
 import com.mqclient.core.event.getString
@@ -26,11 +27,14 @@ internal val ibmMqLog = Log.withTag(MODULE_ID)
  * IBM MQ 模块的初始化入口。
  *
  * 由 SPI 发现后经 `IbmMqServiceAdapter.initialize(context)` 调用（`ModuleRegistry` 在
- * 启动时逐个初始化模块），做三件事：
+ * 启动时逐个初始化模块），做四件事：
  *  1. 用**前缀订阅**收自己的事件（`ibm-mq.*`），交给 [IbmMQEventHandler]；
  *  2. 订阅别的模块 / 核心的事件 —— `core.connection.added` 给新连接建任务，
  *     `core.connection.deleted` 把那条连接留下的任务和数据一起收掉；
- *  3. 给每条连接注册两条周期性扫描任务（消息数量 / 对象列表）。
+ *  3. 给每条连接注册两条周期性扫描任务（消息数量 / 对象列表）；
+ *  4. 按「连接状态上报」约定把连接状态报给核心（[ConnectionStore.reportStatus]）：
+ *     建任务时是「连接中...」，第一条扫描结果回来才定 已连接 / 连接失败
+ *     （见 [IbmMQService.scanMessageCounts]）。
  *
  * 订阅挂在 `context.coroutineScope`（模块自己的 scope）上，返回的 [Job] 由本对象持有；
  * 定时任务挂在 `context.jobScheduler` 上，用任务 ID 前缀 `ibm-mq.` 圈住。[shutdown]
@@ -90,6 +94,9 @@ object IbmMQModule {
                 ) {
                     return@onEvent
                 }
+                // 先在界面上显示「连接中...」：真实的连接由扫描链路建立，
+                // 第一条扫描结果（scanMessageCounts）回来才定 已连接 / 连接失败。
+                reportStatus(connectionId, ConnectionStatus.Connecting)
                 registerJobsForConnection(jobScheduler, created, connectionId)
             },
         )
@@ -100,7 +107,10 @@ object IbmMQModule {
         // （登记是幂等的：同 ID 重复注册只会顶掉旧的，不会跑两条协程。）
         ConnectionStore.connections.value
             .filter { it.serviceId == context.moduleId }
-            .forEach { connection -> registerJobsForConnection(jobScheduler, created, connection.id) }
+            .forEach { connection ->
+                reportStatus(connection.id, ConnectionStatus.Connecting)
+                registerJobsForConnection(jobScheduler, created, connection.id)
+            }
 
         service = created
         scheduler = jobScheduler
@@ -139,6 +149,15 @@ object IbmMQModule {
                 serviceToClose?.close()
             }
         }
+    }
+
+    /**
+     * 按「连接状态上报」约定把状态报给核心（连接数据的唯一入口，见
+     * [ConnectionStore.reportStatus]）：模块只报事实，界面怎么画不归这里管。
+     * 状态没变时核心直接忽略，所以定时链路重复上报是安全的。
+     */
+    private fun reportStatus(connectionId: String, status: ConnectionStatus) {
+        ConnectionStore.reportStatus(connectionId, status, MODULE_ID)
     }
 
     /**

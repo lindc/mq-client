@@ -1,5 +1,7 @@
 package com.mqclient.ibmmq
 
+import com.mqclient.core.ConnectionStatus
+import com.mqclient.core.ConnectionStore
 import com.mqclient.core.event.EventNames
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.emit
@@ -101,8 +103,12 @@ class IbmMQService(private val context: ServiceContext) {
                     "totalMessages" to queues.sumOf { it.messageCount },
                 ),
             )
+            // 这条 5 秒链路就是模块的「心跳」：跑通了即这条连接是活的，按「连接状态
+            // 上报」约定报给核心（唯一入口，见 ConnectionStore.reportStatus）。
+            // 状态没变时核心直接忽略，重复上报不会推着界面重组。
+            ConnectionStore.reportStatus(connectionId, ConnectionStatus.Connected, context.moduleId)
         } catch (cancellation: CancellationException) {
-            // 模块关闭 / 任务被取消：正常退出，不是失败，也不发事件。
+            // 模块关闭 / 任务被取消：正常退出，不是失败，也不发事件、不改状态。
             throw cancellation
         } catch (error: Throwable) {
             context.emit(
@@ -112,6 +118,8 @@ class IbmMQService(private val context: ServiceContext) {
                     "message" to (error.message ?: error::class.simpleName ?: "unknown"),
                 ),
             )
+            // 扫描失败即这条连接当前不可用：状态点变「连接失败」，直到下一次扫通为止。
+            ConnectionStore.reportStatus(connectionId, ConnectionStatus.Failed, context.moduleId)
         }
     }
 

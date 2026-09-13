@@ -154,6 +154,15 @@ data class ConnectionInfo(
     val mqName: String,
     val host: String,
     val port: Int,
+    /**
+     * 该中间件自己的扩展字段（vhost / channel / queue manager / SASL 机制 …），键值都是字符串。
+     *
+     * 这是对话框按 [serviceId] 渲染字段的挂靠点：各 service 模块声明自己要哪些字段，
+     * 值原样存进这里 —— app-core 不解释内容，也不需要为每个中间件改一次模型。
+     * 键名命中敏感关键字的项（password / token / secret …）由 [ConfigManager] 按名字
+     * 自动加密，和普通字段同一套规则。
+     */
+    val options: Map<String, String> = emptyMap(),
     val status: ConnectionStatus = ConnectionStatus.Disconnected,
 ) {
     val endpoint: String get() = "$host:$port"

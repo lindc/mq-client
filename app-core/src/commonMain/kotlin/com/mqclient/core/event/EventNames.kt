@@ -59,10 +59,21 @@ object EventNames {
     const val SCHEDULER_ERROR = "core.scheduler.error"
 
     // ---- 连接通用事件（跨模块，各 MQ 模块共用） ----
+    //
+    // 三条事件都由 core 的 `ConnectionStore` 在**落盘成功后**发出（创建 / 编辑 / 删除
+    // 共用一个写入路径，见 `ConnectionStore.saveAll`），`source = "core"`。
+    // payload 统一为 `connectionId` / `type`（= `ConnectionInfo.serviceId`，也就是模块 id）
+    // / `name`，模块按 `type` 过滤出属于自己的连接。
+    //
+    // 连接**状态**（已连接 / 连接失败）不走事件：模块直接调 `ConnectionStore.reportStatus()`
+    // （连接数据的唯一入口，见 Connection.kt），界面订阅那份 StateFlow。
 
-    /** payload: `connectionId` / `type`(模块 id) / `name` */
+    /** 新建连接落盘成功后；payload: `connectionId` / `type` / `name`。 */
     const val CONNECTION_ADDED = "core.connection.added"
 
-    /** payload: `connectionId` / `type`。模块订阅它来清理自己的数据。 */
+    /** 连接配置被编辑并落盘成功后；payload: `connectionId` / `type` / `name`。 */
+    const val CONNECTION_UPDATED = "core.connection.updated"
+
+    /** 连接删除落盘成功后；payload: `connectionId` / `type` / `name`。模块订阅它来清理自己的数据。 */
     const val CONNECTION_DELETED = "core.connection.deleted"
 }
