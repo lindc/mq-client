@@ -46,6 +46,26 @@ class ModuleRegistryTest {
         assertEquals(3, iterator.hasNextCalls, "取完最后一个还要再问一次 hasNext，那次炸了就停")
     }
 
+    @Test
+    fun `ui service ids that match no service module are reported`() {
+        val known = setOf("ibm-mq", "kafka")
+
+        assertEquals(
+            listOf("kafk"),
+            ModuleRegistry.unknownUiServiceIds(known, listOf("ibm-mq", "kafk", "kafka")),
+            "拼错的名字必须被指出来，其余不受影响",
+        )
+        assertEquals(
+            listOf("ghost"),
+            ModuleRegistry.unknownUiServiceIds(known, listOf("ghost", "ghost")),
+            "重复的名字只报一次",
+        )
+        assertEquals(
+            emptyList(),
+            ModuleRegistry.unknownUiServiceIds(known, listOf("ibm-mq", "kafka")),
+        )
+    }
+
     private fun loadFrom(iterator: Iterator<String>): List<String> =
         ModuleRegistry.loadFrom(String::class.java) { iterator }
 

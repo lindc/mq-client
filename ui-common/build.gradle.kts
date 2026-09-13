@@ -10,6 +10,8 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
+            // app-core 的统一日志入口（Log）：失败上报走它，不再自己摸 System.err。
+            implementation(projects.appCore)
             implementation(libs.compose.runtime)
             implementation(libs.compose.foundation)
             implementation(compose.material3)

@@ -3,6 +3,7 @@ package com.mqclient.ibmmq
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.event.EventNames
 import com.mqclient.core.event.getString
+import com.mqclient.core.log.Log
 import com.mqclient.core.scheduler.JobScheduler
 import com.mqclient.core.scheduler.ScheduledJob
 import com.mqclient.core.spi.MODULE_ID_KEY
@@ -11,6 +12,15 @@ import com.mqclient.core.spi.onEvent
 import com.mqclient.core.spi.onOwnEvents
 import kotlinx.coroutines.Job
 import kotlin.jvm.Synchronized
+
+/**
+ * 本模块的模块名 —— **模块内唯一定义处**：`ServiceAdapter.id`、任务 ID 前缀、
+ * 日志 tag 全部由它派生，不再各写各的字面量。
+ */
+internal const val MODULE_ID = "ibm-mq"
+
+/** 本模块的日志句柄：tag 与 [MODULE_ID] 同源，调用点不需要再写模块名。 */
+internal val ibmMqLog = Log.withTag(MODULE_ID)
 
 /**
  * IBM MQ 模块的初始化入口。
@@ -27,9 +37,6 @@ import kotlin.jvm.Synchronized
  * 时两者一起取消 —— 即「模块销毁时取消自己的订阅与任务」。
  */
 object IbmMQModule {
-
-    /** 本模块任务 ID 的第一段，等于 `ServiceAdapter.id`。 */
-    private const val MODULE_ID = "ibm-mq"
 
     /** 任务类型（ID 的第三段）：`ibm-mq.<connectionId>.scan.messages`。 */
     private const val JOB_SCAN_MESSAGES = "scan.messages"
@@ -97,8 +104,8 @@ object IbmMQModule {
 
         service = created
         scheduler = jobScheduler
-        println(
-            "[ibm-mq] module initialized (moduleId=${context.moduleId}, " +
+        ibmMqLog.info(
+            "module initialized (moduleId=${context.moduleId}, " +
                 "jobs=${jobScheduler.getActiveJobs().filter { it.startsWith("$MODULE_ID.") }})",
         )
         return created

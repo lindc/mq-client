@@ -3,6 +3,7 @@ package com.mqclient.core
 import com.mqclient.core.event.EventBus
 import com.mqclient.core.event.EventBusErrorReporter
 import com.mqclient.core.event.EventNames
+import com.mqclient.core.log.Log
 import com.mqclient.core.scheduler.JobScheduler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.cancel
@@ -67,7 +68,7 @@ object CoreModule {
 
     /**
      * 上报一条「用户应该看得见」的错误：写进 [lastError]，并发 [EventNames.ERROR_OCCURRED]
-     * 事件（日志 / 监控 / 模块订阅用）。总线还没建时退回 stdout —— 打包成桌面程序之后
+     * 事件（日志 / 监控 / 模块订阅用）。总线还没建时退回统一日志（[Log]）—— 打包成桌面程序之后
      * 控制台不可见，所以报错必须有一条能走到界面上的路。
      *
      * 供 app-core 内部拿不到总线引用的对象（[ConfigStore] / [ConnectionStore]）和 UI 层
@@ -83,7 +84,7 @@ object CoreModule {
 
         val bus = bus
         if (bus == null) {
-            println("[${reported.source}] ${reported.message}" + (reported.cause?.let { " ($it)" } ?: ""))
+            Log.error(reported.source, reported.message + (reported.cause?.let { " ($it)" } ?: ""))
             return
         }
         bus.emit(
@@ -105,7 +106,7 @@ object CoreModule {
      */
     fun initialize(
         scope: CoroutineScope,
-        errorReporter: EventBusErrorReporter = EventBusErrorReporter.Println,
+        errorReporter: EventBusErrorReporter = EventBusErrorReporter.Logging,
     ): EventBus {
         bus?.let { return it }
         val created = EventBus(scope, errorReporter)

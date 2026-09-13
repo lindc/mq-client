@@ -3,6 +3,7 @@ package com.mqclient.uicommon.i18n
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.mqclient.core.log.Log
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -38,6 +39,9 @@ object LanguageResources {
 
     private const val STRINGS_ZH_PATH = "files/i18n/strings_zh-CN.json"
     private const val STRINGS_EN_PATH = "files/i18n/strings_en-US.json"
+
+    /** 统一日志 tag。 */
+    private const val LOG_TAG = "language-resources"
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -90,7 +94,7 @@ object LanguageResources {
     private suspend fun readOrNull(path: String): String? = try {
         Res.readBytes(path).decodeToString()
     } catch (t: Throwable) {
-        System.err.println("[LanguageResources] failed to read $path: $t")
+        Log.error(LOG_TAG, "failed to read $path: $t")
         null
     }
 
@@ -102,7 +106,7 @@ object LanguageResources {
                 .jsonObject
                 .mapValues { (_, value) -> value.jsonPrimitive.content }
         } catch (t: Throwable) {
-            System.err.println("[LanguageResources] failed to parse string table: $t")
+            Log.error(LOG_TAG, "failed to parse string table: $t")
             emptyMap()
         }
     }

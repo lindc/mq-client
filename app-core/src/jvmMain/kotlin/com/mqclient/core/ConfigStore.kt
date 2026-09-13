@@ -15,8 +15,8 @@ import java.nio.file.Paths
  *   - [loadConnections] / [saveConnections] — read / rewrite the
  *     `connections` section of the same single file.
  *
- * Failure semantics: reads swallow errors and return safe defaults (logging to
- * stderr); **both writes** ([saveConfig] / [saveConnections]) surface failures
+ * Failure semantics: reads swallow errors and return safe defaults (logged via
+ * the shared Log); **both writes** ([saveConfig] / [saveConnections]) surface failures
  * via [Result], so no caller has to guess whether an edit landed on disk.
  */
 object ConfigStore {

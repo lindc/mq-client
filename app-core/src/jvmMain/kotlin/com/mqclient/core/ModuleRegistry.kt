@@ -2,6 +2,7 @@ package com.mqclient.core
 
 import com.mqclient.core.event.EventBus
 import com.mqclient.core.event.EventNames
+import com.mqclient.core.log.Log
 import com.mqclient.core.scheduler.JobScheduler
 import com.mqclient.core.spi.ServiceContext
 import java.util.ServiceLoader
@@ -16,6 +17,9 @@ import kotlinx.coroutines.cancel
  * without any manual wiring.
  */
 object ModuleRegistry {
+
+    /** 统一日志 tag。 */
+    private const val LOG_TAG = "module-registry"
     val services: List<ServiceAdapter> by lazy { loadAll(ServiceAdapter::class.java) }
 
     val uis: List<BusinessUi> by lazy { loadAll(BusinessUi::class.java) }
@@ -31,12 +35,12 @@ object ModuleRegistry {
         eventBus: EventBus,
         parentScope: CoroutineScope,
         jobScheduler: JobScheduler,
-    ): List<ServiceAdapter> =
-        services.onEach { adapter ->
+    ): List<ServiceAdapter> {
+        val initialized = services.onEach { adapter ->
             val context = ServiceContext.of(adapter.id, eventBus, parentScope, jobScheduler)
             runCatching { adapter.initialize(context) }
                 .onFailure { error ->
-                    System.err.println("[ModuleRegistry] cannot initialize module '${adapter.id}': $error")
+                    Log.error(LOG_TAG, "cannot initialize module '${adapter.id}': $error")
                     // 控制台日志打包后看不见，用户至少要在界面里能看到这条。
                     eventBus.emit(
                         name = EventNames.ERROR_OCCURRED,
@@ -50,6 +54,40 @@ object ModuleRegistry {
                     context.coroutineScope.cancel()
                 }
         }
+
+        reportUnknownUiServiceIds(eventBus)
+        return initialized
+    }
+
+    /**
+     * UI 半与服务半靠 `BusinessUi.serviceId == ServiceAdapter.id` 的字符串约定对上号
+     * （两个 Gradle 模块互不依赖，编译期帮不上忙），拼错时界面只会静默少一块。
+     * 启动时对一遍：对不上的同时上报错误通道 + 日志，让名字错误在启动时暴露。
+     *
+     * 反方向（service 没有对应 UI）**不算错误** —— 模块可以只有后台能力、没有界面。
+     */
+    private fun reportUnknownUiServiceIds(eventBus: EventBus) {
+        val known = services.mapTo(mutableSetOf()) { it.id }
+        unknownUiServiceIds(known, uis.map { it.serviceId }).forEach { serviceId ->
+            val message = "BusinessUi.serviceId '$serviceId' 对不上任何 ServiceAdapter.id，它的界面永远不会显示"
+            Log.error(LOG_TAG, message)
+            eventBus.emit(
+                name = EventNames.ERROR_OCCURRED,
+                payload = mapOf(
+                    "message" to message,
+                    "moduleId" to "core",
+                ),
+                source = "core",
+            )
+        }
+    }
+
+    /**
+     * 返回 [uiServiceIds] 里对不上任何 [knownServiceIds] 的项（保持顺序、去重）。
+     * 抽成纯函数是为了可测（见 ModuleRegistryTest）。
+     */
+    internal fun unknownUiServiceIds(knownServiceIds: Set<String>, uiServiceIds: List<String>): List<String> =
+        uiServiceIds.filter { it !in knownServiceIds }.distinct()
 
     /** [loadFrom] with the real [ServiceLoader] iterator. */
     private fun <T : Any> loadAll(type: Class<T>): List<T> = loadFrom(type) { ServiceLoader.load(type).iterator() }
@@ -76,14 +114,14 @@ object ModuleRegistry {
         while (true) {
             val hasNext = runCatching { providers.hasNext() }
                 .onFailure {
-                    System.err.println("[ModuleRegistry] cannot enumerate ${type.simpleName} providers: $it")
+                    Log.error(LOG_TAG, "cannot enumerate ${type.simpleName} providers: $it")
                 }
                 .getOrNull() ?: break
             if (!hasNext) break
             runCatching { providers.next() }
                 .onFailure {
                     // ServiceConfigurationError is an Error, not an Exception.
-                    System.err.println("[ModuleRegistry] cannot load ${type.simpleName} provider: $it")
+                    Log.error(LOG_TAG, "cannot load ${type.simpleName} provider: $it")
                 }
                 .onSuccess(::add)
         }

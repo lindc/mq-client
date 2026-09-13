@@ -39,7 +39,7 @@ class EventBusTest {
 
     /** 建一条总线 + 一个受控 scope；测完统一收掉，不留悬空协程。 */
     private fun withBus(
-        reporter: EventBusErrorReporter = EventBusErrorReporter.Println,
+        reporter: EventBusErrorReporter = EventBusErrorReporter.Logging,
         body: suspend CoroutineScope.(EventBus) -> Unit,
     ) = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)

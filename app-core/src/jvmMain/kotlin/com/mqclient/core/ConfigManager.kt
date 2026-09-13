@@ -1,5 +1,6 @@
 package com.mqclient.core
 
+import com.mqclient.core.log.Log
 import java.io.File
 import java.nio.file.Files
 import java.util.Base64
@@ -36,7 +37,7 @@ import okio.Path.Companion.toOkioPath
  * in the schema for a future serializer-driven upgrade.
  *
  * Failure policy mirrors the old ConfigStore: reads degrade to safe defaults
- * and log to stderr — the UI must still boot when the key is lost or the
+ * and log via the shared [Log] — the UI must still boot when the key is lost or the
  * file is corrupted; writes report failures through [Result] so the settings
  * dialog can surface "save failed" instead of silently losing edits.
  */
@@ -47,6 +48,9 @@ object ConfigManager {
     private const val SECRET_KEY_FILE_NAME = "secret.key"
     private const val LEGACY_CONNECTIONS_FILE_NAME = "connections.json"
     private const val TMP_SUFFIX = ".tmp"
+
+    /** 统一日志 tag；与上报错误时的 source（`core.config`）同一命名。 */
+    private const val LOG_TAG = "core.config"
 
     /** Prefix distinguishing encrypted values inside config.json. */
     const val ENCRYPTED_VALUE_PREFIX = "enc:v1:"
@@ -140,7 +144,7 @@ object ConfigManager {
      * [loadOrNull]：默认值里其它配置段是空的，拿它去 copy 再落盘会把用户的
      * 连接列表整段抹掉。
      *
-     * 单个敏感字段解密失败仍保留原文 + stderr 日志（见 [decryptTree]），
+     * 单个敏感字段解密失败仍保留原文 + 日志（见 [decryptTree]），
      * 一个坏字段不会拖垮整个配置。
      */
     fun load(): Config = loadOrNull() ?: Config()
@@ -161,7 +165,7 @@ object ConfigManager {
             // JsonElement.toString() emits exact compact JSON; decode from that.
             json.decodeFromString(Config.serializer(), plain.toString())
         } catch (t: Throwable) {
-            System.err.println("[ConfigManager] failed to read config: $t")
+            Log.error(LOG_TAG, "failed to read config: $t")
             null
         }
     }
@@ -185,7 +189,7 @@ object ConfigManager {
             backupCurrentConfig()
             writeFileAtomically(configFile(), prettyPrintJson(encrypted))
         }.onFailure { t ->
-            System.err.println("[ConfigManager] failed to write config: $t")
+            Log.error(LOG_TAG, "failed to write config: $t")
         }
 
     /**
@@ -198,7 +202,7 @@ object ConfigManager {
         try {
             fs.copy(current, backupFile())
         } catch (t: Throwable) {
-            System.err.println("[ConfigManager] failed to back up config.json: $t")
+            Log.warn(LOG_TAG, "failed to back up config.json: $t")
         }
     }
 
@@ -223,7 +227,7 @@ object ConfigManager {
                 plaintext.decodeToString(),
             )
         } catch (t: Throwable) {
-            System.err.println("[ConfigManager] legacy connections.json unreadable: $t")
+            Log.warn(LOG_TAG, "legacy connections.json unreadable: $t")
             null
         }
     }
@@ -287,7 +291,7 @@ object ConfigManager {
                         ).decodeToString(),
                     )
                 } catch (t: Throwable) {
-                    System.err.println("[ConfigManager] failed to decrypt a value: $t")
+                    Log.warn(LOG_TAG, "failed to decrypt a value: $t")
                     element // keep the raw ciphertext rather than corrupting the field
                 }
             } else {

@@ -2,6 +2,7 @@ package com.mqclient.core.scheduler
 
 import com.mqclient.core.event.EventBus
 import com.mqclient.core.event.EventNames
+import com.mqclient.core.log.Log
 import kotlin.time.TimeSource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineName
@@ -12,6 +13,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+
+/** 本组件的日志 tag。 */
+private const val LOG_TAG = "job-scheduler"
 
 /**
  * 轻量级定时任务调度器：各业务模块把自己的周期性任务注册进来，协程生命周期由这里统一管。
@@ -94,7 +98,7 @@ class JobScheduler(
         // 谁也清不掉的僵尸任务 —— 这里补一次身份校验主动摘掉。
         if (!launched.isActive) {
             registry.update { current -> if (current[job.id] === launched) current - job.id else current }
-            println("[JobScheduler] job '${job.id}' was not started: scope is no longer active")
+            Log.warn(LOG_TAG, "job '${job.id}' was not started: scope is no longer active")
         }
     }
 
@@ -189,7 +193,7 @@ class JobScheduler(
             // 的消费方用。只想留一条的话，删掉其中一行即可。
             eventBus.emit(EventNames.SCHEDULER_JOB_FAILED, payload)
             eventBus.emit(EventNames.SCHEDULER_ERROR, payload)
-            println("[JobScheduler] job '${job.id}' failed: $error")
+            Log.error(LOG_TAG, "job '${job.id}' failed: $error")
         }
     }
 

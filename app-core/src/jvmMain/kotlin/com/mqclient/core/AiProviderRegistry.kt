@@ -1,5 +1,6 @@
 package com.mqclient.core
 
+import com.mqclient.core.log.Log
 import java.util.ServiceLoader
 
 /**
@@ -23,7 +24,7 @@ object AiProviderRegistry {
         while (providers.hasNext()) {
             runCatching { providers.next() }
                 .onFailure { error ->
-                    System.err.println("[AiProviderRegistry] cannot load provider: $error")
+                    Log.error("ai-provider-registry", "cannot load provider: $error")
                     // 少一个 provider 用户是看得见的（下拉里没有它），原因却只在控制台里 ——
                     // 报到错误通道上，别让「为什么没有 OpenAI」变成猜谜。
                     CoreModule.reportError(

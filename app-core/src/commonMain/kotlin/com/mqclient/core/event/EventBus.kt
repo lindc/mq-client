@@ -1,5 +1,6 @@
 package com.mqclient.core.event
 
+import com.mqclient.core.log.Log
 import kotlin.concurrent.Volatile
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineName
@@ -15,6 +16,9 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+
+/** EventBus 组件的日志 tag。 */
+private const val LOG_TAG = "event-bus"
 
 /** 订阅的匹配方式；[EventBus] 的四个订阅入口各对应一种。 */
 enum class EventMatchMode { EXACT, PREFIX, SUFFIX, ALL }
@@ -62,8 +66,9 @@ class EventSubscription internal constructor(
 /**
  * 处理器异常的上报口。
  *
- * 默认实现打印到 stdout（commonMain 没有 `System.err`）；JVM 侧想写 stderr 或日志
- * 文件，在 `CoreModule.initialize(scope, errorReporter = …)` 里换掉即可。
+ * 默认实现走统一日志（[Log]，tag = `event-bus`）：落点由 Log 的平台实现决定
+ * （控制台 / 将来的文件）；要换格式或落点，在
+ * `CoreModule.initialize(scope, errorReporter = …)` 里替换即可。
  *
  * ⚠️ 上报口**不要**改成「往同一条总线发错误事件」：handler 抛错 → 发事件 → 该事件的
  * 订阅者又抛错 → 又触发上报…… 会变成无界的事件风暴（[emit] 是异步的，栈上检测不到）。
@@ -73,9 +78,9 @@ fun interface EventBusErrorReporter {
     fun onHandlerError(event: AppEvent, subscription: EventSubscription, error: Throwable)
 
     companion object {
-        /** 默认实现：打印事件名 + 订阅规则 + 异常，绝不抛出。 */
-        val Println: EventBusErrorReporter = EventBusErrorReporter { event, subscription, error ->
-            println("[EventBus] handler failed: event=${event.name} subscription=$subscription error=$error")
+        /** 默认实现：经统一日志记录事件名 + 订阅规则 + 异常，绝不抛出。 */
+        val Logging: EventBusErrorReporter = EventBusErrorReporter { event, subscription, error ->
+            Log.error(LOG_TAG, "handler failed: event=${event.name} subscription=$subscription error=$error")
         }
     }
 }
@@ -104,7 +109,7 @@ fun interface EventBusErrorReporter {
  */
 class EventBus(
     private val scope: CoroutineScope,
-    private val errorReporter: EventBusErrorReporter = EventBusErrorReporter.Println,
+    private val errorReporter: EventBusErrorReporter = EventBusErrorReporter.Logging,
 ) {
     /**
      * replay=0：新订阅者不会收到订阅之前的事件（事件语义，不是状态）。
@@ -299,7 +304,7 @@ class EventBus(
                 errorReporter.onHandlerError(event, subscription, error)
             } catch (reporterError: Throwable) {
                 // 上报口自己坏了也不能连累订阅。
-                println("[EventBus] error reporter failed: $reporterError (original: $error)")
+                Log.error(LOG_TAG, "error reporter failed: $reporterError (original: $error)")
             }
         }
     }

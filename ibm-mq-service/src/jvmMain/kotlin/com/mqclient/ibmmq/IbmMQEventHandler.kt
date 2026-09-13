@@ -41,27 +41,27 @@ class IbmMQEventHandler {
     /** 连接被删除时清掉本模块为它留下的数据（由跨模块订阅触发）。 */
     fun cleanConnectionData(connectionId: String) {
         val removed = queueCounts.remove(connectionId)
-        println("[ibm-mq] cleaned local data for connection=$connectionId (was $removed)")
+        ibmMqLog.info("cleaned local data for connection=$connectionId (was $removed)")
     }
 
     private fun handleScanStarted(event: AppEvent) {
-        println("[ibm-mq] scan started: connection=${event.getString("connectionId") ?: "?"}")
+        ibmMqLog.info("scan started: connection=${event.getString("connectionId") ?: "?"}")
     }
 
     private fun handleScanCompleted(event: AppEvent) {
         val connectionId = event.getString("connectionId") ?: return
         val queueCount = event.getInt("queueCount") ?: 0
         queueCounts[connectionId] = queueCount
-        println(
-            "[ibm-mq] scan completed: connection=$connectionId " +
+        ibmMqLog.info(
+            "scan completed: connection=$connectionId " +
                 "queues=$queueCount messages=${event.getInt("totalMessages") ?: 0}",
         )
     }
 
     private fun handleScanFailed(event: AppEvent) {
         val connectionId = event.getString("connectionId") ?: return
-        println(
-            "[ibm-mq] scan failed: connection=$connectionId " +
+        ibmMqLog.warn(
+            "scan failed: connection=$connectionId " +
                 "reason=${event.getString("message") ?: "unknown"}",
         )
     }
@@ -71,15 +71,15 @@ class IbmMQEventHandler {
         val connectionId = event.getString("connectionId") ?: return
         val queueCount = event.getInt("queueCount") ?: 0
         queueCounts[connectionId] = queueCount
-        println(
-            "[ibm-mq] scheduled scan (messages): connection=$connectionId " +
+        ibmMqLog.debug(
+            "scheduled scan (messages): connection=$connectionId " +
                 "queues=$queueCount messages=${event.getInt("totalMessages") ?: 0}",
         )
     }
 
     private fun handleObjectsScanned(event: AppEvent) {
-        println(
-            "[ibm-mq] scheduled scan (objects): connection=${event.getString("connectionId") ?: "?"} " +
+        ibmMqLog.info(
+            "scheduled scan (objects): connection=${event.getString("connectionId") ?: "?"} " +
                 "queues=${event.getInt("queueCount") ?: 0} topics=${event.getInt("topicCount") ?: 0} " +
                 "listeners=${event.getInt("listenerCount") ?: 0}",
         )

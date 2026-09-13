@@ -4,7 +4,7 @@ import com.mqclient.core.ServiceAdapter
 import com.mqclient.core.spi.ServiceContext
 
 class IbmMqServiceAdapter : ServiceAdapter {
-    override val id = "ibm-mq"
+    override val id = MODULE_ID // 模块名唯一定义处：IbmMQModule.kt 顶层 const
     override val name = "IBM MQ"
     override val description = "IBM MQ connection and management"
     override val protocol = "MQI"
