@@ -8,6 +8,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -95,9 +96,9 @@ fun interface EventBusErrorReporter {
  *     单个 handler 的异常被就地吃掉（只会上报给 [EventBusErrorReporter]），
  *     而同一条订阅的多次回调严格按事件顺序**串行**执行，不会并发重入；
  *  3. **不丢事件**：`extraBufferCapacity = 64` + [BufferOverflow.SUSPEND]，慢订阅者
- *     最多让发送方落后 64 条，再往上发送方挂起等待，而不是丢事件；
- *     [emit] 走 `tryEmit` 快路径（调用线程内保序、不挂起），只有缓冲被填满时才
- *     退化成挂起入队；需要「确认已入队」时用 [emitSync]；
+ *     最多让发送方落后 64 条，再往上发送方挂起等待 —— 所以 [emitSync] 一条不丢。
+ *     [emit] 因为承诺不挂起，缓冲满时改走有界的降级队列（单条转发协程、FIFO），
+ *     只有「缓冲 + 队列」都满才会丢，并计入 [droppedEventCount]；
  *  4. **不用 GlobalScope**：总线只借用构造时传入的 scope，订阅默认也跑在这个 scope
  *     上；模块传入自己的 scope 就等于用自己的生命周期管住了订阅；
  *  5. **不持有业务状态**：唯一的内部状态是订阅注册表（为了取消和调试）。
@@ -122,6 +123,56 @@ class EventBus(
     )
 
     /**
+     * 降级队列：快路径 `tryEmit` 塞不进去时，事件先落到这里，由唯一的转发协程
+     * 按顺序搬进 [_events]。
+     *
+     * 为什么是「一条队列 + 一条协程」，而不是「每次塞不进去就 `scope.launch` 一条
+     * 协程去挂起入队」：慢订阅者持续存在时，`tryEmit` 会持续失败，后者**每发一条
+     * 事件就多一条协程**，而且它们全部挂在 `_events.emit` 上等同一个订阅者 ——
+     * 协程数无上限增长（直到拖垮进程），彼此之间还不保序。换成队列之后：协程数
+     * 恒为 1、队列内严格 FIFO、积压量有上限。
+     *
+     * 容量有上限是刻意的：[emit] 承诺不挂起、不阻塞调用方，背压只能往「丢」这个
+     * 方向泄，不能无限攒。队列满时丢最新的一条并计入 [droppedEventCount]。
+     */
+    private val pending = Channel<AppEvent>(OVERFLOW_QUEUE_CAPACITY)
+
+    /**
+     * 还欠着没进 [_events] 的事件条数：即 [pending] 里的，加上转发协程手上正握着的
+     * 那一条（它取出来了、但还没 `emit` 成功）。
+     *
+     * 用途是给 [emit] 的快路径把门：**它大于 0 时新事件必须跟着排队**，不能走
+     * `tryEmit` 插到前面去，否则先来的还在排队、后来的先被投递。
+     *
+     * 计数点刻意不对称 —— 入队在 `trySend` **之前** +1，出队在 `_events.emit`
+     * **返回之后** -1。所以「转发协程刚取走最后一条、还没发出去」这段时间里计数
+     * 仍然是 1，快路径依然关着；只看队列本身是否为空会漏掉这个窗口。
+     */
+    private val backlog = MutableStateFlow(0)
+
+    /**
+     * 唯一的转发协程：把 [pending] 里的事件按顺序搬进 [_events]。
+     *
+     * 必须声明在 `pending` 之后 —— 属性和 init 块按声明顺序初始化，反了会读到
+     * 还没初始化的队列。
+     *
+     * 构造期就启动，而不是用 LAZY 等到第一次溢出再 `start()`：那样一来并发的溢出
+     * 会各自去 start，还得额外处理「scope 已取消时 start 返回 false」的分支。常驻
+     * 一条只占一个空闲协程，换来的是没有启动竞态。
+     *
+     * 它只 `emit` 不 `collect`，因此不计入 `_events.subscriptionCount`，
+     * [awaitSubscribers] 的期望值不受影响。
+     */
+    init {
+        scope.launch(CoroutineName("EventBus:overflow-drain")) {
+            for (event in pending) {
+                _events.emit(event)
+                backlog.update { it - 1 } // 见 backlog 的注释：必须在 emit 返回之后
+            }
+        }
+    }
+
+    /**
      * 订阅注册表：写侧 CAS 整表替换（[MutableStateFlow.update]），读侧拿到的是
      * 不可变快照，所以遍历时不用担心并发修改。
      *
@@ -136,18 +187,34 @@ class EventBus(
     /** 已注册的订阅条数。 */
     val subscriptionCount: Int get() = registry.value.size
 
+    /** 被 [emit] 丢弃的事件条数（[emitSync] 不会丢，不计入这里）。 */
+    private val droppedEvents = MutableStateFlow(0L)
+
+    /**
+     * 因「缓冲区 + 降级队列都满」而被丢弃的事件总数。
+     *
+     * 正常运行时恒为 0；它开始涨就说明有 handler 卡住了或消费不过来，不该当作噪声
+     * 忽略。丢的时候还会打一行 WARN（含事件名），所以日志里看得到是从哪个事件开始
+     * 顶不住的。
+     */
+    val droppedEventCount: Long get() = droppedEvents.value
+
     // ---------------------------------------------------------------- 发送
 
     /**
      * 异步发送：不挂起、不阻塞调用方，也不返回投递结果。
      *
-     * `tryEmit` 是同步的，所以同一个调用线程里连续 [emit] 的顺序是保真的；
-     * 只有缓冲区被填满（有订阅者落后 64 条以上）时才退化成挂起入队 —— 这条路径
-     * 在极端压力下不保证多次 emit 之间的相对顺序。
+     * `tryEmit` 是同步的，所以同一个调用线程里连续 [emit] 的顺序是保真的。缓冲区被
+     * 填满（有订阅者落后 [BUFFER_CAPACITY] 条以上）时事件转进降级队列 [pending]，
+     * 由单条转发协程按 FIFO 补发 —— 队列内的相对顺序同样是保真的。
      *
-     * ⚠️ 降级路径借用总线的 scope，所以**总线 scope 已取消时（退出途中）这次 emit
-     * 会被静默丢弃**。要「一定入队」的场合（启动广播、测试里的确定顺序）用
-     * [emitSync]，它挂起直到事件进缓冲区，失败会抛而不是丢。
+     * ⚠️ 队列也满时丢**最新**的一条：计入 [droppedEventCount]，并打一行 WARN。走到
+     * 这一步说明有订阅者长时间不消费，继续攒下去只会把内存吃光 —— [emit] 不能挂起，
+     * 背压没有别的地方可去。真的一条都不能丢的场合（启动广播、测试里的确定顺序）用
+     * [emitSync]，它挂起直到事件进入缓冲区。
+     *
+     * ⚠️ 转发协程借用总线的 scope，所以**总线 scope 已取消时（退出途中）这次 emit
+     * 不会被投递**。
      */
     fun emit(name: String, payload: Map<String, Any?> = emptyMap(), source: String? = null) {
         emit(AppEvent(name = name, payload = payload, source = source))
@@ -155,8 +222,20 @@ class EventBus(
 
     /** [emit] 的事件对象重载（转发 / 重新发布已有事件时用）。 */
     fun emit(event: AppEvent) {
-        if (_events.tryEmit(event)) return
-        scope.launch { _events.emit(event) }
+        // 有积压就跟着排队：否则先来的还在队列里、后来的却可能插进缓冲区先被投递。
+        // backlog 的计数点保证了「转发协程刚取走一条还没发出去」也算积压。
+        if (backlog.value == 0 && _events.tryEmit(event)) return
+
+        backlog.update { it + 1 }
+        if (pending.trySend(event).isSuccess) return
+
+        // 队列也满了：这条发不出去，计数要还回去，否则快路径会永久关闭。
+        backlog.update { it - 1 }
+        droppedEvents.update { it + 1 }
+        Log.warn(
+            LOG_TAG,
+            "buffer overflow: dropped '${event.name}' (total dropped: ${droppedEvents.value})",
+        )
     }
 
     /**
@@ -309,8 +388,18 @@ class EventBus(
         }
     }
 
-    private companion object {
+    // 两个容量做成 internal 而不是 private：降级路径的「有界」是行为契约的一部分，
+    // 测试要按它算准丢包条数，写死数字会在改容量时静默失配。
+    internal companion object {
         /** 缓冲区容量：与需求一致（64 条），写满了就背压而不是丢事件。 */
-        const val BUFFER_CAPACITY = 64
+        internal const val BUFFER_CAPACITY = 64
+
+        /**
+         * 降级队列容量：缓冲区之外还能再攒这么多条才丢。
+         *
+         * 取缓冲区 4 倍是为了吃掉「订阅者偶发卡顿」这种短时抖动 —— 那种情况不该丢
+         * 事件。真到了这里还满，说明是持续不消费，丢掉才是正确答案。
+         */
+        internal const val OVERFLOW_QUEUE_CAPACITY = 256
     }
 }

@@ -10,6 +10,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -134,6 +135,48 @@ class EventBusTest {
 
         await(5_000) { seen.size == 80 }
         assertEquals((0 until 80).toList(), seen.toList())
+    }
+
+    @Test
+    fun `async emit stays bounded when a subscriber stalls forever`() = withBus { bus ->
+        val release = CompletableDeferred<Unit>()
+        bus.on("stuck") { release.await() } // 永不消费：缓冲区和降级队列都会被填满
+        assertTrue(bus.awaitSubscribers(1_000L))
+
+        val total = 10_000
+        repeat(total) { bus.emit("stuck") }
+
+        // 旧实现在这里会为**每一条**塞不进去的事件各起一条协程（永不丢、协程数 = total），
+        // 一条慢订阅者就能把进程拖垮。新实现最多留住「缓冲 + 队列」那么多条。
+        val retained = (total - bus.droppedEventCount).toInt()
+        assertTrue(bus.droppedEventCount > 0, "降级路径必须封顶：超量的事件要被丢掉并计数")
+        assertTrue(
+            retained <= EventBus.BUFFER_CAPACITY + EventBus.OVERFLOW_QUEUE_CAPACITY + 8,
+            "留住的事件必须被「缓冲 + 队列」容量封住，实际留了 $retained 条",
+        )
+        release.complete(Unit)
+    }
+
+    @Test
+    fun `async emit keeps order across the overflow queue`() = withBus { bus ->
+        val seen = CopyOnWriteArrayList<Int>()
+        val release = CompletableDeferred<Unit>()
+        // 处理第一条时就卡住：缓冲区被填满并保持，逼剩下的事件全走降级队列。
+        // 放开之后正好能验证「缓冲里的」和「队列里的」是不是按原顺序拼回来的。
+        bus.on("tick") { event ->
+            release.await()
+            seen += event.getInt("i") ?: -1
+        }
+        assertTrue(bus.awaitSubscribers(1_000L))
+
+        val total = 400 // 超过「缓冲 + 队列」容量，逼出丢包
+        repeat(total) { bus.emit("tick", mapOf("i" to it)) }
+        release.complete(Unit)
+
+        val retained = (total - bus.droppedEventCount).toInt()
+        await(10_000) { seen.size == retained }
+        assertTrue(bus.droppedEventCount > 0)
+        assertEquals((0 until retained).toList(), seen.toList(), "降级队列必须是 FIFO")
     }
 
     @Test
