@@ -2,6 +2,9 @@ package com.mqclient.core
 
 import java.io.File
 import java.nio.file.Files
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import kotlin.concurrent.thread
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -89,6 +92,45 @@ class ConfigManagerTest {
 
         val reloaded = ConfigStore.loadConfig()
         assertEquals(listOf("mq-01", "mq-02"), reloaded.connections.map { it.id })
+    }
+
+    @Test
+    fun `concurrent read-modify-writes do not overwrite each other`() {
+        ConfigManager.save(Config(connections = listOf(connection("mq-01", "first"))))
+        val insideEdit = CountDownLatch(1)
+        val releaseEdit = CountDownLatch(1)
+        val otherHasRead = CountDownLatch(1)
+
+        // A：读到配置之后停在 transform 里，给另一个写入者留出插队的机会。
+        val first = thread(name = "edit-a") {
+            ConfigManager.edit { current ->
+                insideEdit.countDown()
+                releaseEdit.await(10, TimeUnit.SECONDS)
+                Result.success(current.copy(connections = current.connections + connection("mq-02", "second")))
+            }
+        }
+        assertTrue(insideEdit.await(10, TimeUnit.SECONDS), "edit 应该已经读到配置并停在 transform 里")
+
+        // B：同样的读-改-写。它要是在 A 的「读」和「写」之间读到了旧值，A 的写入就会把
+        // 它的改动整段覆盖 —— 这正是没有原子性时丢一整段连接的路径。
+        val second = thread(name = "edit-b") {
+            ConfigManager.edit { current ->
+                otherHasRead.countDown()
+                Result.success(current.copy(connections = current.connections + connection("mq-03", "third")))
+            }
+        }
+        // 尽力让 B 真的插进来。有锁时它会在 edit 入口排队、这里等到超时 —— 那正是要的
+        // 结果，所以不校验返回值。
+        otherHasRead.await(1, TimeUnit.SECONDS)
+        releaseEdit.countDown()
+        first.join(10_000)
+        second.join(10_000)
+
+        assertEquals(
+            listOf("mq-01", "mq-02", "mq-03"),
+            ConfigStore.loadConfig().connections.map { it.id },
+            "两次读-改-写都得留下：谁都不该被对方整段覆盖",
+        )
     }
 
     // ---------------------------------------------------------------- 备份

@@ -43,6 +43,7 @@ fun AiInputArea(
     isStreaming: Boolean,
     context: AiContext?,
     onSend: (String) -> Unit,
+    onCancel: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var text by remember { mutableStateOf("") }
@@ -94,22 +95,34 @@ fun AiInputArea(
             )
             Spacer(Modifier.width(8.dp))
             Box {
-                IconButton(
-                    onClick = {
-                        val snapshot = text.trim()
-                        if (snapshot.isNotEmpty()) {
-                            onSend(snapshot)
-                            text = ""
-                        }
-                    },
-                    enabled = !isStreaming && text.isNotBlank(),
-                ) {
-                    Text(
-                        "➤",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = if (!isStreaming && text.isNotBlank()) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                if (isStreaming) {
+                    // 流式中换成「停止」：没有它用户只能等回复自然结束 —— 长回复、
+                    // 卡住的服务端都下不来。
+                    IconButton(onClick = onCancel) {
+                        Text(
+                            "■",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                } else {
+                    IconButton(
+                        onClick = {
+                            val snapshot = text.trim()
+                            if (snapshot.isNotEmpty()) {
+                                onSend(snapshot)
+                                text = ""
+                            }
+                        },
+                        enabled = text.isNotBlank(),
+                    ) {
+                        Text(
+                            "➤",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = if (text.isNotBlank()) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
         }

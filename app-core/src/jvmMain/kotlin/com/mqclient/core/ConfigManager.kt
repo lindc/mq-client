@@ -2,6 +2,7 @@ package com.mqclient.core
 
 import com.mqclient.core.log.Log
 import java.io.File
+import java.io.IOException
 import java.nio.file.Files
 import java.util.Base64
 import kotlinx.serialization.builtins.ListSerializer
@@ -40,6 +41,10 @@ import okio.Path.Companion.toOkioPath
  * and log via the shared [Log] — the UI must still boot when the key is lost or the
  * file is corrupted; writes report failures through [Result] so the settings
  * dialog can surface "save failed" instead of silently losing edits.
+ *
+ * Concurrency: the whole directory is guarded by one process-wide lock (see
+ * [LOCK]); every read-modify-write goes through [edit], never through
+ * [loadOrNull] + [save] as two separate steps.
  */
 object ConfigManager {
 
@@ -51,6 +56,20 @@ object ConfigManager {
 
     /** 统一日志 tag；与上报错误时的 source（`core.config`）同一命名。 */
     private const val LOG_TAG = "core.config"
+
+    /**
+     * 整个配置目录的进程内锁。
+     *
+     * 必须只有一把：`config.json` 是**一份**文件，`connections` 与 `ai` 都在里面，
+     * 而写入方（[ConnectionStore]、[AiConnectionRepository]、设置对话框）写的都是
+     * 「读整份 → 改一段 → 写回」。两把锁各自管住自己的一步、管不住两步之间的时间窗，
+     * 那个窗口里另一个写入者插进来就会被后写的那次整段覆盖 —— 丢的不是某个字段，
+     * 是一整段连接列表。
+     *
+     * 读-改-写统一走 [edit]，它把读、改、写三段锁在同一个临界区里。
+     * Java 监视器可重入，所以 [save] 内部再调 [ensureSecretKey] 不会自锁。
+     */
+    private val LOCK = Any()
 
     /** Prefix distinguishing encrypted values inside config.json. */
     const val ENCRYPTED_VALUE_PREFIX = "enc:v1:"
@@ -108,19 +127,21 @@ object ConfigManager {
      *     until it's gone, so the config dir ends up with exactly two files.
      */
     fun initOnStartup() {
-        ensureSecretKey()
-        if (!fs.exists(configFile())) {
-            // First launch: seed defaults; fold any legacy list into the same
-            // write. A null read means "absent or unreadable" — in the latter
-            // case the legacy file is kept as the user's only copy.
-            val legacy = readLegacyConnections()
-            if (save(Config(connections = legacy ?: emptyList())).isSuccess && legacy != null) {
-                fs.delete(legacyConnectionsFile())
+        synchronized(LOCK) {
+            ensureSecretKey()
+            if (!fs.exists(configFile())) {
+                // First launch: seed defaults; fold any legacy list into the same
+                // write. A null read means "absent or unreadable" — in the latter
+                // case the legacy file is kept as the user's only copy.
+                val legacy = readLegacyConnections()
+                if (save(Config(connections = legacy ?: emptyList())).isSuccess && legacy != null) {
+                    fs.delete(legacyConnectionsFile())
+                }
+            } else {
+                importLegacyConnectionsIfAny()
             }
-        } else {
-            importLegacyConnectionsIfAny()
+            migrateAiConnectionsIfNeeded()
         }
-        migrateAiConnectionsIfNeeded()
     }
 
     /**
@@ -139,15 +160,21 @@ object ConfigManager {
         }
     }
 
-    /** Returns the secret key bytes, generating + persisting them on first use. */
-    fun ensureSecretKey(): ByteArray {
+    /**
+     * Returns the secret key bytes, generating + persisting them on first use.
+     *
+     * 「不存在就生成」和「读回来」必须在同一个临界区里：拆开的话两个线程会各生成
+     * 一把密钥、后写的胜出，而先写那把已经用它加密过的内容 —— 那些内容从此再也解
+     * 不开（配置永久损坏，只能删掉 config.json 重来）。
+     */
+    fun ensureSecretKey(): ByteArray = synchronized(LOCK) {
         val path = secretKeyFile()
         if (!fs.exists(path)) {
             val key = EncryptionService.generateKeyBytes()
             writeFileAtomically(path, Base64.getEncoder().encodeToString(key))
             restrictPermissions(path)
         }
-        return Base64.getDecoder().decode(fs.read(secretKeyFile()) { readUtf8() }.trim())
+        Base64.getDecoder().decode(fs.read(path) { readUtf8() }.trim())
     }
 
     /* -------------------------------- loading ------------------------------ */
@@ -157,9 +184,9 @@ object ConfigManager {
      * 「文件存在但读不出来」压成同一个结果**：两者都得到 [Config] 默认值。
      *
      * 只适合启动首帧这种「读不到就用默认值、之后立刻会被真实值覆盖」的场合。
-     * 凡是「读-改-写」路径（读出来 → copy 改一个字段 → 写回）都必须改用
-     * [loadOrNull]：默认值里其它配置段是空的，拿它去 copy 再落盘会把用户的
-     * 连接列表整段抹掉。
+     * 凡是「读-改-写」路径（读出来 → copy 改一个字段 → 写回）都必须走 [edit]（原子），
+     * 或至少用 [loadOrNull] 拿到真实内容：默认值里其它配置段是空的，拿它去 copy
+     * 再落盘会把用户的连接列表整段抹掉。
      *
      * 单个敏感字段解密失败仍保留原文 + 日志（见 [decryptTree]），
      * 一个坏字段不会拖垮整个配置。
@@ -171,13 +198,13 @@ object ConfigManager {
      * [Config] 默认值；文件在但读不出来（损坏 / 被占用 / 整体解密失败）返回
      * `null`，调用方据此放弃写入，不要拿默认值覆盖磁盘上的真实配置。
      */
-    fun loadOrNull(): Config? {
+    fun loadOrNull(): Config? = synchronized(LOCK) {
         val path = configFile()
-        if (!fs.exists(path)) return Config()
-        return try {
+        if (!fs.exists(path)) return@synchronized Config()
+        try {
             val key = ensureSecretKey()
             val text = fs.read(path) { readUtf8() }
-            if (text.isBlank()) return Config()
+            if (text.isBlank()) return@synchronized Config()
             val plain = decryptTree(json.parseToJsonElement(text), key)
             // JsonElement.toString() emits exact compact JSON; decode from that.
             json.decodeFromString(Config.serializer(), plain.toString())
@@ -185,6 +212,28 @@ object ConfigManager {
             Log.error(LOG_TAG, "failed to read config: $t")
             null
         }
+    }
+
+    /**
+     * 原子的读-改-写：**同一把锁内**读 → 交给 [transform] 改 → 落盘，整段不可分割。
+     *
+     * 凡是「读一份配置、改一个段、再写回」的调用方都必须走这里，而不是
+     * [loadOrNull] 改完再 [save]：后者是两段独立临界区，中间的窗口里另一个写入者
+     * 插进来会被整段覆盖（详见 [LOCK] 的注释）。
+     *
+     * [transform] 拿到的是磁盘上的真实配置，返回：
+     *  - `success(newConfig)` → 落盘，返回 `success`；
+     *  - `failure(...)` → **一个字节都不写**，失败原样交给调用方（校验不过 / 主动放弃）。
+     *
+     * 配置读不出来时 [transform] 根本不会被调用，直接以 failure 返回 —— 与
+     * [loadOrNull] 的语义一致，绝不拿默认值覆盖磁盘上的真实配置。
+     */
+    fun edit(transform: (Config) -> Result<Config>): Result<Unit> = synchronized(LOCK) {
+        val current = loadOrNull()
+            ?: return@synchronized Result.failure(
+                IllegalStateException("config.json is unreadable; nothing was written"),
+            )
+        transform(current).fold(onSuccess = ::save, onFailure = { Result.failure(it) })
     }
 
     /* -------------------------------- saving ------------------------------- */
@@ -198,7 +247,7 @@ object ConfigManager {
      * 不可撤销的，而 [load] 的容错会让一次读失败变成「用默认值整段覆盖」，
      * 留一份上一版是这条错误链上唯一的后悔药。
      */
-    fun save(config: Config): Result<Unit> =
+    fun save(config: Config): Result<Unit> = synchronized(LOCK) {
         runCatching {
             val key = ensureSecretKey()
             val element = json.encodeToJsonElement(Config.serializer(), config)
@@ -208,6 +257,7 @@ object ConfigManager {
         }.onFailure { t ->
             Log.error(LOG_TAG, "failed to write config: $t")
         }
+    }
 
     /**
      * 把当前 `config.json` 复制成 `config.json.bak`（只保留一份，每次保存覆盖）。
@@ -424,6 +474,10 @@ object ConfigManager {
             )
         } catch (_: UnsupportedOperationException) {
             // Windows — no POSIX permissions; skip silently.
+        } catch (t: IOException) {
+            // 收紧权限只是保险：失败不该让 ensureSecretKey 连带失败（那会让整次保存
+            // 报「写不了配置」，而实际上文件已经写好了）。
+            Log.warn(LOG_TAG, "failed to restrict permissions on $path: $t")
         }
     }
 }

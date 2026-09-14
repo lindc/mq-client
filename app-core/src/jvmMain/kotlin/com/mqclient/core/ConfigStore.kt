@@ -58,6 +58,16 @@ object ConfigStore {
     fun saveConfig(config: Config): Result<Unit> = ConfigManager.save(config)
 
     /**
+     * 原子的读-改-写（[ConfigManager.edit]）：在锁内读 → 交给 [transform] 改 → 落盘。
+     *
+     * 「读一份配置、改一个段、再写回」的调用方（[saveConnections]、
+     * `AiConnectionRepository`、AI 面板的设置项）都必须走这里，而不是
+     * [loadConfigOrNull] + [saveConfig] 两步 —— 那两步之间是另一个写入者的机会窗口，
+     * 被插队就意味着整段配置被后写的那次覆盖掉。
+     */
+    fun editConfig(transform: (Config) -> Result<Config>): Result<Unit> = ConfigManager.edit(transform)
+
+    /**
      * 读 `connections` 段。
      *
      * 失败不再「假装没有连接」：[loadConfig] 在读不出来时会静默给出默认值，拿它当结果
@@ -84,14 +94,10 @@ object ConfigStore {
      * Replaces the `connections` section and rewrites config.json, preserving
      * every other section as it currently sits on disk.
      */
-    fun saveConnections(connections: List<ConnectionInfo>): Result<Unit> {
-        // 读-改-写：配置读不出来时 [loadConfig] 会静默给出默认值，拿它写回会
-        // 抹掉配置里的其它段，所以这里必须走 [loadConfigOrNull]，读不出来就
-        // 直接以失败返回 —— 不写、也不假装成功。
-        val current = loadConfigOrNull()
-            ?: return Result.failure(IllegalStateException("config.json is unreadable; connections were not written"))
-        return saveConfig(current.copy(connections = connections))
-    }
+    fun saveConnections(connections: List<ConnectionInfo>): Result<Unit> =
+        // 读-改-写走 [editConfig]：配置读不出来时它不会调用 transform，直接以失败
+        // 返回 —— 不写、也不假装成功（[loadConfig] 的默认值里其它段是空的）。
+        editConfig { current -> Result.success(current.copy(connections = connections)) }
 
     /**
      * Returns the AES key used for the encrypted fields, generating and

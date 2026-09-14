@@ -1,6 +1,7 @@
 package com.mqclient.aipanel
 
 import com.mqclient.core.AiConfig
+import com.mqclient.core.AiConnection
 import com.mqclient.core.Config
 import com.mqclient.core.ConfigManager
 import com.mqclient.core.ConfigStore
@@ -13,8 +14,13 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 
 /**
  * 守住 [AiPanelState.updateConfig] 的落盘路径：它写的是整份 `config.json`，
@@ -65,11 +71,59 @@ class AiPanelStateTest {
         assertNotNull(state.panelError, "失败要能提示，不能静默")
     }
 
-    private fun newState(): AiPanelState = AiPanelState(
-        initialConfig = AiConfig(),
+    /**
+     * 吐一个分片之后永久挂起的后端。
+     *
+     * 用它是为了让「取消」这条路径不依赖真实时间：不取消它就永远结束不了，所以断言
+     * 「停下来了」一定是 [AiPanelState.cancelStreaming] 起的作用，而不是「刚好流完了」。
+     */
+    private class HangingChatService : ChatService {
+        override suspend fun streamReply(
+            history: List<AiMessage>,
+            connection: AiConnection,
+            context: AiContext?,
+            onChunk: (String) -> Unit,
+        ) {
+            onChunk(PARTIAL_REPLY)
+            awaitCancellation()
+        }
+    }
+
+    @Test
+    fun `cancelStreaming stops the reply, keeps what streamed and is not an error`() = runBlocking {
+        val state = newState(
+            config = AiConfig(connections = listOf(aiConnection())),
+            chat = HangingChatService(),
+        )
+
+        state.sendUserMessage("你好", null)
+        // 等第一个分片真的追加进气泡：抢在它之前取消的话一个字都还没落地。
+        withTimeout(2_000) { while (state.messages.last().content.isEmpty()) delay(5) }
+        assertTrue(state.isStreaming, "回复没结束前应该在流式")
+
+        state.cancelStreaming()
+
+        withTimeout(2_000) { while (state.isStreaming) delay(5) }
+        assertEquals(PARTIAL_REPLY, state.messages.last().content, "点停止前看到的那部分要留着")
+        assertNull(state.streamingMessageId)
+        assertNull(state.panelError, "取消不是失败，不该弹错误提示")
+    }
+
+    private fun newState(
+        config: AiConfig = AiConfig(),
+        chat: ChatService = MockChatService(),
+    ): AiPanelState = AiPanelState(
+        initialConfig = config,
         initialMessages = emptyList(),
-        chat = MockChatService(),
+        chat = chat,
         scope = CoroutineScope(SupervisorJob()),
+    )
+
+    private fun aiConnection() = AiConnection(
+        id = "a1",
+        name = "A",
+        providerId = "openai-compatible",
+        baseUrl = "http://localhost:11434/v1",
     )
 
     private fun connection(id: String) = ConnectionInfo(
@@ -84,5 +138,6 @@ class AiPanelStateTest {
     private companion object {
         const val DIR_PROPERTY = "mqclient.config.dir"
         const val CONFIG_FILE_NAME = "config.json"
+        const val PARTIAL_REPLY = "已流出的部分"
     }
 }

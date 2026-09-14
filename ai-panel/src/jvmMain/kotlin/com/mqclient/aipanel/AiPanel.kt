@@ -83,6 +83,7 @@ fun AiPanel(
                     isStreaming = state.isStreaming,
                     context = currentContext,
                     onSend = { text -> state.sendUserMessage(text, currentContext) },
+                    onCancel = { state.cancelStreaming() },
                 )
             }
         }

@@ -35,6 +35,7 @@ import com.mqclient.core.ThemeMode
 import com.mqclient.core.database.DatabaseManager
 import com.mqclient.core.database.DriverFactory
 import com.mqclient.core.event.EventNames
+import com.mqclient.core.log.Log
 import com.mqclient.uicommon.i18n.LanguageResources
 import com.mqclient.uicommon.i18n.stringResource
 import dev.nucleusframework.application.DecoratedWindow
@@ -54,6 +55,9 @@ import kotlinx.coroutines.runBlocking
 
 /** Matches the title bar height `MacosDecoratedWindow` uses. */
 private val TitleBarHeight = 52.dp
+
+/** 本文件的日志 tag；与上报错误时的 source（`app.main`）同一命名。 */
+private const val LOG_TAG = "app.main"
 
 /** Maps the persisted [Language] enum to the string-table language code used as the resource file suffix. */
 private fun Language.toLanguageCode(): String = when (this) {
@@ -102,19 +106,14 @@ private fun AppRoot(bootConfig: Config, onExit: () -> Unit) {
     // 听事件，是因为启动早期（读配置 / 模块初始化）的错误会早于订阅、被总线直接丢掉。
     val appError by CoreModule.lastError.collectAsState()
 
-    // 关窗即退出，三步顺序有讲究（和 DatabaseManager.close 的注释一致）：
-    // 先停模块资源，再停调度器/订阅，最后关库。
+    // 关窗即退出：先收尾，再 onExit。收尾里任何一步抛异常都不能把 [onExit] 带走 ——
+    // 漏一步清理只是泄漏，漏掉 onExit 是窗口关不掉、进程退不出。
     val closeApp: () -> Unit = {
-        // 1. 模块资源：连接 / 会话 / 订阅 / 定时任务（SPI 初始化逆序，见 disposeServices）。
-        //    排在 CoreModule.shutdown() 之前 —— 这时总线与调度器还活着，
-        //    模块收尾时发的事件、上报的失败才有人收。
-        ModuleRegistry.disposeServices()
-        // 2. 调度器与全部事件订阅（应用 scope 由 CoreModule 持有，随之级联取消）。
-        CoreModule.shutdown()
-        // 3. 最后关库：调度器与订阅都停了之后再关，否则关闭途中还在跑的查询会打在
-        //    已关的连接上（见 DatabaseManager.close 的注释）。
-        DatabaseManager.close()
-        onExit()
+        try {
+            shutdownApp()
+        } finally {
+            onExit()
+        }
     }
     DecoratedWindow(onCloseRequest = closeApp, title = "MQ Client") {
         // Resolve dark/light once at the top so the window-chrome theme
@@ -301,4 +300,27 @@ private fun bootstrapEvents() {
         CoreModule.eventBus.awaitSubscribers()
         CoreModule.eventBus.emit(EventNames.APP_STARTED)
     }
+}
+
+/**
+ * 关窗收尾三步，顺序有讲究（和 DatabaseManager.close 的注释一致）：先停模块资源，
+ * 再停调度器 / 订阅，最后关库。
+ *
+ * 每一步单独兜住异常：任一步失败都不能把后面的收尾带走 —— 漏掉 [CoreModule.shutdown]
+ * 会让调度器与全部订阅泄漏，漏掉 [DatabaseManager.close] 会把 JDBC 连接留在半关闭
+ * 状态。失败只记日志：进程马上就退了，这时候弹提示用户也看不到。
+ */
+private fun shutdownApp() {
+    // 1. 模块资源：连接 / 会话 / 订阅 / 定时任务（SPI 初始化逆序，见 disposeServices）。
+    //    排在 CoreModule.shutdown() 之前 —— 这时总线与调度器还活着，
+    //    模块收尾时发的事件、上报的失败才有人收。
+    runCatching { ModuleRegistry.disposeServices() }
+        .onFailure { error -> Log.warn(LOG_TAG, "disposeServices 失败：$error") }
+    // 2. 调度器与全部事件订阅（应用 scope 由 CoreModule 持有，随之级联取消）。
+    runCatching { CoreModule.shutdown() }
+        .onFailure { error -> Log.warn(LOG_TAG, "CoreModule.shutdown 失败：$error") }
+    // 3. 最后关库：调度器与订阅都停了之后再关，否则关闭途中还在跑的查询会打在
+    //    已关的连接上（见 DatabaseManager.close 的注释）。
+    runCatching { DatabaseManager.close() }
+        .onFailure { error -> Log.warn(LOG_TAG, "DatabaseManager.close 失败：$error") }
 }

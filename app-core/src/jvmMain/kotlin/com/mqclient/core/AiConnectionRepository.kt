@@ -13,7 +13,8 @@ private const val LOG_TAG = "core.ai"
  *  - **读**走 [load]：配置读不出来时以 failure 返回 + 错误通道上报，绝不假装
  *    「没有连接」（那会让界面上的连接凭空消失）；
  *  - **写**走 [save] / [create] / [update] / [delete]：读-改-写整份 config.json，
- *    其它配置段原样保留，落盘失败以 failure 返回；
+ *    其它配置段原样保留，落盘失败以 failure 返回；四个方法都是原子的（校验与落盘
+ *    在同一个临界区里，见下面的注释）—— 否则和 [ConnectionStore] 并发写会互相覆盖；
  *  - **迁移**：[migrateIfNeeded] 把旧模型（`ai.providerConfigs`，per-provider
  *    单槽）一次性折叠成连接列表，由 `ConfigManager.initOnStartup` 在启动时调用。
  *
@@ -46,58 +47,64 @@ object AiConnectionRepository {
 
     /* -------------------------------- 写 -------------------------------- */
 
+    /**
+     * 四个写方法全走 [ConfigStore.editConfig]（原子的读-改-写）：校验与落盘在**同一
+     * 个临界区**里完成。分开写（`loadConfigOrNull()` 校验 → `saveConfig()`）的话，
+     * 两步之间的窗口里 [ConnectionStore] 的一次保存会把它整段覆盖掉。
+     */
+
     /** 替换整个连接列表（其它配置段原样保留）。 */
-    fun save(connections: List<AiConnection>): Result<Unit> {
-        val config = ConfigStore.loadConfigOrNull() ?: return unreadable()
-        return ConfigStore.saveConfig(config.copy(ai = config.ai.copy(connections = connections)))
-    }
+    fun save(connections: List<AiConnection>): Result<Unit> =
+        ConfigStore.editConfig { config ->
+            Result.success(config.copy(ai = config.ai.copy(connections = connections)))
+        }
 
     /** 新增一条连接；id 重复直接失败（和 [ConnectionStore.create] 同一约定）。 */
-    fun create(connection: AiConnection): Result<Unit> {
-        val config = ConfigStore.loadConfigOrNull() ?: return unreadable()
-        if (config.ai.connections.any { it.id == connection.id }) {
-            return Result.failure(IllegalArgumentException("连接 id '${connection.id}' 已存在，改用 update()"))
+    fun create(connection: AiConnection): Result<Unit> =
+        ConfigStore.editConfig { config ->
+            if (config.ai.connections.any { it.id == connection.id }) {
+                Result.failure(IllegalArgumentException("连接 id '${connection.id}' 已存在，改用 update()"))
+            } else {
+                Result.success(
+                    config.copy(ai = config.ai.copy(connections = config.ai.connections + connection)),
+                )
+            }
         }
-        return ConfigStore.saveConfig(
-            config.copy(ai = config.ai.copy(connections = config.ai.connections + connection)),
-        )
-    }
 
     /** 按 id 原位替换（列表顺序不变）；id 不存在直接失败。 */
-    fun update(connection: AiConnection): Result<Unit> {
-        val config = ConfigStore.loadConfigOrNull() ?: return unreadable()
-        val index = config.ai.connections.indexOfFirst { it.id == connection.id }
-        if (index < 0) {
-            return Result.failure(NoSuchElementException("连接 '${connection.id}' 不存在，改用 create()"))
+    fun update(connection: AiConnection): Result<Unit> =
+        ConfigStore.editConfig { config ->
+            val index = config.ai.connections.indexOfFirst { it.id == connection.id }
+            if (index < 0) {
+                Result.failure(NoSuchElementException("连接 '${connection.id}' 不存在，改用 create()"))
+            } else {
+                Result.success(
+                    config.copy(
+                        ai = config.ai.copy(
+                            connections = config.ai.connections.toMutableList().also { it[index] = connection },
+                        ),
+                    ),
+                )
+            }
         }
-        return ConfigStore.saveConfig(
-            config.copy(
-                ai = config.ai.copy(
-                    connections = config.ai.connections.toMutableList().also { it[index] = connection },
-                ),
-            ),
-        )
-    }
 
     /** 按 id 删除；不存在直接失败。删掉的若是当前激活连接，激活 id 一并清空。 */
-    fun delete(id: String): Result<Unit> {
-        val config = ConfigStore.loadConfigOrNull() ?: return unreadable()
-        val ai = config.ai
-        if (ai.connections.none { it.id == id }) {
-            return Result.failure(NoSuchElementException("连接 '$id' 不存在"))
+    fun delete(id: String): Result<Unit> =
+        ConfigStore.editConfig { config ->
+            val ai = config.ai
+            if (ai.connections.none { it.id == id }) {
+                Result.failure(NoSuchElementException("连接 '$id' 不存在"))
+            } else {
+                Result.success(
+                    config.copy(
+                        ai = ai.copy(
+                            connections = ai.connections.filterNot { it.id == id },
+                            activeConnectionId = if (ai.activeConnectionId == id) "" else ai.activeConnectionId,
+                        ),
+                    ),
+                )
+            }
         }
-        return ConfigStore.saveConfig(
-            config.copy(
-                ai = ai.copy(
-                    connections = ai.connections.filterNot { it.id == id },
-                    activeConnectionId = if (ai.activeConnectionId == id) "" else ai.activeConnectionId,
-                ),
-            ),
-        )
-    }
-
-    private fun unreadable(): Result<Unit> =
-        Result.failure(IllegalStateException("config.json 读不出来；AI 配置未写入"))
 
     /* ---------------------------- 一次性迁移 ---------------------------- */
 

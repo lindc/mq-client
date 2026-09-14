@@ -17,6 +17,7 @@ import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
@@ -57,6 +58,16 @@ class AiPanelState internal constructor(
     var streamingMessageId: String? by mutableStateOf(null)
         private set
 
+    /**
+     * 正在流式回复的那个协程。必须留着句柄，否则用户只能干等 —— 界面点不到「停止」。
+     *
+     * 结束（正常 / 出错 / 被取消）之后它不会被清成 null，指向一个已完成的 Job；
+     * 对已完成的 Job 调 [Job.cancel] 是无副作用的空操作，下一次 [sendUserMessage]
+     * 会把它换掉，所以不需要（也不该在协程自己的 finally 里）抢着清空 —— 那会和
+     * `launch` 之后的赋值竞争。
+     */
+    private var streamingJob: Job? = null
+
     /** 上一次失败的说明（请求异常等）；界面提示条读取后调 [dismissError]。 */
     var panelError: String? by mutableStateOf(null)
         private set
@@ -80,22 +91,21 @@ class AiPanelState internal constructor(
      * 改一项 AI 设置并落盘。
      *
      * 这是「读-改-写」路径：盘上是整份 `config.json`（连接列表也在里面），所以
-     * 必须先用 [ConfigStore.loadConfigOrNull] 读到真实内容再写回 —— 用
-     * [ConfigStore.loadConfig] 的话，配置一旦读不出来它会静默给出默认值，拿默认值
-     * 去 copy 再落盘会把连接列表整段抹掉。读不出来时只改内存值、不碰磁盘，并把
-     * 原因交给 [panelError]。
+     * 必须读到真实内容再写回 —— 用 [ConfigStore.loadConfig] 的话，配置一旦读不出来
+     * 它会静默给出默认值，拿默认值去 copy 再落盘会把连接列表整段抹掉。
+     *
+     * 走 [ConfigStore.editConfig]（原子的读-改-写）而不是「load 再 save」两步：两步
+     * 之间的窗口里 [com.mqclient.core.ConnectionStore] 的一次保存会把它整段覆盖。
+     * 读不出来时 [ConfigStore.editConfig] 一个字节都不写，只改内存值，并把原因交给
+     * [panelError]。
      */
     fun updateConfig(transform: (AiConfig) -> AiConfig) {
         val next = transform(config)
         config = next
-        val current = ConfigStore.loadConfigOrNull()
-        if (current == null) {
-            panelError = "配置读取失败，本次修改未保存到磁盘"
-            return
-        }
-        ConfigStore.saveConfig(current.copy(ai = next)).onFailure { error ->
-            panelError = "设置保存失败：${error.message ?: error.javaClass.simpleName}"
-        }
+        ConfigStore.editConfig { current -> Result.success(current.copy(ai = next)) }
+            .onFailure { error ->
+                panelError = "设置保存失败：${error.message ?: error.javaClass.simpleName}"
+            }
     }
 
     /**
@@ -142,7 +152,7 @@ class AiPanelState internal constructor(
         messageList.add(assistantMsg)
         streamingMessageId = assistantMsg.id
 
-        scope.launch {
+        streamingJob = scope.launch {
             // onChunk 可能来自任意线程（真实 provider 会从 HTTP/SSE 回调），而 Compose
             // 状态只能在面板自己的调度器上写。用一条无界 channel 把分片转进本协程里串行
             // 追加：顺序天然保真，写状态的一定是面板的调度器。
@@ -168,15 +178,29 @@ class AiPanelState internal constructor(
                 // 这里会直接把 scope 的 Job 弄失败，整个面板之后 launch 全部被取消。
                 // 刻意不写进 messages —— 那会被 AiStore 落盘、下一轮还会当 history 发给模型。
                 panelError = error.message ?: error.javaClass.simpleName
-                if (messageList.lastOrNull { it.id == assistantMsg.id }?.content.isNullOrEmpty()) {
-                    // 一个字都没流出来：撤掉空气泡，提示条已经说明了原因。
-                    messageList.removeAll { it.id == assistantMsg.id }
-                }
             } finally {
                 streamingMessageId = null
+                // 一个字都没流出来就撤掉空气泡：出错时提示条已经说明了原因；被取消时
+                // 更不该留一条空回复 —— 它会被 AiStore 落盘，下一轮当成 history 又发给
+                // 模型。流了一半的要保留，那是用户点「停止」之前看到的。
+                if (messageList.lastOrNull { it.id == assistantMsg.id }?.content.isNullOrEmpty()) {
+                    messageList.removeAll { it.id == assistantMsg.id }
+                }
                 AiStore.saveMessages(messages)
             }
         }
+    }
+
+    /**
+     * 停止正在流式生成的回复。没有在流式时是空操作。
+     *
+     * 取消会顺着 [Job.cancel] 传到 `chat.streamReply`，HTTP/SSE 连接随之关闭；
+     * 已经流出来的那部分**保留**在气泡里（用户看到的就是他拿到的），
+     * 收尾与落盘由 [sendUserMessage] 的 `finally` 完成。
+     */
+    fun cancelStreaming() {
+        streamingJob?.cancel()
+        streamingJob = null
     }
 
     /**
