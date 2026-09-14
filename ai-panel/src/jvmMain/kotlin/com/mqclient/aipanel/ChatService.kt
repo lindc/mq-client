@@ -15,7 +15,7 @@ data class AiContext(
 
 /**
  * Pluggable chat backend. The real implementation ([AdapterChatService]) bridges
- * to the ai-service adapters (provider dispatch + SSE streaming); tests use
+ * to the openai-service adapters (registry dispatch + SSE streaming); tests use
  * [MockChatService].
  */
 interface ChatService {

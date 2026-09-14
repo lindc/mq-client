@@ -1,5 +1,6 @@
 package com.mqclient.app.settings
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -9,6 +10,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenuItem
@@ -35,6 +37,7 @@ import com.mqclient.ai.AiAdapterRegistry
 import com.mqclient.ai.AiProvider
 import com.mqclient.core.AiConfig
 import com.mqclient.core.AiConnection
+import com.mqclient.openai.ui.openAiIcon
 import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.i18n.stringResource
 import java.util.UUID
@@ -107,11 +110,21 @@ internal fun AiSettingsPane(
             Spacer(Modifier.height(20.dp))
             HorizontalDivider()
             Spacer(Modifier.height(16.dp))
-            Text(
-                text = stringResource("ai_connection_card_prefix") + " ${activeConnection.name}",
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.primary,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // 目前只有 openai-compatible 一个 provider，logo 直接用它的；
+                // 将来多 provider 时这里按 providerId 分发（谁的品牌归谁的 *-ui 模块）。
+                Image(
+                    painter = openAiIcon(),
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = stringResource("ai_connection_card_prefix") + " ${activeConnection.name}",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
             Spacer(Modifier.height(12.dp))
             ConnectionCard(
                 connection = activeConnection,

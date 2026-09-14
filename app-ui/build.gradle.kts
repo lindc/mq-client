@@ -27,9 +27,11 @@ kotlin {
             // Right-side AI assistant panel.
             implementation(projects.aiPanel)
 
-            // Unified AI service — provider descriptors, adapters (registry-based)
-            // and the connection model all live in :ai-service.
-            implementation(projects.aiService)
+            // OpenAI-compatible AI adapter module (:openai-service) — adapter, registry
+            // and provider descriptors live there; the connection model is in app-core.
+            implementation(projects.openaiService)
+            // OpenAI branding/resources (logo shown when creating a connection).
+            implementation(projects.openaiUi)
 
             // Business modules (discovered via SPI at runtime).
             implementation(projects.ibmMqService)

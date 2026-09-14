@@ -6,13 +6,13 @@ import kotlinx.serialization.Serializable
  * 一条用户创建的 AI 连接（Provider + 具体配置）。
  *
  * 与 MQ 侧的 [ConnectionInfo] 同一思路，但只服务 AI 面板 / AI 适配器：
- *  - [providerId] 指向 ai-service 里 `com.mqclient.ai.AiProvider.id`
- *    （`openai-compatible` / `claude` / `gemini`），适配器据此分发；
+ *  - [providerId] 指向 openai-service 里 `com.mqclient.ai.AiProvider.id`
+ *    （内置 `openai-compatible`），适配器据此分发；
  *  - [token] 字段名命中 ConfigManager 的敏感关键词（"token"）→ 落盘自动加密；
  *    [Sensitive] 标注把同一意图写进 schema；
  *  - 同一个 Provider 可以有多条连接（多个账号、多个 Ollama 实例），互不影响。
  *
- * 为什么放 commonMain：ai-service 的 commonMain（适配器接口）要引用它；
+ * 为什么放 commonMain：openai-service 的 commonMain（适配器接口）要引用它；
  * jvmMain 的 ConfigModel 再引用 commonMain 的类则是合法方向（jvmMain 可见 commonMain）。
  */
 @Serializable

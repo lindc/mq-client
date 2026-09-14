@@ -36,27 +36,4 @@ object AiProviders {
         requiresToken = true,
         defaultModels = listOf("gpt-4o", "gpt-4o-mini", "deepseek-chat", "moonshot-v1-8k", "llama3.1"),
     )
-
-    /** Anthropic 官方 Messages API（格式与 OpenAI 不同，走独立适配器）。 */
-    val CLAUDE = AiProvider(
-        id = "claude",
-        name = "Claude",
-        description = "Anthropic 官方 Messages API",
-        defaultBaseUrl = "https://api.anthropic.com",
-        requiresToken = true,
-        defaultModels = listOf("claude-3-5-sonnet-latest", "claude-3-5-haiku-latest", "claude-3-opus-latest"),
-    )
-
-    /** Google Gemini（generativelanguage v1beta）。 */
-    val GEMINI = AiProvider(
-        id = "gemini",
-        name = "Gemini",
-        description = "Google Gemini API",
-        defaultBaseUrl = "https://generativelanguage.googleapis.com",
-        requiresToken = true,
-        defaultModels = listOf("gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"),
-    )
-
-    /** 全部内置 Provider，注册表初始化用。 */
-    val ALL: List<AiProvider> = listOf(OPENAI_COMPATIBLE, CLAUDE, GEMINI)
 }

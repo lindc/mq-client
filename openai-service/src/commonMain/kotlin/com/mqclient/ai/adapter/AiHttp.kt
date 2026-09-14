@@ -58,7 +58,7 @@ internal fun AiConnection.baseUrlOrThrow(): String {
 
 /**
  * 非 2xx 统一转 [AiException]。正文里若能解析出服务端的 `error.message` 就带上它
- * （三家协议的报错形状大体一致），否则截一段原始正文。错误响应不是流，可以放心
+ * （OpenAI 兼容生态的报错形状大体一致），否则截一段原始正文。错误响应不是流，可以放心
  * [bodyAsText]。
  */
 internal suspend fun HttpResponse.throwIfNotSuccess(provider: String) {

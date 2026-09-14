@@ -9,7 +9,7 @@ import com.mqclient.core.DEFAULT_SYSTEM_PROMPT
 import kotlinx.coroutines.flow.collect
 
 /**
- * 真实的后端实现：把面板的聊天记录桥接到 ai-service 的适配器
+ * 真实的后端实现：把面板的聊天记录桥接到 openai-service 模块的适配器
  * （[AiAdapterRegistry] 按 providerId 分发 + SSE 流式）。
  *
  * 系统提示词取连接自己的；没填就回退共享的 [DEFAULT_SYSTEM_PROMPT]。

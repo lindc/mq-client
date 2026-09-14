@@ -110,7 +110,8 @@ object AiConnectionRepository {
      * 旧的 SPI id 到新 providerId 的映射：
      *  - `openai` → `openai-compatible`（沿用用户填的 URL）；
      *  - `ollama` → `openai-compatible`，URL 补 `/v1`（那是它的 Chat Completions 端点）；
-     *  - `claude` → `claude`；
+     *  - `claude` → `claude`（该适配器已不在内置列表；槽位迁移成连接保留数据，
+     *    以「未知 provider」出现在设置里，由用户删除或重填）；
      *  - 其他（第三方 SPI provider）→ `openai-compatible` 尽力而为，用户可在设置里改。
      */
     fun migrateIfNeeded(ai: AiConfig): AiConfig {
