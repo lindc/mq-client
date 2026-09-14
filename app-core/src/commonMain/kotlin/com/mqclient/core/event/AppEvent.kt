@@ -72,6 +72,8 @@ fun AppEvent.getBoolean(key: String): Boolean? = when (val value = payload[key])
  *
  * commonMain 里没有可用的墙上时钟 API（`System.currentTimeMillis()` 是 JVM 的），
  * 所以照 app-core 既有的 EncryptionService / DriverFactory 模式走 expect/actual：
- * 声明在这里，JVM 实现见 `TimeJvm.kt`。只用于给事件与日志行打时间戳，不参与业务判断。
+ * 声明在这里，JVM 实现见 `TimeJvm.kt`。它是 app-core 里**唯一**的墙上时钟实现：
+ * 消费者包括事件 / 日志行的时间戳（本文件、`Log.kt`）与 CacheManager 的
+ * TTL / 新鲜度判断 —— 新组件要用时间就接这里，不要再加第二处平台时钟。
  */
 internal expect fun systemTimeMillis(): Long

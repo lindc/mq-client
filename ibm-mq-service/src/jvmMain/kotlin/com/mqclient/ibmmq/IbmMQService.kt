@@ -2,6 +2,7 @@ package com.mqclient.ibmmq
 
 import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ConnectionStore
+import com.mqclient.core.cache.CacheManager
 import com.mqclient.core.event.EventNames
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.emit
@@ -26,8 +27,34 @@ data class QueueSnapshot(val name: String, val depth: Int, val messageCount: Int
  *
  * ⚠️ 骨架：仓库当前没有任何 IBM MQ 客户端依赖（见 `ibm-mq-service/build.gradle.kts`），
  * 所以 [fetchQueues] 是模拟实现。接真库时只替换它，事件部分不用动。
+ *
+ * 缓存：每条连接的快照存在它专属的 CacheManager 里（入口见 [IbmMQModule.connectionOrNull]）：
+ * 扫描链路负责刷新（write-through），[cachedQueues] / [cachedQueueMessageCount] 是
+ * 只读入口 —— 读不碰 MQ，刷新不阻塞读。
  */
 class IbmMQService(private val context: ServiceContext) {
+
+    private companion object {
+        /** 队列快照的 key（实例隔离数据，所以 key 不需要连接前缀）。 */
+        const val KEY_QUEUES = "queues"
+
+        /** 主题 / 监听器列表的 key。 */
+        const val KEY_TOPICS = "topics"
+        const val KEY_LISTENERS = "listeners"
+
+        /**
+         * 对象列表 / 队列快照的 TTL：比 10 分钟的对象扫描间隔略长一截 ——
+         * 扫描是主动刷新，TTL 只是「连接失联后数据别永远烂在缓存里」的兜底，
+         * 略长于扫描间隔就不会在两次扫描之间出现空窗。
+         */
+        const val OBJECTS_TTL_MS = 15 * 60 * 1_000L
+
+        /** 单队列消息数的 TTL：5 秒心跳刷新一次，TTL 只做失联兜底。 */
+        const val QUEUE_MESSAGE_COUNT_TTL_MS = 60 * 1_000L
+
+        /** 单队列消息数的 key：`queue.<name>.messageCount`。 */
+        fun messageCountKey(queueName: String): String = "queue.$queueName.messageCount"
+    }
 
     /** 同一模块内多次扫描串行执行，避免重叠扫描互相覆盖结果。 */
     private val scanLock = Mutex()
@@ -58,6 +85,7 @@ class IbmMQService(private val context: ServiceContext) {
                 context.emit(IbmMQEvents.SCAN_STARTED, mapOf("connectionId" to connectionId))
                 try {
                     val queues = fetchQueues(connectionId)
+                    writeQueuesToCache(connectionId, queues)
                     context.emit(
                         name = IbmMQEvents.SCAN_COMPLETED,
                         payload = mapOf(
@@ -95,6 +123,7 @@ class IbmMQService(private val context: ServiceContext) {
     suspend fun scanMessageCounts(connectionId: String) = scanLock.withLock {
         try {
             val queues = fetchQueues(connectionId)
+            writeQueuesToCache(connectionId, queues)
             context.emit(
                 name = IbmMQEvents.MESSAGES_SCANNED,
                 payload = mapOf(
@@ -137,6 +166,14 @@ class IbmMQService(private val context: ServiceContext) {
 
             saveObjects(connectionId, queues, topics, listeners)
 
+            // 写缓存（write-through）：三份快照一次写全，订阅方读到的是同一轮扫描的
+            // 结果；lastUpdatedAt 由 CacheManager 自己刷新。
+            writeQueuesToCache(connectionId, queues)
+            cacheOf(connectionId)?.let { cache ->
+                cache.put(KEY_TOPICS, topics, ttlMs = OBJECTS_TTL_MS)
+                cache.put(KEY_LISTENERS, listeners, ttlMs = OBJECTS_TTL_MS)
+            }
+
             context.emit(
                 name = IbmMQEvents.OBJECTS_SCANNED,
                 payload = mapOf(
@@ -158,6 +195,44 @@ class IbmMQService(private val context: ServiceContext) {
             )
         }
     }
+
+    /**
+     * 读当前缓存的队列快照：只查缓存、不碰 MQ、也不挂起（刷新由扫描链路负责，
+     * 见 [scanObjects] / [scanMessageCounts]）。没有缓存时返回空列表。
+     */
+    fun cachedQueues(connectionId: String): List<QueueSnapshot> =
+        cacheOf(connectionId)?.getAs<List<QueueSnapshot>>(KEY_QUEUES) ?: emptyList()
+
+    /**
+     * 读单个队列的最近消息数（缓存值；没有 / 已过期返回 null）。
+     * 5 秒心跳每次扫描都会刷新它，适合界面直接读来展示。
+     */
+    fun cachedQueueMessageCount(connectionId: String, queueName: String): Int? =
+        cacheOf(connectionId)?.getAs<Int>(messageCountKey(queueName))
+
+    /**
+     * 失效某个队列的全部缓存（队列被删除 / 清空后由调用方主动触发）。
+     * 演示按前缀批量清理：key 形如 `queue.<名称>.messageCount`。
+     */
+    fun invalidateQueueCache(connectionId: String, queueName: String) {
+        cacheOf(connectionId)?.removeByPrefix("queue.$queueName.")
+    }
+
+    /**
+     * 扫描链路的写缓存助手：心跳 / 手动扫描 / 对象扫描三条 fetchQueues 链路共用。
+     * 连接已被删除（上下文被摘掉）时安静跳过 —— 数据没人要了。
+     */
+    private fun writeQueuesToCache(connectionId: String, queues: List<QueueSnapshot>) {
+        val cache = cacheOf(connectionId) ?: return
+        cache.put(KEY_QUEUES, queues, ttlMs = OBJECTS_TTL_MS)
+        queues.forEach { queue ->
+            cache.put(messageCountKey(queue.name), queue.messageCount, ttlMs = QUEUE_MESSAGE_COUNT_TTL_MS)
+        }
+    }
+
+    /** 取该连接的缓存实例；连接不存在（已删除 / 未注册）时为 null。 */
+    private fun cacheOf(connectionId: String): CacheManager? =
+        IbmMQModule.connectionOrNull(connectionId)?.cache
 
     /**
      * 登记一个要在 [close] 时释放的句柄（真实连接 / 消费者 / 通道）。

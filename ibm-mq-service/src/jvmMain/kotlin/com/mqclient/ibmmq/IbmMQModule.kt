@@ -11,6 +11,7 @@ import com.mqclient.core.spi.MODULE_ID_KEY
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.onEvent
 import com.mqclient.core.spi.onOwnEvents
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.Job
 import kotlin.jvm.Synchronized
 
@@ -27,14 +28,16 @@ internal val ibmMqLog = Log.withTag(MODULE_ID)
  * IBM MQ 模块的初始化入口。
  *
  * 由 SPI 发现后经 `IbmMqServiceAdapter.initialize(context)` 调用（`ModuleRegistry` 在
- * 启动时逐个初始化模块），做四件事：
+ * 启动时逐个初始化模块），做五件事：
  *  1. 用**前缀订阅**收自己的事件（`ibm-mq.*`），交给 [IbmMQEventHandler]；
  *  2. 订阅别的模块 / 核心的事件 —— `core.connection.added` 给新连接建任务，
  *     `core.connection.deleted` 把那条连接留下的任务和数据一起收掉；
  *  3. 给每条连接注册两条周期性扫描任务（消息数量 / 对象列表）；
  *  4. 按「连接状态上报」约定把连接状态报给核心（[ConnectionStore.reportStatus]）：
  *     建任务时是「连接中...」，第一条扫描结果回来才定 已连接 / 连接失败
- *     （见 [IbmMQService.scanMessageCounts]）。
+ *     （见 [IbmMQService.scanMessageCounts]）；
+ *  5. 为每条连接维护运行时上下文（[IbmMQConnectionContext]：该连接专属的缓存
+ *     实例）：连接出现时建立，连接删除 / 模块销毁时清理。
  *
  * 订阅挂在 `context.coroutineScope`（模块自己的 scope）上，返回的 [Job] 由本对象持有；
  * 定时任务挂在 `context.jobScheduler` 上，用任务 ID 前缀 `ibm-mq.` 圈住。[shutdown]
@@ -56,6 +59,14 @@ object IbmMQModule {
     private var service: IbmMQService? = null
     private var scheduler: JobScheduler? = null
     private var subscriptions: List<Job> = emptyList()
+
+    /**
+     * connectionId → 该连接的运行时上下文（含它专属的 `CacheManager`）。
+     *
+     * 「每条连接一个缓存实例」的注册表：连接出现时建立、消失时摘除并 cleanup ——
+     * 缓存实例的生命周期严格跟着连接走（模块源码在 jvmMain，直接用 JVM 集合）。
+     */
+    private val connections = ConcurrentHashMap<String, IbmMQConnectionContext>()
 
     /**
      * 幂等：重复调用返回同一个 [IbmMQService]，不会重复注册订阅。
@@ -81,6 +92,8 @@ object IbmMQModule {
                     // 不用把任务 id 一个个记下来再 cancel。
                     jobScheduler.cancelByPrefix(ScheduledJob.prefixFor(context.moduleId, connectionId))
                     handler.cleanConnectionData(connectionId)
+                    // 连接级的缓存实例随连接一起销毁：先摘掉引用，再清空（谁创建谁清理）。
+                    connections.remove(connectionId)?.cleanup()
                 }
             },
             // 跨模块：新连接建好后给它配一套自己的任务（每条连接一组，互不影响）。
@@ -97,6 +110,9 @@ object IbmMQModule {
                 // 先在界面上显示「连接中...」：真实的连接由扫描链路建立，
                 // 第一条扫描结果（scanMessageCounts）回来才定 已连接 / 连接失败。
                 reportStatus(connectionId, ConnectionStatus.Connecting)
+                // 上下文必须先于任务就位：5 秒心跳（runOnStart）会立刻扫描并写缓存，
+                // 顺序反了的话第一条扫描还没有缓存可写（connectionOrNull 仍是 null）。
+                ensureConnection(connectionId)
                 registerJobsForConnection(jobScheduler, created, connectionId)
             },
         )
@@ -108,6 +124,8 @@ object IbmMQModule {
         ConnectionStore.connections.value
             .filter { it.serviceId == context.moduleId }
             .forEach { connection ->
+                // 同上：上下文先于任务 —— 第一条心跳扫描要有缓存可写。
+                ensureConnection(connection.id)
                 reportStatus(connection.id, ConnectionStatus.Connecting)
                 registerJobsForConnection(jobScheduler, created, connection.id)
             }
@@ -124,6 +142,20 @@ object IbmMQModule {
     /** 已初始化的业务门面；未初始化时为 null。 */
     @Synchronized
     fun serviceOrNull(): IbmMQService? = service
+
+    /**
+     * 一条连接的运行时上下文（也就是它专属缓存实例的持有者）；连接不存在时为 null。
+     *
+     * [IbmMQService] 通过它读写本连接的缓存；模块外部需要某条连接的缓存时也走这里。
+     */
+    fun connectionOrNull(connectionId: String): IbmMQConnectionContext? = connections[connectionId]
+
+    /**
+     * 建立（或取回已存在的）连接上下文。ConcurrentHashMap 保证并发下同一条连接
+     * 也只会有一个实例。
+     */
+    private fun ensureConnection(connectionId: String): IbmMQConnectionContext =
+        connections.computeIfAbsent(connectionId) { IbmMQConnectionContext(it) }
 
     /**
      * 模块销毁：取消订阅、按前缀停掉本模块的全部定时任务，并释放服务资源。
@@ -146,7 +178,14 @@ object IbmMQModule {
                 // 任务 ID 的第一段就是模块名，所以「本模块的任务」= `ibm-mq.` 前缀。
                 schedulerToStop?.cancelByPrefix("$MODULE_ID.")
             } finally {
-                serviceToClose?.close()
+                try {
+                    serviceToClose?.close()
+                } finally {
+                    // 全部连接的缓存实例一并销毁：shutdown 之后本模块不再持有任何
+                    // 连接级数据（连接删除是单条清理，这里是兜底的全量清理）。
+                    connections.values.forEach { it.cleanup() }
+                    connections.clear()
+                }
             }
         }
     }
