@@ -24,16 +24,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.mqclient.core.AiProvider
+import com.mqclient.core.AiConnection
 import com.mqclient.uicommon.i18n.stringResource
 
 /**
  * Header band: title + provider dropdown + close, plus a single info row
  * for the current selection context.
  *
- * The dropdown lists every AI provider registered through the
- * [com.mqclient.core.AiProvider] SPI — pure switcher, no trailing entries.
- * Selecting one writes its id back to [com.mqclient.core.AiConfig.activeProviderId].
+ * The dropdown lists the enabled AI connections
+ * ([com.mqclient.core.AiConfig.connections]) — pure switcher, no trailing
+ * entries. Selecting one writes its id back to
+ * [com.mqclient.core.AiConfig.activeConnectionId].
  *
  * Glyphs are plain text (🤖 ✕ ▼) so the module doesn't pull in
  * material-icons-extended. Buttons stay as [TextButton] — lightweight,
@@ -42,10 +43,10 @@ import com.mqclient.uicommon.i18n.stringResource
  */
 @Composable
 fun AiPanelHeader(
-    providers: List<AiProvider>,
-    activeProviderId: String?,
+    connections: List<AiConnection>,
+    activeConnectionId: String?,
     context: AiContext?,
-    onProviderSelected: (AiProvider) -> Unit,
+    onConnectionSelected: (AiConnection) -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -68,10 +69,10 @@ fun AiPanelHeader(
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f),
             )
-            ProviderDropdownButton(
-                providers = providers,
-                activeProviderId = activeProviderId,
-                onProviderSelected = onProviderSelected,
+            ConnectionDropdownButton(
+                connections = connections,
+                activeConnectionId = activeConnectionId,
+                onConnectionSelected = onConnectionSelected,
             )
             TextButton(onClick = onDismiss) {
                 Text("✕", style = MaterialTheme.typography.titleMedium)
@@ -85,33 +86,33 @@ fun AiPanelHeader(
 }
 
 /**
- * The button shows the active provider's display name + a ▼ glyph. Click
- * opens a menu listing every registered provider (active marked with a
- * leading "✓ ") — pure switcher, no trailing entries.
+ * The button shows the active connection's name + a ▼ glyph. Click opens a
+ * menu listing every enabled connection (active marked with a leading "✓ ")
+ * — pure switcher, no trailing entries.
  */
 @Composable
-private fun ProviderDropdownButton(
-    providers: List<AiProvider>,
-    activeProviderId: String?,
-    onProviderSelected: (AiProvider) -> Unit,
+private fun ConnectionDropdownButton(
+    connections: List<AiConnection>,
+    activeConnectionId: String?,
+    onConnectionSelected: (AiConnection) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val activeLabel = providers.firstOrNull { it.id == activeProviderId }?.displayName
-        ?: if (providers.isEmpty()) stringResource("ai_provider_none") else stringResource("ai_provider_pick")
+    val activeLabel = connections.firstOrNull { it.id == activeConnectionId }?.name
+        ?: if (connections.isEmpty()) stringResource("ai_no_connections") else stringResource("ai_connection_pick")
     TextButton(onClick = { expanded = true }) {
         Text(activeLabel, style = MaterialTheme.typography.labelLarge)
         Text(" ▼", style = MaterialTheme.typography.labelLarge)
     }
     DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-        providers.forEach { provider ->
-            val isActive = provider.id == activeProviderId
+        connections.forEach { connection ->
+            val isActive = connection.id == activeConnectionId
             DropdownMenuItem(
                 text = {
-                    Text(if (isActive) "✓ ${provider.displayName}" else "   ${provider.displayName}")
+                    Text(if (isActive) "✓ ${connection.name}" else "   ${connection.name}")
                 },
                 onClick = {
                     expanded = false
-                    if (!isActive) onProviderSelected(provider)
+                    if (!isActive) onConnectionSelected(connection)
                 },
             )
         }

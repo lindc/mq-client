@@ -42,10 +42,10 @@ fun AiPanel(
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
                 AiPanelHeader(
-                    providers = state.providers,
-                    activeProviderId = state.activeProvider?.id,
+                    connections = state.connections,
+                    activeConnectionId = state.activeConnection?.id,
                     context = currentContext,
-                    onProviderSelected = { picked -> state.updateConfig { it.copy(activeProviderId = picked.id) } },
+                    onConnectionSelected = { picked -> state.updateConfig { it.copy(activeConnectionId = picked.id) } },
                     onDismiss = onDismiss,
                 )
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)

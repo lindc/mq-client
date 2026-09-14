@@ -27,11 +27,9 @@ kotlin {
             // Right-side AI assistant panel.
             implementation(projects.aiPanel)
 
-            // AI providers — each is an independent module registered through
-            // the AiProvider SPI, so removing one is just deleting this line.
-            implementation(projects.aiClaudeService)
-            implementation(projects.aiOpenaiService)
-            implementation(projects.aiOllamaService)
+            // Unified AI service — provider descriptors, adapters (registry-based)
+            // and the connection model all live in :ai-service.
+            implementation(projects.aiService)
 
             // Business modules (discovered via SPI at runtime).
             implementation(projects.ibmMqService)

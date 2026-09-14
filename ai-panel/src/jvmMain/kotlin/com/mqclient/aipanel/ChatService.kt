@@ -1,6 +1,6 @@
 package com.mqclient.aipanel
 
-import com.mqclient.core.AiConfig
+import com.mqclient.core.AiConnection
 
 /**
  * Tiny DTO describing the user's current focus in the main UI. We pass this
@@ -14,16 +14,15 @@ data class AiContext(
 )
 
 /**
- * Pluggable chat backend. The current implementation is a mock that emits a
- * canned reply; a future real implementation would call out to OpenAI /
- * Anthropic / Ollama via HTTP and parse SSE chunks into the same [onChunk]
- * callback so the rest of the UI doesn't change.
+ * Pluggable chat backend. The real implementation ([AdapterChatService]) bridges
+ * to the ai-service adapters (provider dispatch + SSE streaming); tests use
+ * [MockChatService].
  */
 interface ChatService {
     /**
-     * Streams one assistant turn. Implementations are expected to call
-     * [onChunk] multiple times with small string fragments; the call site
-     * appends them to the in-flight assistant bubble.
+     * Streams one assistant turn for [connection]. Implementations are expected
+     * to call [onChunk] multiple times with small string fragments; the call
+     * site appends them to the in-flight assistant bubble.
      *
      * ⚠️ [onChunk] **可能从任意线程被调**（真实实现在 HTTP/SSE 线程上回调）：只需要把
      * 文本递出去，不要去碰 Compose 状态 —— 调用方（[AiPanelState]）会把分片转回自己的
@@ -31,7 +30,7 @@ interface ChatService {
      */
     suspend fun streamReply(
         history: List<AiMessage>,
-        config: AiConfig,
+        connection: AiConnection,
         context: AiContext?,
         onChunk: (String) -> Unit,
     )

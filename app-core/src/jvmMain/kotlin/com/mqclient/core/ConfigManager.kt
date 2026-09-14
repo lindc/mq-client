@@ -120,6 +120,23 @@ object ConfigManager {
         } else {
             importLegacyConnectionsIfAny()
         }
+        migrateAiConnectionsIfNeeded()
+    }
+
+    /**
+     * AI 连接模型的一次性升级：旧 `ai.providerConfigs`（per-provider 单槽）折叠成
+     * `ai.connections`（多条连接）。已迁移过则零开销；配置读不出来时跳过（下次启动
+     * 再试）。迁移规则本身在 [AiConnectionRepository]（AI 域），这里只负责把它挂到
+     * 启动路径上。
+     */
+    private fun migrateAiConnectionsIfNeeded() {
+        val current = loadOrNull() ?: return
+        val migrated = AiConnectionRepository.migrateIfNeeded(current.ai)
+        if (migrated !== current.ai) {
+            save(current.copy(ai = migrated)).onFailure { error ->
+                Log.warn(LOG_TAG, "failed to persist migrated AI connections (retry next launch): $error")
+            }
+        }
     }
 
     /** Returns the secret key bytes, generating + persisting them on first use. */

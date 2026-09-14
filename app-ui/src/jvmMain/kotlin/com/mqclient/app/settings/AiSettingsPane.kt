@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
@@ -23,53 +24,58 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import com.mqclient.ai.AiAdapterRegistry
+import com.mqclient.ai.AiProvider
 import com.mqclient.core.AiConfig
-import com.mqclient.core.AiProvider
-import com.mqclient.core.AiProviderConfig
-import com.mqclient.core.AiProviderRegistry
-import com.mqclient.core.CoreModule
+import com.mqclient.core.AiConnection
+import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.i18n.stringResource
-import java.util.Base64
+import java.util.UUID
+import kotlinx.coroutines.launch
 
 /**
- * AI settings tab — active provider picker, history limit, auto-attach
- * toggle, and the per-provider config card for the **currently active**
- * provider only.
+ * AI settings tab（Provider + Connection 模型）：连接选择器、「新建连接」、历史条数、
+ * 附加上下文开关，以及**当前连接**的配置卡。
  *
- * Until the user picks a service in the top dropdown, the config card is
- * not rendered at all — there's nothing meaningful to configure without a
- * target provider.
- *
- * For each provider the user can override URL, API key, model and system
- * prompt; the app-level [AiConfig.providerConfigs] is sparse — missing
- * entries render with the provider's built-in defaults.
+ * 编辑风格与设置对话框一致：每次修改都把新的 [AiConnection] 经 [onChange] 写回草稿，
+ * 落盘由对话框底部的「保存」统一决定（取消即丢弃）。
  */
 @Composable
 internal fun AiSettingsPane(
     value: AiConfig,
     onChange: (AiConfig) -> Unit,
 ) {
-    val registeredProviders = remember { AiProviderRegistry.all }
-    // Build a quick id → override map; the single card looks itself up by
-    // id later (other ids never get rendered).
-    val overridesById = remember(value.providerConfigs) {
-        value.providerConfigs.associateBy { it.providerId }
-    }
+    val providers = remember { AiAdapterRegistry.providers() }
+    val activeConnection = value.connections.firstOrNull { it.id == value.activeConnectionId }
+        ?: value.connections.firstOrNull()
 
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(stringResource("settings_tab_ai"), style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(16.dp))
 
-        ActiveProviderRow(
-            providers = registeredProviders,
-            activeId = value.activeProviderId,
-            onChange = { onChange(value.copy(activeProviderId = it)) },
+        ConnectionPickerRow(
+            connections = value.connections,
+            activeId = activeConnection?.id,
+            onPick = { id -> onChange(value.copy(activeConnectionId = id)) },
+            onCreate = {
+                // 新连接的默认值取第一个内置 Provider（注册表初始化即有，拿不到就留空由用户填）。
+                val provider = providers.firstOrNull()
+                val created = AiConnection(
+                    id = UUID.randomUUID().toString(),
+                    name = "连接 ${value.connections.size + 1}",
+                    providerId = provider?.id.orEmpty(),
+                    baseUrl = provider?.defaultBaseUrl.orEmpty(),
+                    model = provider?.defaultModels?.firstOrNull().orEmpty(),
+                )
+                onChange(value.copy(connections = value.connections + created, activeConnectionId = created.id))
+            },
         )
         Spacer(Modifier.height(16.dp))
 
@@ -97,47 +103,42 @@ internal fun AiSettingsPane(
             modifier = Modifier.padding(start = 4.dp),
         )
 
-        // Only the explicitly-chosen provider gets a card. A blank id stays
-        // blank — we deliberately don't fall back to "first registered",
-        // because that would silently show a config the user never asked for.
-        val activeProvider = value.activeProviderId
-            .takeIf { it.isNotBlank() }
-            ?.let { id -> registeredProviders.firstOrNull { it.id == id } }
-
-        if (activeProvider != null) {
+        if (activeConnection != null) {
             Spacer(Modifier.height(20.dp))
             HorizontalDivider()
             Spacer(Modifier.height(16.dp))
             Text(
-                text = stringResource("ai_provider_card_prefix") + " ${activeProvider.displayName}",
+                text = stringResource("ai_connection_card_prefix") + " ${activeConnection.name}",
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.primary,
             )
             Spacer(Modifier.height(12.dp))
-            ProviderCard(
-                provider = activeProvider,
-                override = overridesById[activeProvider.id],
-                onChange = { newOverride ->
-                    val newList = value.providerConfigs
-                        .filterNot { it.providerId == activeProvider.id } + newOverride
-                    onChange(value.copy(providerConfigs = newList))
+            ConnectionCard(
+                connection = activeConnection,
+                providers = providers,
+                onChange = { updated ->
+                    onChange(
+                        value.copy(
+                            connections = value.connections.map { if (it.id == updated.id) updated else it },
+                        ),
+                    )
                 },
-            )
-        } else if (registeredProviders.isNotEmpty()) {
-            Spacer(Modifier.height(20.dp))
-            HorizontalDivider()
-            Spacer(Modifier.height(16.dp))
-            Text(
-                text = stringResource("ai_select_service_first"),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                onDelete = {
+                    onChange(
+                        value.copy(
+                            connections = value.connections.filterNot { it.id == activeConnection.id },
+                            // 刚删掉的连接不该继续当激活项。
+                            activeConnectionId = "",
+                        ),
+                    )
+                },
             )
         } else {
             Spacer(Modifier.height(20.dp))
             HorizontalDivider()
             Spacer(Modifier.height(16.dp))
             Text(
-                text = stringResource("ai_no_providers"),
+                text = stringResource("ai_no_connections"),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -145,26 +146,32 @@ internal fun AiSettingsPane(
     }
 }
 
-/* ----------------------------- Active provider ----------------------------- */
+/* ----------------------------- Connection picker ----------------------------- */
 
 @Composable
-private fun ActiveProviderRow(
-    providers: List<AiProvider>,
-    activeId: String,
-    onChange: (String) -> Unit,
+private fun ConnectionPickerRow(
+    connections: List<AiConnection>,
+    activeId: String?,
+    onPick: (String) -> Unit,
+    onCreate: () -> Unit,
 ) {
-    val currentLabel = if (activeId.isBlank()) {
-        stringResource("ai_not_selected")
-    } else {
-        providers.firstOrNull { it.id == activeId }?.displayName ?: activeId
+    val currentLabel = connections.firstOrNull { it.id == activeId }?.name
+        ?: if (connections.isEmpty()) stringResource("ai_no_connections") else stringResource("ai_not_selected")
+    Column(modifier = Modifier.fillMaxWidth()) {
+        SettingsDropdownRow(
+            label = stringResource("ai_connection_label"),
+            currentLabel = currentLabel,
+            options = connections,
+            optionLabel = { it.name },
+            onPick = { onPick(it.id) },
+        )
+        Spacer(Modifier.height(8.dp))
+        PressableButton(
+            onClick = onCreate,
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        ) { Text(stringResource("ai_connection_new")) }
     }
-    SettingsDropdownRow(
-        label = stringResource("ai_default_service"),
-        currentLabel = currentLabel,
-        options = providers,
-        optionLabel = { it.displayName },
-        onPick = { onChange(it.id) },
-    )
 }
 
 /* -------------------------------- Toggle row -------------------------------- */
@@ -195,44 +202,45 @@ private fun ToggleRow(
     }
 }
 
-/* ----------------------------- Provider card ----------------------------- */
+/* ----------------------------- Connection card ----------------------------- */
 
 /**
- * The config card for the single active provider. Shows the provider's
- * built-in defaults as placeholder text and lets the user fill in their own
- * values; [override] is whatever's already persisted for this provider
- * (null when the user hasn't customised it yet).
+ * 当前连接的配置卡。
+ *
+ * 输入框状态按连接 id 建键（和旧 provider 卡同一理由）：每次敲键都会把新值经
+ * [onChange] 上抛，拿「值」当键等于每键重建输入状态（IME 合成被打断）；按 id 建键则
+ * 切换连接自然重建，卡内编辑也不会被外部重组冲掉。
  */
 @Composable
-private fun ProviderCard(
-    provider: AiProvider,
-    override: AiProviderConfig?,
-    onChange: (AiProviderConfig) -> Unit,
+private fun ConnectionCard(
+    connection: AiConnection,
+    providers: List<AiProvider>,
+    onChange: (AiConnection) -> Unit,
+    onDelete: () -> Unit,
 ) {
-    // 键用 provider.id，不用 override：flush() 每敲一个键就会回写一个新 override，
-    // 拿 override 当键等于每键重建输入状态（IME 合成被打断、model 字段清不空）。
-    // 切 provider 时 id 变 → 自然重建；同一张卡内不再被外部值冲掉。
-    var url by remember(provider.id) { mutableStateOf(override?.providerUrl ?: "") }
-    var token by remember(provider.id) { mutableStateOf(override?.accessToken ?: "") }
-    var model by remember(provider.id) {
-        mutableStateOf(override?.model?.takeIf { it.isNotBlank() } ?: provider.defaultModel)
-    }
-    var prompt by remember(provider.id) {
-        mutableStateOf(decodePrompt(override?.systemPromptBase64))
-    }
-    // API key is masked by default; the eye toggle reveals it for pasting
-    // / proof-reading.
+    var name by remember(connection.id) { mutableStateOf(connection.name) }
+    var providerId by remember(connection.id) { mutableStateOf(connection.providerId) }
+    var baseUrl by remember(connection.id) { mutableStateOf(connection.baseUrl) }
+    var token by remember(connection.id) { mutableStateOf(connection.token) }
+    var model by remember(connection.id) { mutableStateOf(connection.model) }
+    var prompt by remember(connection.id) { mutableStateOf(connection.systemPrompt) }
+    var enabled by remember(connection.id) { mutableStateOf(connection.enabled) }
+    // API key 默认遮蔽；眼睛按钮切换明文，方便粘贴 / 核对。
     var tokenVisible by remember { mutableStateOf(false) }
+    var testing by remember(connection.id) { mutableStateOf(false) }
+    var testResult by remember(connection.id) { mutableStateOf<Boolean?>(null) }
+    val scope = rememberCoroutineScope()
 
-    // Every keystroke writes a new [AiProviderConfig] back into the list.
     fun flush() {
         onChange(
-            AiProviderConfig(
-                providerId = provider.id,
-                providerUrl = url,
-                accessToken = token,
+            connection.copy(
+                name = name,
+                providerId = providerId,
+                baseUrl = baseUrl,
+                token = token,
                 model = model,
-                systemPromptBase64 = encodePrompt(prompt),
+                systemPrompt = prompt,
+                enabled = enabled,
             ),
         )
     }
@@ -243,16 +251,46 @@ private fun ProviderCard(
             .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
             .padding(12.dp),
     ) {
-        LabeledField(stringResource("ai_field_url")) {
+        LabeledField(stringResource("conn_name_label")) {
             OutlinedTextField(
-                value = url,
+                value = name,
                 onValueChange = {
-                    url = it
+                    name = it
                     flush()
                 },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
-                placeholder = { Text(provider.defaultServerUrl) },
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+
+        SettingsDropdownRow(
+            label = stringResource("ai_field_provider"),
+            currentLabel = providers.firstOrNull { it.id == providerId }?.name ?: providerId.ifBlank { "—" },
+            options = providers,
+            optionLabel = { it.name },
+            onPick = { picked ->
+                providerId = picked.id
+                // 切 Provider 时把没填过的默认值补上；用户填过的值不动。
+                if (baseUrl.isBlank()) baseUrl = picked.defaultBaseUrl
+                if (model.isBlank()) model = picked.defaultModels.firstOrNull().orEmpty()
+                flush()
+            },
+        )
+        Spacer(Modifier.height(8.dp))
+
+        LabeledField(stringResource("ai_field_url")) {
+            OutlinedTextField(
+                value = baseUrl,
+                onValueChange = {
+                    baseUrl = it
+                    flush()
+                },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                placeholder = {
+                    Text(providers.firstOrNull { it.id == providerId }?.defaultBaseUrl.orEmpty())
+                },
             )
         }
         Spacer(Modifier.height(8.dp))
@@ -266,10 +304,8 @@ private fun ProviderCard(
                 },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
-                // Masked by default; the trailing eye flips to plain text.
                 visualTransformation = if (tokenVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                // Dotted hint so an empty field still reads as "secret goes
-                // here" — it disappears as soon as the user types.
+                // 空字段也给个圆点提示「这里是密钥」；一开始输入就消失。
                 placeholder = { Text("••••••••") },
                 trailingIcon = {
                     Box(
@@ -290,7 +326,7 @@ private fun ProviderCard(
 
         LabeledField(stringResource("ai_field_model")) {
             ModelComboBox(
-                provider = provider,
+                provider = providers.firstOrNull { it.id == providerId },
                 model = model,
                 onChange = {
                     model = it
@@ -314,41 +350,103 @@ private fun ProviderCard(
                 placeholder = { Text(stringResource("ai_system_prompt_placeholder")) },
             )
         }
+        Spacer(Modifier.height(12.dp))
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable {
+                    enabled = !enabled
+                    flush()
+                },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = stringResource("ai_field_enabled"),
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+            )
+            Switch(
+                checked = enabled,
+                onCheckedChange = {
+                    enabled = it
+                    flush()
+                },
+            )
+        }
+        Spacer(Modifier.height(12.dp))
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            PressableButton(
+                onClick = {
+                    // 用输入框里的当前值发起测试（可能还没 flush 回上层草稿）。
+                    val snapshot = connection.copy(
+                        name = name,
+                        providerId = providerId,
+                        baseUrl = baseUrl,
+                        token = token,
+                        model = model,
+                        systemPrompt = prompt,
+                        enabled = enabled,
+                    )
+                    testing = true
+                    testResult = null
+                    scope.launch {
+                        testResult = runCatching {
+                            AiAdapterRegistry.adapter(snapshot.providerId)?.testConnection(snapshot) ?: false
+                        }.getOrDefault(false)
+                        testing = false
+                    }
+                },
+                enabled = !testing,
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            ) {
+                Text(if (testing) stringResource("ai_testing") else stringResource("conn_test_connection"))
+            }
+            Spacer(Modifier.width(8.dp))
+            testResult?.let { ok ->
+                Text(
+                    text = if (ok) stringResource("ai_test_ok") else stringResource("ai_test_fail"),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            PressableButton(
+                onClick = onDelete,
+                containerColor = MaterialTheme.colorScheme.errorContainer,
+                contentColor = MaterialTheme.colorScheme.onErrorContainer,
+            ) { Text(stringResource("common_delete")) }
+        }
     }
 }
 
 /**
- * Editable model combo box: the user can type straight into the field, or
- * open the menu to pick from the provider's curated models.
- *
- * Options are the provider's [AiProvider.models] plus whatever custom value
- * is already saved, deduped — so a hand-typed model never disappears from
- * the list just because the provider doesn't ship it.
+ * 可编辑的模型组合框：直接往框里敲，或打开菜单从 Provider 的 [AiProvider.defaultModels]
+ * 里挑。Provider 未知（id 对不上注册表）时退化成纯文本输入。
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun ModelComboBox(
-    provider: AiProvider,
+    provider: AiProvider?,
     model: String,
     onChange: (String) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    // Dedupe: curated list first, then whatever custom value is already
-    // saved — so a hand-typed model never disappears from the list just
-    // because the provider doesn't ship it.
+    // 去重：预置候选在前，已保存的自定义值跟着，手填过的模型不会从列表里消失。
     val options = remember(provider, model) {
-        (provider.models + model).filter { it.isNotBlank() }.distinct()
+        ((provider?.defaultModels ?: emptyList()) + model).filter { it.isNotBlank() }.distinct()
     }
-    // Filter as the user types, but always keep the in-progress text as an
-    // entry so a fully custom name stays reachable.
+    // 输入时过滤候选，但始终保留正在输入的文本，全自定义的名字才始终可达。
     val visibleOptions = remember(options, model) {
-        if (model.isBlank()) options
-        else {
+        if (model.isBlank()) {
+            options
+        } else {
             val matches = options.filter { it.contains(model, ignoreCase = true) }
             if (matches.any { it.equals(model, ignoreCase = true) }) matches else matches + model
         }
     }
-
     ExposedDropdownMenuBox(
         expanded = expanded,
         onExpandedChange = { expanded = it },
@@ -364,7 +462,7 @@ private fun ModelComboBox(
                 .fillMaxWidth()
                 .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable),
             singleLine = true,
-            placeholder = { Text(provider.defaultModel) },
+            placeholder = { Text(provider?.defaultModels?.firstOrNull().orEmpty()) },
             trailingIcon = {
                 ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
             },
@@ -398,29 +496,3 @@ private fun LabeledField(label: String, content: @Composable () -> Unit) {
         content()
     }
 }
-
-/* -------------------------------- helpers -------------------------------- */
-
-/**
- * Decode a stored base64 prompt back to a UTF-8 String. Base64 here is a
- * storage obfuscation, not security — bytes round-trip as UTF-8 so CJK,
- * quotes and newlines survive the JSON file unmolested.
- */
-private fun decodePrompt(b64: String?): String =
-    try {
-        if (b64.isNullOrBlank()) ""
-        else String(Base64.getDecoder().decode(b64), Charsets.UTF_8)
-    } catch (error: Throwable) {
-        // 存进去的自定义提示词读不出来：界面只能显示空串，但不能让用户以为提示词是自己
-        // 被清掉的 —— 上报到错误通道（同一消息重复上报时状态值相等，不会反复弹）。
-        CoreModule.reportError(
-            message = "自定义系统提示词解析失败，已按空提示词显示",
-            source = "app-ui",
-            error = error,
-        )
-        ""
-    }
-
-/** Encode any user-entered prompt text into the Base64 storage form. */
-private fun encodePrompt(plain: String): String =
-    Base64.getEncoder().encodeToString(plain.toByteArray(Charsets.UTF_8))

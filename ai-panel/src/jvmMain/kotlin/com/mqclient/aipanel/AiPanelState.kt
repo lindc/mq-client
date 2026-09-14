@@ -11,11 +11,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import com.mqclient.core.AiConfig
-import com.mqclient.core.AiProvider
-import com.mqclient.core.AiProviderRegistry
+import com.mqclient.core.AiConnection
 import com.mqclient.core.ConfigStore
-import com.mqclient.core.CoreModule
-import com.mqclient.core.DEFAULT_SYSTEM_PROMPT
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -28,10 +25,9 @@ import kotlinx.coroutines.withContext
 /**
  * Single source of truth for the AI panel.
  *
- * Pulls the registered [AiProvider] list from the SPI registry and merges
- * in the user-configured overrides from [AiConfig.providerConfigs]. The
- * [activeProvider] is whatever provider matches [AiConfig.activeProviderId]
- * (or the first registered one if nothing's set).
+ * The dropdown lists the enabled entries of [AiConfig.connections]; the
+ * [activeConnection] is whatever connection matches [AiConfig.activeConnectionId]
+ * (or the first enabled one if nothing's set).
  */
 @Stable
 class AiPanelState internal constructor(
@@ -67,28 +63,18 @@ class AiPanelState internal constructor(
 
     val isStreaming: Boolean get() = streamingMessageId != null
 
-    /** All registered AI providers (from SPI). Recomputed when [AiProviderRegistry] changes. */
-    val providers: List<AiProvider> = AiProviderRegistry.all
+    /** 面板连接下拉的候选：配置里启用的连接。 */
+    val connections: List<AiConnection> get() = config.connections.filter { it.enabled }
 
     /**
-     * The provider the user picked via [AiConfig.activeProviderId], or the
-     * first registered one if nothing's set. Computed on every read so it
-     * stays in lockstep with [config] after [updateConfig].
+     * The connection the user picked via [AiConfig.activeConnectionId], or the
+     * first enabled one if nothing's set (or the picked one was deleted /
+     * disabled). Computed on every read so it stays in lockstep with [config]
+     * after [updateConfig].
      */
-    val activeProvider: AiProvider?
-        get() = providers.firstOrNull { it.id == config.activeProviderId }
-            ?: providers.firstOrNull()
-
-    /**
-     * The override (URL/token/model/prompt) for the active provider, or
-     * null when the user hasn't customised it yet — the runtime falls back
-     * to the provider's defaults.
-     */
-    val activeProviderOverride: com.mqclient.core.AiProviderConfig?
-        get() = config.providerConfigs.firstOrNull { it.providerId == activeProvider?.id }
-
-    val systemPrompt: String
-        get() = activeProviderOverride?.systemPromptBase64?.let(::decodePrompt) ?: DEFAULT_SYSTEM_PROMPT
+    val activeConnection: AiConnection?
+        get() = connections.firstOrNull { it.id == config.activeConnectionId }
+            ?: connections.firstOrNull()
 
     /**
      * 改一项 AI 设置并落盘。
@@ -133,7 +119,7 @@ class AiPanelState internal constructor(
     fun sendUserMessage(text: String, context: AiContext?) {
         val trimmed = text.trim()
         if (trimmed.isEmpty() || isStreaming) return
-        if (activeProvider == null) return
+        val connection = activeConnection ?: return
 
         val userMsg = AiMessage(
             id = newId(),
@@ -164,7 +150,7 @@ class AiPanelState internal constructor(
             try {
                 val producer = async {
                     try {
-                        chat.streamReply(historyForCall, config, context) { chunk -> chunks.trySend(chunk) }
+                        chat.streamReply(historyForCall, connection, context) { chunk -> chunks.trySend(chunk) }
                     } finally {
                         chunks.close()
                     }
@@ -242,27 +228,6 @@ class AiPanelState internal constructor(
     }
 
     private fun newId(): String = UUID.randomUUID().toString()
-
-    private fun decodePrompt(b64: String): String =
-        try {
-            if (b64.isBlank()) DEFAULT_SYSTEM_PROMPT
-            else String(java.util.Base64.getDecoder().decode(b64), Charsets.UTF_8)
-        } catch (error: Throwable) {
-            // 解不出来就回退默认提示词，但要让用户知道：否则他只会发现「我的提示词不见了」。
-            // 重复上报同一条消息时 AppError 值相等 → lastError 不重复发射，不会刷屏。
-            CoreModule.reportError(
-                message = "自定义系统提示词解析失败，已回退到默认提示词",
-                source = "ai-panel",
-                error = error,
-            )
-            DEFAULT_SYSTEM_PROMPT
-        }
-
-    companion object {
-        /** Encode any user-entered prompt text into the Base64 storage form. */
-        fun encodePrompt(plain: String): String =
-            java.util.Base64.getEncoder().encodeToString(plain.toByteArray(Charsets.UTF_8))
-    }
 }
 
 /**
@@ -282,7 +247,7 @@ fun rememberAiPanelState(initialConfig: AiConfig = ConfigStore.loadConfig().ai):
             // 历史在下面的 effect 里读：`remember { }` 在组合期间同步执行，直接
             // readText() 会卡在组合（= UI 线程）上。
             initialMessages = emptyList(),
-            chat = MockChatService(),
+            chat = AdapterChatService(),
             scope = scope,
         )
     }

@@ -10,6 +10,8 @@ okio = "3.15.0"
 sqldelight = "2.3.2"
 # Coroutines — 固定在 sqldelight 传递解析出的版本上，不主动升级。
 kotlinxCoroutines = "1.10.2"
+# Ktor — HTTP/SSE client for the unified AI module (:ai-service).
+ktor = "3.2.3"
 
 [libraries]
 # Compose Multiplatform
@@ -34,6 +36,12 @@ okio = { module = "com.squareup.okio:okio-jvm", version.ref = "okio" }
 # Coroutines — app-core 的事件总线把 CoroutineScope / Job / SharedFlow 放在公开 API
 # 上, 所以由 app-core 用 api 暴露 (见 app-core/build.gradle.kts).
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinxCoroutines" }
+
+# Ktor Client — HTTP + SSE for the unified AI module (:ai-service). Multiplatform
+# artifacts (CIO engine included), so the adapter layer lives in commonMain.
+ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
+ktor-client-cio = { module = "io.ktor:ktor-client-cio", version.ref = "ktor" }
+ktor-client-mock = { module = "io.ktor:ktor-client-mock", version.ref = "ktor" }
 
 # SQLDelight: typed SQLite persistence for runtime history data.
 sqldelight-runtime = { module = "app.cash.sqldelight:runtime", version.ref = "sqldelight" }

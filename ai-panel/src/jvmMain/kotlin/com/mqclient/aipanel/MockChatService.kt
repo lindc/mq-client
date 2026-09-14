@@ -1,10 +1,10 @@
 package com.mqclient.aipanel
 
-import com.mqclient.core.AiConfig
+import com.mqclient.core.AiConnection
 import kotlinx.coroutines.delay
 
 /**
- * Mock backend used until a real provider is wired in.
+ * Mock backend: canned replies, used by tests. The real path is [AdapterChatService].
  *
  * Picks one of three canned replies based on simple keyword sniffing in the
  * most recent user message, then streams it character-by-character so the
@@ -17,7 +17,7 @@ class MockChatService(
 
     override suspend fun streamReply(
         history: List<AiMessage>,
-        config: AiConfig,
+        connection: AiConnection,
         context: AiContext?,
         onChunk: (String) -> Unit,
     ) {

@@ -93,11 +93,12 @@ enum class ThemeMode {
 /**
  * User-tunable AI panel knobs.
  *
- * The dropdown the user sees in the panel header shows whatever providers
- * are registered via the [AiProvider] SPI; each provider gets its own
- * [AiProviderConfig] slot in [providerConfigs]. Missing entries just mean
- * "user hasn't customised this one yet" — the renderer falls back to
- * the provider's defaults.
+ * The dropdown the user sees in the panel header lists the enabled
+ * [connections] — one user-created connection per account / endpoint
+ * (Provider + Connection model). Legacy pre-migration files instead carry
+ * one [AiProviderConfig] slot per provider in [providerConfigs];
+ * [AiConnectionRepository] folds them into [connections] on startup and
+ * clears the old field.
  *
  * [historyLimit] governs how many past messages the panel loads from
  * `ai-messages.json` on startup — defaults to 200 per the first-launch
@@ -105,23 +106,34 @@ enum class ThemeMode {
  */
 @Serializable
 data class AiConfig(
-    /** Stable id of the active [AiProvider]; empty = first registered. */
+    /**
+     * 旧模型里「当前选中的 provider」（SPI id）。
+     * @deprecated 由 [activeConnectionId] 取代；保留仅为读取旧 config.json 并迁移。
+     */
     val activeProviderId: String = "",
     /** How many past messages to load on startup. UI clamps to 10-500. */
     val historyLimit: Int = 200,
     /** Whether to attach the current connection/queue context to each user prompt. */
     val autoAttachContext: Boolean = true,
-    /** One slot per AI provider — sparse; missing entries use provider defaults. */
+    /**
+     * 旧模型：每个 Provider 一个配置槽（sparse）。
+     * @deprecated 已由 [connections] 取代；启动迁移（[AiConnectionRepository]）
+     * 读完后清空。不要在新代码里读写它。
+     */
     val providerConfigs: List<AiProviderConfig> = emptyList(),
+    /** Stable id of the active [AiConnection]; empty = first enabled connection. */
+    val activeConnectionId: String = "",
+    /** 用户创建的 AI 连接（Provider + Connection 模型），可多条并存。 */
+    val connections: List<AiConnection> = emptyList(),
 )
 
 /**
- * Per-provider overrides. [providerId] matches [AiProvider.id]; the URL,
- * token, model and prompt are user-edited and override the provider's
- * built-in defaults when present.
+ * 旧模型的 per-provider 配置槽；`providerId` 是当时 SPI 的小写 id
+ * （`openai` / `ollama` / `claude`）。
  *
- * [systemPrompt] is stored Base64 to keep the JSON file clean regardless
- * of what the user types (CJK, quotes, newlines).
+ * @deprecated 由 [AiConfig.connections]（[AiConnection]）取代；仅作为迁移来源保留
+ * （映射表见 [AiConnectionRepository]），迁移完成后被清空。
+ * [systemPromptBase64] 是老格式（Base64 存提示词）；新模型存明文。
  */
 @Serializable
 data class AiProviderConfig(
