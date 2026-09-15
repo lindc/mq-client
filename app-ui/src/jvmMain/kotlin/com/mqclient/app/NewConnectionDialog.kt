@@ -3,26 +3,27 @@ package com.mqclient.app
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -31,7 +32,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.DpSize
@@ -86,14 +86,15 @@ internal fun NewConnectionDialog(
         LaunchedEffect(nucleusWindow) { nucleusWindow.setMinimumSize(DpSize(480.dp, 420.dp)) }
 
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                CategoryTabStrip(
+            Row(modifier = Modifier.fillMaxSize()) {
+                CategorySideNav(
                     tabs = categoryOrder,
                     selected = selectedCategory,
                     onSelect = { selectedCategory = it },
+                    modifier = Modifier.fillMaxHeight().widthIn(min = 110.dp, max = 140.dp),
                 )
-                HorizontalDivider()
-                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
                     TabBody(
                         adapters = grouped[selectedCategory].orEmpty(),
                         defaultAiName = defaultAiName,
@@ -106,43 +107,41 @@ internal fun NewConnectionDialog(
     }
 }
 
-/** 横排类目 tab：手搓（M3 TabRow 定制不动），样式与 MainWindow 的 tab / 设置侧栏一致。 */
+/**
+ * 左侧类目导航（上下排列）：与设置对话框的 SideNav 同一套路 —— 整行可点、
+ * 选中行 `primaryContainer` 底。手搓而不是 M3 组件，理由同设置侧栏。
+ */
 @Composable
-private fun CategoryTabStrip(
+private fun CategorySideNav(
     tabs: List<String>,
     selected: String,
     onSelect: (String) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            tabs.forEach { tab ->
-                val isSelected = tab == selected
-                Text(
-                    text = tab,
-                    style = MaterialTheme.typography.labelLarge,
-                    color =
-                        if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier =
-                        Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(
-                                if (isSelected) MaterialTheme.colorScheme.primaryContainer
-                                else androidx.compose.ui.graphics.Color.Transparent,
-                            )
-                            .clickable { onSelect(tab) }
-                            .padding(horizontal = 14.dp, vertical = 8.dp),
-                )
-            }
+    Column(
+        modifier = modifier
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(vertical = 8.dp),
+    ) {
+        tabs.forEach { tab ->
+            val isSelected = tab == selected
+            Text(
+                text = tab,
+                style = MaterialTheme.typography.bodyMedium,
+                color =
+                    if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .background(
+                            if (isSelected) MaterialTheme.colorScheme.primaryContainer
+                            else androidx.compose.ui.graphics.Color.Transparent,
+                        )
+                        .clickable { onSelect(tab) }
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+            )
         }
-        HorizontalDivider()
     }
 }
 
