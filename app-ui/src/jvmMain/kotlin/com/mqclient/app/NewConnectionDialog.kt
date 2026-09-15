@@ -1,7 +1,6 @@
 package com.mqclient.app
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,11 +12,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -40,6 +40,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.rememberDialogState
 import com.mqclient.ai.AiAdapterRegistry
 import com.mqclient.ai.AiProviders
+import com.mqclient.app.connection.MiddlewareTypeCard
+import com.mqclient.app.connection.toMiddlewareType
 import com.mqclient.core.AiConnection
 import com.mqclient.core.AiConnectionRepository
 import com.mqclient.core.ModuleRegistry
@@ -133,10 +135,30 @@ internal fun NewConnectionDialog(
                                     Modifier
                                         .weight(1f)
                                         .fillMaxHeight()
-                                        .padding(20.dp)
-                                        .verticalScroll(rememberScrollState()),
+                                        .padding(horizontal = 20.dp, vertical = 16.dp),
                             ) {
-                                ServiceTypeList(adapters = grouped[selectedCategory].orEmpty())
+                                Text(
+                                    text = stringResource("new_connection_pick_type"),
+                                    style = MaterialTheme.typography.titleMedium,
+                                )
+                                Spacer(Modifier.height(12.dp))
+                                // 卡片网格：每行 2 列，间距 12dp；点击卡片直接进入第二步。
+                                LazyVerticalGrid(
+                                    columns = GridCells.Fixed(2),
+                                    modifier = Modifier.fillMaxWidth().weight(1f),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                                ) {
+                                    items(grouped[selectedCategory].orEmpty(), key = { it.id }) { adapter ->
+                                        MiddlewareTypeCard(
+                                            type = adapter.toMiddlewareType(),
+                                            onClick = {
+                                                selectedServiceId = adapter.id
+                                                step = NewConnectionStep.CREATE
+                                            },
+                                        )
+                                    }
+                                }
                             }
                         }
                         NewConnectionStep.CREATE -> CreateStep(
@@ -170,7 +192,6 @@ internal fun NewConnectionDialog(
                     selectedIsAi = selectedIsAi,
                     saveError = saveError,
                     onClose = onDismiss,
-                    onNext = { if (selectedServiceId != null) step = NewConnectionStep.CREATE },
                     onBack = { step = NewConnectionStep.SELECT },
                     onSave = {
                         // 与设置页保存同风格：同步落盘（create 是普通函数，非挂起）。
@@ -254,49 +275,6 @@ private fun CategorySideNav(
                         .clickable { onSelect(tab) }
                         .padding(horizontal = 16.dp, vertical = 12.dp),
             )
-        }
-    }
-}
-
-/** 第一步内容：服务类型卡片单选。选中项决定「下一步」进入哪种创建表单。 */
-@Composable
-private fun ServiceTypeList(adapters: List<ServiceAdapter>) {
-    var selectedId by remember(adapters) { mutableStateOf(adapters.firstOrNull()?.id) }
-    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        adapters.forEach { adapter ->
-            val isSelected = adapter.id == selectedId
-            Row(
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .border(
-                            width = 1.dp,
-                            color =
-                                if (isSelected) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.outlineVariant,
-                            shape = RoundedCornerShape(8.dp),
-                        )
-                        .clickable { selectedId = adapter.id }
-                        .padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                androidx.compose.foundation.Image(
-                    painter = middlewareIcon(adapter.id),
-                    contentDescription = null,
-                    modifier = Modifier.size(24.dp),
-                )
-                Spacer(Modifier.width(10.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(adapter.name, style = MaterialTheme.typography.bodyMedium)
-                    if (adapter.description.isNotBlank()) {
-                        Text(
-                            text = adapter.description,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
         }
     }
 }
@@ -410,8 +388,8 @@ private fun CreateStep(
 }
 
 /**
- * 共享 footer：第一步「关闭 / 下一步」，第二步 AI「上一步 / 保存」+ 错误行、
- * 其余类型只有「上一步」（表单还没有，无东西可保存）。
+ * 共享 footer：第一步只有「取消」（点卡片即进第二步），第二步 AI「上一步 / 保存」
+ * + 错误行、其余类型只有「上一步」（表单还没有，无东西可保存）。
  */
 @Composable
 private fun DialogFooter(
@@ -419,7 +397,6 @@ private fun DialogFooter(
     selectedIsAi: Boolean,
     saveError: String?,
     onClose: () -> Unit,
-    onNext: () -> Unit,
     onBack: () -> Unit,
     onSave: () -> Unit,
 ) {
@@ -443,15 +420,13 @@ private fun DialogFooter(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             when (step) {
-                NewConnectionStep.SELECT -> {
+                NewConnectionStep.SELECT ->
+                    // 点卡片即进第二步，这里只需要一个出口。
                     PressableButton(
                         onClick = onClose,
                         containerColor = MaterialTheme.colorScheme.surfaceVariant,
                         contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    ) { Text(stringResource("common_close")) }
-                    Spacer(Modifier.width(8.dp))
-                    PressableButton(onClick = onNext) { Text(stringResource("common_next")) }
-                }
+                    ) { Text(stringResource("common_cancel")) }
                 NewConnectionStep.CREATE ->
                     if (selectedIsAi) {
                         PressableButton(

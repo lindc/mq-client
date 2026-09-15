@@ -14,6 +14,8 @@ kotlin {
             implementation(libs.compose.runtime)
             implementation(libs.compose.foundation)
             implementation(compose.material3)
+            // composeResources（品牌图标 drawable）需要资源 API 才能生成访问器。
+            implementation(compose.components.resources)
         }
     }
 }

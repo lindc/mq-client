@@ -14,6 +14,9 @@ kotlin {
         commonMain.dependencies {
             // Only the Compose runtime is needed for the @Composable contract.
             implementation(libs.compose.runtime)
+            // Painter（ModuleIcon SPI 的返回类型）在 ui-graphics 里，business 模块经
+            // SPI 拿到的是这个类型；app-core 仍然不引 foundation / material。
+            implementation(libs.compose.ui.graphics)
             // 事件总线 (core/event/EventBus.kt) 的公开签名里有 CoroutineScope / Job /
             // SharedFlow, 必须 api 暴露, 否则 app-ui 与各业务模块看不到这些类型。
             api(libs.kotlinx.coroutines.core)

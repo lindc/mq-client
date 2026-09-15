@@ -16,6 +16,7 @@
   "license_title": "Open-source Licenses",
   "license_view": "View open-source licenses",
   "error_dialog_title": "Something went wrong",
+  "new_connection_pick_type": "Choose a middleware type:",
   "new_connection_form_todo": "The creation form for this type will arrive in a later version.",
   "common_close": "Close",
   "titlebar_clock": "Clock",

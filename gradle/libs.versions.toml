@@ -17,6 +17,8 @@ ktor = "3.2.3"
 # Compose Multiplatform
 compose-runtime = { module = "org.jetbrains.compose.runtime:runtime", version.ref = "composeMultiplatform" }
 compose-foundation = { module = "org.jetbrains.compose.foundation:foundation", version.ref = "composeMultiplatform" }
+# Painter（ModuleIcon SPI 的签名类型）所在的最小 ui 构件；app-core 不引 material/foundation。
+compose-ui-graphics = { module = "org.jetbrains.compose.ui:ui-graphics", version.ref = "composeMultiplatform" }
 
 # Nucleus windowing framework (Tao backend) — powers the custom DecoratedWindow
 # chrome (previously reached via the now-removed compose-macos-ui dependency).
