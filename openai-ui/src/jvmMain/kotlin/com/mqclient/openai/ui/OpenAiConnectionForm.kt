@@ -58,6 +58,15 @@ class OpenAiConnectionForm : ConnectionFormUi {
         var model by remember { mutableStateOf(providers.firstOrNull()?.defaultModels?.firstOrNull().orEmpty()) }
 
         return object : ConnectionFormState {
+            override fun reset(defaultName: String) {
+                name = defaultName
+                providerId = providers.firstOrNull()?.id.orEmpty()
+                baseUrl = providers.firstOrNull()?.defaultBaseUrl.orEmpty()
+                token = ""
+                model = providers.firstOrNull()?.defaultModels?.firstOrNull().orEmpty()
+                saveError = null
+            }
+
             override fun submit(): Boolean {
                 val connection = AiConnection(
                     id = UUID.randomUUID().toString(),

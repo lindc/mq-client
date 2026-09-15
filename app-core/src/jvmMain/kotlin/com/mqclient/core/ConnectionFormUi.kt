@@ -42,6 +42,15 @@ interface ConnectionFormUi {
 interface ConnectionFormState {
 
     /**
+     * 清空草稿回到初始值（字段重置为对应 Provider 的默认值、错误行清掉）。
+     * 宿主在**每次进入创建页**时调用 —— 「新建连接」的语义就是从空白开始，
+     * 上一次的输入不该残留。
+     *
+     * @param defaultName 连接名为空时的默认值（宿主按「连接 N」实时计算）。
+     */
+    fun reset(defaultName: String)
+
+    /**
      * 校验 + 落盘。成功返回 `true`（宿主随后关窗）；失败返回 `false`
      * （错误已由面板展示，对话框保持打开）。
      */

@@ -125,10 +125,13 @@ internal fun NewConnectionDialog(
                                     selectedServiceId = ids.firstOrNull()?.id
                                 }
                             },
-                            onSelectType = { adapter ->
-                                selectedServiceId = adapter.id
-                                step = NewConnectionStep.CREATE
-                            },
+                        onSelectType = { adapter ->
+                            // 每次进入创建页都从空白开始（「新建连接」的语义）；
+                            // reset 是纯状态赋值，不损失秒切（面板常驻、只改值）。
+                            formStates[adapter.id]?.reset(defaultName)
+                            selectedServiceId = adapter.id
+                            step = NewConnectionStep.CREATE
+                        },
                         )
                     },
                     second = {
