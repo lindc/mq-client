@@ -27,6 +27,9 @@ object ModuleRegistry {
     /** 各模块的品牌图标（谁的图标归谁的 `*-ui` 模块，见 [ModuleIcon]）。 */
     val icons: List<ModuleIcon> by lazy { loadAll(ModuleIcon::class.java) }
 
+    /** 各模块的新建连接表单（第二步面板，见 [ConnectionFormUi]）。 */
+    val forms: List<ConnectionFormUi> by lazy { loadAll(ConnectionFormUi::class.java) }
+
     /**
      * 本次初始化过的模块：`initializeServices` 拿到的全量「适配器 + 它的模块 scope」
      * （含初始化失败的 —— 失败的那个正是需要收尾的），供 [disposeServices] 逆序销毁。

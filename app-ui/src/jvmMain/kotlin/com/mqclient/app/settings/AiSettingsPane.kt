@@ -37,8 +37,11 @@ import com.mqclient.ai.AiAdapterRegistry
 import com.mqclient.ai.AiProvider
 import com.mqclient.core.AiConfig
 import com.mqclient.core.AiConnection
+import com.mqclient.openai.ui.ModelComboBox
 import com.mqclient.openai.ui.openAiIcon
+import com.mqclient.uicommon.LabeledField
 import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.SettingsDropdownRow
 import com.mqclient.uicommon.i18n.stringResource
 import java.util.UUID
 import kotlinx.coroutines.launch
@@ -432,80 +435,5 @@ private fun ConnectionCard(
                 contentColor = MaterialTheme.colorScheme.onErrorContainer,
             ) { Text(stringResource("common_delete")) }
         }
-    }
-}
-
-/**
- * 可编辑的模型组合框：直接往框里敲，或打开菜单从 Provider 的 [AiProvider.defaultModels]
- * 里挑。Provider 未知（id 对不上注册表）时退化成纯文本输入。
- */
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
-@Composable
-internal fun ModelComboBox(
-    provider: AiProvider?,
-    model: String,
-    onChange: (String) -> Unit,
-) {
-    var expanded by remember { mutableStateOf(false) }
-    // 去重：预置候选在前，已保存的自定义值跟着，手填过的模型不会从列表里消失。
-    val options = remember(provider, model) {
-        ((provider?.defaultModels ?: emptyList()) + model).filter { it.isNotBlank() }.distinct()
-    }
-    // 输入时过滤候选，但始终保留正在输入的文本，全自定义的名字才始终可达。
-    val visibleOptions = remember(options, model) {
-        if (model.isBlank()) {
-            options
-        } else {
-            val matches = options.filter { it.contains(model, ignoreCase = true) }
-            if (matches.any { it.equals(model, ignoreCase = true) }) matches else matches + model
-        }
-    }
-    ExposedDropdownMenuBox(
-        expanded = expanded,
-        onExpandedChange = { expanded = it },
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        OutlinedTextField(
-            value = model,
-            onValueChange = {
-                onChange(it)
-                expanded = true
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable),
-            singleLine = true,
-            placeholder = { Text(provider?.defaultModels?.firstOrNull().orEmpty()) },
-            trailingIcon = {
-                ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
-            },
-        )
-        ExposedDropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-        ) {
-            visibleOptions.forEach { option ->
-                DropdownMenuItem(
-                    text = { Text(option) },
-                    onClick = {
-                        expanded = false
-                        onChange(option)
-                    },
-                )
-            }
-        }
-    }
-}
-
-@Composable
-internal fun LabeledField(label: String, content: @Composable () -> Unit) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(4.dp))
-        content()
     }
 }

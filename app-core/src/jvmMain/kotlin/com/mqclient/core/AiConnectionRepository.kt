@@ -71,6 +71,19 @@ object AiConnectionRepository {
             }
         }
 
+    /**
+     * 切换激活的 AI 连接（`ai.activeConnectionId`）。新建表单落盘后调用它保持与
+     * 设置页一致的行为：新建的连接立即成为面板当前连接。
+     */
+    fun setActive(id: String): Result<Unit> =
+        ConfigStore.editConfig { config ->
+            if (config.ai.connections.none { it.id == id }) {
+                Result.failure(NoSuchElementException("连接 '$id' 不存在"))
+            } else {
+                Result.success(config.copy(ai = config.ai.copy(activeConnectionId = id)))
+            }
+        }
+
     /** 按 id 原位替换（列表顺序不变）；id 不存在直接失败。 */
     fun update(connection: AiConnection): Result<Unit> =
         ConfigStore.editConfig { config ->

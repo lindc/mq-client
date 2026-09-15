@@ -11,11 +11,16 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             implementation(projects.appCore)
+            // 新建连接表单（ConnectionFormUi 实现）用本模块对应的 service：
+            // Provider 列表来自 AiAdapterRegistry。
+            implementation(projects.openaiService)
             implementation(libs.compose.runtime)
             implementation(libs.compose.foundation)
             implementation(compose.material3)
             // composeResources（logo 等品牌素材）需要资源 API 才能生成访问器。
             implementation(compose.components.resources)
+            // 表单字段组件（LabeledField / SettingsDropdownRow）与 i18n。
+            implementation(projects.uiCommon)
         }
     }
 }

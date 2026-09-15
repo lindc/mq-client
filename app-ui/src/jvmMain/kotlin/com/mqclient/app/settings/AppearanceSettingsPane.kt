@@ -46,6 +46,7 @@ import com.mqclient.core.FONT_SYSTEM_SERIF
 import com.mqclient.core.ThemeConfig
 import com.mqclient.core.ThemeMode
 import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.SettingsDropdownRow
 import com.mqclient.uicommon.i18n.stringResource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext

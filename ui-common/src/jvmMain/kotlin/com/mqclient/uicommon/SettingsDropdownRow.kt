@@ -1,4 +1,4 @@
-package com.mqclient.app.settings
+package com.mqclient.uicommon
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -24,17 +24,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
 /**
- * 设置面板里的「标签 + 下拉」行：主题 / 语言 / AI 服务三处共用同一份实现。
- *
- * 之前三处各写一份，`ThemeModeRow` 的注释还写着「和 LanguageRow / FontRow 用的是
- * 同一个原语」—— 其实不是：LanguageRow 是 `surface` 底、**只有 ▼ 能点**，另两处是
- * `surfaceVariant` 底、整行可点。统一之后外观和点按范围都对上了。
+ * 设置面板里的「标签 + 下拉」行：主题 / 语言 / AI 服务等处共用同一份实现。
  *
  * 泛型 [T] 是候选项本身（枚举 / provider / 什么都行），显示文字由 [optionLabel] 给，
  * 所以调用方不用为了复用而把候选项硬塞成一个公共类型。
  */
 @Composable
-internal fun <T> SettingsDropdownRow(
+fun <T> SettingsDropdownRow(
     label: String,
     currentLabel: String,
     options: List<T>,
@@ -50,8 +46,7 @@ internal fun <T> SettingsDropdownRow(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(4.dp))
-        // Box 是 DropdownMenu 的锚点：少了它菜单会挂到外层容器上去，而不是贴着这行
-        // （ActiveProviderRow 原来就漏了这层）。
+        // Box 是 DropdownMenu 的锚点：少了它菜单会挂到外层容器上去，而不是贴着这行。
         Box {
             Row(
                 modifier = Modifier
