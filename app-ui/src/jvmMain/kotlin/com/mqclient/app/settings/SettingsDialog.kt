@@ -141,6 +141,7 @@ private fun HeaderBar(selectedTab: SettingsTab, onClose: () -> Unit) {
         )
         PressableButton(
             onClick = onClose,
+            standardMinWidth = false, // ✕ 是图标按钮，不套「4 字宽」标准。
             containerColor = MaterialTheme.colorScheme.surfaceVariant,
             contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
         ) { Text("\u2715") }
