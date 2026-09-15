@@ -8,6 +8,7 @@ class IbmMqServiceAdapter : ServiceAdapter {
     override val name = "IBM MQ"
     override val description = "IBM MQ connection and management"
     override val protocol = "MQI"
+    override val category = "MQ"
 
     /**
      * SPI 发现后由 ModuleRegistry 调用：注册本模块的事件订阅

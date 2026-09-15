@@ -38,19 +38,3 @@ internal fun ErrorDialog(error: AppError, onDismiss: () -> Unit) {
         },
     )
 }
-
-/**
- * 新建连接对话框：功能还没实现，所以先把话说清楚 —— 空窗口会让人以为是界面坏了。
- * TODO 接上连接表单（写入 `config.connections` 并广播 `core.connection.added`）。
- */
-@Composable
-internal fun NewConnectionDialog(onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        confirmButton = {
-            PressableButton(onClick = onDismiss) { Text(stringResource("common_close")) }
-        },
-        title = { Text(stringResource("menu_new_connection")) },
-        text = { Text(stringResource("new_connection_todo")) },
-    )
-}

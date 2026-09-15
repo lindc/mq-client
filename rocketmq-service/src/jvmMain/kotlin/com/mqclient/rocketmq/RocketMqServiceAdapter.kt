@@ -7,4 +7,5 @@ class RocketMqServiceAdapter : ServiceAdapter {
     override val name = "RocketMQ"
     override val description = "RocketMQ connection and management"
     override val protocol = "Remoting"
+    override val category = "MQ"
 }

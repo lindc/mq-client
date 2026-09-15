@@ -25,6 +25,15 @@ interface ServiceAdapter {
     val protocol: String
 
     /**
+     * 类目名，新建连接对话框按它把各模块分到不同的 tab（如 `"MQ"`、`"AI"`）。
+     *
+     * 各模块**自己持有字符串常量** —— app-core 不集中定义取值，新增类目不需要改
+     * 这里；tab 的生成完全来自 SPI 扫描（见 [ModuleRegistry] 与对话框侧的
+     * `groupByCategory`）。
+     */
+    val category: String
+
+    /**
      * 模块初始化钩子：由 [ModuleRegistry.initializeServices] 在启动时调用，模块在这里
      * 注册自己的事件订阅（见 [ServiceContext]）。
      *

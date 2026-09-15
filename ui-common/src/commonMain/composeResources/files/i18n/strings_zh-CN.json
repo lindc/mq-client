@@ -16,7 +16,7 @@
   "license_title": "开源许可证",
   "license_view": "查看开源许可证",
   "error_dialog_title": "出错了",
-  "new_connection_todo": "新建连接功能尚未实现。",
+  "new_connection_form_todo": "该类型的创建表单将在后续版本提供。",
   "common_close": "关闭",
   "titlebar_clock": "时钟",
 

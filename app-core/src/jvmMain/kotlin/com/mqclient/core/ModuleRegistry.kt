@@ -166,6 +166,14 @@ object ModuleRegistry {
     internal fun unknownUiServiceIds(knownServiceIds: Set<String>, uiServiceIds: List<String>): List<String> =
         uiServiceIds.filter { it !in knownServiceIds }.distinct()
 
+    /**
+     * 按 [ServiceAdapter.category] 把服务模块分组（新建连接对话框的 tab 数据源）。
+     * 类目完全由 SPI 扫描得出 —— 新模块带新 category 时 tab 自动出现，无需改任何
+     * 调用方。抽成纯函数是为了可测（见 ModuleRegistryTest）。
+     */
+    fun groupByCategory(services: List<ServiceAdapter>): Map<String, List<ServiceAdapter>> =
+        services.groupBy { it.category }
+
     /** [loadFrom] with the real [ServiceLoader] iterator. */
     private fun <T : Any> loadAll(type: Class<T>): List<T> = loadFrom(type) { ServiceLoader.load(type).iterator() }
 

@@ -225,7 +225,21 @@ private fun AppRoot(bootConfig: Config, onExit: () -> Unit) {
                     AboutDialog(onDismiss = { showAbout = false })
                 }
                 if (showNewConnection) {
-                    NewConnectionDialog(onDismiss = { showNewConnection = false })
+                    NewConnectionDialog(
+                        // AI 连接的默认名与设置页同一策略（连接 N）。
+                        defaultAiName = "连接 ${appConfig.ai.connections.size + 1}",
+                        onDismiss = { showNewConnection = false },
+                        // 落盘已由对话框完成；这里同步内存 appConfig —— 设置对话框的
+                        // 草稿基于它，不同步的话下次整份覆盖保存会抹掉新连接。
+                        onAiCreated = { conn ->
+                            appConfig = appConfig.copy(
+                                ai = appConfig.ai.copy(
+                                    connections = appConfig.ai.connections + conn,
+                                    activeConnectionId = conn.id,
+                                ),
+                            )
+                        },
+                    )
                 }
                 appError?.let { error ->
                     ErrorDialog(error = error, onDismiss = { CoreModule.clearLastError() })

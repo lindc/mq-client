@@ -74,6 +74,28 @@ class ModuleRegistryTest {
         )
     }
 
+    // ---------------------------------------------------------------- 分组
+
+    @Test
+    fun `services are grouped by category keeping order within each group`() {
+        val grouped = ModuleRegistry.groupByCategory(
+            listOf(
+                FakeAdapter("ibm-mq", category = "MQ"),
+                FakeAdapter("kafka", category = "MQ"),
+                FakeAdapter("openai-compatible", category = "AI"),
+            ),
+        )
+
+        assertEquals(setOf("MQ", "AI"), grouped.keys)
+        assertEquals(listOf("ibm-mq", "kafka"), grouped["MQ"]!!.map { it.id }, "组内保持传入顺序")
+        assertEquals(listOf("openai-compatible"), grouped["AI"]!!.map { it.id })
+    }
+
+    @Test
+    fun `empty service list groups to nothing`() {
+        assertEquals(emptyMap(), ModuleRegistry.groupByCategory(emptyList()))
+    }
+
     // ---------------------------------------------------------------- 销毁
 
     @Test
@@ -117,7 +139,7 @@ class ModuleRegistryTest {
     /** 造「适配器 + 它的模块 scope」对：[ModuleRegistry.disposeAll] 收的就是这个。 */
     private fun modules(vararg specs: Pair<String, () -> Unit>): List<Pair<ServiceAdapter, CoroutineScope>> =
         specs.map { (id, onDispose) ->
-            FakeAdapter(id, onDispose) to CoroutineScope(SupervisorJob())
+            FakeAdapter(id, onDispose = onDispose) to CoroutineScope(SupervisorJob())
         }
 
     private val CoroutineScope.isCancelled: Boolean get() = coroutineContext[Job]?.isCancelled == true
@@ -125,6 +147,7 @@ class ModuleRegistryTest {
     /** 只关心 dispose 的假适配器：描述字段填默认值，initialize 不做事。 */
     private class FakeAdapter(
         override val id: String,
+        override val category: String = "MQ",
         private val onDispose: () -> Unit = {},
     ) : ServiceAdapter {
         override val name: String get() = id

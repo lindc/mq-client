@@ -441,7 +441,7 @@ private fun ConnectionCard(
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-private fun ModelComboBox(
+internal fun ModelComboBox(
     provider: AiProvider?,
     model: String,
     onChange: (String) -> Unit,
@@ -498,7 +498,7 @@ private fun ModelComboBox(
 }
 
 @Composable
-private fun LabeledField(label: String, content: @Composable () -> Unit) {
+internal fun LabeledField(label: String, content: @Composable () -> Unit) {
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
             text = label,

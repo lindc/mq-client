@@ -7,4 +7,5 @@ class KafkaServiceAdapter : ServiceAdapter {
     override val name = "Kafka"
     override val description = "Kafka connection and management"
     override val protocol = "Kafka Protocol"
+    override val category = "MQ"
 }
