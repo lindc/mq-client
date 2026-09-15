@@ -70,32 +70,36 @@ class DatabaseManagerTest {
     }
 
     @Test
-    fun `initialize is idempotent and keeps the first driver`() {
+    fun `initialize is idempotent and keeps the first driver`() = runBlocking {
         DatabaseManager.initialize(DriverFactory(), Dispatchers.IO.limitedParallelism(1))
-        val first = DatabaseManager.getDriver()
+        val first = DatabaseManager.withDriver { it }
         val firstContext = DatabaseManager.dbContext
 
         DatabaseManager.initialize(DriverFactory(), Dispatchers.IO.limitedParallelism(1))
 
-        assertEquals(first, DatabaseManager.getDriver(), "重复 initialize 不该换掉已建好的连接")
+        assertEquals(
+            first,
+            DatabaseManager.withDriver { it },
+            "重复 initialize 不该换掉已建好的连接",
+        )
         assertEquals(firstContext, DatabaseManager.dbContext, "驱动与调度器要成对地只初始化一次")
     }
 
     @Test
-    fun `accessing the driver before initialize fails loudly`() {
+    fun `accessing the driver before initialize fails loudly`() = runBlocking<Unit> {
         DatabaseManager.close()
 
-        assertFailsWith<IllegalStateException> { DatabaseManager.getDriver() }
+        assertFailsWith<IllegalStateException> { DatabaseManager.withDriver { it } }
         assertFailsWith<IllegalStateException> { DatabaseManager.dbContext }
     }
 
     @Test
-    fun `close is idempotent and drops the connection`() {
+    fun `close is idempotent and drops the connection`() = runBlocking<Unit> {
         DatabaseManager.initialize(DriverFactory(), Dispatchers.IO.limitedParallelism(1))
         DatabaseManager.close()
         DatabaseManager.close()
 
-        assertFailsWith<IllegalStateException> { DatabaseManager.getDriver() }
+        assertFailsWith<IllegalStateException> { DatabaseManager.withDriver { it } }
     }
 
     private companion object {

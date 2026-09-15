@@ -8,8 +8,9 @@ import kotlinx.coroutines.withContext
  * SQLite 基础设施唯一入口（app-core 只提供基础设施，不定义任何表）：
  *
  * 1. 启动早期调用 [initialize]（一次即可，幂等；接线点在 app-ui 的 `Main.kt`）；
- * 2. 各业务模块通过 [getDriver] 拿到共享的 [SqlDriver]，用自己模块内 sqldelight 生成的
- *    Database 包装它，自行管理自己的表；
+ * 2. 各业务模块通过 [withDriver] 在共享的 [SqlDriver] 上执行查询（用自己模块内 sqldelight
+ *    生成的 Database 包装 driver、建自己的表）——驱动没有第二个出口，生命周期不可能
+ *    脱离本对象的管理；
  * 3. **所有对驱动的访问都必须跑在 [dbContext] 上**（见下面的线程模型）。
  *
  * 所有模块共享同一个数据库文件（`~/.mqclient/mqclient.db`，见 [DriverFactory]），
@@ -95,16 +96,6 @@ object DatabaseManager {
         val driver = _driver ?: throw IllegalStateException(NOT_INITIALIZED)
         return withContext(dbContext) { block(driver) }
     }
-
-    /**
-     * 返回共享的 [SqlDriver]，用于构造模块自己 sqldelight 生成的 `Database` 包装。
-     *
-     * ⚠️ 拿它可以，**直接拿它执行查询不行**：这是一条单连接，绕过 [dbContext] / [withDriver]
-     * 就是把自己扔进 SQLException 和数据错乱的坑里。
-     *
-     * @throws IllegalStateException 若 [initialize] 尚未调用
-     */
-    fun getDriver(): SqlDriver = _driver ?: throw IllegalStateException(NOT_INITIALIZED)
 
     /**
      * 关闭共享连接（应用退出时调；重复调用安全）。
