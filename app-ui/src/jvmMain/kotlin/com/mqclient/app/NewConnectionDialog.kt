@@ -8,15 +8,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
@@ -26,7 +24,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -35,9 +32,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.rememberDialogState
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.mqclient.ai.AiAdapterRegistry
 import com.mqclient.ai.AiProviders
 import com.mqclient.app.connection.MiddlewareTypeCard
@@ -45,14 +42,11 @@ import com.mqclient.app.connection.toMiddlewareType
 import com.mqclient.core.AiConnection
 import com.mqclient.core.AiConnectionRepository
 import com.mqclient.core.ModuleRegistry
-import com.mqclient.core.ServiceAdapter
 import com.mqclient.app.settings.LabeledField
 import com.mqclient.app.settings.ModelComboBox
 import com.mqclient.app.settings.SettingsDropdownRow
 import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.i18n.stringResource
-import dev.nucleusframework.application.DecoratedDialog
-import dev.nucleusframework.application.LocalNucleusWindow
 import java.util.UUID
 
 /** 对话框的两步流程：先选服务类型，再进对应类型的创建表单。 */
@@ -61,10 +55,10 @@ private enum class NewConnectionStep { SELECT, CREATE }
 /**
  * 新建连接对话框（向导两步式）：
  *
- *  - **第一步**：左侧类目导航 + 服务类型卡片单选，底部「关闭 / 下一步」。类目 tab
- *    **完全由 SPI 扫描**得出 —— [ModuleRegistry.services] 按 [ServiceAdapter.category]
- *    分组（[ModuleRegistry.groupByCategory]），新模块带新 category 时 tab 自动出现，
- *    这里没有任何硬编码的类目清单；
+ *  - **第一步**：左侧类目导航 + 服务类型卡片网格（每行 2 列），点卡片直接进第二步。
+ *    类目 tab **完全由 SPI 扫描**得出 —— [ModuleRegistry.services] 按 category 分组
+ *    （[ModuleRegistry.groupByCategory]），新模块带新 category 时自动出现，这里没有
+ *    任何硬编码的类目清单；
  *  - **第二步**：所选类型的创建表单。AI（[AiProviders.OPENAI_COMPATIBLE]）是独立的
  *    [AiConnection] 体系（存 `ai.connections`，不经 [com.mqclient.core.ConnectionStore]），
  *    表单落盘走 [AiConnectionRepository.create]（token 由 ConfigManager 的名字匹配自动
@@ -72,7 +66,10 @@ private enum class NewConnectionStep { SELECT, CREATE }
  *    设置对话框下次整份覆盖保存会把这条新连接抹掉。其余类型（MQ）表单在后续版本提供，
  *    第二步只放提示 + 「上一步」。
  *
- * 表单字段状态提到对话框级：保存按钮在共享 footer 里，两个 step 切换时草稿不丢。
+ * 容器用 [Dialog] 而不是 Nucleus 的 DecoratedDialog：后者是固定尺寸的 OS 窗口，
+ * 做不到「高度自适应内容」；Compose 的 [Dialog] 让内容撑高度，配合 `heightIn`
+ * 实现「内容少时对话框矮、多时到上限后内部滚动」。表单字段状态提到对话框级：
+ * 保存按钮在共享 footer 里，两个 step 切换时草稿不丢。
  */
 @Composable
 internal fun NewConnectionDialog(
@@ -83,7 +80,7 @@ internal fun NewConnectionDialog(
     val grouped = remember { ModuleRegistry.groupByCategory(ModuleRegistry.services) }
     val categoryOrder = remember(grouped) { grouped.keys.sorted() }
     var selectedCategory by remember { mutableStateOf(categoryOrder.firstOrNull().orEmpty()) }
-    // 第一步选中的服务类型；切类目时落回该类目的第一个类型，保证「下一步」总有目标。
+    // 第二步要创建的服务类型；由第一步的卡片点击直接决定。
     var selectedServiceId by remember { mutableStateOf(grouped[selectedCategory]?.firstOrNull()?.id) }
     var step by remember { mutableStateOf(NewConnectionStep.SELECT) }
 
@@ -101,90 +98,58 @@ internal fun NewConnectionDialog(
         grouped[selectedCategory].orEmpty().firstOrNull { it.id == selectedServiceId }
     val selectedIsAi = selectedAdapter?.id == AiProviders.OPENAI_COMPATIBLE.id
 
-    DecoratedDialog(
-        onCloseRequest = onDismiss,
-        state = rememberDialogState(size = DpSize(780.dp, 560.dp)),
-        title = stringResource("menu_new_connection"),
-        resizable = true,
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
-        val nucleusWindow = LocalNucleusWindow.current
-        LaunchedEffect(nucleusWindow) { nucleusWindow.setMinimumSize(DpSize(720.dp, 420.dp)) }
-
-        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
-            Column(modifier = Modifier.fillMaxSize()) {
+        Surface(
+            modifier = Modifier.width(780.dp),
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surface,
+        ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
                 HeaderBar(onClose = onDismiss)
                 HorizontalDivider()
-                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                    when (step) {
-                        NewConnectionStep.SELECT -> Row(modifier = Modifier.fillMaxSize()) {
-                            CategorySideNav(
-                                tabs = categoryOrder,
-                                selected = selectedCategory,
-                                onSelect = { category ->
-                                    selectedCategory = category
-                                    val ids = grouped[category].orEmpty()
-                                    if (ids.none { it.id == selectedServiceId }) {
-                                        selectedServiceId = ids.firstOrNull()?.id
-                                    }
-                                },
-                                modifier = Modifier.fillMaxHeight().widthIn(min = 110.dp, max = 140.dp),
-                            )
-                            VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                            Column(
-                                modifier =
-                                    Modifier
-                                        .weight(1f)
-                                        .fillMaxHeight()
-                                        .padding(horizontal = 20.dp, vertical = 16.dp),
-                            ) {
-                                Text(
-                                    text = stringResource("new_connection_pick_type"),
-                                    style = MaterialTheme.typography.titleMedium,
-                                )
-                                Spacer(Modifier.height(12.dp))
-                                // 卡片网格：每行 2 列，间距 12dp；点击卡片直接进入第二步。
-                                LazyVerticalGrid(
-                                    columns = GridCells.Fixed(2),
-                                    modifier = Modifier.fillMaxWidth().weight(1f),
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                                ) {
-                                    items(grouped[selectedCategory].orEmpty(), key = { it.id }) { adapter ->
-                                        MiddlewareTypeCard(
-                                            type = adapter.toMiddlewareType(),
-                                            onClick = {
-                                                selectedServiceId = adapter.id
-                                                step = NewConnectionStep.CREATE
-                                            },
-                                        )
-                                    }
-                                }
+                when (step) {
+                    NewConnectionStep.SELECT -> SelectStepBody(
+                        grouped = grouped,
+                        categoryOrder = categoryOrder,
+                        selectedCategory = selectedCategory,
+                        onSelectCategory = { category ->
+                            selectedCategory = category
+                            val ids = grouped[category].orEmpty()
+                            if (ids.none { it.id == selectedServiceId }) {
+                                selectedServiceId = ids.firstOrNull()?.id
                             }
-                        }
-                        NewConnectionStep.CREATE -> CreateStep(
-                            isAi = selectedIsAi,
-                            providers = providers,
-                            aiName = aiName,
-                            aiProviderId = aiProviderId,
-                            aiBaseUrl = aiBaseUrl,
-                            aiToken = aiToken,
-                            aiTokenVisible = aiTokenVisible,
-                            aiModel = aiModel,
-                            onNameChange = { aiName = it },
-                            onProviderChange = { picked ->
-                                aiProviderId = picked.id
-                                // 切 Provider 时把没填过的默认值补上；用户填过的值不动。
-                                if (aiBaseUrl.isBlank()) aiBaseUrl = picked.defaultBaseUrl
-                                if (aiModel.isBlank()) {
-                                    aiModel = picked.defaultModels.firstOrNull().orEmpty()
-                                }
-                            },
-                            onBaseUrlChange = { aiBaseUrl = it },
-                            onTokenChange = { aiToken = it },
-                            onTokenVisibleChange = { aiTokenVisible = it },
-                            onModelChange = { aiModel = it },
-                        )
-                    }
+                        },
+                        onSelectType = { adapter ->
+                            selectedServiceId = adapter.id
+                            step = NewConnectionStep.CREATE
+                        },
+                    )
+                    NewConnectionStep.CREATE -> CreateStep(
+                        isAi = selectedIsAi,
+                        providers = providers,
+                        aiName = aiName,
+                        aiProviderId = aiProviderId,
+                        aiBaseUrl = aiBaseUrl,
+                        aiToken = aiToken,
+                        aiTokenVisible = aiTokenVisible,
+                        aiModel = aiModel,
+                        onNameChange = { aiName = it },
+                        onProviderChange = { picked ->
+                            aiProviderId = picked.id
+                            // 切 Provider 时把没填过的默认值补上；用户填过的值不动。
+                            if (aiBaseUrl.isBlank()) aiBaseUrl = picked.defaultBaseUrl
+                            if (aiModel.isBlank()) {
+                                aiModel = picked.defaultModels.firstOrNull().orEmpty()
+                            }
+                        },
+                        onBaseUrlChange = { aiBaseUrl = it },
+                        onTokenChange = { aiToken = it },
+                        onTokenVisibleChange = { aiTokenVisible = it },
+                        onModelChange = { aiModel = it },
+                    )
                 }
                 HorizontalDivider()
                 DialogFooter(
@@ -238,6 +203,75 @@ private fun HeaderBar(onClose: () -> Unit) {
             containerColor = MaterialTheme.colorScheme.surfaceVariant,
             contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
         ) { Text("✕") }
+    }
+}
+
+/**
+ * 第一步：左侧类目导航 + 服务类型卡片网格（每行 2 列）。
+ *
+ * 内容区 `spacedBy(12.dp, CenterVertically)`：卡片行之间保持 12dp 间距，同时内容
+ * 不满一屏时整体垂直居中（`heightIn(min = 260.dp)` 给了它可分配的富余高度）；内容
+ * 超出 `max = 460.dp` 时切到内部滚动。
+ *
+ * 网格用 `chunked(2)` 而不是 LazyVerticalGrid：类目下卡片最多几张，lazy 布局会
+ * 强制填满可用高度，「内容少时收缩 + 垂直居中」都做不了；普通 Row 组合 wrap 内容，
+ * 两个目标都满足。
+ */
+@Composable
+private fun SelectStepBody(
+    grouped: Map<String, List<com.mqclient.core.ServiceAdapter>>,
+    categoryOrder: List<String>,
+    selectedCategory: String,
+    onSelectCategory: (String) -> Unit,
+    onSelectType: (com.mqclient.core.ServiceAdapter) -> Unit,
+) {
+    Row(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = 260.dp, max = 460.dp),
+    ) {
+        CategorySideNav(
+            tabs = categoryOrder,
+            selected = selectedCategory,
+            onSelect = onSelectCategory,
+            modifier = Modifier.fillMaxHeight().widthIn(min = 110.dp, max = 140.dp),
+        )
+        VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        Column(
+            modifier =
+                Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
+        ) {
+            Text(
+                text = stringResource("new_connection_pick_type"),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            grouped[selectedCategory].orEmpty().chunked(2).forEach { row ->
+                // IntrinsicSize.Min + 卡片 fillMaxHeight：同一行两张卡等高。
+                Row(
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .height(IntrinsicSize.Min),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    row.forEach { adapter ->
+                        MiddlewareTypeCard(
+                            type = adapter.toMiddlewareType(),
+                            onClick = { onSelectType(adapter) },
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
+                        )
+                    }
+                    // 奇数行补一个占位，让单卡保持半宽、与上一行对齐。
+                    if (row.size == 1) Spacer(modifier = Modifier.weight(1f))
+                }
+            }
+        }
     }
 }
 
@@ -303,9 +337,10 @@ private fun CreateStep(
     Column(
         modifier =
             Modifier
-                .fillMaxSize()
-                .padding(20.dp)
-                .verticalScroll(rememberScrollState()),
+                .fillMaxWidth()
+                .heightIn(min = 260.dp, max = 460.dp)
+                .verticalScroll(rememberScrollState())
+                .padding(20.dp),
     ) {
         if (!isAi) {
             Text(
