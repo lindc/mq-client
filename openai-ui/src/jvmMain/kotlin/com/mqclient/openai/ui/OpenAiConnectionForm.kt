@@ -4,9 +4,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -80,10 +80,10 @@ class OpenAiConnectionForm : ConnectionFormUi {
             @Composable
             override fun Content() {
                 Column(
+                    // 填满宿主给的固定空间（随窗口缩放），内容超出时内部滚动。
                     modifier =
                         Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 260.dp, max = 460.dp)
+                            .fillMaxSize()
                             .verticalScroll(rememberScrollState())
                             .padding(20.dp),
                 ) {
