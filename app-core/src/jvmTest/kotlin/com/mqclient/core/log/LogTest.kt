@@ -2,6 +2,7 @@ package com.mqclient.core.log
 
 import java.io.ByteArrayOutputStream
 import java.io.PrintStream
+import java.nio.file.Files
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -109,10 +110,15 @@ class LogTest {
     fun `platform writer sends info to stdout and error to stderr`() {
         // 真实写入内核的一次冒烟：INFO → stdout、ERROR → stderr。
         // 交换全局流有风险，所以严格 try/finally 恢复；用例串行执行，不会串到别的测试。
+        // emitPlatformLogLine 现在还会写文件 sink（configDir()/logs/），所以这里把
+        // 配置目录重定向到临时目录，不让测试碰用户真实的 ~/.mqclient。
         val out = ByteArrayOutputStream()
         val err = ByteArrayOutputStream()
         val previousOut = System.out
         val previousErr = System.err
+        val previousConfigDir = System.getProperty("mqclient.config.dir")
+        val tempDir = Files.createTempDirectory("mqclient-log-test")
+        System.setProperty("mqclient.config.dir", tempDir.toString())
         try {
             System.setOut(PrintStream(out, true, Charsets.UTF_8))
             System.setErr(PrintStream(err, true, Charsets.UTF_8))
@@ -126,6 +132,12 @@ class LogTest {
         } finally {
             System.setOut(previousOut)
             System.setErr(previousErr)
+            if (previousConfigDir == null) {
+                System.clearProperty("mqclient.config.dir")
+            } else {
+                System.setProperty("mqclient.config.dir", previousConfigDir)
+            }
+            tempDir.toFile().deleteRecursively()
         }
 
         assertTrue(out.toString(Charsets.UTF_8).contains("[INFO] [smoke] hello"), "INFO 应写 stdout")

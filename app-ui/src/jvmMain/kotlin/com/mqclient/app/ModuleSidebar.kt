@@ -45,7 +45,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mqclient.core.ConnectionInfo
 import com.mqclient.core.ConnectionStatus
-import com.mqclient.core.ConnectionStore
 
 /**
  * What a tree entry points at. `objectType == null` selects the connection's
@@ -101,7 +100,6 @@ fun ModuleTree(
                 ObjectTypes.forEachIndexed { index, type ->
                     ObjectTypeRow(
                         type = type,
-                        count = ConnectionStore.countOf(connection.id, type),
                         isLast = index == ObjectTypes.lastIndex,
                         selected = selection == NavSelection(connection.id, type),
                         onClick = { onSelect(NavSelection(connection.id, type)) },
@@ -195,11 +193,10 @@ private fun ConnectionRow(
     }
 }
 
-/** Object-type leaf: dashed branch, the type name, and its count on the right. */
+/** Object-type leaf: dashed branch and the type name. */
 @Composable
 private fun ObjectTypeRow(
     type: String,
-    count: Int,
     isLast: Boolean,
     selected: Boolean,
     onClick: () -> Unit,
@@ -229,14 +226,8 @@ private fun ObjectTypeRow(
             text = type,
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.weight(1f),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-            text = "($count)",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
@@ -372,7 +363,7 @@ fun ModuleRail(
                         DropdownMenuItem(
                             text = {
                                 Text(
-                                    "$type (${ConnectionStore.countOf(connection.id, type)})",
+                                    type,
                                     color =
                                         if (selected) MaterialTheme.colorScheme.primary
                                         else MaterialTheme.colorScheme.onSurface,

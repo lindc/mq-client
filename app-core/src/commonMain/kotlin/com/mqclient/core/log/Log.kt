@@ -59,7 +59,7 @@ internal fun interface LogWriter {
  *
  * 设计要点：
  *  1. **API 在 common、写入在平台**：调用方只依赖 app-core 的公开 API，实际落点
- *     （终端 / 将来的文件 sink）由 JVM actual 决定，和 EncryptionService 同一套模式；
+ *     （终端 + 文件 sink）由 JVM actual 决定，和 EncryptionService 同一套模式；
  *  2. **不走事件总线**：日志要求不丢、保序、无背压，并且不能形成「handler 出错 → 打
  *     日志 → 日志又是事件 → 又触发 handler」的风暴 —— 这些和 EventBus 的语义
  *     （replay = 0 会丢、慢订阅者会反压发送方）正好相反，理由详见 EventBus 的
@@ -69,7 +69,7 @@ internal fun interface LogWriter {
  *  4. 级别过滤是全局开关：[minLevel] 默认 DEBUG（等价于原先散装 println 的行为）。
  *
  * 线程安全：对象可在任意线程调用；单次 `println` 对 `PrintStream` 是原子的，
- * 所以控制台上的两行日志不会互相穿插。将来加文件 sink 时在 actual 里自行加锁。
+ * 所以控制台上的两行日志不会互相穿插。文件 sink 的锁在 JVM actual（LogFileSink）里。
  */
 object Log {
 

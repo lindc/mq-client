@@ -16,7 +16,7 @@ private const val LOG_TAG = "core.connection"
  * 三类调用者各走各的门：
  *  - **写入**（新建 / 编辑 / 删除）只经过这里：[create] / [update] / [delete] 落盘成功后
  *    才换快照，并按新旧差异广播 `core.connection.added/updated/deleted`（见 [saveAll]）；
- *  - **读取**走 [connections]（[StateFlow]）或 [countOf]。快照拿到手就当归一化数据看待 ——
+ *  - **读取**走 [connections]（[StateFlow]）。快照拿到手就当归一化数据看待 ——
  *    改它不会写盘、也不会通知任何人；
  *  - **模块 → 核心**的连接状态上报走 [reportStatus]：模块连上 / 连不上之后，把
  *    [ConnectionInfo.status] 的事实报回来，界面（`collectAsState()`）自动重绘状态点。
@@ -47,15 +47,6 @@ object ConnectionStore {
     /** 可观测快照；UI 用 `collectAsState()` 订阅。直接改它无效 —— 新建 / 编辑 / 删除走 [create] / [update] / [delete]。 */
     val connections: StateFlow<List<ConnectionInfo>> = _connections.asStateFlow()
 
-    private val objectCounts: Map<String, Map<String, Int>> =
-        mapOf(
-            "mq-01" to mapOf("queue" to 12, "listener" to 3, "topic" to 0),
-        )
-
-    /** Number of objects of [objectType] behind [connectionId]; 0 when unknown. */
-    fun countOf(connectionId: String, objectType: String): Int =
-        objectCounts[connectionId]?.get(objectType) ?: 0
-
     /**
      * 重新读盘（状态同样重置为未连接）。**读失败时保留当前列表**：把失败当成空列表会让
      * 用户的连接在界面上凭空消失（他可能以为被删了，接着重新添加一遍）。失败原因由
@@ -71,8 +62,8 @@ object ConnectionStore {
     /**
      * 新建一条连接：追加到列表末尾 → 落盘 → **落盘成功才**广播 `core.connection.added`。
      *
-     * [ConnectionInfo.id] 由调用方给（界面按 UUID 生成），**必须唯一**：编辑 / 删除 /
-     * 对象计数都按 id 定位，重复 id 直接以失败返回、不写盘。
+     * [ConnectionInfo.id] 由调用方给（界面按 UUID 生成），**必须唯一**：编辑 / 删除
+     * 都按 id 定位，重复 id 直接以失败返回、不写盘。
      */
     @Synchronized
     fun create(connection: ConnectionInfo): Result<Unit> {
