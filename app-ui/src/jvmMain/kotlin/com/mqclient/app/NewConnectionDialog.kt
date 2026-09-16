@@ -31,6 +31,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
@@ -44,6 +48,7 @@ import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.i18n.stringResource
 import dev.nucleusframework.application.DecoratedDialog
 import dev.nucleusframework.application.LocalNucleusWindow
+import dev.nucleusframework.window.windowDragArea
 
 /** 对话框的两步流程：先选服务类型，再进对应模块的创建面板。 */
 private enum class NewConnectionStep { SELECT, CREATE }
@@ -92,11 +97,20 @@ internal fun NewConnectionDialog(
 
     // 可缩放的真实窗口（Compose Dialog 不支持用户拖拽缩放）：初始 780×560，
     // 用户自由调整大小 —— 页面填满窗口、只保留窗口最小尺寸限制（见 setMinimumSize）。
+    // Esc 关闭走 onPreviewKeyEvent：对话框没有系统标题栏，键盘出口得自己接。
     DecoratedDialog(
         onCloseRequest = onDismiss,
         state = rememberDialogState(size = DpSize(780.dp, 560.dp)),
         title = stringResource("menu_new_connection"),
         resizable = true,
+        onPreviewKeyEvent = { event ->
+            if (event.type == KeyEventType.KeyUp && event.key == Key.Escape) {
+                onDismiss()
+                true
+            } else {
+                false
+            }
+        },
     ) {
         val nucleusWindow = LocalNucleusWindow.current
         LaunchedEffect(nucleusWindow) { nucleusWindow.setMinimumSize(DpSize(720.dp, 480.dp)) }
@@ -176,12 +190,17 @@ internal fun NewConnectionDialog(
     }
 }
 
-/** 标题栏：标题文字走 i18n（`menu_new_connection`），右侧 ✕ 关闭。 */
+/**
+ * 标题栏：标题文字走 i18n（`menu_new_connection`），右侧 ✕ 关闭。
+ * 整条标题栏是窗口拖拽区（[windowDragArea]）—— 对话框没有系统标题栏，
+ * 这里就是唯一的拖拽把手；✕ 按钮不受影响（点击仍归按钮，拖动归窗口）。
+ */
 @Composable
 private fun HeaderBar(onClose: () -> Unit) {
     Row(
         modifier =
             Modifier
+                .windowDragArea()
                 .fillMaxWidth()
                 .padding(start = 20.dp, end = 12.dp, top = 16.dp, bottom = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -241,10 +260,6 @@ private fun SelectStepBody(
                     .padding(horizontal = 20.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
         ) {
-            Text(
-                text = stringResource("new_connection_pick_type"),
-                style = MaterialTheme.typography.titleMedium,
-            )
             grouped[selectedCategory].orEmpty().chunked(2).forEach { row ->
                 // IntrinsicSize.Min + 卡片 fillMaxHeight：同一行两张卡等高。
                 Row(

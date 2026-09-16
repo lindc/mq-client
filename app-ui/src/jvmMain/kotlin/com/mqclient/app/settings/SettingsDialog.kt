@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -30,6 +31,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.rememberDialogState
@@ -38,6 +43,7 @@ import dev.nucleusframework.application.LocalNucleusWindow
 import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.i18n.stringResource
 import dev.nucleusframework.application.DecoratedDialog
+import dev.nucleusframework.window.windowDragArea
 
 /** Tabs the side nav can select. Order matches visual order top → bottom. */
 internal enum class SettingsTab(val icon: String, val key: String) {
@@ -72,15 +78,30 @@ fun SettingsDialog(
     var draft by remember { mutableStateOf(initial) }
     var selectedTab by remember { mutableStateOf(SettingsTab.GENERAL) }
     var saveError by remember { mutableStateOf<String?>(null) }
+    // 关闭拦截：草稿相对打开时的 initial 改过 → ESC / ✕ / 取消先弹确认，不直接丢改动。
+    // 保存成功后 caller 把落盘配置传回来，draft == initial 自然变回「干净」。
+    // 拦截决策全在 [SettingsCloseGuard]（可单测），这里只做接线。
+    val isDirty = draft != initial
+    val closeGuard = remember { SettingsCloseGuard(onClose = onDismiss) }
 
     // A real (Nucleus) window instead of the old fixed-size popup, so the user
     // can drag any edge or corner to resize it. The Surface fills the whole
     // window, so its content tracks whatever size is picked.
+    // Esc 关闭走 onPreviewKeyEvent：对话框没有系统标题栏，键盘出口得自己接。
     DecoratedDialog(
-        onCloseRequest = onDismiss,
+        // Alt+F4 / 系统关闭请求和 ESC / ✕ / 取消走同一条 guard 路径：有改动先确认。
+        onCloseRequest = { closeGuard.requestClose(isDirty) },
         state = rememberDialogState(size = DpSize(760.dp, 600.dp)),
         title = stringResource("settings_title"),
         resizable = true,
+        onPreviewKeyEvent = { event ->
+            if (event.type == KeyEventType.KeyUp && event.key == Key.Escape) {
+                closeGuard.requestClose(isDirty)
+                true
+            } else {
+                false
+            }
+        },
     ) {
         // Keep the window usable: don't let it shrink below what the side rail
         // + tab content need. 放 effect 里：组合体会随重组反复执行，窗口副作用不该在那儿。
@@ -92,7 +113,7 @@ fun SettingsDialog(
             color = MaterialTheme.colorScheme.surface,
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
-                HeaderBar(selectedTab = selectedTab, onClose = onDismiss)
+                HeaderBar(selectedTab = selectedTab, onClose = { closeGuard.requestClose(isDirty) })
                 HorizontalDivider()
                 Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
                     SideNav(
@@ -113,7 +134,7 @@ fun SettingsDialog(
                 }
                 HorizontalDivider()
                 FooterActions(
-                    onCancel = onDismiss,
+                    onCancel = { closeGuard.requestClose(isDirty) },
                     onSave = {
                         // Clear the previous error so a second successful
                         // attempt doesn\'t leave a stale banner behind.
@@ -123,13 +144,54 @@ fun SettingsDialog(
                 )
             }
         }
+
+        // 关闭确认：只在草稿真的改过时出现（见 SettingsCloseGuard）。三个出口：
+        // 保存并关闭（成功才关）/ 放弃更改 / 继续编辑。
+        if (closeGuard.confirmingClose) {
+            AlertDialog(
+                onDismissRequest = { closeGuard.keepEditing() },
+                title = { Text(stringResource("settings_unsaved_title")) },
+                text = { Text(stringResource("settings_unsaved_text")) },
+                confirmButton = {
+                    PressableButton(
+                        onClick = closeGuard::discardChanges,
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    ) { Text(stringResource("settings_unsaved_discard")) }
+                },
+                dismissButton = {
+                    Row {
+                        PressableButton(
+                            onClick = closeGuard::keepEditing,
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        ) { Text(stringResource("settings_unsaved_keep")) }
+                        Spacer(Modifier.width(8.dp))
+                        PressableButton(
+                            onClick = {
+                                val error = onSave(draft)
+                                if (error == null) {
+                                    closeGuard.saveSucceeded()
+                                } else {
+                                    // 落盘失败：回设置界面展示原因，确认弹窗收起。
+                                    closeGuard.saveFailed()
+                                    saveError = error
+                                }
+                            },
+                        ) { Text(stringResource("settings_unsaved_save")) }
+                    }
+                },
+            )
+        }
     }
 }
 
+// 整条标题栏是窗口拖拽区（同 NewConnectionDialog 的 HeaderBar）；✕ 按钮不受影响。
 @Composable
 private fun HeaderBar(selectedTab: SettingsTab, onClose: () -> Unit) {
     Row(
         modifier = Modifier
+            .windowDragArea()
             .fillMaxWidth()
             .padding(start = 20.dp, end = 12.dp, top = 16.dp, bottom = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
