@@ -90,7 +90,7 @@ class AiPanelState internal constructor(
     /**
      * 改一项 AI 设置并落盘。
      *
-     * 这是「读-改-写」路径：盘上是整份 `config.json`（连接列表也在里面），所以
+     * 这是「读-改-写」路径：盘上是整份 `config.toml`（连接列表也在里面），所以
      * 必须读到真实内容再写回 —— 用 [ConfigStore.loadConfig] 的话，配置一旦读不出来
      * 它会静默给出默认值，拿默认值去 copy 再落盘会把连接列表整段抹掉。
      *
@@ -110,7 +110,7 @@ class AiPanelState internal constructor(
 
     /**
      * 外部（设置对话框）传来的新配置：只同步内存值，**不落盘** —— 盘上已经是新值了
-     * （那条路径自己写过 config.json）。
+     * （那条路径自己写过 config.toml）。
      */
     fun applyConfig(config: AiConfig) {
         this.config = config

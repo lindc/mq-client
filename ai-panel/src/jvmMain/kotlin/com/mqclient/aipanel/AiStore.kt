@@ -14,7 +14,7 @@ import kotlinx.serialization.json.Json
  * Filesystem-backed persistence for the AI panel's chat history.
  *
  * Settings (provider / model / URL / key / system prompt / history limit)
- * live in the shared `~/.mqclient/config.json` managed by [com.mqclient.core.ConfigStore];
+ * live in the shared `~/.mqclient/config.toml` managed by [com.mqclient.core.ConfigStore];
  * only the chat history — which the other modules don't care about — stays here.
  *
  * File location: `~/.mqclient/ai-messages.json`. Missing or unparsable files
@@ -79,7 +79,7 @@ object AiStore {
     }
 
     /**
-     * 聊天记录的目录：和 `config.json` 同一个 `~/.mqclient/`，因此也尊重
+     * 聊天记录的目录：和 `config.toml` 同一个 `~/.mqclient/`，因此也尊重
      * `mqclient.config.dir` 覆盖。之前这里自己拼 `user.home`，覆盖目录的测试 / 便携模式
      * 会写到另一个目录去。
      */

@@ -12,6 +12,8 @@ sqldelight = "2.3.2"
 kotlinxCoroutines = "1.10.2"
 # Ktor — HTTP/SSE client for the AI adapter module (:openai-service).
 ktor = "3.2.3"
+# Ktoml — TOML 编解码，配置文件 config.toml 的读写。
+ktoml = "0.7.1"
 
 [libraries]
 # Compose Multiplatform
@@ -49,6 +51,12 @@ ktor-client-mock = { module = "io.ktor:ktor-client-mock", version.ref = "ktor" }
 sqldelight-runtime = { module = "app.cash.sqldelight:runtime", version.ref = "sqldelight" }
 sqldelight-sqlite-driver = { module = "app.cash.sqldelight:sqlite-driver", version.ref = "sqldelight" }
 sqldelight-coroutines = { module = "app.cash.sqldelight:coroutines-extensions", version.ref = "sqldelight" }
+
+# Ktoml: TOML codec for ConfigManager (config.toml). 0.7.x 拆成了 core / source /
+# file 三个模块：Toml 编解码 API 在 core，file 只提供文件读写助手（core 是它的
+# runtime 依赖，编译期要单独引）。
+ktoml-core = { module = "com.akuleshov7:ktoml-core-jvm", version.ref = "ktoml" }
+ktoml-file = { module = "com.akuleshov7:ktoml-file-jvm", version.ref = "ktoml" }
 
 [plugins]
 kotlinMultiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }

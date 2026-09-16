@@ -14,7 +14,7 @@ import mq_client.ui_common.generated.resources.Res
  *
  * String tables live in bundled JSON resources
  * (`composeResources/files/i18n/strings_<lang>.json`) and are loaded at
- * startup according to `config.json`'s language. Access is a plain global
+ * startup according to `config.toml`'s language. Access is a plain global
  * lookup — no CompositionLocal; live refresh comes from [revision] (a Compose
  * state bumped by [load]), so every composable that called [stringResource]
  * re-renders on the new table. The trigger is `core.language.changed` on the

@@ -41,3 +41,6 @@ actual object EncryptionService {
         return cipher.doFinal(ct)
     }
 }
+
+/** 密钥在 `secret.key` 里，由 ConfigManager 生成与持久化（首次用时自动生成）。 */
+actual fun sensitiveEncryptionKey(): ByteArray = ConfigManager.ensureSecretKey()

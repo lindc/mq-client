@@ -23,7 +23,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 
 /**
- * 守住 [AiPanelState.updateConfig] 的落盘路径：它写的是整份 `config.json`，
+ * 守住 [AiPanelState.updateConfig] 的落盘路径：它写的是整份 `config.toml`，
  * 配置读不出来时必须放弃写入，不能拿默认值把连接列表一起抹掉。
  */
 class AiPanelStateTest {
@@ -60,7 +60,7 @@ class AiPanelStateTest {
     @Test
     fun `updateConfig gives up when the config is unreadable`() {
         ConfigManager.save(Config(connections = listOf(connection("mq-01"))))
-        File(dir, CONFIG_FILE_NAME).writeText("this is not json")
+        File(dir, CONFIG_FILE_NAME).writeText("this is not toml")
         val corrupted = File(dir, CONFIG_FILE_NAME).readText()
 
         val state = newState()
@@ -137,7 +137,7 @@ class AiPanelStateTest {
 
     private companion object {
         const val DIR_PROPERTY = "mqclient.config.dir"
-        const val CONFIG_FILE_NAME = "config.json"
+        const val CONFIG_FILE_NAME = "config.toml"
         const val PARTIAL_REPLY = "已流出的部分"
     }
 }

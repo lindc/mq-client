@@ -1,12 +1,18 @@
 package com.mqclient.core
 
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.serializer
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 
 /**
- * Root config persisted at `~/.mqclient/config.json`.
+ * Root config persisted at `~/.mqclient/config.toml`.
  *
  * Single-file layout (since the ConfigManager migration): everything —
- * including the connection list — lives in this one plaintext-JSON file.
+ * including the connection list — lives in this one plaintext-TOML file.
  * Sensitive string fields (marked with [Sensitive] and/or matching the
  * sensitive-name keywords in [ConfigManager]) are stored encrypted, each
  * value as `enc:v1:Base64(iv):Base64(ct+tag)` under the AES key from
@@ -108,7 +114,7 @@ enum class ThemeMode {
 data class AiConfig(
     /**
      * 旧模型里「当前选中的 provider」（SPI id）。
-     * @deprecated 由 [activeConnectionId] 取代；保留仅为读取旧 config.json 并迁移。
+     * @deprecated 由 [activeConnectionId] 取代；保留仅为读取旧配置文件并迁移。
      */
     val activeProviderId: String = "",
     /** How many past messages to load on startup. UI clamps to 10-500. */
@@ -139,8 +145,9 @@ data class AiConfig(
 data class AiProviderConfig(
     val providerId: String,
     val providerUrl: String = "",
-    /** API key — encrypted at rest by ConfigManager (name-matched + [Sensitive]). */
+    /** API key — encrypted at rest by [EncryptedStringSerializer]. */
     @Sensitive
+    @Serializable(with = EncryptedStringSerializer::class)
     val accessToken: String = "",
     val model: String = "",
     val systemPromptBase64: String = "",
@@ -152,9 +159,9 @@ data class AiProviderConfig(
  * module — the sidebar lists connections, not modules.
  *
  * The concrete credential fields a middleware needs are decided by its own
- * service module (per the single-file spec, connections live in config.json);
- * any field a service adds whose name matches the sensitive keywords
- * (password, apiKey, …) is encrypted automatically by [ConfigManager].
+ * service module (per the single-file spec, connections live in config.toml);
+ * the [options] map values whose key matches the sensitive keywords
+ * (password, apiKey, …) are encrypted by [SensitiveOptionsSerializer].
  */
 @Serializable
 data class ConnectionInfo(
@@ -171,9 +178,10 @@ data class ConnectionInfo(
      *
      * 这是对话框按 [serviceId] 渲染字段的挂靠点：各 service 模块声明自己要哪些字段，
      * 值原样存进这里 —— app-core 不解释内容，也不需要为每个中间件改一次模型。
-     * 键名命中敏感关键字的项（password / token / secret …）由 [ConfigManager] 按名字
-     * 自动加密，和普通字段同一套规则。
+     * 键名命中敏感关键字的项（password / token / secret …）由 [SensitiveOptionsSerializer]
+     * 落盘加密，和普通字段同一套规则。
      */
+    @Serializable(with = SensitiveOptionsSerializer::class)
     val options: Map<String, String> = emptyMap(),
     val status: ConnectionStatus = ConnectionStatus.Disconnected,
 ) {
@@ -187,6 +195,36 @@ enum class ConnectionStatus(val label: String) {
     Connecting("连接中..."),
     Failed("连接失败"),
     Disconnected("未连接"),
+}
+
+/**
+ * [ConnectionInfo.options] 的序列化器：键名命中 [ConfigManager.SENSITIVE_NAME_KEYWORDS]
+ * 的值在编码时加密；解码时凡带 [ENCRYPTED_VALUE_PREFIX] 的值统一解密
+ * （明文原样放行，解密失败保留密文，见 [decryptStoredValue]）。
+ *
+ * 键本身是用户/服务自定义的，只能按名字识别敏感性 —— 这是树遍历之外唯一
+ * 需要名字匹配的地方。
+ */
+object SensitiveOptionsSerializer : KSerializer<Map<String, String>> {
+    private val delegate = MapSerializer(String.serializer(), String.serializer())
+    override val descriptor = SerialDescriptor("mqclient.SensitiveOptions", delegate.descriptor)
+
+    override fun serialize(encoder: Encoder, value: Map<String, String>) {
+        delegate.serialize(
+            encoder,
+            value.mapValues { (key, v) ->
+                val lower = key.lowercase()
+                if (ConfigManager.SENSITIVE_NAME_KEYWORDS.any { lower.contains(it) }) {
+                    encryptStoredValue(v)
+                } else {
+                    v
+                }
+            },
+        )
+    }
+
+    override fun deserialize(decoder: Decoder): Map<String, String> =
+        delegate.deserialize(decoder).mapValues { (_, v) -> decryptStoredValue(v) }
 }
 
 /** The default seed color; restored by the "恢复默认" button in settings. */

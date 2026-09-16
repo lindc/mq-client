@@ -8,8 +8,7 @@ import kotlinx.serialization.Serializable
  * 与 MQ 侧的 [ConnectionInfo] 同一思路，但只服务 AI 面板 / AI 适配器：
  *  - [providerId] 指向 openai-service 里 `com.mqclient.ai.AiProvider.id`
  *    （内置 `openai-compatible`），适配器据此分发；
- *  - [token] 字段名命中 ConfigManager 的敏感关键词（"token"）→ 落盘自动加密；
- *    [Sensitive] 标注把同一意图写进 schema；
+ *  - [token] 挂 [EncryptedStringSerializer]（[Sensitive] 标注意图）→ 落盘自动加密；
  *  - 同一个 Provider 可以有多条连接（多个账号、多个 Ollama 实例），互不影响。
  *
  * 为什么放 commonMain：openai-service 的 commonMain（适配器接口）要引用它；
@@ -26,6 +25,7 @@ data class AiConnection(
     val baseUrl: String = "",
     /** API key / token，落盘自动加密。 */
     @Sensitive
+    @Serializable(with = EncryptedStringSerializer::class)
     val token: String = "",
     val model: String = "",
     /** 系统提示词（明文存储；空 = 用默认提示词）。 */

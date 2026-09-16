@@ -58,7 +58,7 @@ import org.jetbrains.compose.resources.Font as ResourceFont
 /**
  * Display-only labels for font ids that older builds could persist into
  * [ThemeConfig.fontFamily] (System Sans/Serif/Mono). They are no longer
- * offered in the dropdown, but a stale config.json may still carry one, so
+ * offered in the dropdown, but a stale config.toml may still carry one, so
  * the collapsed field shows its old label instead of a raw id. Persisted
  * values are never rewritten here.
  */
@@ -303,7 +303,7 @@ private fun PresetPaletteGrid(
  *
  * Selecting an entry persists its id — [FONT_LXGW_WEN_KAI_MONO] for the
  * bundled font, the raw family name otherwise (save logic unchanged: a plain
- * string in config.json). The typography layer does not consume
+ * string in config.toml). The typography layer does not consume
  * [ThemeConfig.fontFamily] yet; that wiring stays deferred.
  */
 @Composable

@@ -8,11 +8,11 @@ import java.util.UUID
 private const val LOG_TAG = "core.ai"
 
 /**
- * AI 连接的持久化入口（读写 `config.json` 的 `ai` 段），风格对齐 [ConnectionStore]：
+ * AI 连接的持久化入口（读写 `config.toml` 的 `ai` 段），风格对齐 [ConnectionStore]：
  *
  *  - **读**走 [load]：配置读不出来时以 failure 返回 + 错误通道上报，绝不假装
  *    「没有连接」（那会让界面上的连接凭空消失）；
- *  - **写**走 [save] / [create] / [update] / [delete]：读-改-写整份 config.json，
+ *  - **写**走 [save] / [create] / [update] / [delete]：读-改-写整份 config.toml，
  *    其它配置段原样保留，落盘失败以 failure 返回；四个方法都是原子的（校验与落盘
  *    在同一个临界区里，见下面的注释）—— 否则和 [ConnectionStore] 并发写会互相覆盖；
  *  - **迁移**：[migrateIfNeeded] 把旧模型（`ai.providerConfigs`，per-provider
@@ -36,7 +36,7 @@ object AiConnectionRepository {
         val config = ConfigStore.loadConfigOrNull()
         if (config != null) return Result.success(config.ai.connections)
 
-        val failure = IllegalStateException("config.json 存在但读不出来（AI 连接没有丢，只是这次没读到）")
+        val failure = IllegalStateException("config.toml 存在但读不出来（AI 连接没有丢，只是这次没读到）")
         CoreModule.reportError(
             message = failure.message ?: "读取 AI 连接失败",
             source = "core.ai",

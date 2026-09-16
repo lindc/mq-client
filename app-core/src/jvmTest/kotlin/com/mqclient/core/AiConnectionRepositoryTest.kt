@@ -12,7 +12,7 @@ import kotlin.test.assertTrue
 
 /**
  * 守住 [AiConnectionRepository] 的两条底线：
- *  - token 落盘必须加密（密文进 config.json，读回来是明文）；
+ *  - token 落盘必须加密（密文进 config.toml，读回来是明文）；
  *  - 旧模型（`ai.providerConfigs`）的启动迁移不能丢用户数据。
  */
 class AiConnectionRepositoryTest {
@@ -129,7 +129,7 @@ class AiConnectionRepositoryTest {
 
     @Test
     fun `load fails loudly when the config file is unreadable`() {
-        File(dir, CONFIG_FILE_NAME).writeText("this is not json")
+        File(dir, CONFIG_FILE_NAME).writeText("this is not toml")
 
         val result = AiConnectionRepository.load()
 
@@ -147,6 +147,6 @@ class AiConnectionRepositoryTest {
 
     private companion object {
         const val DIR_PROPERTY = "mqclient.config.dir"
-        const val CONFIG_FILE_NAME = "config.json"
+        const val CONFIG_FILE_NAME = "config.toml"
     }
 }

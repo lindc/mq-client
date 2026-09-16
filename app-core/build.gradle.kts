@@ -33,6 +33,9 @@ kotlin {
         jvmMain.dependencies {
             // JDBC SQLite driver (JdbcSqliteDriver) — desktop only.
             implementation(libs.sqldelight.sqlite.driver)
+            // Ktoml — config.toml 的 TOML 编解码（ConfigManager）。
+            implementation(libs.ktoml.core)
+            implementation(libs.ktoml.file)
         }
         jvmTest.dependencies {
             implementation(kotlin("test"))

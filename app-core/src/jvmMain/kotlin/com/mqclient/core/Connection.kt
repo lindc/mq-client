@@ -10,7 +10,7 @@ import kotlinx.coroutines.flow.asStateFlow
 private const val LOG_TAG = "core.connection"
 
 /**
- * 连接列表：**所有模块共同依赖的唯一入口**，背后是单文件配置 `~/.mqclient/config.json`
+ * 连接列表：**所有模块共同依赖的唯一入口**，背后是单文件配置 `~/.mqclient/config.toml`
  * 的 `connections` 段（见 [ConfigManager]）。
  *
  * 三类调用者各走各的门：
@@ -115,7 +115,7 @@ object ConnectionStore {
     }
 
     /**
-     * 连接数据的唯一写入路径：把 [list] 整体写进 config.json，**只在落盘成功之后**换内存
+     * 连接数据的唯一写入路径：把 [list] 整体写进 config.toml，**只在落盘成功之后**换内存
      * 快照，并按新旧差异广播连接事件（新增 / 编辑 / 删除各发各的）。
      *
      * 快照必须等落盘成功再换：否则界面会显示一份磁盘上没有的连接列表，下次启动又变回去。

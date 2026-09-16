@@ -49,7 +49,7 @@ class ConfigManagerTest {
     @Test
     fun `corrupt config file is reported as unreadable`() {
         ConfigManager.save(Config(connections = listOf(connection("mq-01", "first"))))
-        writeRaw("this is not json")
+        writeRaw("this is not toml")
 
         assertNull(ConfigManager.loadOrNull(), "文件在但读不出来必须返回 null，而不是默认值")
         assertTrue(ConfigManager.load().connections.isEmpty(), "load() 仍给默认值，但只能用于启动首帧")
@@ -60,7 +60,7 @@ class ConfigManagerTest {
     @Test
     fun `read-modify-write is abandoned when config is unreadable`() {
         ConfigManager.save(Config(connections = listOf(connection("mq-01", "first"))))
-        writeRaw("this is not json")
+        writeRaw("this is not toml")
         val corrupted = readRaw()
 
         val current = ConfigStore.loadConfigOrNull()
@@ -73,7 +73,7 @@ class ConfigManagerTest {
     @Test
     fun `saveConnections refuses to write when config is unreadable`() {
         ConfigManager.save(Config(connections = listOf(connection("mq-01", "first"))))
-        writeRaw("this is not json")
+        writeRaw("this is not toml")
         val corrupted = readRaw()
 
         val result = ConfigStore.saveConnections(listOf(connection("mq-02", "second")))
@@ -143,8 +143,8 @@ class ConfigManagerTest {
         ConfigManager.save(Config(connections = listOf(connection("mq-02", "second"))))
 
         assertTrue(backupFile().exists(), "第二次保存必须留下上一版")
-        assertTrue(readRaw().contains("second"), "config.json 是新值")
-        assertTrue(backupFile().readText().contains("first"), "config.json.bak 是上一版")
+        assertTrue(readRaw().contains("second"), "config.toml 是新值")
+        assertTrue(backupFile().readText().contains("first"), "config.toml.bak 是上一版")
     }
 
     // ---------------------------------------------------------------- 工具
@@ -170,7 +170,7 @@ class ConfigManagerTest {
 
     private companion object {
         const val DIR_PROPERTY = "mqclient.config.dir"
-        const val CONFIG_FILE_NAME = "config.json"
-        const val BACKUP_FILE_NAME = "config.json.bak"
+        const val CONFIG_FILE_NAME = "config.toml"
+        const val BACKUP_FILE_NAME = "config.toml.bak"
     }
 }

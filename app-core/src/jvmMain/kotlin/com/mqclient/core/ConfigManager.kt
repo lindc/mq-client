@@ -1,5 +1,6 @@
 package com.mqclient.core
 
+import com.akuleshov7.ktoml.Toml
 import com.mqclient.core.log.Log
 import java.io.File
 import java.io.IOException
@@ -7,12 +8,6 @@ import java.nio.file.Files
 import java.util.Base64
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.encodeToJsonElement
 import okio.FileSystem
 import okio.Path
 import okio.Path.Companion.toOkioPath
@@ -23,19 +18,18 @@ import okio.Path.Companion.toOkioPath
  *
  *   ~/.mqclient/
  *     ├── secret.key       32 random bytes, Base64-encoded (AES-256 key)
- *     ├── config.json      pretty JSON: general / theme / ai / connections /
+ *     ├── config.toml      pretty TOML: general / theme / ai / connections /
  *                          metadata, sensitive string fields stored as
  *                          `enc:v1:<iv>:<ct+tag>` ciphertext
- *     └── config.json.bak  上一版 config.json，每次 [save] 成功写入前留一份
+ *     └── config.toml.bak  上一版 config.toml，每次 [save] 成功写入前留一份
  *
- * Sensitive-field handling: ConfigManager walks the serialized JSON tree and
- * encrypts/decrypts every **string** value under a key whose (lowercased)
- * name contains one of [SENSITIVE_NAME_KEYWORDS] — password, apiKey,
- * accessToken, secret, token, … Name matching works across any model shape —
- * including the per-service connection payloads under `connections`, whose
- * concrete fields the middleware modules decide — without reflection, which
- * is unavailable in commonMain. [Sensitive] annotations mark the same intent
- * in the schema for a future serializer-driven upgrade.
+ * Sensitive-field handling is serializer-driven: fields marked
+ * `@Serializable(with = EncryptedStringSerializer::class)` (and the
+ * [ConnectionInfo.options] values whose key matches
+ * [SENSITIVE_NAME_KEYWORDS]) encrypt on encode / decrypt on decode —
+ * [save] and [loadOrNull] are single [Toml] codec calls with no tree
+ * walking. Sensitive values on disk carry the `enc:v1:` prefix
+ * ([ENCRYPTED_VALUE_PREFIX]).
  *
  * Failure policy mirrors the old ConfigStore: reads degrade to safe defaults
  * and log via the shared [Log] — the UI must still boot when the key is lost or the
@@ -48,8 +42,8 @@ import okio.Path.Companion.toOkioPath
  */
 object ConfigManager {
 
-    private const val CONFIG_FILE_NAME = "config.json"
-    private const val BACKUP_FILE_NAME = "config.json.bak"
+    private const val CONFIG_FILE_NAME = "config.toml"
+    private const val BACKUP_FILE_NAME = "config.toml.bak"
     private const val SECRET_KEY_FILE_NAME = "secret.key"
     private const val LEGACY_CONNECTIONS_FILE_NAME = "connections.json"
     private const val TMP_SUFFIX = ".tmp"
@@ -60,7 +54,7 @@ object ConfigManager {
     /**
      * 整个配置目录的进程内锁。
      *
-     * 必须只有一把：`config.json` 是**一份**文件，`connections` 与 `ai` 都在里面，
+     * 必须只有一把：`config.toml` 是**一份**文件，`connections` 与 `ai` 都在里面，
      * 而写入方（[ConnectionStore]、[AiConnectionRepository]、设置对话框）写的都是
      * 「读整份 → 改一段 → 写回」。两把锁各自管住自己的一步、管不住两步之间的时间窗，
      * 那个窗口里另一个写入者插进来就会被后写的那次整段覆盖 —— 丢的不是某个字段，
@@ -71,14 +65,13 @@ object ConfigManager {
      */
     private val LOCK = Any()
 
-    /** Prefix distinguishing encrypted values inside config.json. */
-    const val ENCRYPTED_VALUE_PREFIX = "enc:v1:"
-
     /**
-     * Field-name keywords that mark a JSON string value as sensitive.
-     * Matching is a case-insensitive substring test on the property name.
-     * Conservative on purpose: `token` alone already covers accessToken and
-     * refreshToken, while names like prompt / url / model stay plaintext.
+     * Field-name keywords that mark a string value as sensitive. Matching is
+     * a case-insensitive substring test on the property name. Conservative on
+     * purpose: `token` alone already covers accessToken and refreshToken,
+     * while names like prompt / url / model stay plaintext. Consumed by
+     * [SensitiveOptionsSerializer] — annotated fields carry their serializer
+     * directly.
      */
     val SENSITIVE_NAME_KEYWORDS: List<String> = listOf(
         "password", "passwd", "pwd",
@@ -88,15 +81,14 @@ object ConfigManager {
 
     private val fs: FileSystem = FileSystem.SYSTEM
 
-    /** Pretty JSON for config.json (hand-editable, diff-able); tolerant of unknown keys. */
-    private val json = Json {
-        prettyPrint = true
-        ignoreUnknownKeys = true
-        encodeDefaults = true
-    }
-
-    /** Compact JSON for decoding legacy whole-file-encrypted payloads. */
+    /**
+     * JSON 解码器，只用于旧格式文件（`connections.json` 整体加密块解出后的
+     * 列表、迁移期的旧 `config.json`）；现行磁盘格式是 TOML。
+     */
     private val legacyJson = Json { ignoreUnknownKeys = true }
+
+    /** TOML 磁盘格式编解码（config.toml）。0.7.x 里 [Toml] 是类，用默认配置实例。 */
+    private val toml = Toml.Default
 
     /* ------------------------------ locations ------------------------------ */
 
@@ -121,7 +113,7 @@ object ConfigManager {
     /**
      * First-launch + migration entry point (idempotent):
      *  1. generate `secret.key` when missing;
-     *  2. seed a default `config.json` when missing;
+     *  2. seed a default `config.toml` when missing;
      *  3. fold a leftover legacy encrypted `connections.json` into the single
      *     file (merging by connection id) and delete it — on every launch
      *     until it's gone, so the config dir ends up with exactly two files.
@@ -165,7 +157,7 @@ object ConfigManager {
      *
      * 「不存在就生成」和「读回来」必须在同一个临界区里：拆开的话两个线程会各生成
      * 一把密钥、后写的胜出，而先写那把已经用它加密过的内容 —— 那些内容从此再也解
-     * 不开（配置永久损坏，只能删掉 config.json 重来）。
+     * 不开（配置永久损坏，只能删掉 config.toml 重来）。
      */
     fun ensureSecretKey(): ByteArray = synchronized(LOCK) {
         val path = secretKeyFile()
@@ -180,7 +172,7 @@ object ConfigManager {
     /* -------------------------------- loading ------------------------------ */
 
     /**
-     * Reads and decrypts `config.json` into a [Config], **把「文件不存在」和
+     * Reads and decrypts `config.toml` into a [Config], **把「文件不存在」和
      * 「文件存在但读不出来」压成同一个结果**：两者都得到 [Config] 默认值。
      *
      * 只适合启动首帧这种「读不到就用默认值、之后立刻会被真实值覆盖」的场合。
@@ -188,7 +180,7 @@ object ConfigManager {
      * 或至少用 [loadOrNull] 拿到真实内容：默认值里其它配置段是空的，拿它去 copy
      * 再落盘会把用户的连接列表整段抹掉。
      *
-     * 单个敏感字段解密失败仍保留原文 + 日志（见 [decryptTree]），
+     * 单个敏感字段解密失败仍保留原文 + 日志（见 [decryptStoredValue]），
      * 一个坏字段不会拖垮整个配置。
      */
     fun load(): Config = loadOrNull() ?: Config()
@@ -202,12 +194,10 @@ object ConfigManager {
         val path = configFile()
         if (!fs.exists(path)) return@synchronized Config()
         try {
-            val key = ensureSecretKey()
             val text = fs.read(path) { readUtf8() }
             if (text.isBlank()) return@synchronized Config()
-            val plain = decryptTree(json.parseToJsonElement(text), key)
-            // JsonElement.toString() emits exact compact JSON; decode from that.
-            json.decodeFromString(Config.serializer(), plain.toString())
+            // 敏感字段的解密发生在序列化器里（EncryptedStringSerializer 等）。
+            toml.decodeFromString(Config.serializer(), text)
         } catch (t: Throwable) {
             Log.error(LOG_TAG, "failed to read config: $t")
             null
@@ -231,7 +221,7 @@ object ConfigManager {
     fun edit(transform: (Config) -> Result<Config>): Result<Unit> = synchronized(LOCK) {
         val current = loadOrNull()
             ?: return@synchronized Result.failure(
-                IllegalStateException("config.json is unreadable; nothing was written"),
+                IllegalStateException("config.toml is unreadable; nothing was written"),
             )
         transform(current).fold(onSuccess = ::save, onFailure = { Result.failure(it) })
     }
@@ -239,28 +229,26 @@ object ConfigManager {
     /* -------------------------------- saving ------------------------------- */
 
     /**
-     * Encrypts [config]'s sensitive fields and writes it to `config.json`
-     * through a temp file + atomic rename, so a crash mid-write can never
-     * leave a half-written file behind.
+     * Writes [config] to `config.toml` through a temp file + atomic rename,
+     * so a crash mid-write can never leave a half-written file behind.
+     * 敏感字段的加密发生在序列化器里（编码时进行）。
      *
-     * 写入前先把当前 `config.json` 复制成 `config.json.bak`：写入是原子的、
+     * 写入前先把当前 `config.toml` 复制成 `config.toml.bak`：写入是原子的、
      * 不可撤销的，而 [load] 的容错会让一次读失败变成「用默认值整段覆盖」，
      * 留一份上一版是这条错误链上唯一的后悔药。
      */
     fun save(config: Config): Result<Unit> = synchronized(LOCK) {
         runCatching {
-            val key = ensureSecretKey()
-            val element = json.encodeToJsonElement(Config.serializer(), config)
-            val encrypted = encryptTree(element, key)
+            val text = toml.encodeToString(Config.serializer(), config)
             backupCurrentConfig()
-            writeFileAtomically(configFile(), prettyPrintJson(encrypted))
+            writeFileAtomically(configFile(), text)
         }.onFailure { t ->
             Log.error(LOG_TAG, "failed to write config: $t")
         }
     }
 
     /**
-     * 把当前 `config.json` 复制成 `config.json.bak`（只保留一份，每次保存覆盖）。
+     * 把当前 `config.toml` 复制成 `config.toml.bak`（只保留一份，每次保存覆盖）。
      * 备份失败不能连累保存本身 —— 它只是保险，缺了它写入依然是正确的。
      */
     private fun backupCurrentConfig() {
@@ -269,7 +257,7 @@ object ConfigManager {
         try {
             fs.copy(current, backupFile())
         } catch (t: Throwable) {
-            Log.warn(LOG_TAG, "failed to back up config.json: $t")
+            Log.warn(LOG_TAG, "failed to back up config.toml: $t")
         }
     }
 
@@ -300,7 +288,7 @@ object ConfigManager {
     }
 
     /**
-     * One-time migration for configs that already have a `config.json`:
+     * One-time migration for configs that already have a `config.toml`:
      * folds a leftover legacy `connections.json` into the `connections`
      * section (legacy entries whose id is already present are skipped) and
      * deletes the old file. Never deletes on a failed decrypt.
@@ -315,129 +303,6 @@ object ConfigManager {
         val merged = current.copy(connections = current.connections + fresh)
         if (save(merged).isSuccess) {
             fs.delete(legacyConnectionsFile())
-        }
-    }
-
-    /* ------------------------ sensitive-field transform -------------------- */
-
-    private fun isSensitiveKey(name: String): Boolean {
-        val lower = name.lowercase()
-        return SENSITIVE_NAME_KEYWORDS.any { lower.contains(it) }
-    }
-
-    /** True for string primitives only — numbers / booleans pass through untouched. */
-    private fun JsonPrimitive.isStringValue(): Boolean = contentOrNull != null
-
-    private fun encryptTree(element: JsonElement, key: ByteArray): JsonElement = when (element) {
-        is JsonObject -> JsonObject(
-            element.mapValues { (name, value) ->
-                val plain = if (value is JsonPrimitive) value.contentOrNull else null
-                if (plain != null && isSensitiveKey(name)) {
-                    val ct = EncryptionService.encrypt(plain.toByteArray(Charsets.UTF_8), key)
-                    JsonPrimitive(ENCRYPTED_VALUE_PREFIX + ct)
-                } else {
-                    encryptTree(value, key)
-                }
-            },
-        )
-        is JsonArray -> JsonArray(element.map { encryptTree(it, key) })
-        else -> element
-    }
-
-    private fun decryptTree(element: JsonElement, key: ByteArray): JsonElement = when (element) {
-        is JsonObject -> JsonObject(element.mapValues { (_, value) -> decryptTree(value, key) })
-        is JsonArray -> JsonArray(element.map { decryptTree(it, key) })
-        is JsonPrimitive -> {
-            val content = element.contentOrNull
-            if (content != null && content.startsWith(ENCRYPTED_VALUE_PREFIX)) {
-                try {
-                    JsonPrimitive(
-                        EncryptionService.decrypt(
-                            content.removePrefix(ENCRYPTED_VALUE_PREFIX),
-                            key,
-                        ).decodeToString(),
-                    )
-                } catch (t: Throwable) {
-                    Log.warn(LOG_TAG, "failed to decrypt a value: $t")
-                    element // keep the raw ciphertext rather than corrupting the field
-                }
-            } else {
-                element
-            }
-        }
-    }
-
-    /* ----------------------- sensitive-value transform -------------------- */
-
-    /**
-     * Minimal JSON pretty-printer (2-space indent) used to write config.json
-     * with encrypted values in place — avoids depending on the internal
-     * JsonElement serializer while keeping the file hand-editable.
-     */
-    private fun prettyPrintJson(element: JsonElement): String = buildString {
-        appendElement(element, 0)
-    }
-
-    private fun StringBuilder.appendElement(element: JsonElement, indent: Int) {
-        when (element) {
-            is JsonObject -> {
-                append('{')
-                var first = true
-                element.forEach { (key, value) ->
-                    if (!first) append(',')
-                    first = false
-                    append('\n')
-                    appendIndent(indent + 1)
-                    append('"').append(escapeJson(key)).append("\": ")
-                    appendElement(value, indent + 1)
-                }
-                if (!first) {
-                    append('\n')
-                    appendIndent(indent)
-                }
-                append('}')
-            }
-            is JsonArray -> {
-                append('[')
-                var first = true
-                element.forEach { value ->
-                    if (!first) append(',')
-                    first = false
-                    append('\n')
-                    appendIndent(indent + 1)
-                    appendElement(value, indent + 1)
-                }
-                if (!first) {
-                    append('\n')
-                    appendIndent(indent)
-                }
-                append(']')
-            }
-            is JsonPrimitive -> {
-                val content = element.contentOrNull
-                if (content != null) append('"').append(escapeJson(content)).append('"')
-                else append(element.toString()) // numbers / booleans / null — JsonNull included
-            }
-        }
-    }
-
-    private fun StringBuilder.appendIndent(level: Int) {
-        repeat(level) { append("  ") }
-    }
-
-    /** Escapes a raw string for embedding inside a JSON string literal. */
-    private fun escapeJson(value: String): String = buildString(value.length + 8) {
-        for (ch in value) {
-            when (ch) {
-                '"' -> append("\\\"")
-                '\\' -> append("\\\\")
-                '\n' -> append("\\n")
-                '\r' -> append("\\r")
-                '\t' -> append("\\t")
-                '\b' -> append("\\b")
-                '\u000C' -> append("\\f")
-                else -> if (ch < ' ') append("\\u%04x".format(ch.code)) else append(ch)
-            }
         }
     }
 

@@ -6,7 +6,7 @@ import java.nio.file.Paths
 /**
  * Backward-compatible facade over [ConfigManager].
  *
- * The app moved to a single `config.json` (connections included, sensitive
+ * The app moved to a single `config.toml` (connections included, sensitive
  * fields encrypted in place) plus `secret.key` — nothing else in the config
  * directory. This object keeps the pre-migration API surface (used by
  * app-ui and ai-panel) intact so no caller outside core had to change:
@@ -24,11 +24,11 @@ object ConfigStore {
     /** `~/.mqclient/` (or the `mqclient.config.dir` override), as a java.nio path. */
     fun configDir(): Path = Paths.get(ConfigManager.configDir().toString())
 
-    private fun configFile(): Path = configDir().resolve("config.json")
+    private fun configFile(): Path = configDir().resolve("config.toml")
 
     /**
      * First-launch seed + legacy migration. Generates `secret.key` when
-     * missing, writes a default `config.json` on first run, and folds any
+     * missing, writes a default `config.toml` on first run, and folds any
      * leftover legacy `connections.json` into the single file.
      */
     fun initOnStartup() {
@@ -36,7 +36,7 @@ object ConfigStore {
     }
 
     /**
-     * Reads the app config from `config.json`, decrypting sensitive fields.
+     * Reads the app config from `config.toml`, decrypting sensitive fields.
      * Missing or unparsable file yields [Config] defaults.
      */
     fun loadConfig(): Config = ConfigManager.load()
@@ -51,7 +51,7 @@ object ConfigStore {
     fun loadConfigOrNull(): Config? = ConfigManager.loadOrNull()
 
     /**
-     * Encrypts sensitive fields and writes [config] to `config.json`
+     * Encrypts sensitive fields and writes [config] to `config.toml`
      * (temp file + atomic rename). Returns a [Result] so callers can
      * surface a failed "保存" instead of silently dropping edits.
      */
@@ -81,7 +81,7 @@ object ConfigStore {
         val config = loadConfigOrNull()
         if (config != null) return Result.success(config.connections)
 
-        val failure = IllegalStateException("config.json 存在但读不出来（连接没有丢，只是这次没读到）")
+        val failure = IllegalStateException("config.toml 存在但读不出来（连接没有丢，只是这次没读到）")
         CoreModule.reportError(
             message = failure.message ?: "读取连接列表失败",
             source = "core.config",
@@ -91,7 +91,7 @@ object ConfigStore {
     }
 
     /**
-     * Replaces the `connections` section and rewrites config.json, preserving
+     * Replaces the `connections` section and rewrites config.toml, preserving
      * every other section as it currently sits on disk.
      */
     fun saveConnections(connections: List<ConnectionInfo>): Result<Unit> =
