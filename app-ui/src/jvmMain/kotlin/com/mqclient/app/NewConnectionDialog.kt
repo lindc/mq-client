@@ -4,14 +4,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -56,7 +55,8 @@ private enum class NewConnectionStep { SELECT, CREATE }
 /**
  * 新建连接对话框（向导两步式）：
  *
- *  - **第一步**：左侧类目导航 + 服务类型卡片网格（每行 2 列），点卡片直接进第二步。
+ *  - **第一步**：左侧类目导航 + 服务类型卡片网格（每张卡有最大宽度，按窗口宽度自适应列数），
+ *    点卡片直接进第二步。
  *    类目 tab **完全由 SPI 扫描**得出 —— [ModuleRegistry.services] 按 category 分组
  *    （[ModuleRegistry.groupByCategory]），新模块带新 category 时自动出现，这里没有
  *    任何硬编码的类目清单；
@@ -220,15 +220,17 @@ private fun HeaderBar(onClose: () -> Unit) {
 }
 
 /**
- * 第一步：左侧类目导航 + 服务类型卡片网格（每行 2 列）。
+ * 第一步：左侧类目导航 + 服务类型卡片网格（每张卡有最大宽度，按窗口宽度自适应列数）。
  *
  * 内容区 `spacedBy(12.dp, CenterVertically)`：卡片行之间保持 12dp 间距，同时内容
  * 不满一屏时整体垂直居中（`heightIn(min = 260.dp)` 给了它可分配的富余高度）；内容
  * 超出 `max = 460.dp` 时切到内部滚动。
  *
- * 网格用 `chunked(2)` 而不是 LazyVerticalGrid：类目下卡片最多几张，lazy 布局会
- * 强制填满可用高度，「内容少时收缩 + 垂直居中」都做不了；普通 Row 组合 wrap 内容，
- * 两个目标都满足。
+ * 用 `BoxWithConstraints` 取容器可用宽度算出能放下几列（`maxCardWidth` 为列宽上限），
+ * 每张卡直接给 `width(cardWidth)` 固定宽度（cardWidth = min(maxCardWidth, 可用宽度)），
+ * 不靠 `weight` 去封顶——`FlowRow` 的 `weight` 会忽略 `widthIn(max)` 把单卡拉满整行，
+ * 普通 `Row` 的 `weight` 也不可靠，所以直接定宽最稳。窗口越宽一行能放越多张，窄屏退化为
+ * 1–2 列，最后一行卡片同样保持最大宽度、左对齐。
  */
 @Composable
 private fun SelectStepBody(
@@ -260,24 +262,30 @@ private fun SelectStepBody(
                     .padding(horizontal = 20.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
         ) {
-            grouped[selectedCategory].orEmpty().chunked(2).forEach { row ->
-                // IntrinsicSize.Min + 卡片 fillMaxHeight：同一行两张卡等高。
-                Row(
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .height(IntrinsicSize.Min),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    row.forEach { adapter ->
-                        MiddlewareTypeCard(
-                            type = adapter.toMiddlewareType(),
-                            onClick = { onSelectType(adapter) },
-                            modifier = Modifier.weight(1f).fillMaxHeight(),
-                        )
+            // 每张卡给定「固定宽度」= 上限 maxCardWidth（且不超可用宽度，极窄屏退化为整行宽），
+            // 不依赖 weight 去封顶：用 `width(cardWidth)` 直接定宽，单卡 / 末行卡片都不会被撑满。
+            // 列数按可用宽度算，窗口越宽一行能放越多张；窄屏退化为 1–2 列。
+            val maxCardWidth = 280.dp
+            val gap = 12.dp
+            BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                val columns = ((maxWidth + gap) / (maxCardWidth + gap)).toInt().coerceAtLeast(1)
+                val cardWidth = if (maxCardWidth < maxWidth) maxCardWidth else maxWidth
+                val items = grouped[selectedCategory].orEmpty()
+                Column(verticalArrangement = Arrangement.spacedBy(gap)) {
+                    items.chunked(columns).forEach { rowItems ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(gap),
+                        ) {
+                            rowItems.forEach { adapter ->
+                                MiddlewareTypeCard(
+                                    type = adapter.toMiddlewareType(),
+                                    onClick = { onSelectType(adapter) },
+                                    modifier = Modifier.width(cardWidth),
+                                )
+                            }
+                        }
                     }
-                    // 奇数行补一个占位，让单卡保持半宽、与上一行对齐。
-                    if (row.size == 1) Spacer(modifier = Modifier.weight(1f))
                 }
             }
         }
