@@ -22,7 +22,7 @@ object ModuleRegistry {
     private const val LOG_TAG = "module-registry"
     val services: List<ServiceAdapter> by lazy { loadAll(ServiceAdapter::class.java) }
 
-    val uis: List<BusinessUi> by lazy { loadAll(BusinessUi::class.java) }
+    val uis: List<AdapterUI> by lazy { loadAll(AdapterUI::class.java) }
 
     /** 各模块的品牌图标（谁的图标归谁的 `*-ui` 模块，见 [ModuleIcon]）。 */
     val icons: List<ModuleIcon> by lazy { loadAll(ModuleIcon::class.java) }
@@ -84,7 +84,7 @@ object ModuleRegistry {
 
         initializedServices = initialized
         initializedBus = eventBus
-        reportUnknownUiServiceIds(eventBus)
+        reportUnknownUIServiceIds(eventBus)
         return initialized.map { it.first }
     }
 
@@ -143,16 +143,16 @@ object ModuleRegistry {
     }
 
     /**
-     * UI 半与服务半靠 `BusinessUi.serviceId == ServiceAdapter.id` 的字符串约定对上号
+     * UI 半与服务半靠 `AdapterUI.serviceId == ServiceAdapter.id` 的字符串约定对上号
      * （两个 Gradle 模块互不依赖，编译期帮不上忙），拼错时界面只会静默少一块。
      * 启动时对一遍：对不上的同时上报错误通道 + 日志，让名字错误在启动时暴露。
      *
      * 反方向（service 没有对应 UI）**不算错误** —— 模块可以只有后台能力、没有界面。
      */
-    private fun reportUnknownUiServiceIds(eventBus: EventBus) {
+    private fun reportUnknownUIServiceIds(eventBus: EventBus) {
         val known = services.mapTo(mutableSetOf()) { it.id }
-        unknownUiServiceIds(known, uis.map { it.serviceId }).forEach { serviceId ->
-            val message = "BusinessUi.serviceId '$serviceId' 对不上任何 ServiceAdapter.id，它的界面永远不会显示"
+        unknownUIServiceIds(known, uis.map { it.serviceId }).forEach { serviceId ->
+            val message = "AdapterUI.serviceId '$serviceId' 对不上任何 ServiceAdapter.id，它的界面永远不会显示"
             Log.error(LOG_TAG, message)
             eventBus.emit(
                 name = EventNames.ERROR_OCCURRED,
@@ -169,7 +169,7 @@ object ModuleRegistry {
      * 返回 [uiServiceIds] 里对不上任何 [knownServiceIds] 的项（保持顺序、去重）。
      * 抽成纯函数是为了可测（见 ModuleRegistryTest）。
      */
-    internal fun unknownUiServiceIds(knownServiceIds: Set<String>, uiServiceIds: List<String>): List<String> =
+    internal fun unknownUIServiceIds(knownServiceIds: Set<String>, uiServiceIds: List<String>): List<String> =
         uiServiceIds.filter { it !in knownServiceIds }.distinct()
 
     /**

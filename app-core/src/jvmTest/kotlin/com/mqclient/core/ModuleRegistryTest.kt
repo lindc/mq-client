@@ -60,17 +60,17 @@ class ModuleRegistryTest {
 
         assertEquals(
             listOf("kafk"),
-            ModuleRegistry.unknownUiServiceIds(known, listOf("ibm-mq", "kafk", "kafka")),
+            ModuleRegistry.unknownUIServiceIds(known, listOf("ibm-mq", "kafk", "kafka")),
             "拼错的名字必须被指出来，其余不受影响",
         )
         assertEquals(
             listOf("ghost"),
-            ModuleRegistry.unknownUiServiceIds(known, listOf("ghost", "ghost")),
+            ModuleRegistry.unknownUIServiceIds(known, listOf("ghost", "ghost")),
             "重复的名字只报一次",
         )
         assertEquals(
             emptyList(),
-            ModuleRegistry.unknownUiServiceIds(known, listOf("ibm-mq", "kafka")),
+            ModuleRegistry.unknownUIServiceIds(known, listOf("ibm-mq", "kafka")),
         )
     }
 

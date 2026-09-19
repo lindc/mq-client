@@ -48,7 +48,7 @@ import com.mqclient.core.ConnectionStatus
 
 /**
  * What a tree entry points at. `objectType == null` selects the connection's
- * overview (its [com.mqclient.core.BusinessUi] contribution); a non-null type
+ * overview (its [com.mqclient.core.AdapterUI] contribution); a non-null type
  * selects the object workspace of that kind.
  */
 data class NavSelection(val connectionId: String, val objectType: String? = null)

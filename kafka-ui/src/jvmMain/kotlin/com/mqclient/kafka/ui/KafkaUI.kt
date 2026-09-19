@@ -22,9 +22,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.mqclient.core.BusinessUi
+import com.mqclient.core.AdapterUI
 
-class KafkaUi : BusinessUi {
+class KafkaUI : AdapterUI {
     override val serviceId = "kafka"
     override val title = "Kafka"
     override val content: @Composable () -> Unit = { KafkaDemo() }

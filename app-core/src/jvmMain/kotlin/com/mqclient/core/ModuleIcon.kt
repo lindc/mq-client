@@ -4,7 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.painter.Painter
 
 /**
- * 业务模块图标的 SPI（与 [BusinessUi] 平行但更轻）：每个 `*-ui` 模块把自己品牌
+ * 业务模块图标的 SPI（与 [AdapterUI] 平行但更轻）：每个 `*-ui` 模块把自己品牌
  * 图标的 drawable 与 [painter] 一起带在**自己模块里**，注册在
  * `META-INF/services/com.mqclient.core.ModuleIcon`。
  *

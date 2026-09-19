@@ -4,7 +4,7 @@ import androidx.compose.runtime.Composable
 
 /**
  * 「新建连接」第二步的创建表单，由各 `*-ui` 模块提供（SPI 注册，与
- * [BusinessUi] / [ModuleIcon] 并列）。
+ * [AdapterUI] / [ModuleIcon] 并列）。
  *
  * 分工：**面板内的一切归模块** —— 字段、布局、校验、错误展示、落盘（模块自己调
  * 对应的 repository）；宿主（app-ui 的对话框）只提供容器、导航和「完成」按钮。

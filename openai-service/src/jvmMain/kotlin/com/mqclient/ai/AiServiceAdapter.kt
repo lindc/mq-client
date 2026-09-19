@@ -8,7 +8,7 @@ import com.mqclient.core.ServiceAdapter
  * 硬编码的类目清单。
  *
  * 纯描述性：AI 有自己的适配器注册表（[AiAdapterRegistry]），这里 initialize /
- * dispose 用默认空实现，不重复一条生命周期。没有对应的 [com.mqclient.core.BusinessUi]
+ * dispose 用默认空实现，不重复一条生命周期。没有对应的 [com.mqclient.core.AdapterUI]
  * 是合法的（service 没有界面不算错误，见 ModuleRegistry 的说明）。
  */
 class AiServiceAdapter : ServiceAdapter {
