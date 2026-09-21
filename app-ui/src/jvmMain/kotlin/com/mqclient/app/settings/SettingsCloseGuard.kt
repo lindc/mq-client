@@ -13,7 +13,7 @@ import androidx.compose.runtime.setValue
  *    用户在确认弹窗里选：[discardChanges] / [saveSucceeded] 关，
  *    [saveFailed] / [keepEditing] 留。
  *
- * 独立成类是为了脱离 Composable 直接单测（同 [com.mqclient.aipanel.AiPanelState]
+ * 独立成类是为了脱离 Composable 直接单测（同 [com.mqclient.aiui.AiPanelState]
  * 的做法）；用 mutableStateOf 让 UI 直接观察状态变化。
  */
 internal class SettingsCloseGuard(private val onClose: () -> Unit) {

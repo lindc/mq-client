@@ -33,7 +33,8 @@ dependencyResolutionManagement {
 include(
     ":app-core",
     ":app-ui",
-    ":ai-panel",
+    ":ai-ui",
+    ":ai-service",
     ":ui-common",
     ":openai-service",
     ":openai-ui",

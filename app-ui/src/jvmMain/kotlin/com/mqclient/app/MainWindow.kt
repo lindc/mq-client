@@ -39,9 +39,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.mqclient.aipanel.AiContext
-import com.mqclient.aipanel.AiPanel
-import com.mqclient.aipanel.AiPanelState
+import com.mqclient.aiui.AiContext
+import com.mqclient.aiui.AiPanel
+import com.mqclient.aiui.AiPanelState
 import com.mqclient.core.ConnectionInfo
 import com.mqclient.core.ModuleRegistry
 

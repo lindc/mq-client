@@ -23,9 +23,9 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.dp
-import com.mqclient.aipanel.AiChatPersistence
-import com.mqclient.aipanel.AiContext
-import com.mqclient.aipanel.rememberAiPanelState
+import com.mqclient.aiservice.AiChatPersistence
+import com.mqclient.aiui.AiContext
+import com.mqclient.aiui.rememberAiPanelState
 import com.mqclient.core.AiConnectionRepository
 import com.mqclient.core.Config
 import com.mqclient.core.ConfigStore

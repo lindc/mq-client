@@ -25,7 +25,9 @@ kotlin {
             implementation(projects.uiCommon)
 
             // Right-side AI assistant panel.
-            implementation(projects.aiPanel)
+            implementation(projects.aiUi)
+            // AI 落库（ai_connection / chat_history）——bootstrapEvents 里注册订阅。
+            implementation(projects.aiService)
 
             // OpenAI-compatible AI adapter module (:openai-service) — adapter, registry
             // and provider descriptors live there; the connection model is in app-core.
