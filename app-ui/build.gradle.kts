@@ -17,7 +17,6 @@ kotlin {
             implementation(libs.nucleus.window)
             implementation(libs.nucleus.application)
             implementation(libs.material.kolor)
-            implementation(libs.compose.data.viz)
             implementation(compose.material3)
             implementation(compose.components.resources)
 

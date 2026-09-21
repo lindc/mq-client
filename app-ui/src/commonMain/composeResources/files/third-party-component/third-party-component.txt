@@ -1,6 +1,9 @@
 compose-multiplatform,Apache License 2.0," Copyright 2020-2021 JetBrains s.r.o.
 (https://github.com/JetBrains/compose-multiplatform)"
 
+Kuiver,Apache License 2.0,, "Copyright 2025 Denis Koljada.
+(https://github.com/justdeko/kuiver)"
+
 LxgwWenKai,SIL Open Font License 1.1,"Copyright 2024 The LXGW WenKai Project Authors
 (https://github.com/lxgw/LxgwWenkaiTC)"
 

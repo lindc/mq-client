@@ -15,6 +15,8 @@ kotlin {
             implementation(libs.compose.runtime)
             implementation(libs.compose.foundation)
             implementation(compose.material3)
+            // Kuiver — Compose Multiplatform UI 组件库.
+            implementation(libs.kuiver)
             // Compose resources packaging (i18n JSON tables under
             // composeResources/files/i18n/).
             implementation(compose.components.resources)

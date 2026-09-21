@@ -12,10 +12,10 @@ sqldelight = "2.3.2"
 kotlinxCoroutines = "1.10.2"
 # Ktor — HTTP/SSE client for the AI adapter module (:openai-service).
 ktor = "3.2.3"
-# Compose 图表/数据可视化库 (charts, graphs).
-composeDataViz = "0.1.66"
 # Ktoml — TOML 编解码，配置文件 config.toml 的读写。
 ktoml = "0.7.1"
+# Kuiver — Compose Multiplatform UI 组件库。
+kuiver = "0.4.2"
 
 [libraries]
 # Compose Multiplatform
@@ -32,9 +32,6 @@ nucleus-application = { module = "dev.nucleusframework:nucleus.nucleus-applicati
 
 # Material You dynamic color for Compose Multiplatform
 material-kolor = { module = "com.materialkolor:material-kolor", version.ref = "materialKolor" }
-
-# Compose 数据可视化 (图表组件)
-compose-data-viz = { module = "io.github.3moly:compose-data-viz", version.ref = "composeDataViz" }
 
 # JSON serialization for the AI panel's settings / message-history files.
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
@@ -62,6 +59,9 @@ sqldelight-coroutines = { module = "app.cash.sqldelight:coroutines-extensions", 
 # runtime 依赖，编译期要单独引）。
 ktoml-core = { module = "com.akuleshov7:ktoml-core-jvm", version.ref = "ktoml" }
 ktoml-file = { module = "com.akuleshov7:ktoml-file-jvm", version.ref = "ktoml" }
+
+# Kuiver — Compose Multiplatform UI 组件库.
+kuiver = { module = "io.github.justdeko:kuiver", version.ref = "kuiver" }
 
 [plugins]
 kotlinMultiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
