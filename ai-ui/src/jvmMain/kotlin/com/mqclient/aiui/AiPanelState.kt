@@ -18,6 +18,7 @@ import com.mqclient.core.AiConfig
 import com.mqclient.core.AiConnection
 import com.mqclient.core.ConfigStore
 import com.mqclient.core.CoreModule
+import com.mqclient.core.log.Log
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -32,11 +33,17 @@ import kotlinx.coroutines.launch
  * The dropdown lists the enabled entries of [AiConfig.connections]; the
  * [activeConnection] is whatever connection matches [AiConfig.activeConnectionId]
  * (or the first enabled one if nothing's set).
+ *
+ * ### 会话缓存：按连接隔离
+ *
+ * 每个连接一份自己的消息列表（[messagesByConnection]），切换连接 = 切换展示的列表，
+ * **不同连接的消息绝不混在一起**。历史从 chat_history 表的加载只发生在「往该连接
+ * **发第一条消息之前**」且每连接一次（[ensureHistoryLoaded]）——打开面板、切换连接
+ * 都不读库，没有连接的 cache 就以空列表呈现。
  */
 @Stable
 class AiPanelState internal constructor(
     initialConfig: AiConfig,
-    initialMessages: List<AiMessage>,
     private val chat: ChatService,
     private val scope: CoroutineScope,
 ) {
@@ -44,18 +51,26 @@ class AiPanelState internal constructor(
         private set
 
     /**
-     * 当前会话的全部消息（含正在流式追加的那一条）。
-     *
-     * 底层是 [SnapshotStateList]：流式时每个分片只改「那一条」的下标，读它的气泡才会
-     * 重组 —— 之前每个分片都 `messages.toMutableList()` 复制整段历史再整体替换，
-     * 整棵消息列表（每个气泡）都会被重算。
+     * 按连接隔离的会话消息缓存：connectionId → 该连接的全部消息（含正在流式追加的
+     * 那一条）。列表底层是 [SnapshotStateList]：流式时每个分片只改「那一条」的下标，
+     * 只有读它的气泡重组。
      */
-    private val messageList: SnapshotStateList<AiMessage> = mutableStateListOf<AiMessage>().apply {
-        addAll(initialMessages)
-    }
+    private val messagesByConnection = mutableMapOf<String, SnapshotStateList<AiMessage>>()
 
-    /** 消息的只读视图。内容随状态变化，不要把它缓存下来。 */
-    val messages: List<AiMessage> get() = messageList
+    /** 已经从 DB 加载过历史的连接（每连接只读一次；读失败也标记，避免每次发送都重试）。 */
+    private val historyLoaded = mutableSetOf<String>()
+
+    /** 取某连接的会话列表（没有就建一份空的）。 */
+    private fun listFor(connectionId: String): SnapshotStateList<AiMessage> =
+        messagesByConnection.getOrPut(connectionId) { mutableStateListOf() }
+
+    /** 当前激活连接的会话列表；没有激活连接时为空。 */
+    private fun activeList(): SnapshotStateList<AiMessage> =
+        activeConnection?.id?.let { listFor(it) } ?: mutableStateListOf()
+
+    /** 当前展示的消息（= 激活连接自己的缓存）。内容随状态变化，不要缓存引用。 */
+    val messages: List<AiMessage>
+        get() = activeConnection?.id?.let { messagesByConnection[it] } ?: emptyList()
 
     /** Id of the assistant message currently being streamed, or null. */
     var streamingMessageId: String? by mutableStateOf(null)
@@ -76,14 +91,6 @@ class AiPanelState internal constructor(
         private set
 
     val isStreaming: Boolean get() = streamingMessageId != null
-
-    // ---- 历史加载（来源：chat_history 表，按当前激活连接） ----
-
-    /** 已经把哪个连接的历史灌进了 [messageList]；null 表示还没加载过。 */
-    private var loadedConnectionId: String? = null
-
-    /** 流式进行中切了连接：结束（成功/失败/取消）后补加载新连接的历史。 */
-    private var pendingReload: Boolean = false
 
     /** 面板连接下拉的候选：配置里启用的连接。 */
     val connections: List<AiConnection> get() = config.connections.filter { it.enabled }
@@ -108,28 +115,24 @@ class AiPanelState internal constructor(
      * 走 [ConfigStore.editConfig]（原子的读-改-写）而不是「load 再 save」两步：两步
      * 之间的窗口里 [com.mqclient.core.ConnectionStore] 的一次保存会把它整段覆盖。
      * 读不出来时 [ConfigStore.editConfig] 一个字节都不写，只改内存值，并把原因交给
-     * [panelError]。
+     * [panelError]。切换连接不需要任何加载动作 —— 展示列表本来就是按连接缓存的。
      */
     fun updateConfig(transform: (AiConfig) -> AiConfig) {
-        val previousActiveId = activeConnection?.id
         val next = transform(config)
         config = next
         ConfigStore.editConfig { current -> Result.success(current.copy(ai = next)) }
             .onFailure { error ->
                 panelError = "设置保存失败：${error.message ?: error.javaClass.simpleName}"
             }
-        // 面板内切换连接：历史按连接走，切了人就换一份。
-        if (activeConnection?.id != previousActiveId) requestHistoryReload()
     }
 
     /**
      * 外部（设置对话框）传来的新配置：只同步内存值，**不落盘** —— 盘上已经是新值了
-     * （那条路径自己写过 config.toml）。激活连接被换掉的话历史同样要重载。
+     * （那条路径自己写过 config.toml）。激活连接即使被换掉也不用加载 —— 缓存按
+     * connectionId 取，第一次发送时才读历史。
      */
     fun applyConfig(config: AiConfig) {
-        val previousActiveId = activeConnection?.id
         this.config = config
-        if (activeConnection?.id != previousActiveId) requestHistoryReload()
     }
 
     /** 关闭失败提示条。 */
@@ -141,11 +144,17 @@ class AiPanelState internal constructor(
      * Sends [text] as a user message, then kicks off a streaming reply.
      * No-op if [text] is blank, a previous turn is still streaming, or no
      * provider has been configured yet.
+     *
+     * 历史加载只发生在这里：发送前若该连接的历史还没进过缓存，先读一次
+     * chat_history（[ensureHistoryLoaded]），保证发给模型的上下文完整。
      */
     fun sendUserMessage(text: String, context: AiContext?) {
         val trimmed = text.trim()
         if (trimmed.isEmpty() || isStreaming) return
         val connection = activeConnection ?: return
+        // 列表与消息都在入口定死：流式期间用户切换连接，追加仍然落在发起的那条
+        // 连接自己的列表里 —— 两个连接的消息互不串。
+        val list = listFor(connection.id)
 
         val userMsg = AiMessage(
             id = newId(),
@@ -155,7 +164,6 @@ class AiPanelState internal constructor(
         )
         // 落库的 question 是「含包装上下文」的 wire 版本（与发给模型的一致）。
         val question = userMsg.copy(content = buildContextPrefix(context)?.let { "$it\n\n$trimmed" } ?: trimmed)
-        val historyForCall = messages + question
 
         val assistantMsg = AiMessage(
             id = newId(),
@@ -163,11 +171,17 @@ class AiPanelState internal constructor(
             content = "",
             timestamp = System.currentTimeMillis(),
         )
-        messageList.add(userMsg)
-        messageList.add(assistantMsg)
+        // 同步占位：双击的第二次点击必须被 isStreaming 挡在门外。
         streamingMessageId = assistantMsg.id
 
         streamingJob = scope.launch {
+            // 发消息之前才读一次历史（每连接一次，之后走缓存）。
+            ensureHistoryLoaded(connection.id, list)
+            // 给模型的上下文 = 缓存里的全部消息 + 本条的 wire 版本。
+            val historyForCall = list + question
+            list.add(userMsg)
+            list.add(assistantMsg)
+
             // onChunk 可能来自任意线程（真实 provider 会从 HTTP/SSE 回调），而 Compose
             // 状态只能在面板自己的调度器上写。用一条无界 channel 把分片转进本协程里串行
             // 追加：顺序天然保真，写状态的一定是面板的调度器。
@@ -187,12 +201,12 @@ class AiPanelState internal constructor(
                 }
                 for (chunk in chunks) {
                     if (startedAt == null) startedAt = System.currentTimeMillis()
-                    appendToMessage(assistantMsg.id, chunk)
+                    appendToMessage(list, assistantMsg.id, chunk)
                 }
                 // 生产端的异常在这里浮上来（join 不会重抛，await 会）。
                 val result = producer.await()
                 finishedAt = System.currentTimeMillis()
-                val reply = messageList.lastOrNull { it.id == assistantMsg.id }?.content.orEmpty()
+                val reply = list.lastOrNull { it.id == assistantMsg.id }?.content.orEmpty()
                 emitChatSaved(
                     connection = connection,
                     question = question.content,
@@ -230,12 +244,8 @@ class AiPanelState internal constructor(
                 // 一个字都没流出来就撤掉空气泡：出错时提示条已经说明了原因；被取消时
                 // 更不该留一条空回复 —— 下一轮会被当成 history 又发给模型。流了一半的
                 // 要保留，那是用户点「停止」之前看到的。
-                if (messageList.lastOrNull { it.id == assistantMsg.id }?.content.isNullOrEmpty()) {
-                    messageList.removeAll { it.id == assistantMsg.id }
-                }
-                if (pendingReload) {
-                    pendingReload = false
-                    requestHistoryReload()
+                if (list.lastOrNull { it.id == assistantMsg.id }?.content.isNullOrEmpty()) {
+                    list.removeAll { it.id == assistantMsg.id }
                 }
             }
         }
@@ -258,21 +268,22 @@ class AiPanelState internal constructor(
      * 不更新），没有评价的位置 —— 重启后评价丢失是计划内的取舍。
      */
     fun recordFeedback(messageId: String, useful: Boolean?) {
-        val idx = messageList.indexOfLast { it.id == messageId }
+        val list = activeList()
+        val idx = list.indexOfLast { it.id == messageId }
         if (idx < 0) return
-        val current = messageList[idx]
+        val current = list[idx]
         if (current.feedback == useful) return
         // 只改这一条的下标：别的气泡不会因此重组。
-        messageList[idx] = current.copy(feedback = useful)
+        list[idx] = current.copy(feedback = useful)
     }
 
     /**
-     * 清空对话：内存列表立即清；当前连接在 chat_history 表里的记录一并删除
+     * 清空对话：当前连接的内存列表立即清；chat_history 表里该连接的记录一并删除
      * （审计表只在这个**用户显式动作**和保留天数清理时才允许 DELETE）。
      */
     fun clearHistory() {
-        messageList.clear()
         val connectionId = activeConnection?.id ?: return
+        listFor(connectionId).clear()
         scope.launch {
             runCatching { ChatHistoryRepository.deleteByConnectionId(connectionId) }
                 .onFailure { error ->
@@ -281,40 +292,25 @@ class AiPanelState internal constructor(
         }
     }
 
-    // ---------------------------- 历史（DB） ----------------------------
+    // ---------------------------- 历史加载（发消息前） ----------------------------
 
     /**
-     * 把当前激活连接的历史从 chat_history 表灌进面板（面板打开时与切换连接时调）。
+     * 确保该连接的历史已在缓存里：每连接**只读一次** DB（[historyLoaded] 去重，读
+     * 失败同样标记 —— 缺历史比反复弹错好）。其余场景（打开面板 / 切换连接）都直接
+     * 走缓存，不触发任何 DB 访问。
      *
-     *  - 流式中跳过：流出来的分片正在追加，重灌会把它冲掉；记 [pendingReload]，
-     *    流结束的 finally 里补。
-     *  - 加载期间用户又切了连接：按 [loadedConnectionId] 弃掉过期结果。
-     *  - FAILED 记录只进审计，不进对话流（也不会被当 history 发给模型）。
+     * 历史行按时间正序展开（question→USER、reply→ASSISTANT）追加进该连接自己的
+     * 列表；FAILED 记录只进审计，不进对话流（也不会被当 history 发给模型）。
      */
-    fun requestHistoryReload() {
-        val connectionId = activeConnection?.id
-        if (connectionId == null) {
-            loadedConnectionId = null
-            messageList.clear()
-            return
-        }
-        if (connectionId == loadedConnectionId) return
-        if (isStreaming) {
-            pendingReload = true
-            return
-        }
-        loadedConnectionId = connectionId
-        messageList.clear()
-        scope.launch {
-            val rows = runCatching {
-                ChatHistoryRepository.getRecent(connectionId, limit = config.historyLimit.toLong())
-            }.onFailure { error ->
-                CoreModule.reportError(message = "AI 对话历史读取失败", source = SOURCE_TAG, error = error)
-            }.getOrDefault(emptyList())
-            // 加载期间又切了连接（或又发起了加载）：这批结果已经过期。
-            if (loadedConnectionId != connectionId) return@launch
-            messageList.addAll(rows.toAiMessages())
-        }
+    private suspend fun ensureHistoryLoaded(connectionId: String, list: SnapshotStateList<AiMessage>) {
+        if (!historyLoaded.add(connectionId)) return
+        val rows = runCatching {
+            ChatHistoryRepository.getRecent(connectionId, limit = config.historyLimit.toLong())
+        }.onFailure { error ->
+            // 读取失败不弹全局错误框（非关键后台数据，缺了不影响发消息），降级为日志。
+            Log.warn(SOURCE_TAG, "failed to load chat history: $error")
+        }.getOrDefault(emptyList())
+        list.addAll(rows.toAiMessages())
     }
 
     /** 审计行 → 面板消息：按时间正序展开，question→USER、reply→ASSISTANT。 */
@@ -381,11 +377,11 @@ class AiPanelState internal constructor(
         )
     }
 
-    private fun appendToMessage(messageId: String, chunk: String) {
-        val idx = messageList.indexOfLast { it.id == messageId }
+    private fun appendToMessage(list: SnapshotStateList<AiMessage>, messageId: String, chunk: String) {
+        val idx = list.indexOfLast { it.id == messageId }
         if (idx < 0) return
         // 只改这一条：列表身份不变，只有读它的气泡重组。
-        messageList[idx] = messageList[idx].copy(content = messageList[idx].content + chunk)
+        list[idx] = list[idx].copy(content = list[idx].content + chunk)
     }
 
     /** Builds a `[CONTEXT] k=v =` prefix from the current selection, or null if nothing to attach. */
@@ -404,26 +400,24 @@ class AiPanelState internal constructor(
 
 /**
  * Compose entry point. Wires the persisted [AiConfig] into a stable
- * [AiPanelState] tied to the local coroutine scope; history comes from the
- * chat_history table via [AiPanelState.requestHistoryReload].
+ * [AiPanelState] tied to the local coroutine scope. History is NOT loaded here —
+ * each connection's chat log is read from chat_history once, right before the
+ * first message is sent to it (see [AiPanelState.sendUserMessage]).
  */
 @Composable
 fun rememberAiPanelState(initialConfig: AiConfig = ConfigStore.loadConfig().ai): AiPanelState {
     val scope = rememberCoroutineScope()
     // 刻意不给 remember 带 key：带上 initialConfig 会在每次保存设置时重建 state ——
     // 正在流式的回复被遗弃在旧对象上（新 state 的 streamingMessageId 为空，界面看上去
-    // 停止了、用户还能再点发送 → 两个流并发），聊天记录也会被重新读库覆盖。
+    // 停止了、用户还能再点发送 → 两个流并发），按连接缓存的会话列表也会跟着丢。
     val state = remember {
         AiPanelState(
             initialConfig = initialConfig,
-            initialMessages = emptyList(),
             chat = AdapterChatService(),
             scope = scope,
         )
     }
-    // 历史从 chat_history 表加载（DB 访问走 withDriver 的单槽 IO 调度器，不占 UI 线程）。
-    LaunchedEffect(Unit) { state.requestHistoryReload() }
-    // 设置保存后把新配置同步进来（只赋值，不再写盘）；激活连接变了会顺带重载历史。
+    // 设置保存后把新配置同步进来（只赋值，不再写盘）。
     LaunchedEffect(initialConfig) { state.applyConfig(initialConfig) }
     return state
 }

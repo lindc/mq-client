@@ -98,7 +98,8 @@ class AiPanelStateTest {
 
         state.sendUserMessage("你好", null)
         // 等第一个分片真的追加进气泡：抢在它之前取消的话一个字都还没落地。
-        withTimeout(2_000) { while (state.messages.last().content.isEmpty()) delay(5) }
+        // （消息在 sendUserMessage 协程里、历史加载完成之后才追加，列表可能短暂为空。）
+        withTimeout(2_000) { while (state.messages.isEmpty() || state.messages.last().content.isEmpty()) delay(5) }
         assertTrue(state.isStreaming, "回复没结束前应该在流式")
 
         state.cancelStreaming()
@@ -114,7 +115,6 @@ class AiPanelStateTest {
         chat: ChatService = MockChatService(),
     ): AiPanelState = AiPanelState(
         initialConfig = config,
-        initialMessages = emptyList(),
         chat = chat,
         scope = CoroutineScope(SupervisorJob()),
     )
