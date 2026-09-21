@@ -77,27 +77,7 @@ object EventNames {
     /** 连接删除落盘成功后；payload: `connectionId` / `type` / `name`。模块订阅它来清理自己的数据。 */
     const val CONNECTION_DELETED = "core.connection.deleted"
 
-    // ---- AI 事件 ----
-    //
-    // 按命名约定这些名字本该放 AI 模块自己的常量文件，但 AI 连接的数据层
-    // （AiConnectionRepository）在 core 里、是快照事件的发出方，依赖方向不允许
-    // core 反向引用 ai-panel —— 常量跟着发出方走。
-    // 消费方是 ai-panel 的落库订阅（ai_connection / chat_history 两张表，SQLite）。
-
-    /**
-     * AI 连接快照已创建。只在「新建连接」或「service_url 变化」（后者会废弃旧连接、
-     * 换发新 connectionId 写入）后发出；改 model / token / name / 提示词不发。
-     * payload: `connectionId`(String) / `prevId`(String?，url 变化时为旧连接的 UUID，
-     * 全新建为 null) / `serviceUrl`(String)。
-     */
-    const val AI_CONNECTION_SNAPSHOT_CREATED = "ai.connection.snapshot.created"
-
-    /**
-     * AI 对话已完成（成功或失败），请求落一条 chat_history 审计记录。
-     * payload: `connectionId`(String) / `modelName`(String) / `question`(String) /
-     * `reply`(String?) / `tokenCount`(Int) / `promptTokens`(Int) / `completionTokens`(Int) /
-     * `createdTime`(Long) / `startedTime`(Long?) / `finishedTime`(Long?) /
-     * `status`(String: SUCCESS|FAILED) / `errorMessage`(String?) / `finishReason`(String?)。
-     */
-    const val AI_CHAT_HISTORY_SAVE = "ai.chat.history.save"
+    // AI 事件（`ai.*`）不在这里：契约常量跟着发出方走，现在在 ai-service 的
+    // `AiEvents`（事件名）与 `AiPayloadKeys`（payload key）里 —— core 不再持有任何 AI 名字。
 }
+

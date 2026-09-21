@@ -4,8 +4,8 @@ import com.mqclient.ai.AiAdapterRegistry
 import com.mqclient.ai.AiChatMessage
 import com.mqclient.ai.AiException
 import com.mqclient.ai.AiRole
+import com.mqclient.aiservice.DEFAULT_SYSTEM_PROMPT
 import com.mqclient.core.AiConnection
-import com.mqclient.core.DEFAULT_SYSTEM_PROMPT
 import kotlinx.coroutines.flow.collect
 
 /**

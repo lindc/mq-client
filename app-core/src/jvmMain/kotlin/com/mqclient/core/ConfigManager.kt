@@ -55,7 +55,7 @@ object ConfigManager {
      * 整个配置目录的进程内锁。
      *
      * 必须只有一把：`config.toml` 是**一份**文件，`connections` 与 `ai` 都在里面，
-     * 而写入方（[ConnectionStore]、[AiConnectionRepository]、设置对话框）写的都是
+     * 而写入方（[ConnectionStore]、AI 模块自己的连接仓库、设置对话框）写的都是
      * 「读整份 → 改一段 → 写回」。两把锁各自管住自己的一步、管不住两步之间的时间窗，
      * 那个窗口里另一个写入者插进来就会被后写的那次整段覆盖 —— 丢的不是某个字段，
      * 是一整段连接列表。
@@ -132,23 +132,26 @@ object ConfigManager {
             } else {
                 importLegacyConnectionsIfAny()
             }
-            migrateAiConnectionsIfNeeded()
+            migrateModuleSections()
         }
     }
 
     /**
-     * AI 连接模型的一次性升级：旧 `ai.providerConfigs`（per-provider 单槽）折叠成
-     * `ai.connections`（多条连接）。已迁移过则零开销；配置读不出来时跳过（下次启动
-     * 再试）。迁移规则本身在 [AiConnectionRepository]（AI 域），这里只负责把它挂到
-     * 启动路径上。
+     * 让各模块迁移自己在 config.toml 里的段（SPI：`ConfigMigration`）。
+     *
+     * 模块侧是**纯函数**（只改 [Config]，不落盘、不发事件、不碰数据库 —— 此刻
+     * `CoreModule` / `DatabaseManager` 都还没初始化）；写盘由这里统一做，和本类的
+     * 读-改-写共享同一个临界区，所以模块之间、以及模块与其它写入者之间都不会互相覆盖。
+     *
+     * 只有某个模块返回了**新对象**（引用变了）才保存，一个都没改动时一个字节都不写；
+     * 配置读不出来时整块跳过（下次启动再试）—— 绝不拿默认值覆盖磁盘上的真实配置。
      */
-    private fun migrateAiConnectionsIfNeeded() {
+    private fun migrateModuleSections() {
         val current = loadOrNull() ?: return
-        val migrated = AiConnectionRepository.migrateIfNeeded(current.ai)
-        if (migrated !== current.ai) {
-            save(current.copy(ai = migrated)).onFailure { error ->
-                Log.warn(LOG_TAG, "failed to persist migrated AI connections (retry next launch): $error")
-            }
+        val migrated = ModuleRegistry.runConfigMigrations(current)
+        if (migrated === current) return
+        save(migrated).onFailure { error ->
+            Log.warn(LOG_TAG, "failed to persist module config migrations (retry next launch): $error")
         }
     }
 

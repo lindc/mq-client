@@ -1,25 +1,30 @@
-package com.mqclient.core
+package com.mqclient.aiservice
 
-import com.mqclient.core.event.EventNames
+import com.mqclient.core.AiConfig
+import com.mqclient.core.AiConnection
+import com.mqclient.core.AiProviderConfig
+import com.mqclient.core.ConfigStore
+import com.mqclient.core.CoreModule
 import com.mqclient.core.log.Log
 import java.util.Base64
 import java.util.UUID
 
-/** 本组件的日志 tag；与上报错误的 source（`core.ai`）同一命名。 */
-private const val LOG_TAG = "core.ai"
+/** 本模块的日志 tag；与上报错误的 source（`ai`）同一命名。 */
+private const val LOG_TAG = "ai"
 
 /**
- * AI 连接的持久化入口（读写 `config.toml` 的 `ai` 段），风格对齐 [ConnectionStore]：
+ * AI 连接的持久化入口（读写 `config.toml` 的 `ai` 段），风格对齐 core 的 `ConnectionStore`：
  *
  *  - **读**走 [load]：配置读不出来时以 failure 返回 + 错误通道上报，绝不假装
  *    「没有连接」（那会让界面上的连接凭空消失）；
  *  - **写**走 [save] / [create] / [update] / [delete]：读-改-写整份 config.toml，
  *    其它配置段原样保留，落盘失败以 failure 返回；四个方法都是原子的（校验与落盘
- *    在同一个临界区里，见下面的注释）—— 否则和 [ConnectionStore] 并发写会互相覆盖；
+ *    在同一个临界区里，见下面的注释）—— 否则和 core 的 `ConnectionStore` 并发写会互相覆盖；
  *  - **迁移**：[migrateIfNeeded] 把旧模型（`ai.providerConfigs`，per-provider
- *    单槽）一次性折叠成连接列表，由 `ConfigManager.initOnStartup` 在启动时调用。
+ *    单槽）一次性折叠成连接列表；由 [AiConfigMigration] 经 core 的配置迁移钩子
+ *    （`ConfigMigration` SPI）在启动早期调用，不依赖本模块已被初始化。
  *
- * token 的加解密由 [ConfigManager] 的名字匹配规则承担（字段名含 "token"），
+ * token 的加解密由 core 的 `ConfigManager` 的名字匹配规则承担（字段名含 "token"），
  * 这里读写到的永远是明文。
  */
 object AiConnectionRepository {
@@ -29,8 +34,8 @@ object AiConnectionRepository {
     /**
      * 读连接列表。
      *
-     * 失败语义与 [ConnectionStore.loadConnections] 一致：文件不存在（首次启动）→
-     * 空列表，正常；文件在但读不出来 → failure，同时通过 [CoreModule.reportError]
+     * 失败语义与 core 的 `ConnectionStore.loadConnections` 一致：文件不存在（首次启动）→
+     * 空列表，正常；文件在但读不出来 → failure，同时通过 `CoreModule.reportError`
      * 上报，让调用方和用户都能知道。
      */
     fun load(): Result<List<AiConnection>> {
@@ -49,7 +54,7 @@ object AiConnectionRepository {
     /* -------------------------------- 写 -------------------------------- */
 
     /**
-     * 四个写方法全走 [ConfigStore.editConfig]（原子的读-改-写）：校验与落盘在**同一
+     * 四个写方法全走 `ConfigStore.editConfig`（原子的读-改-写）：校验与落盘在**同一
      * 个临界区**里完成。分开写（`loadConfigOrNull()` 校验 → `saveConfig()`）的话，
      * 两步之间的窗口里 [ConnectionStore] 的一次保存会把它整段覆盖掉。
      */
@@ -63,7 +68,7 @@ object AiConnectionRepository {
     /**
      * 新增一条连接；id 重复直接失败（和 [ConnectionStore.create] 同一约定）。
      *
-     * 落盘成功后广播 [EventNames.AI_CONNECTION_SNAPSHOT_CREATED]（新建必插快照，
+     * 落盘成功后广播 [AiEvents.AI_CONNECTION_SNAPSHOT_CREATED]（新建必插快照，
      * 见 ai-panel 落库订阅）—— 「新建连接」向导的写入口只有这里。
      */
     fun create(connection: AiConnection): Result<Unit> =
@@ -197,11 +202,11 @@ object AiConnectionRepository {
         val connection = candidate.connection
         // 总线未初始化（早期调用）时静默跳过：emit 本身非挂起、不阻塞保存路径。
         CoreModule.eventBusOrNull?.emit(
-            name = EventNames.AI_CONNECTION_SNAPSHOT_CREATED,
+            name = AiEvents.AI_CONNECTION_SNAPSHOT_CREATED,
             payload = mapOf(
-                "connectionId" to connection.id,
-                "prevId" to candidate.prevId,
-                "serviceUrl" to connection.baseUrl,
+                AiPayloadKeys.CONNECTION_ID to connection.id,
+                AiPayloadKeys.PREV_ID to candidate.prevId,
+                AiPayloadKeys.SERVICE_URL to connection.baseUrl,
             ),
             source = LOG_TAG,
         )

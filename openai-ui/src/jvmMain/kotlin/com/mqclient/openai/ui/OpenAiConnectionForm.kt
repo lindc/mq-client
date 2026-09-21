@@ -25,8 +25,8 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.mqclient.ai.AiAdapterRegistry
 import com.mqclient.ai.AiProviders
+import com.mqclient.aiservice.AiConnectionRepository
 import com.mqclient.core.AiConnection
-import com.mqclient.core.AiConnectionRepository
 import com.mqclient.core.ConnectionFormState
 import com.mqclient.core.ConnectionFormUi
 import com.mqclient.uicommon.LabeledField

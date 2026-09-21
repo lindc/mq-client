@@ -1,5 +1,12 @@
-package com.mqclient.core
+package com.mqclient.aiservice
 
+import com.mqclient.core.AiConfig
+import com.mqclient.core.AiConnection
+import com.mqclient.core.AiProviderConfig
+import com.mqclient.core.Config
+import com.mqclient.core.ConfigManager
+import com.mqclient.core.ConfigStore
+import com.mqclient.core.ConnectionInfo
 import java.io.File
 import java.nio.file.Files
 import java.util.Base64

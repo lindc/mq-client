@@ -103,8 +103,8 @@ enum class ThemeMode {
  * [connections] — one user-created connection per account / endpoint
  * (Provider + Connection model). Legacy pre-migration files instead carry
  * one [AiProviderConfig] slot per provider in [providerConfigs];
- * [AiConnectionRepository] folds them into [connections] on startup and
- * clears the old field.
+ * the AI module's startup migration (ai-service's `AiConnectionRepository`)
+ * folds them into [connections] and clears the old field.
  *
  * [historyLimit] governs how many past messages the panel loads from the
  * chat_history table on startup — defaults to 200 per the first-launch
@@ -123,8 +123,8 @@ data class AiConfig(
     val autoAttachContext: Boolean = true,
     /**
      * 旧模型：每个 Provider 一个配置槽（sparse）。
-     * @deprecated 已由 [connections] 取代；启动迁移（[AiConnectionRepository]）
-     * 读完后清空。不要在新代码里读写它。
+     * @deprecated 已由 [connections] 取代；启动迁移（ai-service 的 `AiConnectionRepository`，
+     * 经 core 的 `ConfigMigration` SPI 触发）读完后清空。不要在新代码里读写它。
      */
     val providerConfigs: List<AiProviderConfig> = emptyList(),
     /** Stable id of the active [AiConnection]; empty = first enabled connection. */
@@ -138,7 +138,7 @@ data class AiConfig(
  * （`openai` / `ollama` / `claude`）。
  *
  * @deprecated 由 [AiConfig.connections]（[AiConnection]）取代；仅作为迁移来源保留
- * （映射表见 [AiConnectionRepository]），迁移完成后被清空。
+ * （映射表见 ai-service 的 `AiConnectionRepository`），迁移完成后被清空。
  * [systemPromptBase64] 是老格式（Base64 存提示词）；新模型存明文。
  */
 @Serializable
@@ -241,11 +241,5 @@ const val FONT_SYSTEM_SANS: String = "system_sans"
 const val FONT_SYSTEM_SERIF: String = "system_serif"
 const val FONT_SYSTEM_MONO: String = "system_mono"
 
-/** Default system prompt — bilingual is fine here since users only see it in the settings dialog. */
-const val DEFAULT_SYSTEM_PROMPT: String =
-    "你是一个 MQ 管理助手,帮助用户排查消息队列问题、解释概念并生成安全的运维命令。" +
-        "回答简洁,中文输出,必要时给出可执行的步骤。"
-
-/** UTF-8 bytes of [DEFAULT_SYSTEM_PROMPT] → Base64. Computed once at class load. */
-val DEFAULT_SYSTEM_PROMPT_BASE64: String =
-    java.util.Base64.getEncoder().encodeToString(DEFAULT_SYSTEM_PROMPT.toByteArray(Charsets.UTF_8))
+// 默认系统提示词（DEFAULT_SYSTEM_PROMPT）已随 AI 域搬到 ai-service：
+// `com.mqclient.aiservice.DEFAULT_SYSTEM_PROMPT`（见 AiDefaults.kt）。

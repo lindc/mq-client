@@ -10,13 +10,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
+import com.mqclient.aiservice.AiEvents
+import com.mqclient.aiservice.AiPayloadKeys
 import com.mqclient.aiservice.db.Chat_history
 import com.mqclient.aiservice.db.ChatHistoryRepository
 import com.mqclient.core.AiConfig
 import com.mqclient.core.AiConnection
 import com.mqclient.core.ConfigStore
 import com.mqclient.core.CoreModule
-import com.mqclient.core.event.EventNames
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -360,21 +361,21 @@ class AiPanelState internal constructor(
     ) {
         // 总线未初始化（单测环境）时静默跳过：聊天不能因为审计缺席而受影响。
         CoreModule.eventBusOrNull?.emit(
-            name = EventNames.AI_CHAT_HISTORY_SAVE,
+            name = AiEvents.AI_CHAT_HISTORY_SAVE,
             payload = mapOf<String, Any?>(
-                "connectionId" to connection.id,
-                "modelName" to connection.model,
-                "question" to question,
-                "reply" to reply,
-                "tokenCount" to (result?.totalTokens ?: 0),
-                "promptTokens" to (result?.promptTokens ?: 0),
-                "completionTokens" to (result?.completionTokens ?: 0),
-                "createdTime" to createdAt,
-                "startedTime" to startedAt,
-                "finishedTime" to finishedAt,
-                "status" to status,
-                "errorMessage" to errorMessage,
-                "finishReason" to result?.finishReason,
+                AiPayloadKeys.CONNECTION_ID to connection.id,
+                AiPayloadKeys.MODEL_NAME to connection.model,
+                AiPayloadKeys.QUESTION to question,
+                AiPayloadKeys.REPLY to reply,
+                AiPayloadKeys.TOKEN_COUNT to (result?.totalTokens ?: 0),
+                AiPayloadKeys.PROMPT_TOKENS to (result?.promptTokens ?: 0),
+                AiPayloadKeys.COMPLETION_TOKENS to (result?.completionTokens ?: 0),
+                AiPayloadKeys.CREATED_TIME to createdAt,
+                AiPayloadKeys.STARTED_TIME to startedAt,
+                AiPayloadKeys.FINISHED_TIME to finishedAt,
+                AiPayloadKeys.STATUS to status,
+                AiPayloadKeys.ERROR_MESSAGE to errorMessage,
+                AiPayloadKeys.FINISH_REASON to result?.finishReason,
             ),
             source = SOURCE_TAG,
         )

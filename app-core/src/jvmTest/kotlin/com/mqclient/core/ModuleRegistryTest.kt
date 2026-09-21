@@ -1,5 +1,6 @@
 package com.mqclient.core
 
+import com.mqclient.core.spi.ConfigMigration
 import java.util.ServiceConfigurationError
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -94,6 +95,29 @@ class ModuleRegistryTest {
     @Test
     fun `empty service list groups to nothing`() {
         assertEquals(emptyMap(), ModuleRegistry.groupByCategory(emptyList()))
+    }
+
+    // ---------------------------------------------------------------- 配置迁移
+
+    @Test
+    fun `config migrations compose in order`() {
+        val bump = ConfigMigration { it.copy(metadata = it.metadata.copy(version = it.metadata.version + 1)) }
+
+        val migrated = ModuleRegistry.runConfigMigrations(Config(), listOf(bump, bump))
+
+        assertEquals(3, migrated.metadata.version, "两个迁移依次作用：默认 1 → 2 → 3")
+    }
+
+    @Test
+    fun `untouched config keeps its identity so nothing gets written`() {
+        val config = Config()
+        val noop = ConfigMigration { it }
+
+        assertTrue(ModuleRegistry.runConfigMigrations(config, emptyList()) === config, "没有迁移时不该换对象")
+        assertTrue(
+            ModuleRegistry.runConfigMigrations(config, listOf(noop, noop)) === config,
+            "迁移没改动时必须保住引用相等 —— core 靠它决定「一个字节都不写」",
+        )
     }
 
     // ---------------------------------------------------------------- 销毁

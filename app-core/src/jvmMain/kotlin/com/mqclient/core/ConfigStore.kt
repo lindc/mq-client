@@ -61,7 +61,7 @@ object ConfigStore {
      * 原子的读-改-写（[ConfigManager.edit]）：在锁内读 → 交给 [transform] 改 → 落盘。
      *
      * 「读一份配置、改一个段、再写回」的调用方（[saveConnections]、
-     * `AiConnectionRepository`、AI 面板的设置项）都必须走这里，而不是
+     * AI 模块的连接仓库、AI 面板的设置项）都必须走这里，而不是
      * [loadConfigOrNull] + [saveConfig] 两步 —— 那两步之间是另一个写入者的机会窗口，
      * 被插队就意味着整段配置被后写的那次覆盖掉。
      */

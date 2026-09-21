@@ -4,6 +4,7 @@ import com.mqclient.core.event.EventBus
 import com.mqclient.core.event.EventNames
 import com.mqclient.core.log.Log
 import com.mqclient.core.scheduler.JobScheduler
+import com.mqclient.core.spi.ConfigMigration
 import com.mqclient.core.spi.ServiceContext
 import java.util.ServiceLoader
 import kotlinx.coroutines.CoroutineScope
@@ -29,6 +30,25 @@ object ModuleRegistry {
 
     /** 各模块的新建连接表单（第二步面板，见 [ConnectionFormUi]）。 */
     val forms: List<ConnectionFormUi> by lazy { loadAll(ConnectionFormUi::class.java) }
+
+    /**
+     * 各模块的配置段迁移（见 [ConfigMigration]）。由 `ConfigManager.initOnStartup`
+     * 在启动早期触发 —— 那时 [initializeServices] 还没跑，所以迁移实现不能依赖任何
+     * 「模块已初始化」的状态。
+     */
+    internal val configMigrations: List<ConfigMigration> by lazy { loadAll(ConfigMigration::class.java) }
+
+    /**
+     * 依次跑各模块的配置迁移，返回迁移后的配置；返回**同一个引用**表示没有任何模块
+     * 改动过，调用方据此决定要不要落盘。
+     *
+     * [migrations] 可注入是为了可测（见 ModuleRegistryTest）：真实的 SPI 列表在测试环境
+     * 里取决于 classpath 上装了哪些模块。
+     */
+    internal fun runConfigMigrations(
+        config: Config,
+        migrations: List<ConfigMigration> = configMigrations,
+    ): Config = migrations.fold(config) { current, migration -> migration.migrate(current) }
 
     /**
      * 本次初始化过的模块：`initializeServices` 拿到的全量「适配器 + 它的模块 scope」

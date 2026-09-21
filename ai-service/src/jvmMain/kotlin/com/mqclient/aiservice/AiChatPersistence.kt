@@ -8,7 +8,6 @@ import com.mqclient.aiservice.handler.AiConnectionSnapshotHandler
 import com.mqclient.core.ConfigStore
 import com.mqclient.core.CoreModule
 import com.mqclient.core.database.DatabaseManager
-import com.mqclient.core.event.EventNames
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 
@@ -49,10 +48,10 @@ object AiChatPersistence {
         // on() 自带收集协程、默认挂在总线构造时的 app 级 scope 上 —— 正是这里想要的
         // 生命周期，不需要再包一层 launch。
         return listOf(
-            CoreModule.eventBus.on(EventNames.AI_CONNECTION_SNAPSHOT_CREATED) { event ->
+            CoreModule.eventBus.on(AiEvents.AI_CONNECTION_SNAPSHOT_CREATED) { event ->
                 snapshotHandler.handle(event)
             },
-            CoreModule.eventBus.on(EventNames.AI_CHAT_HISTORY_SAVE) { event ->
+            CoreModule.eventBus.on(AiEvents.AI_CHAT_HISTORY_SAVE) { event ->
                 chatHandler.handle(event)
             },
         )
