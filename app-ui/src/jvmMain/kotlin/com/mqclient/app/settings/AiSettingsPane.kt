@@ -43,11 +43,10 @@ import com.mqclient.uicommon.LabeledField
 import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.SettingsDropdownRow
 import com.mqclient.uicommon.i18n.stringResource
-import java.util.UUID
 import kotlinx.coroutines.launch
 
 /**
- * AI settings tab（Provider + Connection 模型）：连接选择器、「新建连接」、历史条数、
+ * AI settings tab（Provider + Connection 模型）：连接选择器、历史条数、
  * 附加上下文开关，以及**当前连接**的配置卡。
  *
  * 编辑风格与设置对话框一致：每次修改都把新的 [AiConnection] 经 [onChange] 写回草稿，
@@ -70,18 +69,6 @@ internal fun AiSettingsPane(
             connections = value.connections,
             activeId = activeConnection?.id,
             onPick = { id -> onChange(value.copy(activeConnectionId = id)) },
-            onCreate = {
-                // 新连接的默认值取第一个内置 Provider（注册表初始化即有，拿不到就留空由用户填）。
-                val provider = providers.firstOrNull()
-                val created = AiConnection(
-                    id = UUID.randomUUID().toString(),
-                    name = "连接 ${value.connections.size + 1}",
-                    providerId = provider?.id.orEmpty(),
-                    baseUrl = provider?.defaultBaseUrl.orEmpty(),
-                    model = provider?.defaultModels?.firstOrNull().orEmpty(),
-                )
-                onChange(value.copy(connections = value.connections + created, activeConnectionId = created.id))
-            },
         )
         Spacer(Modifier.height(16.dp))
 
@@ -169,25 +156,17 @@ private fun ConnectionPickerRow(
     connections: List<AiConnection>,
     activeId: String?,
     onPick: (String) -> Unit,
-    onCreate: () -> Unit,
 ) {
     val currentLabel = connections.firstOrNull { it.id == activeId }?.name
         ?: if (connections.isEmpty()) stringResource("ai_no_connections") else stringResource("ai_not_selected")
-    Column(modifier = Modifier.fillMaxWidth()) {
-        SettingsDropdownRow(
-            label = stringResource("ai_connection_label"),
-            currentLabel = currentLabel,
-            options = connections,
-            optionLabel = { it.name },
-            onPick = { onPick(it.id) },
-        )
-        Spacer(Modifier.height(8.dp))
-        PressableButton(
-            onClick = onCreate,
-            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-        ) { Text(stringResource("ai_connection_new")) }
-    }
+    // 新建连接统一走主菜单的「新建连接」向导（SPI 表单、落盘后重载），这里只负责选择。
+    SettingsDropdownRow(
+        label = stringResource("ai_connection_label"),
+        currentLabel = currentLabel,
+        options = connections,
+        optionLabel = { it.name },
+        onPick = { onPick(it.id) },
+    )
 }
 
 /* -------------------------------- Toggle row -------------------------------- */
