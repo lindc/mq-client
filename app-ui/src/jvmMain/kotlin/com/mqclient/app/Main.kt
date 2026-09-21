@@ -246,31 +246,38 @@ private fun AppRoot(bootConfig: Config, onExit: () -> Unit) {
                         // Returns null on success, or the reason the write
                         // failed — the dialog stays open and surfaces it.
                         onSave = { newConfig ->
-                            val failure = ConfigStore.saveConfig(newConfig).exceptionOrNull()
-                            if (failure == null) {
-                                // Only adopt the draft once it's on disk:
-                                // otherwise the UI would show settings the
-                                // next launch won't have.
-                                val previous = appConfig
-                                appConfig = newConfig
+                            // 无变更 = 保存成功但零副作用：不写盘、不发事件，
+                            // 只关对话框（把值改回去再点保存是最常见路径）。
+                            if (newConfig == appConfig) {
                                 showSettings = false
-                                // 广播设置变更（核心事件）：主题 / i18n / 需要重载配置的模块
-                                // 自己订阅就行，设置对话框不需要认识这些消费者。
-                                CoreModule.eventBus.emit(
-                                    name = EventNames.SETTINGS_CHANGED,
-                                    payload = mapOf("config" to newConfig),
-                                )
-                                if (previous.general.language != newConfig.general.language) {
-                                    CoreModule.eventBus.emit(
-                                        name = EventNames.LANGUAGE_CHANGED,
-                                        payload = mapOf("language" to newConfig.general.language),
-                                    )
-                                }
                                 null
                             } else {
-                                stringResource("settings_save_failed").format(
-                                    failure.message ?: failure.javaClass.simpleName,
-                                )
+                                val failure = ConfigStore.saveConfig(newConfig).exceptionOrNull()
+                                if (failure == null) {
+                                    // Only adopt the draft once it's on disk:
+                                    // otherwise the UI would show settings the
+                                    // next launch won't have.
+                                    val previous = appConfig
+                                    appConfig = newConfig
+                                    showSettings = false
+                                    // 广播设置变更（核心事件）：主题 / i18n / 需要重载配置的模块
+                                    // 自己订阅就行，设置对话框不需要认识这些消费者。
+                                    CoreModule.eventBus.emit(
+                                        name = EventNames.SETTINGS_CHANGED,
+                                        payload = mapOf("config" to newConfig),
+                                    )
+                                    if (previous.general.language != newConfig.general.language) {
+                                        CoreModule.eventBus.emit(
+                                            name = EventNames.LANGUAGE_CHANGED,
+                                            payload = mapOf("language" to newConfig.general.language),
+                                        )
+                                    }
+                                    null
+                                } else {
+                                    stringResource("settings_save_failed").format(
+                                        failure.message ?: failure.javaClass.simpleName,
+                                    )
+                                }
                             }
                         },
                     )

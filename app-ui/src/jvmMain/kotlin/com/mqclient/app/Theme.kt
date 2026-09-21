@@ -10,71 +10,73 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontSynthesis
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import com.materialkolor.DynamicMaterialTheme
 import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.rememberDynamicMaterialThemeState
+import com.mqclient.app.fonts.rememberAppFontFamily
 import com.mqclient.core.ThemeConfig
-import mq_client.app_ui.generated.resources.Res
-import mq_client.app_ui.generated.resources.lxgw_wen_kai_mono_regular
-import org.jetbrains.compose.resources.Font as ResourceFont
 
 /**
- * The app's type scale: Material's default sizes/weights, rendered entirely in
- * LXGW WenKai Mono Regular (the bundled font). The system-font flags in
- * [ThemeConfig] are accepted for forward-compat but currently ignored —
- * compose-on-JVM's `Font()` companion overloads conflict in confusing ways
- * when both resource- and system-font imports are in scope, so we ship
- * with the bundled font only. The flags remain in [ThemeConfig] so a future
- * Compose update can lift this restriction without a config migration.
+ * The app's type scale: Material's default weights, rendered in the family
+ * resolved from [ThemeConfig.fontFamily] (bundled LXGW by default, a system
+ * font when the settings dialog persists one — see [rememberAppFontFamily]),
+ * scaled uniformly so that [ThemeConfig.fontSize] acts as the body size.
  *
  * [Font] reads the resource during composition, so this has to be built inside
  * a composable.
  */
 @Composable
-private fun appTypography(@Suppress("UNUSED_PARAMETER") theme: ThemeConfig): Typography {
-    // [Font] 是 @Composable（要读资源），但 FontFamily / Typography 没必要每次重组都重建：
-    // 重建会让 MaterialTheme.typography 换一个身份，把整棵读样式的界面推着重算。
-    val font = ResourceFont(Res.font.lxgw_wen_kai_mono_regular, FontWeight.Normal)
-    val family = remember(font) { FontFamily(font) }
-    return remember(family) { Typography().withFontFamily(family) }
+private fun appTypography(theme: ThemeConfig): Typography {
+    val family = rememberAppFontFamily(theme.fontFamily)
+    // 14 = Material bodyMedium 默认 = ThemeConfig.fontSize 的默认值，作为缩放基准。
+    // Typography 重建会让 MaterialTheme.typography 换一个身份，把整棵读样式的
+    // 界面推着重算 —— key 只放 family 身份和 scale，平时重组不重建。
+    val scale = theme.fontSize / 14f
+    return remember(family, scale) { Typography().withFontFamily(family, scale) }
 }
 
 /**
- * Applies [family] to every style in the Material type scale. The individual
- * styles carry their own size/weight; only the family is overridden.
+ * Applies [family] and the size [scale] to every style in the Material type
+ * scale: family + font size + line height (scaled in lockstep, otherwise the
+ * larger sizes would crowd their lines).
  *
- * [FontSynthesis.None] matters here: the family ships a single Regular weight,
- * so any bolder request (a `FontWeight.SemiBold` label, say) would otherwise be
- * answered by Skia smearing the Regular outline — a fake bold that reads as a
- * different, blurrier typeface rather than as emphasis.
+ * [FontSynthesis.None] matters here: the bundled family ships a single Regular
+ * weight, so any bolder request (a `FontWeight.SemiBold` label, say) would
+ * otherwise be answered by Skia smearing the Regular outline — a fake bold
+ * that reads as a different, blurrier typeface rather than as emphasis.
  */
-private fun Typography.withFontFamily(family: FontFamily): Typography =
+// internal（而非 private）：TypographyScaleTest 直接覆盖这个纯函数。
+internal fun Typography.withFontFamily(family: FontFamily, scale: Float): Typography =
     copy(
-        displayLarge = displayLarge.with(family),
-        displayMedium = displayMedium.with(family),
-        displaySmall = displaySmall.with(family),
-        headlineLarge = headlineLarge.with(family),
-        headlineMedium = headlineMedium.with(family),
-        headlineSmall = headlineSmall.with(family),
-        titleLarge = titleLarge.with(family),
-        titleMedium = titleMedium.with(family),
-        titleSmall = titleSmall.with(family),
-        bodyLarge = bodyLarge.with(family),
-        bodyMedium = bodyMedium.with(family),
-        bodySmall = bodySmall.with(family),
-        labelLarge = labelLarge.with(family),
-        labelMedium = labelMedium.with(family),
-        labelSmall = labelSmall.with(family),
+        displayLarge = displayLarge.with(family, scale),
+        displayMedium = displayMedium.with(family, scale),
+        displaySmall = displaySmall.with(family, scale),
+        headlineLarge = headlineLarge.with(family, scale),
+        headlineMedium = headlineMedium.with(family, scale),
+        headlineSmall = headlineSmall.with(family, scale),
+        titleLarge = titleLarge.with(family, scale),
+        titleMedium = titleMedium.with(family, scale),
+        titleSmall = titleSmall.with(family, scale),
+        bodyLarge = bodyLarge.with(family, scale),
+        bodyMedium = bodyMedium.with(family, scale),
+        bodySmall = bodySmall.with(family, scale),
+        labelLarge = labelLarge.with(family, scale),
+        labelMedium = labelMedium.with(family, scale),
+        labelSmall = labelSmall.with(family, scale),
     )
 
-private fun TextStyle.with(family: FontFamily): TextStyle =
-    copy(fontFamily = family, fontSynthesis = FontSynthesis.None)
+private fun TextStyle.with(family: FontFamily, scale: Float): TextStyle = copy(
+    fontFamily = family,
+    fontSynthesis = FontSynthesis.None,
+    fontSize = (fontSize.value * scale).sp,
+    lineHeight = (lineHeight.value * scale).sp,
+)
 
 /**
- * Top-level theme wrapper. [theme] controls the seed color and which system
- * fonts (if any) get layered onto the bundled LXGW family; [isDarkTheme]
+ * Top-level theme wrapper. [theme] controls the seed color and the type scale
+ * (font family + base size, resolved by [rememberAppFontFamily]); [isDarkTheme]
  * is the resolved light/dark choice — pass the result of
  * [com.mqclient.core.ThemeMode] + `isSystemInDarkTheme()` from the call site
  * so the title bar ([NucleusDecoratedWindowTheme]) and content can share

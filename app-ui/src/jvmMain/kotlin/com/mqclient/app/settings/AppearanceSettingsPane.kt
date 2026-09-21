@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mqclient.app.fonts.FontEntry
 import com.mqclient.app.fonts.SystemFonts
+import com.mqclient.app.fonts.rememberAppFontFamily
 import com.mqclient.core.DEFAULT_SEED_COLOR
 import com.mqclient.core.FONT_LXGW_WEN_KAI_MONO
 import com.mqclient.core.FONT_SYSTEM_MONO
@@ -111,7 +112,7 @@ internal fun AppearanceSettingsPane(
             onChange = { onChange(value.copy(fontSize = it)) },
         )
         Spacer(Modifier.height(8.dp))
-        FontPreviewRow(fontSize = value.fontSize)
+        FontPreviewRow(fontSize = value.fontSize, fontFamilyId = value.fontFamily)
     }
 }
 
@@ -480,19 +481,15 @@ private fun CheckMark() {
 }
 
 /**
- * Live font preview row. Renders a sample string with the **bundled**
- * LXGW face at the chosen size; the `fontFamily` selection is not wired
- * here (nor in Theme.kt) on purpose — the dropdown already persists the
- * choice (built-in ids or real system family names via [SystemFonts]),
- * and rendering will start consuming it once the message-bus rework
- * lands, so preview and app typography switch over in one step.
+ * Live font preview row. Renders a sample string with the family resolved
+ * from [fontFamilyId] (via [rememberAppFontFamily] — the same resolver the
+ * app typography uses), at the chosen size. The preview therefore shows the
+ * real rendering, including the fallback a system font degrades to when it
+ * can't be loaded.
  */
 @Composable
-private fun FontPreviewRow(fontSize: Int) {
-    // ResourceFont is @Composable (it reads async resources), so it can't
-    // sit inside remember's @DisallowComposableCalls lambda. Just construct
-    // FontFamily inline — it's a thin wrapper, cheap to recreate.
-    val family = FontFamily(ResourceFont(Res.font.lxgw_wen_kai_mono_regular, FontWeight.Normal))
+private fun FontPreviewRow(fontSize: Int, fontFamilyId: String) {
+    val family = rememberAppFontFamily(fontFamilyId)
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
             text = stringResource("font_preview_label"),
