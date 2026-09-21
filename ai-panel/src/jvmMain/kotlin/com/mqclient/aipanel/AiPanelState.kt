@@ -10,18 +10,20 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
+import com.mqclient.aipanel.db.ChatHistory
+import com.mqclient.aipanel.db.ChatHistoryRepository
 import com.mqclient.core.AiConfig
 import com.mqclient.core.AiConnection
 import com.mqclient.core.ConfigStore
+import com.mqclient.core.CoreModule
+import com.mqclient.core.event.EventNames
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 /**
  * Single source of truth for the AI panel.
@@ -74,6 +76,14 @@ class AiPanelState internal constructor(
 
     val isStreaming: Boolean get() = streamingMessageId != null
 
+    // ---- 历史加载（来源：chat_history 表，按当前激活连接） ----
+
+    /** 已经把哪个连接的历史灌进了 [messageList]；null 表示还没加载过。 */
+    private var loadedConnectionId: String? = null
+
+    /** 流式进行中切了连接：结束（成功/失败/取消）后补加载新连接的历史。 */
+    private var pendingReload: Boolean = false
+
     /** 面板连接下拉的候选：配置里启用的连接。 */
     val connections: List<AiConnection> get() = config.connections.filter { it.enabled }
 
@@ -100,20 +110,25 @@ class AiPanelState internal constructor(
      * [panelError]。
      */
     fun updateConfig(transform: (AiConfig) -> AiConfig) {
+        val previousActiveId = activeConnection?.id
         val next = transform(config)
         config = next
         ConfigStore.editConfig { current -> Result.success(current.copy(ai = next)) }
             .onFailure { error ->
                 panelError = "设置保存失败：${error.message ?: error.javaClass.simpleName}"
             }
+        // 面板内切换连接：历史按连接走，切了人就换一份。
+        if (activeConnection?.id != previousActiveId) requestHistoryReload()
     }
 
     /**
      * 外部（设置对话框）传来的新配置：只同步内存值，**不落盘** —— 盘上已经是新值了
-     * （那条路径自己写过 config.toml）。
+     * （那条路径自己写过 config.toml）。激活连接被换掉的话历史同样要重载。
      */
     fun applyConfig(config: AiConfig) {
+        val previousActiveId = activeConnection?.id
         this.config = config
+        if (activeConnection?.id != previousActiveId) requestHistoryReload()
     }
 
     /** 关闭失败提示条。 */
@@ -137,10 +152,9 @@ class AiPanelState internal constructor(
             content = trimmed,
             timestamp = System.currentTimeMillis(),
         )
-
-        val contextPrefix = buildContextPrefix(context)
-        val wireContent = if (contextPrefix != null) "$contextPrefix\n\n$trimmed" else trimmed
-        val historyForCall = messages + userMsg.copy(content = wireContent)
+        // 落库的 question 是「含包装上下文」的 wire 版本（与发给模型的一致）。
+        val question = userMsg.copy(content = buildContextPrefix(context)?.let { "$it\n\n$trimmed" } ?: trimmed)
+        val historyForCall = messages + question
 
         val assistantMsg = AiMessage(
             id = newId(),
@@ -157,6 +171,11 @@ class AiPanelState internal constructor(
             // 状态只能在面板自己的调度器上写。用一条无界 channel 把分片转进本协程里串行
             // 追加：顺序天然保真，写状态的一定是面板的调度器。
             val chunks = Channel<String>(Channel.UNLIMITED)
+            // 落库用的时间戳：createdTime = 提问时刻；startedTime = 首片到达；
+            // finishedTime = 流结束。三者构成一条审计记录的耗时画像。
+            val createdAt = userMsg.timestamp
+            var startedAt: Long? = null
+            var finishedAt: Long? = null
             try {
                 val producer = async {
                     try {
@@ -166,27 +185,57 @@ class AiPanelState internal constructor(
                     }
                 }
                 for (chunk in chunks) {
+                    if (startedAt == null) startedAt = System.currentTimeMillis()
                     appendToMessage(assistantMsg.id, chunk)
                 }
                 // 生产端的异常在这里浮上来（join 不会重抛，await 会）。
-                producer.await()
+                val result = producer.await()
+                finishedAt = System.currentTimeMillis()
+                val reply = messageList.lastOrNull { it.id == assistantMsg.id }?.content.orEmpty()
+                emitChatSaved(
+                    connection = connection,
+                    question = question.content,
+                    reply = reply,
+                    createdAt = createdAt,
+                    startedAt = startedAt,
+                    finishedAt = finishedAt,
+                    status = ChatHistoryRepository.STATUS_SUCCESS,
+                    errorMessage = null,
+                    result = result,
+                )
             } catch (cancellation: CancellationException) {
                 // 取消不是失败，必须原样抛出（吞掉会让 scope 的取消失效）。
+                // 用户主动停止的半截回复不进审计表 —— 审计记录以「完成」为单位。
                 throw cancellation
             } catch (error: Throwable) {
                 // 失败必须看得见：否则界面上只剩一个永远“…”的空气泡。未捕获异常逃出
                 // 这里会直接把 scope 的 Job 弄失败，整个面板之后 launch 全部被取消。
-                // 刻意不写进 messages —— 那会被 AiStore 落盘、下一轮还会当 history 发给模型。
+                // 刻意不写进 messages —— 那会被下一轮当成 history 发给模型；失败只进
+                // 审计表（FAILED 记录，见 emitChatSaved）。
                 panelError = error.message ?: error.javaClass.simpleName
+                emitChatSaved(
+                    connection = connection,
+                    question = question.content,
+                    reply = null,
+                    createdAt = createdAt,
+                    startedAt = startedAt,
+                    finishedAt = System.currentTimeMillis(),
+                    status = ChatHistoryRepository.STATUS_FAILED,
+                    errorMessage = error.message ?: error.javaClass.simpleName,
+                    result = null,
+                )
             } finally {
                 streamingMessageId = null
                 // 一个字都没流出来就撤掉空气泡：出错时提示条已经说明了原因；被取消时
-                // 更不该留一条空回复 —— 它会被 AiStore 落盘，下一轮当成 history 又发给
-                // 模型。流了一半的要保留，那是用户点「停止」之前看到的。
+                // 更不该留一条空回复 —— 下一轮会被当成 history 又发给模型。流了一半的
+                // 要保留，那是用户点「停止」之前看到的。
                 if (messageList.lastOrNull { it.id == assistantMsg.id }?.content.isNullOrEmpty()) {
                     messageList.removeAll { it.id == assistantMsg.id }
                 }
-                AiStore.saveMessages(messages)
+                if (pendingReload) {
+                    pendingReload = false
+                    requestHistoryReload()
+                }
             }
         }
     }
@@ -204,8 +253,8 @@ class AiPanelState internal constructor(
     }
 
     /**
-     * 记录 👍/👎 评价；[useful] 为 null 表示撤销评价。评价挂在消息上，随
-     * [AiStore.saveMessages] 一起落盘。
+     * 记录 👍/👎 评价。评价只活在**内存**里：chat_history 是追加式审计表（只插入
+     * 不更新），没有评价的位置 —— 重启后评价丢失是计划内的取舍。
      */
     fun recordFeedback(messageId: String, useful: Boolean?) {
         val idx = messageList.indexOfLast { it.id == messageId }
@@ -216,21 +265,117 @@ class AiPanelState internal constructor(
         messageList[idx] = current.copy(feedback = useful)
     }
 
-    /** Drops every message and clears the on-disk log. */
+    /**
+     * 清空对话：内存列表立即清；当前连接在 chat_history 表里的记录一并删除
+     * （审计表只在这个**用户显式动作**和保留天数清理时才允许 DELETE）。
+     */
     fun clearHistory() {
         messageList.clear()
-        AiStore.saveMessages(emptyList())
+        val connectionId = activeConnection?.id ?: return
+        scope.launch {
+            runCatching { ChatHistoryRepository.deleteByConnectionId(connectionId) }
+                .onFailure { error ->
+                    CoreModule.reportError(message = "清空 AI 对话失败", source = SOURCE_TAG, error = error)
+                }
+        }
     }
 
+    // ---------------------------- 历史（DB） ----------------------------
+
     /**
-     * 把磁盘上的历史灌回来（由 [rememberAiPanelState] 在 IO 调度器上读完再调）。
+     * 把当前激活连接的历史从 chat_history 表灌进面板（面板打开时与切换连接时调）。
      *
-     * 只在面板还是空的时候接受：读盘那一小段时间里用户可能已经发了第一条消息 ——
-     * 那次会话不该被旧记录盖掉（流式进行中同理）。
+     *  - 流式中跳过：流出来的分片正在追加，重灌会把它冲掉；记 [pendingReload]，
+     *    流结束的 finally 里补。
+     *  - 加载期间用户又切了连接：按 [loadedConnectionId] 弃掉过期结果。
+     *  - FAILED 记录只进审计，不进对话流（也不会被当 history 发给模型）。
      */
-    internal fun restoreHistory(loaded: List<AiMessage>) {
-        if (messageList.isNotEmpty() || isStreaming) return
-        messageList.addAll(loaded)
+    fun requestHistoryReload() {
+        val connectionId = activeConnection?.id
+        if (connectionId == null) {
+            loadedConnectionId = null
+            messageList.clear()
+            return
+        }
+        if (connectionId == loadedConnectionId) return
+        if (isStreaming) {
+            pendingReload = true
+            return
+        }
+        loadedConnectionId = connectionId
+        messageList.clear()
+        scope.launch {
+            val rows = runCatching {
+                ChatHistoryRepository.getRecent(connectionId, limit = config.historyLimit.toLong())
+            }.onFailure { error ->
+                CoreModule.reportError(message = "AI 对话历史读取失败", source = SOURCE_TAG, error = error)
+            }.getOrDefault(emptyList())
+            // 加载期间又切了连接（或又发起了加载）：这批结果已经过期。
+            if (loadedConnectionId != connectionId) return@launch
+            messageList.addAll(rows.toAiMessages())
+        }
+    }
+
+    /** 审计行 → 面板消息：按时间正序展开，question→USER、reply→ASSISTANT。 */
+    private fun List<ChatHistory>.toAiMessages(): List<AiMessage> =
+        asSequence()
+            .filter { it.status == ChatHistoryRepository.STATUS_SUCCESS }
+            .sortedWith(compareBy({ it.createdTime }, { it.id }))
+            .flatMap { row ->
+                buildList {
+                    add(AiMessage(id = newId(), role = Role.USER, content = row.question.orEmpty(), timestamp = row.createdTime))
+                    if (!row.reply.isNullOrEmpty()) {
+                        add(
+                            AiMessage(
+                                id = newId(),
+                                role = Role.ASSISTANT,
+                                content = row.reply,
+                                timestamp = row.finishedTime ?: row.startedTime ?: row.createdTime,
+                            ),
+                        )
+                    }
+                }
+            }
+            .toList()
+
+    // ---------------------------- 审计落库事件 ----------------------------
+
+    /**
+     * 广播 `ai.chat.history.save`：AI 回复完成（成功或失败）后由事件处理器落
+     * chat_history。发事件而不是直接写库，是为了解耦 —— 面板不关心表结构，
+     * 将来审计消费方（统计/导出）也可以直接订阅同一事件。
+     */
+    private fun emitChatSaved(
+        connection: AiConnection,
+        question: String,
+        reply: String?,
+        createdAt: Long,
+        startedAt: Long?,
+        finishedAt: Long?,
+        status: String,
+        errorMessage: String?,
+        result: AiStreamResult?,
+    ) {
+        // 总线未初始化（单测环境）时静默跳过：聊天不能因为审计缺席而受影响。
+        CoreModule.eventBusOrNull?.emit(
+            name = EventNames.AI_CHAT_HISTORY_SAVE,
+            payload = mapOf<String, Any?>(
+                "connectionId" to connection.id,
+                "modelName" to connection.model,
+                "question" to question,
+                "reply" to reply,
+                "tokenCount" to (result?.totalTokens ?: 0),
+                "promptTokens" to (result?.promptTokens ?: 0),
+                "completionTokens" to (result?.completionTokens ?: 0),
+                "createdTime" to createdAt,
+                "startedTime" to startedAt,
+                "finishedTime" to finishedAt,
+                "status" to status,
+                "errorMessage" to errorMessage,
+                "finishReason" to result?.finishReason,
+            ),
+            source = SOURCE_TAG,
+        )
     }
 
     private fun appendToMessage(messageId: String, chunk: String) {
@@ -255,32 +400,29 @@ class AiPanelState internal constructor(
 }
 
 /**
- * Compose entry point. Loads the chat log off disk (sliced to
- * [AiConfig.historyLimit] most-recent messages) and wires the persisted
- * [AiConfig] into a stable [AiPanelState] tied to the local coroutine scope.
+ * Compose entry point. Wires the persisted [AiConfig] into a stable
+ * [AiPanelState] tied to the local coroutine scope; history comes from the
+ * chat_history table via [AiPanelState.requestHistoryReload].
  */
 @Composable
 fun rememberAiPanelState(initialConfig: AiConfig = ConfigStore.loadConfig().ai): AiPanelState {
     val scope = rememberCoroutineScope()
     // 刻意不给 remember 带 key：带上 initialConfig 会在每次保存设置时重建 state ——
     // 正在流式的回复被遗弃在旧对象上（新 state 的 streamingMessageId 为空，界面看上去
-    // 停止了、用户还能再点发送 → 两个流并发），聊天记录也会被重新读盘覆盖。
+    // 停止了、用户还能再点发送 → 两个流并发），聊天记录也会被重新读库覆盖。
     val state = remember {
         AiPanelState(
             initialConfig = initialConfig,
-            // 历史在下面的 effect 里读：`remember { }` 在组合期间同步执行，直接
-            // readText() 会卡在组合（= UI 线程）上。
             initialMessages = emptyList(),
             chat = AdapterChatService(),
             scope = scope,
         )
     }
-    // 读盘放在 IO，读完再灌进 state：面板先以空列表渲染，不阻塞首帧。
-    LaunchedEffect(Unit) {
-        val loaded = withContext(Dispatchers.IO) { AiStore.loadMessages(initialConfig.historyLimit) }
-        state.restoreHistory(loaded)
-    }
-    // 设置保存后把新配置同步进来（只赋值，不再写盘）。
+    // 历史从 chat_history 表加载（DB 访问走 withDriver 的单槽 IO 调度器，不占 UI 线程）。
+    LaunchedEffect(Unit) { state.requestHistoryReload() }
+    // 设置保存后把新配置同步进来（只赋值，不再写盘）；激活连接变了会顺带重载历史。
     LaunchedEffect(initialConfig) { state.applyConfig(initialConfig) }
     return state
 }
+
+private const val SOURCE_TAG = "ai-panel"

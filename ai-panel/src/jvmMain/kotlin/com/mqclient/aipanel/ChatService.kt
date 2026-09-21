@@ -24,6 +24,9 @@ interface ChatService {
      * to call [onChunk] multiple times with small string fragments; the call
      * site appends them to the in-flight assistant bubble.
      *
+     * 返回值是收尾元数据（finishReason / token usage，见 [AiStreamResult]）——
+     * 服务端没给的字段为 null，调用方按缺省处理。
+     *
      * ⚠️ [onChunk] **可能从任意线程被调**（真实实现在 HTTP/SSE 线程上回调）：只需要把
      * 文本递出去，不要去碰 Compose 状态 —— 调用方（[AiPanelState]）会把分片转回自己的
      * 调度器上串行追加。顺序仍按调用顺序保留。
@@ -33,5 +36,5 @@ interface ChatService {
         connection: AiConnection,
         context: AiContext?,
         onChunk: (String) -> Unit,
-    )
+    ): AiStreamResult
 }

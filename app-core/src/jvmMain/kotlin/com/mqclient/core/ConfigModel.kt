@@ -106,8 +106,8 @@ enum class ThemeMode {
  * [AiConnectionRepository] folds them into [connections] on startup and
  * clears the old field.
  *
- * [historyLimit] governs how many past messages the panel loads from
- * `ai-messages.json` on startup — defaults to 200 per the first-launch
+ * [historyLimit] governs how many past messages the panel loads from the
+ * chat_history table on startup — defaults to 200 per the first-launch
  * spec.
  */
 @Serializable

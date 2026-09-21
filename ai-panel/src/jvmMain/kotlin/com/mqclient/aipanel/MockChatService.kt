@@ -20,10 +20,11 @@ class MockChatService(
         connection: AiConnection,
         context: AiContext?,
         onChunk: (String) -> Unit,
-    ) {
+    ): AiStreamResult {
         val lastUser = history.lastOrNull { it.role == Role.USER }?.content.orEmpty()
         val reply = pickReply(lastUser, context)
         stream(reply, onChunk)
+        return AiStreamResult(finishReason = "stop")
     }
 
     private fun pickReply(userText: String, context: AiContext?): String {

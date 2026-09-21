@@ -1,5 +1,6 @@
 package com.mqclient.core
 
+import com.mqclient.core.event.EventNames
 import com.mqclient.core.log.Log
 import java.util.Base64
 import java.util.UUID
@@ -59,7 +60,12 @@ object AiConnectionRepository {
             Result.success(config.copy(ai = config.ai.copy(connections = connections)))
         }
 
-    /** 新增一条连接；id 重复直接失败（和 [ConnectionStore.create] 同一约定）。 */
+    /**
+     * 新增一条连接；id 重复直接失败（和 [ConnectionStore.create] 同一约定）。
+     *
+     * 落盘成功后广播 [EventNames.AI_CONNECTION_SNAPSHOT_CREATED]（新建必插快照，
+     * 见 ai-panel 落库订阅）—— 「新建连接」向导的写入口只有这里。
+     */
     fun create(connection: AiConnection): Result<Unit> =
         ConfigStore.editConfig { config ->
             if (config.ai.connections.any { it.id == connection.id }) {
@@ -69,7 +75,7 @@ object AiConnectionRepository {
                     config.copy(ai = config.ai.copy(connections = config.ai.connections + connection)),
                 )
             }
-        }
+        }.onSuccess { emitSnapshotCreated(SnapshotCandidate(connection, prevId = null)) }
 
     /**
      * 切换激活的 AI 连接（`ai.activeConnectionId`）。新建表单落盘后调用它保持与
@@ -118,6 +124,88 @@ object AiConnectionRepository {
                 )
             }
         }
+
+    /* ------------------------ 快照规则（落库触发） ------------------------ */
+
+    /**
+     * 一个待插快照的候选：新连接 + 它的快照 prevId（跨连接追溯用，见
+     * [resolveSnapshotChanges]）。
+     */
+    data class SnapshotCandidate(
+        val connection: AiConnection,
+        /** url 变化场景下的旧连接 UUID；全新建为 null。 */
+        val prevId: String?,
+    )
+
+    /**
+     * 快照规则的计算结果（见 [resolveSnapshotChanges]）：
+     *
+     *  - [connections]：换发新 id 之后的完整连接列表（落盘用这个）；
+     *  - [idRewrite]：旧 id → 新 id（只有 url 变化的连接有键）；
+     *  - [snapshotCandidates]：需要插快照的候选（新建的 + url 变化换新 id 的）。
+     */
+    data class SnapshotChanges(
+        val connections: List<AiConnection>,
+        val idRewrite: Map<String, String>,
+        val snapshotCandidates: List<SnapshotCandidate>,
+    )
+
+    /**
+     * 对比修改前后的连接列表，应用快照规则：
+     *
+     *  - **新建**（id 在 [previous] 里不存在）→ 插快照（prevId = NULL），id 不变；
+     *  - **service_url 变化** → 换发新 UUID（视为新连接：旧连接废弃、新连接写入），
+     *    插快照，快照的 prevId = **旧连接的 UUID**（跨连接追溯）；
+     *  - 其他修改（model / token / name / system_prompt）→ 不插快照，id 不变。
+     *
+     * 纯函数（不改配置、不发事件）：调用方先拿 [SnapshotChanges.connections] 落盘，
+     * 成功后再对 [snapshotCandidates] 调 [emitSnapshotsCreated]，保证磁盘与事件一致。
+     * 设置对话框保存整份 Config 不走 [create] / [update]，快照触发靠这个函数补上。
+     */
+    fun resolveSnapshotChanges(
+        previous: List<AiConnection>,
+        incoming: List<AiConnection>,
+    ): SnapshotChanges {
+        val prevById = previous.associateBy { it.id }
+        val connections = ArrayList<AiConnection>(incoming.size)
+        val idRewrite = HashMap<String, String>()
+        val candidates = ArrayList<SnapshotCandidate>()
+        for (connection in incoming) {
+            val old = prevById[connection.id]
+            when {
+                old == null || old.baseUrl != connection.baseUrl -> {
+                    val reIded = if (old == null) connection else connection.copy(id = UUID.randomUUID().toString())
+                    if (old != null) idRewrite[connection.id] = reIded.id
+                    connections += reIded
+                    candidates += SnapshotCandidate(reIded, prevId = old?.id)
+                }
+                else -> connections += connection
+            }
+        }
+        return SnapshotChanges(connections, idRewrite, candidates)
+    }
+
+    /**
+     * 快照事件广播（[create] 与设置对话框保存路径共用）。事件订阅方（ai-panel）
+     * 负责把快照写进 ai_connection 表。
+     */
+    fun emitSnapshotsCreated(candidates: List<SnapshotCandidate>) {
+        candidates.forEach { emitSnapshotCreated(it) }
+    }
+
+    private fun emitSnapshotCreated(candidate: SnapshotCandidate) {
+        val connection = candidate.connection
+        // 总线未初始化（早期调用）时静默跳过：emit 本身非挂起、不阻塞保存路径。
+        CoreModule.eventBusOrNull?.emit(
+            name = EventNames.AI_CONNECTION_SNAPSHOT_CREATED,
+            payload = mapOf(
+                "connectionId" to connection.id,
+                "prevId" to candidate.prevId,
+                "serviceUrl" to connection.baseUrl,
+            ),
+            source = LOG_TAG,
+        )
+    }
 
     /* ---------------------------- 一次性迁移 ---------------------------- */
 

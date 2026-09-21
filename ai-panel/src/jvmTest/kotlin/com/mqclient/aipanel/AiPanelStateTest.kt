@@ -83,7 +83,7 @@ class AiPanelStateTest {
             connection: AiConnection,
             context: AiContext?,
             onChunk: (String) -> Unit,
-        ) {
+        ): AiStreamResult {
             onChunk(PARTIAL_REPLY)
             awaitCancellation()
         }

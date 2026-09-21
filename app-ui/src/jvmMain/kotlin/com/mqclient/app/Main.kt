@@ -23,8 +23,10 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.dp
+import com.mqclient.aipanel.AiChatPersistence
 import com.mqclient.aipanel.AiContext
 import com.mqclient.aipanel.rememberAiPanelState
+import com.mqclient.core.AiConnectionRepository
 import com.mqclient.core.Config
 import com.mqclient.core.ConfigStore
 import com.mqclient.core.ConnectionStore
@@ -252,24 +254,45 @@ private fun AppRoot(bootConfig: Config, onExit: () -> Unit) {
                                 showSettings = false
                                 null
                             } else {
-                                val failure = ConfigStore.saveConfig(newConfig).exceptionOrNull()
+                                // AI 连接快照规则（新建 / service_url 变化换新 UUID）在
+                                // 落盘**前**定稿：磁盘上的 id 与随后广播的快照事件一致。
+                                // activeConnectionId 指向的连接被换发新 id 时同步跟随。
+                                val snapshotChanges = AiConnectionRepository.resolveSnapshotChanges(
+                                    previous = appConfig.ai.connections,
+                                    incoming = newConfig.ai.connections,
+                                )
+                                val effective =
+                                    if (snapshotChanges.idRewrite.isEmpty()) newConfig
+                                    else newConfig.copy(
+                                        ai = newConfig.ai.copy(
+                                            connections = snapshotChanges.connections,
+                                            activeConnectionId =
+                                            snapshotChanges.idRewrite[newConfig.ai.activeConnectionId]
+                                                ?: newConfig.ai.activeConnectionId,
+                                        ),
+                                    )
+                                val failure = ConfigStore.saveConfig(effective).exceptionOrNull()
                                 if (failure == null) {
                                     // Only adopt the draft once it's on disk:
                                     // otherwise the UI would show settings the
                                     // next launch won't have.
                                     val previous = appConfig
-                                    appConfig = newConfig
+                                    appConfig = effective
                                     showSettings = false
                                     // 广播设置变更（核心事件）：主题 / i18n / 需要重载配置的模块
                                     // 自己订阅就行，设置对话框不需要认识这些消费者。
                                     CoreModule.eventBus.emit(
                                         name = EventNames.SETTINGS_CHANGED,
-                                        payload = mapOf("config" to newConfig),
+                                        payload = mapOf("config" to effective),
                                     )
-                                    if (previous.general.language != newConfig.general.language) {
+                                    // AI 快照事件放在 SETTINGS_CHANGED 之后：消费方（ai-panel
+                                    // 落库）只关心快照本身，顺序无依赖，但先声明配置再声明快照
+                                    // 读起来更符合因果。
+                                    AiConnectionRepository.emitSnapshotsCreated(snapshotChanges.snapshotCandidates)
+                                    if (previous.general.language != effective.general.language) {
                                         CoreModule.eventBus.emit(
                                             name = EventNames.LANGUAGE_CHANGED,
-                                            payload = mapOf("language" to newConfig.general.language),
+                                            payload = mapOf("language" to effective.general.language),
                                         )
                                     }
                                     null
@@ -313,6 +336,9 @@ private fun bootstrapEvents() {
         }
     ModuleRegistry.initializeServices(CoreModule.eventBus, scope, CoreModule.jobScheduler)
     scope.launch {
+        // AI 落库：建表 + 按保留天数清理 + 订阅快照/对话两个事件。DB 初始化失败时
+        // register 会上报并整块缺席（对话照常，只是不落库）。
+        AiChatPersistence.register(scope)
         CoreModule.eventBus.awaitSubscribers()
         CoreModule.eventBus.emit(EventNames.APP_STARTED)
     }

@@ -59,7 +59,7 @@ class OpenAiCompatibleAdapter(private val client: HttpClient) : AiAdapter {
         )
     }
 
-    /** 流式对话：逐帧解析 `choices[0].delta.content`。 */
+    /** 流式对话：逐帧解析 `choices[0].delta.content`；usage 末帧经 [AiStreamChunk] 透出。 */
     override fun chatStream(connection: AiConnection, messages: List<AiChatMessage>): Flow<AiStreamChunk> = flow {
         val response = client.post(connection.endpoint("/chat/completions")) {
             connection.applyAuth(this)
@@ -67,7 +67,15 @@ class OpenAiCompatibleAdapter(private val client: HttpClient) : AiAdapter {
             setBody(
                 aiJson.encodeToString(
                     ChatRequest.serializer(),
-                    ChatRequest(connection.model, messages.toDto(), stream = true),
+                    // include_usage：OpenAI 规范行为，规范服务会在 [DONE] 前发一帧只有
+                    // usage 的收尾帧；不兼容的服务要么忽略、要么报错（后者值得暴露）。
+                    ChatRequest(
+                        connection.model,
+                        messages.toDto(),
+                        stream = true,
+                        // aiJson 没开 encodeDefaults：布尔字段必须显式传参才不会被省略。
+                        streamOptions = StreamOptions(includeUsage = true),
+                    ),
                 ),
             )
         }
@@ -78,6 +86,17 @@ class OpenAiCompatibleAdapter(private val client: HttpClient) : AiAdapter {
             // 解析不了的帧直接跳过：部分兼容服务会插非标准的心跳 / 注释帧。
             val chunk = runCatching { aiJson.decodeFromString(StreamChunk.serializer(), payload) }.getOrNull()
                 ?: return@collect
+            // usage 收尾帧的 choices 为空（且 delta 为空），必须先于 choices 判空检查。
+            val usage = chunk.usage
+            if (usage != null) {
+                emit(
+                    AiStreamChunk(
+                        promptTokens = usage.promptTokens,
+                        completionTokens = usage.completionTokens,
+                        totalTokens = usage.totalTokens,
+                    ),
+                )
+            }
             val choice = chunk.choices.firstOrNull() ?: return@collect
             val delta = choice.delta?.content.orEmpty()
             if (delta.isNotEmpty() || choice.finishReason != null) {
@@ -109,7 +128,16 @@ class OpenAiCompatibleAdapter(private val client: HttpClient) : AiAdapter {
         val model: String,
         val messages: List<MessageDto>,
         val stream: Boolean? = null,
+        @SerialName("stream_options") val streamOptions: StreamOptions? = null,
     )
+
+    /**
+     * OpenAI 的 `stream_options.include_usage`：要求流末尾附一帧只有 usage 的收尾帧。
+     * includeUsage 刻意不给默认值 —— aiJson 的 encodeDefaults=false 会把等于默认值的
+     * 字段整个省略掉，那样这个开关就永远发不出去了。
+     */
+    @Serializable
+    private data class StreamOptions(@SerialName("include_usage") val includeUsage: Boolean)
 
     @Serializable
     private data class MessageDto(val role: String, val content: String)
@@ -128,13 +156,22 @@ class OpenAiCompatibleAdapter(private val client: HttpClient) : AiAdapter {
 
         @Serializable
         data class Message(val content: String? = null)
-
-        @Serializable
-        data class Usage(@SerialName("total_tokens") val totalTokens: Int? = null)
     }
 
+    /** usage 三件套：流式收尾帧与非流式响应共用。 */
     @Serializable
-    private data class StreamChunk(val choices: List<Choice> = emptyList()) {
+    private data class Usage(
+        @SerialName("total_tokens") val totalTokens: Int? = null,
+        @SerialName("prompt_tokens") val promptTokens: Int? = null,
+        @SerialName("completion_tokens") val completionTokens: Int? = null,
+    )
+
+    @Serializable
+    private data class StreamChunk(
+        val choices: List<Choice> = emptyList(),
+        /** `include_usage` 开启时服务端在流末尾发的统计帧；多数帧上为 null。 */
+        val usage: Usage? = null,
+    ) {
         @Serializable
         data class Choice(
             val delta: Delta? = null,
