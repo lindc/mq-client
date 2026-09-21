@@ -3,7 +3,8 @@
 -- api_key / name / model / system_prompt / enabled 等只活在 config.toml，不进这张表。
 -- prevId 存的是**旧连接的 UUID**（url 变化 = 新 connection_id 接任，prevId 跨连接
 -- 追溯旧 lineage；全新建为 NULL），不是本表的自增 id。
-CREATE TABLE IF NOT EXISTS aiConnection (
+-- `AS AiConnection`：物理表名用蛇形，生成的 Kotlin 数据类保持驼峰名。
+CREATE TABLE IF NOT EXISTS ai_connection (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     connectionId TEXT NOT NULL,         -- 连接 UUID
     prevId       TEXT,                  -- 旧连接的 UUID（新建 = NULL）
@@ -11,24 +12,24 @@ CREATE TABLE IF NOT EXISTS aiConnection (
     createdTime  INTEGER NOT NULL       -- 快照创建时间（Unix 毫秒）
 );
 
-CREATE INDEX IF NOT EXISTS idx_aiConnection_connectionId ON aiConnection(connectionId);
-CREATE INDEX IF NOT EXISTS idx_aiConnection_prevId ON aiConnection(prevId);
+CREATE INDEX IF NOT EXISTS idx_ai_connection_connection_id ON ai_connection(connectionId);
+CREATE INDEX IF NOT EXISTS idx_ai_connection_prev_id ON ai_connection(prevId);
 
 insertSnapshot:
-INSERT INTO aiConnection(connectionId, prevId, serviceUrl, createdTime)
+INSERT INTO ai_connection(connectionId, prevId, serviceUrl, createdTime)
 VALUES (?, ?, ?, ?);
 
 selectLatestByConnectionId:
-SELECT * FROM aiConnection
+SELECT * FROM ai_connection
 WHERE connectionId = ?
 ORDER BY id DESC
 LIMIT 1;
 
 selectAllByConnectionId:
-SELECT * FROM aiConnection
+SELECT * FROM ai_connection
 WHERE connectionId = ?
 ORDER BY id ASC;
 
 selectById:
-SELECT * FROM aiConnection
+SELECT * FROM ai_connection
 WHERE id = ?;

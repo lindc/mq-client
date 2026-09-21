@@ -1,29 +1,30 @@
 -- 对话审计表：只在 AI 回复完成后插入一条完整记录。
 -- 只插入，不更新，不删除（cleanOld 是按保留天数的清理，不算业务删除）。
 -- FAILED 记录只进审计，面板加载对话历史时按 status 过滤。
-CREATE TABLE IF NOT EXISTS chatHistory (
+-- `AS ChatHistory`：物理表名用蛇形，生成的 Kotlin 数据类保持驼峰名。
+CREATE TABLE IF NOT EXISTS chat_history (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
-    connectionId     TEXT NOT NULL,                 -- 连接 UUID
-    snapshotId       INTEGER,                       -- 指向 aiConnection.id
-    modelName        TEXT NOT NULL,                 -- 本次对话用的模型
-    tokenCount       INTEGER DEFAULT 0,             -- 总 token 消耗
-    promptTokens     INTEGER DEFAULT 0,             -- 输入 token 数
-    completionTokens INTEGER DEFAULT 0,             -- 输出 token 数
-    createdTime      INTEGER NOT NULL,              -- 用户提问时间（Unix 毫秒）
-    startedTime      INTEGER,                       -- 收到 AI 第一个 token 的时间
-    finishedTime     INTEGER,                       -- AI 回复结束时间
-    status           TEXT DEFAULT 'SUCCESS',        -- SUCCESS / FAILED
-    errorMessage     TEXT,                          -- 失败时的错误信息
-    finishReason     TEXT,                          -- stop / length / ...
-    question         TEXT,                          -- 用户问题（含包装的上下文数据）
-    reply            TEXT                           -- AI 回复
+    connectionId     TEXT NOT NULL,          -- 连接 UUID
+    snapshotId       INTEGER,                -- 指向 ai_connection.id
+    modelName        TEXT NOT NULL,          -- 本次对话用的模型
+    tokenCount       INTEGER DEFAULT 0,      -- 总 token 消耗
+    promptTokens     INTEGER DEFAULT 0,      -- 输入 token 数
+    completionTokens INTEGER DEFAULT 0,      -- 输出 token 数
+    createdTime      INTEGER NOT NULL,       -- 用户提问时间（Unix 毫秒）
+    startedTime      INTEGER,                -- 收到 AI 第一个 token 的时间
+    finishedTime     INTEGER,                -- AI 回复结束时间
+    status           TEXT DEFAULT 'SUCCESS', -- SUCCESS / FAILED
+    errorMessage     TEXT,                   -- 失败时的错误信息
+    finishReason     TEXT,                   -- stop / length / ...
+    question         TEXT,                   -- 用户问题（含包装的上下文数据）
+    reply            TEXT                    -- AI 回复
 );
 
-CREATE INDEX IF NOT EXISTS idx_chatHistory_connectionId ON chatHistory(connectionId);
-CREATE INDEX IF NOT EXISTS idx_chatHistory_createdTime ON chatHistory(createdTime DESC);
+CREATE INDEX IF NOT EXISTS idx_chat_history_connection_id ON chat_history(connectionId);
+CREATE INDEX IF NOT EXISTS idx_chat_history_created_time ON chat_history(createdTime DESC);
 
 insertChat:
-INSERT INTO chatHistory(
+INSERT INTO chat_history(
     connectionId, snapshotId, modelName, tokenCount, promptTokens, completionTokens,
     createdTime, startedTime, finishedTime, status, errorMessage, finishReason, question, reply
 ) VALUES (
@@ -32,42 +33,42 @@ INSERT INTO chatHistory(
 );
 
 selectByConnectionId:
-SELECT * FROM chatHistory
+SELECT * FROM chat_history
 WHERE connectionId = ?
 ORDER BY createdTime DESC, id DESC;
 
 selectRecentByConnectionId:
-SELECT * FROM chatHistory
+SELECT * FROM chat_history
 WHERE connectionId = ?
 ORDER BY createdTime DESC, id DESC
 LIMIT :limit;
 
 selectByModel:
-SELECT * FROM chatHistory
+SELECT * FROM chat_history
 WHERE connectionId = ? AND modelName = ?
 ORDER BY createdTime DESC, id DESC;
 
 selectByTimeRange:
-SELECT * FROM chatHistory
+SELECT * FROM chat_history
 WHERE connectionId = ? AND createdTime >= :fromTime AND createdTime <= :toTime
 ORDER BY createdTime DESC, id DESC;
 
--- 连表查：对话 + 所属快照的 URL（snapshot_id → aiConnection.id）。
+-- 连表查：对话 + 所属快照的 URL（snapshot_id → ai_connection.id）。
 -- LEFT JOIN：FAILED / 无快照的行也要返回，此时 snapshotServiceUrl 为 null。
 -- 生成类型 SelectWithSnapshot = ChatHistory 全字段 + snapshotServiceUrl。
 selectWithSnapshot:
-SELECT chatHistory.*, aiConnection.serviceUrl AS snapshotServiceUrl
-FROM chatHistory
-LEFT JOIN aiConnection ON chatHistory.snapshotId = aiConnection.id
-WHERE chatHistory.connectionId = ?
-ORDER BY chatHistory.createdTime DESC, chatHistory.id DESC;
+SELECT chat_history.*, ai_connection.serviceUrl AS snapshotServiceUrl
+FROM chat_history
+LEFT JOIN ai_connection ON chat_history.snapshotId = ai_connection.id
+WHERE chat_history.connectionId = ?
+ORDER BY chat_history.createdTime DESC, chat_history.id DESC;
 
 deleteByConnectionId:
-DELETE FROM chatHistory
+DELETE FROM chat_history
 WHERE connectionId = ?;
 
 -- DELETE 型语句生成 QueryResult<Long>，executeAsOne() 即受影响行数 ——
 -- 删除行数不需要额外的 SELECT changes()。
 cleanOld:
-DELETE FROM chatHistory
+DELETE FROM chat_history
 WHERE createdTime < ?;

@@ -59,23 +59,23 @@ object ChatHistoryRepository {
     }
 
     /** 某个连接的全部对话（createdTime 倒序）。 */
-    suspend fun getByConnectionId(connectionId: String): List<ChatHistory> = withDatabase { db ->
+    suspend fun getByConnectionId(connectionId: String): List<Chat_history> = withDatabase { db ->
         db.chat_historyQueries.selectByConnectionId(connectionId).executeAsList()
     }
 
     /** 某个连接的最近 [limit] 条对话（createdTime 倒序）。 */
-    suspend fun getRecent(connectionId: String, limit: Long): List<ChatHistory> = withDatabase { db ->
+    suspend fun getRecent(connectionId: String, limit: Long): List<Chat_history> = withDatabase { db ->
         db.chat_historyQueries.selectRecentByConnectionId(connectionId = connectionId, limit = limit).executeAsList()
     }
 
     /** 某个连接里某个模型的全部对话（createdTime 倒序）。 */
-    suspend fun getByModel(connectionId: String, modelName: String): List<ChatHistory> = withDatabase { db ->
+    suspend fun getByModel(connectionId: String, modelName: String): List<Chat_history> = withDatabase { db ->
         db.chat_historyQueries.selectByModel(connectionId = connectionId, modelName = modelName).executeAsList()
     }
 
     /**
      * 某个连接的全部对话，经 snapshot_id 连出所属快照的 serviceUrl（createdTime 倒序）。
-     * 生成类型 [SelectWithSnapshot] = ChatHistory 全字段 + `snapshotServiceUrl: String?`
+     * 生成类型 [SelectWithSnapshot] = Chat_history 全字段 + `snapshotServiceUrl: String?`
      * （LEFT JOIN —— FAILED / 无快照的行 url 为 null，不丢行）。
      */
     suspend fun getWithSnapshot(connectionId: String): List<SelectWithSnapshot> = withDatabase { db ->
@@ -83,7 +83,7 @@ object ChatHistoryRepository {
     }
 
     /** 某个连接在 [fromTime, toTime] 闭区间内的对话（createdTime 倒序）。 */
-    suspend fun getByTimeRange(connectionId: String, fromTime: Long, toTime: Long): List<ChatHistory> =
+    suspend fun getByTimeRange(connectionId: String, fromTime: Long, toTime: Long): List<Chat_history> =
         withDatabase { db ->
             db.chat_historyQueries.selectByTimeRange(
                 connectionId = connectionId,

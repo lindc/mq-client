@@ -10,7 +10,7 @@ import com.mqclient.core.database.DatabaseManager
  * （事件 handler / UI），这里只做纯读写。
  *
  * 命名说明：SQLDelight 把驼峰表名 `aiConnection` 的 queries 属性生成为
- * `ai_connectionQueries`（数据类倒是 `AiConnection`），下面的名字以生成物为准。
+ * `ai_connectionQueries`（数据类是 `Ai_connection`），下面的名字以生成物为准。
  */
 object AiConnectionSnapshotRepository {
 
@@ -33,12 +33,12 @@ object AiConnectionSnapshotRepository {
     }
 
     /** 某个连接的最新一条快照（没有则 null）。 */
-    suspend fun getLatestSnapshot(connectionId: String): AiConnection? = withDatabase { db ->
+    suspend fun getLatestSnapshot(connectionId: String): Ai_connection? = withDatabase { db ->
         db.ai_connectionQueries.selectLatestByConnectionId(connectionId).executeAsOneOrNull()
     }
 
     /** 某个连接的全部快照（按 id 升序，即快照链顺序）。 */
-    suspend fun getAllSnapshots(connectionId: String): List<AiConnection> = withDatabase { db ->
+    suspend fun getAllSnapshots(connectionId: String): List<Ai_connection> = withDatabase { db ->
         db.ai_connectionQueries.selectAllByConnectionId(connectionId).executeAsList()
     }
 

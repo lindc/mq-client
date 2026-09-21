@@ -10,7 +10,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
-import com.mqclient.aiservice.db.ChatHistory
+import com.mqclient.aiservice.db.Chat_history
 import com.mqclient.aiservice.db.ChatHistoryRepository
 import com.mqclient.core.AiConfig
 import com.mqclient.core.AiConnection
@@ -317,7 +317,7 @@ class AiPanelState internal constructor(
     }
 
     /** 审计行 → 面板消息：按时间正序展开，question→USER、reply→ASSISTANT。 */
-    private fun List<ChatHistory>.toAiMessages(): List<AiMessage> =
+    private fun List<Chat_history>.toAiMessages(): List<AiMessage> =
         asSequence()
             .filter { it.status == ChatHistoryRepository.STATUS_SUCCESS }
             .sortedWith(compareBy({ it.createdTime }, { it.id }))
