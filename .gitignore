@@ -38,3 +38,6 @@ nul;
 # 必须用 /resources/ 锚定仓库根：不加前导斜杠会连各模块的 src/jvmMain/resources/
 # （SPI 的 META-INF/services 就在那里）一起忽略掉。
 /resources/
+
+# Agent 工具的本地工作目录（会话产物，与项目无关）。
+.codewhale/
