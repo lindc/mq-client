@@ -226,6 +226,12 @@ private fun AppRoot(bootConfig: Config, onExit: () -> Unit) {
                         aiPanelState = aiPanelState,
                         aiContext = aiContext,
                         onDismissAiPanel = { aiPanelVisible = false },
+                        // 编辑连接落盘后从磁盘重载内存 appConfig —— 与新建连接一致，
+                        // 避免设置页的整份保存把刚改过的连接覆盖掉。列表本身由
+                        // ConnectionStore.connections 的 StateFlow 订阅自动刷新。
+                        onConnectionsChanged = {
+                            ConfigStore.loadConfigOrNull()?.let { loaded -> appConfig = loaded }
+                        },
                     )
                 }
                 if (showAbout) {

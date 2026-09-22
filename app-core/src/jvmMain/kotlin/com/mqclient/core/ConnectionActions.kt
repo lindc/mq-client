@@ -29,12 +29,11 @@ interface ConnectionActions {
     /**
      * 修改连接：打开「修改连接」对话框，预填当前连接信息、保存时走更新而非新建。
      *
-     * **TODO（占位实现）**：当前 `ConnectionFormState` 只支持新建（`reset(defaultName)`），
-     * 没有载入已有配置做编辑的能力，新建连接向导也不支持编辑模式（预填 + 标题
-     * 「修改连接」+ 保存走 `ConnectionStore.update`）。所以宿主侧目前只把目标连接
-     * 记到 [com.mqclient.app.connection.ConnectionMenuState.editTarget] 并弹一个占位对话框
-     * （见 `ConnectionMenuDialogs`），真正的编辑 UI 就位后再替换。等放开时，本动作应
-     * 直接打开 `NewConnectionDialog` 的编辑模式（按 `connectionId` 非空区分新建/修改）。
+     * 宿主侧记录目标连接到 [com.mqclient.app.connection.ConnectionMenuState.editTarget]，
+     * 由 `ConnectionMenuDialogs` 渲染 `EditConnectionDialog`（复用创建第二步的同一套
+     * 表单渲染，按 `connection.serviceId` 经 SPI 取表单、`loadFrom` 预填、`submit` 落盘）。
+     * 表单层已支持编辑：`ConnectionFormState.loadFrom` 默认空实现（仅新建的模块继承即可），
+     * IBM MQ 等支持编辑的模块 override 它；`submit` 内部按 `editingId` 分支 create / update。
      */
     fun edit(connectionId: String)
 

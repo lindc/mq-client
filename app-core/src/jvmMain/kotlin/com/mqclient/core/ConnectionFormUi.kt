@@ -62,6 +62,16 @@ interface ConnectionFormState {
     fun submit(): Boolean
 
     /**
+     * 编辑模式：从已有连接载入草稿，预填表单。新建流程不调它（见 [reset]）。
+     *
+     * 默认空实现 —— 只用于新建、暂不支持「修改连接」的模块继承即可，不影响新建；
+     * 支持编辑的模块应 override 本方法并按各自配置回填字段。敏感字段（密码等）按
+     * 模块安全策略处理：通常留空 + 占位符，用户不动就沿用原值（参考 IBM MQ 的
+     * [com.mqclient.ibmmq.ui.IbmMqConnectionFormState.loadFrom]）。
+     */
+    fun loadFrom(connection: ConnectionInfo) {}
+
+    /**
      * 表单是否正忙于后台流程（测试连接 / 保存中）。宿主据此禁用「完成」按钮，
      * 防止流程进行中被重复触发；实现方把它实现成 Compose 状态，宿主组合期读取
      * 会自动随变化重组。同步表单永远是 false（默认值），无需关心。

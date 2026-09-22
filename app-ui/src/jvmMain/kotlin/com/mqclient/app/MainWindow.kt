@@ -81,6 +81,7 @@ fun MainWindow(
     aiPanelState: AiPanelState,
     aiContext: AiContext?,
     onDismissAiPanel: () -> Unit,
+    onConnectionsChanged: () -> Unit,
 ) {
     // 连接列表由调用方（Main.kt 里 collectAsState 一次）传进来 —— 这里原来是
     // `remember { ConnectionStore.connections }`，会把快照 remember 死，连接变化永远看不到。
@@ -247,7 +248,11 @@ fun MainWindow(
         StatusBar(currentModuleName = selection?.let { connectionName(it) })
     }
     // 右键菜单引出的对话框（删除确认 / 正在连接 / 连接失败 / 测试结果 / 队列管理器属性）。
-    ConnectionMenuDialogs(state = menuState, actions = connectionActions)
+    ConnectionMenuDialogs(
+        state = menuState,
+        actions = connectionActions,
+        onConnectionChanged = onConnectionsChanged,
+    )
 }
 
 /**

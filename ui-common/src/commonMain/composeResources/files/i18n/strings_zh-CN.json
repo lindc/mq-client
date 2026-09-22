@@ -172,7 +172,6 @@
   "menu_qmgr_properties": "查看队列管理器属性",
   "menu_delete_connection": "删除连接",
   "connection_copy_suffix": "（副本）",
-  "edit_connection_todo": "「修改连接」功能尚未实现（TODO）：需要 ConnectionFormState 支持载入已有配置，且新建连接向导支持编辑模式（预填、标题「修改连接」、保存走更新）。",
   "delete_confirm_title": "删除连接",
   "delete_confirm_text": "确定要删除连接「%1$s」吗？此操作不可撤销。",
   "common_delete": "删除",

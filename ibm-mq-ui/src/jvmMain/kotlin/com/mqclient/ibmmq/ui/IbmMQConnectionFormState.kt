@@ -259,7 +259,7 @@ class IbmMqConnectionFormState(
      * （options 读回时已由序列化器解密）；密码三兄弟不回填明文 —— 输入框留空、
      * 显示占位符，用户不动就沿用原值。
      */
-    fun loadFrom(connection: ConnectionInfo) {
+    override fun loadFrom(connection: ConnectionInfo) {
         val config = ibmMQConfigFromOptions(connection.options)
         editingId = connection.id
         defaultName = connection.name
