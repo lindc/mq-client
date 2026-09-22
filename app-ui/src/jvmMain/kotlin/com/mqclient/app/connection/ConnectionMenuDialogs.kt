@@ -54,6 +54,11 @@ fun ConnectionMenuDialogs(
             onDismiss = { state.deleteTarget = null },
         )
     }
+    // TODO 占位：编辑 UI 未实现，先弹一个说明缺口的对话框；编辑模式就位后删除本分支、
+    // 改为打开 `NewConnectionDialog` 编辑模式（按 connection 非空区分新建/修改）。
+    state.editTarget?.let {
+        EditPlaceholderDialog(onDismiss = { state.editTarget = null })
+    }
     state.connectingForProperties?.let { connection ->
         ConnectingDialog(connectionName = connection.name, onDismiss = { state.connectingForProperties = null })
     }
@@ -106,6 +111,23 @@ private fun DeleteConfirmDialog(connection: ConnectionInfo, onConfirm: () -> Uni
                 containerColor = MaterialTheme.colorScheme.surfaceVariant,
                 contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ) { Text(stringResource("common_cancel")) }
+        },
+    )
+}
+
+/**
+ * TODO 占位对话框：编辑功能尚未实现（见 [ConnectionActions.edit]）。点击「修改连接」
+ * 后先弹它，说明缺口并点名当前连接，避免菜单点了毫无反应。编辑模式就位后整段删除，
+ * 由 `NewConnectionDialog` 编辑模式接管 —— 那时不再需要这个占位。
+ */
+@Composable
+private fun EditPlaceholderDialog(onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource("menu_edit_connection")) },
+        text = { Text(stringResource("edit_connection_todo")) },
+        confirmButton = {
+            PressableButton(onClick = onDismiss) { Text(stringResource("common_close")) }
         },
     )
 }

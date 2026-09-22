@@ -27,6 +27,18 @@ interface ConnectionActions {
     suspend fun disconnect(connectionId: String)
 
     /**
+     * 修改连接：打开「修改连接」对话框，预填当前连接信息、保存时走更新而非新建。
+     *
+     * **TODO（占位实现）**：当前 `ConnectionFormState` 只支持新建（`reset(defaultName)`），
+     * 没有载入已有配置做编辑的能力，新建连接向导也不支持编辑模式（预填 + 标题
+     * 「修改连接」+ 保存走 `ConnectionStore.update`）。所以宿主侧目前只把目标连接
+     * 记到 [com.mqclient.app.connection.ConnectionMenuState.editTarget] 并弹一个占位对话框
+     * （见 `ConnectionMenuDialogs`），真正的编辑 UI 就位后再替换。等放开时，本动作应
+     * 直接打开 `NewConnectionDialog` 的编辑模式（按 `connectionId` 非空区分新建/修改）。
+     */
+    fun edit(connectionId: String)
+
+    /**
      * 复制连接：直接落盘一条副本（新 id，名称加「（副本）」后缀，状态未连接），
      * 不打开对话框。落盘失败经错误通道上报，菜单侧无需关心结果。
      */

@@ -39,6 +39,13 @@ class ConnectionMenuState {
     /** 待二次确认的删除目标；null = 无。 */
     var deleteTarget by mutableStateOf<ConnectionInfo?>(null)
 
+    /**
+     * 待编辑的连接目标；null = 无。**TODO 占位**：当前编辑 UI 未实现，点击「修改连接」
+     * 后仅把目标连接记到这里，由 `ConnectionMenuDialogs` 弹一个占位对话框说明缺口；
+     * 真正的编辑（预填 + 更新）就位后，应改为打开 `NewConnectionDialog` 编辑模式。
+     */
+    var editTarget by mutableStateOf<ConnectionInfo?>(null)
+
     /** 待打开的属性对话框目标（已连接，内容由模块的 ConnectionPropertiesUi 贡献）。 */
     var propertiesTarget by mutableStateOf<ConnectionInfo?>(null)
 
@@ -75,6 +82,13 @@ class ConnectionActionsImpl(private val state: ConnectionMenuState) : Connection
     override suspend fun connect(connectionId: String) = request(connectionId, "connect")
 
     override suspend fun disconnect(connectionId: String) = request(connectionId, "disconnect")
+
+    override fun edit(connectionId: String) {
+        // TODO: 编辑 UI 尚未实现。真正放开时应：按 connectionId 找到连接，打开
+        // `NewConnectionDialog` 编辑模式（预填该连接、标题「修改连接」、保存走
+        // `ConnectionStore.update` 而非 `create`）。眼下只把目标记到状态、由对话框占位提示。
+        state.editTarget = connectionById(connectionId)
+    }
 
     override fun copy(connectionId: String) {
         val connection = connectionById(connectionId) ?: return

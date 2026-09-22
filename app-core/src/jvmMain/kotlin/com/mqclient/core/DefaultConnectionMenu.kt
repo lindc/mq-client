@@ -9,16 +9,14 @@ package com.mqclient.core
  *  1. 连接 / 断开 / 重新连接（**合并为一项**，按 [ConnectionInfo.status] 切换文案；
  *     Connecting 时禁用）；
  *  2. ─ 分隔线 ─
- *  3. 复制连接（直接落盘副本，不打开对话框）；
- *  4. 测试连接（Connecting 时禁用，其余状态都可发起）；
- *  5. ─ 分隔线 ─
- *  6. 查看队列管理器属性（**始终启用**，未连接时点击会先连接；宿主只对注册了
+ *  3. 修改连接（编辑已有连接；**当前为占位**，见 [ConnectionActions.edit] 的 TODO）；
+ *  4. 复制连接（直接落盘副本，不打开对话框）；
+ *  5. 测试连接（Connecting 时禁用，其余状态都可发起）；
+ *  6. ─ 分隔线 ─
+ *  7. 查看队列管理器属性（**始终启用**，未连接时点击会先连接；宿主只对注册了
  *     [ConnectionPropertiesUi] 的模块显示它 —— 判别依据是 [ITEM_QMGR_PROPERTIES]）；
- *  7. ─ 分隔线 ─
- *  8. 删除连接（危险操作，宿主用 error 色显示并二次确认）。
- *
- * 「编辑连接」刻意不在默认菜单里：现有表单（`ConnectionFormState`）只支持新建，
- * 载入已有配置做编辑的能力就位后再放开。
+ *  8. ─ 分隔线 ─
+ *  9. 删除连接（危险操作，宿主用 error 色显示并二次确认）。
  *
  * 连续分隔线、首尾分隔线由宿主渲染前统一过滤（见 app-ui 的
  * `filterNotConsecutiveSeparators`），这里不必小心翼翼地拼。
@@ -37,6 +35,11 @@ object DefaultConnectionMenu {
     ): List<ContextMenuItem> = listOf(
         buildConnectMenuItem(connection, actions),
         ContextMenuItem.separator("sep.after-connect"),
+        ContextMenuItem(
+            id = "edit",
+            title = "menu_edit_connection",
+            onClick = { actions.edit(connection.id) },
+        ),
         ContextMenuItem(
             id = "copy",
             title = "menu_copy_connection",
