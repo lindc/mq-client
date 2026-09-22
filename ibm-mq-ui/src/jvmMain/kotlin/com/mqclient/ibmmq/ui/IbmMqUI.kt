@@ -1,11 +1,30 @@
 package com.mqclient.ibmmq.ui
 
-import androidx.compose.runtime.Composable
-import com.mqclient.core.AdapterUI
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import com.mqclient.core.AdapterUI
+import com.mqclient.uicommon.i18n.stringResource
 
+/**
+ * IBM MQ 模块的主页面占位：连接的连接 / 断开等操作**不放这里** —— 将来挂在
+ * 侧边栏连接条目的右键菜单里（入口见 [IbmMQModule.connectAsync] / [disconnectAsync]，
+ * 已就绪）。本页面后续承载选中连接的队列 / 主题浏览内容。
+ */
 class IbmMqUI : AdapterUI {
     override val serviceId = "ibm-mq"
     override val title = "IBM MQ"
-    override val content: @Composable () -> Unit = { Text("IBM MQ — coming soon") }
+    override val content: @Composable () -> Unit = {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(
+                text = stringResource("ibm_mq_page_placeholder"),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
 }

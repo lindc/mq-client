@@ -1,5 +1,7 @@
 package com.mqclient.ibmmq
 
+import com.ibm.mq.MQQueueManager
+import com.ibm.mq.constants.MQConstants
 import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.cache.CacheManager
@@ -7,14 +9,49 @@ import com.mqclient.core.event.EventNames
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.emit
 import com.mqclient.ibmmq.event.IbmMQEvents
+import java.io.FileInputStream
+import java.security.KeyStore
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicReference
+import javax.net.ssl.KeyManagerFactory
+import javax.net.ssl.SSLContext
+import javax.net.ssl.TrustManagerFactory
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+
+/** OpenJDK 用标准 `TLS_*` 套件名；此属性必须为 false，否则 IBM 映射把名字查不到（2397）。 */
+internal const val USE_IBM_CIPHER_MAPPINGS = "com.ibm.mq.cfg.useIBMCipherMappings"
+
+/**
+ * 组装 MQ 连接属性：CLIENT 网络参数 + 认证 + SSL（cipher / peerName）。
+ * [IbmMQConnectionManager.connect] 与 [IbmMQService.testConnection] 共用同一份组装，
+ * 保证「测试」和「正式连接」的行为永远一致。
+ */
+internal fun mqProperties(config: IbmMQConfig): java.util.Hashtable<String, Any> {
+    val properties = java.util.Hashtable<String, Any>()
+    if (config.mode == ConnectionMode.CLIENT) {
+        properties[MQConstants.HOST_NAME_PROPERTY] = config.host.trim()
+        properties[MQConstants.PORT_PROPERTY] = config.port
+        properties[MQConstants.CHANNEL_PROPERTY] = config.channel.trim()
+    }
+    if (config.username.isNotBlank()) properties[MQConstants.USER_ID_PROPERTY] = config.username
+    if (config.password.isNotBlank()) properties[MQConstants.PASSWORD_PROPERTY] = config.password
+    properties[MQConstants.CCSID_PROPERTY] = config.ccsid
+    // SSL 只对 CLIENT 模式有意义（BINDING 是同机 JNI，没有 TLS 通道）。
+    if (config.mode == ConnectionMode.CLIENT && config.sslEnabled) {
+        config.cipherSuite.takeIf { it.isNotBlank() }
+            ?.let { properties[MQConstants.SSL_CIPHER_SUITE_PROPERTY] = it }
+        config.peerName.takeIf { it.isNotBlank() }
+            ?.let { properties[MQConstants.SSL_PEER_NAME_PROPERTY] = it }
+    }
+    return properties
+}
 
 /** 扫描到的队列快照（示例数据结构）。 */
 data class QueueSnapshot(val name: String, val depth: Int, val messageCount: Int)
@@ -80,6 +117,8 @@ class IbmMQService(private val context: ServiceContext) {
     fun startScan(connectionId: String) {
         val started = context.coroutineScope.launch {
             scanLock.withLock {
+                // 显式连接模型：没连上就没有 cache 可写，也没有 MQ 句柄可查。
+                if (connectedContext(connectionId) == null) return@launch
                 // 事件名来自 IbmMQEvents，payload 里的 moduleId / source 由
                 // ServiceContext.emit 自动补上。
                 context.emit(IbmMQEvents.SCAN_STARTED, mapOf("connectionId" to connectionId))
@@ -114,13 +153,16 @@ class IbmMQService(private val context: ServiceContext) {
     }
 
     /**
-     * 定时任务入口（`ibm-mq.<connectionId>.scan.messages`，每 5 秒）：扫一次消息数量。
+     * 定时任务入口（`ibm-mq.<connectionId>.scan.messages`，间隔来自连接配置）：扫一次
+     * 消息数量。**状态守卫**：非 CONNECTED（未连 / 连接中 / 已失败）直接跳过 ——
+     * 连接失败后任务不注销、靠状态守卫空转，用户重连后自动恢复。
      *
      * 与 [startScan] 共用一把 [scanLock]：定时扫描和用户手动扫描不会同时压到同一条连接上。
      * 业务错误在这里就转成 `*.failed` 事件了 —— 能落到调度器 `JOB_FAILED` 的是「意料之外」
      * 的异常（代码 bug 之类），两者别混为一谈。
      */
     suspend fun scanMessageCounts(connectionId: String) = scanLock.withLock {
+        val ctx = connectedContext(connectionId) ?: return@withLock
         try {
             val queues = fetchQueues(connectionId)
             writeQueuesToCache(connectionId, queues)
@@ -132,33 +174,36 @@ class IbmMQService(private val context: ServiceContext) {
                     "totalMessages" to queues.sumOf { it.messageCount },
                 ),
             )
-            // 这条 5 秒链路就是模块的「心跳」：跑通了即这条连接是活的，按「连接状态
-            // 上报」约定报给核心（唯一入口，见 ConnectionStore.reportStatus）。
-            // 状态没变时核心直接忽略，重复上报不会推着界面重组。
+            // 心跳跑通了即这条连接是活的，按「连接状态上报」约定报给核心（唯一入口，
+            // 见 ConnectionStore.reportStatus）。状态没变时核心直接忽略，重复上报
+            // 不会推着界面重组。
             ConnectionStore.reportStatus(connectionId, ConnectionStatus.Connected, context.moduleId)
         } catch (cancellation: CancellationException) {
             // 模块关闭 / 任务被取消：正常退出，不是失败，也不发事件、不改状态。
             throw cancellation
         } catch (error: Throwable) {
+            val message = error.message ?: error::class.simpleName ?: "unknown"
             context.emit(
                 name = IbmMQEvents.MESSAGES_SCAN_FAILED,
-                payload = mapOf(
-                    "connectionId" to connectionId,
-                    "message" to (error.message ?: error::class.simpleName ?: "unknown"),
-                ),
+                payload = mapOf("connectionId" to connectionId, "message" to message),
             )
-            // 扫描失败即这条连接当前不可用：状态点变「连接失败」，直到下一次扫通为止。
+            // 扫描失败即这条连接大概率已断：上下文与核心状态一起转 FAILED（UI 显示
+            // 「连接失败」），定时任务下个轮次由状态守卫跳过，等用户重连。
+            ctx.lastError = message
+            ctx.status = ConnectionStatus.Failed
             ConnectionStore.reportStatus(connectionId, ConnectionStatus.Failed, context.moduleId)
         }
     }
 
     /**
-     * 定时任务入口（`ibm-mq.<connectionId>.scan.objects`，每 10 分钟）：扫一次对象列表。
+     * 定时任务入口（`ibm-mq.<connectionId>.scan.objects`，间隔来自连接配置）：扫一次
+     * 对象列表。状态守卫同 [scanMessageCounts]。
      *
      * 队列 / 主题 / 监听器一次拿全再发一条事件，订阅方（UI）就不会看到「队列已更新、
      * 主题还是旧的」这种中间态。落库交给 [saveObjects]。
      */
     suspend fun scanObjects(connectionId: String) = scanLock.withLock {
+        connectedContext(connectionId) ?: return@withLock
         try {
             val queues = fetchQueues(connectionId)
             val topics = fetchTopics(connectionId)
@@ -186,13 +231,17 @@ class IbmMQService(private val context: ServiceContext) {
         } catch (cancellation: CancellationException) {
             throw cancellation
         } catch (error: Throwable) {
+            val message = error.message ?: error::class.simpleName ?: "unknown"
             context.emit(
                 name = IbmMQEvents.OBJECTS_SCAN_FAILED,
-                payload = mapOf(
-                    "connectionId" to connectionId,
-                    "message" to (error.message ?: error::class.simpleName ?: "unknown"),
-                ),
+                payload = mapOf("connectionId" to connectionId, "message" to message),
             )
+            // 与消息扫描同一条连接：失败一并转 FAILED（守卫让任务空转，等重连）。
+            IbmMQModule.connectionOrNull(connectionId)?.let { ctx ->
+                ctx.lastError = message
+                ctx.status = ConnectionStatus.Failed
+            }
+            ConnectionStore.reportStatus(connectionId, ConnectionStatus.Failed, context.moduleId)
         }
     }
 
@@ -230,7 +279,14 @@ class IbmMQService(private val context: ServiceContext) {
         }
     }
 
-    /** 取该连接的缓存实例；连接不存在（已删除 / 未注册）时为 null。 */
+    /** 连接处于 CONNECTED 时的上下文；否则 null —— 显式连接模型的扫描守卫。 */
+    private fun connectedContext(connectionId: String): IbmMQConnectionContext? =
+        IbmMQModule.connectionOrNull(connectionId)
+            ?.takeIf { it.status == ConnectionStatus.Connected }
+
+    /**
+     * 取该连接的缓存实例；连接不存在 / 未连接（cache 只在连接成功后创建）时为 null。
+     */
     private fun cacheOf(connectionId: String): CacheManager? =
         IbmMQModule.connectionOrNull(connectionId)?.cache
 
@@ -277,6 +333,94 @@ class IbmMQService(private val context: ServiceContext) {
             ),
             source = context.moduleId,
         )
+    }
+
+    /**
+     * 用给定配置发起一次真实连接，验证可达性；**临时连接，用完即关**，不登记资源、
+     * 不写缓存、不上报状态 —— 正式数据只属于 [ConnectionStore] 里的连接。
+     *
+     * 失败以异常抛出（含 MQ 原因码的消息），成功静默返回；「测试连接」按钮和
+     * 「保存前测试」都走这里。超时由调用方 `withTimeout` 控制 —— 注意 MQ 的 connect
+     * 是阻塞 IO，协程取消不能中断它：超时后本次调用立即返回失败，但底层 IO 线程
+     * 会滞留到 TCP 超时为止。本地桌面工具场景下可接受，不做额外处理。
+     *
+     * SSL（OpenJDK 下的两个硬坑，见 [configureSslContext] 与 [USE_IBM_CIPHER_MAPPINGS]）：
+     * cipher 映射必须关掉（IBM 风格 `SSL_*` 名在 OpenJDK 上不存在，报 2397）；
+     * 证书走**显式构建的 SSLContext**（JSSE 系统属性在默认上下文被缓存后设置无效，
+     * 会报 2393）。基准测试见 `jvmTest` 的 `IbmMQSslDiagTest`。
+     */
+    suspend fun testConnection(config: IbmMQConfig): Unit = withContext(Dispatchers.IO) {
+        // SSL 属性（keystore / truststore / cipher 映射）见下方 sslEnabled 分支；
+        // 连接属性统一走 [mqProperties]，与正式连接共用同一份组装。
+        val properties = mqProperties(config)
+
+        // SSL 只对 CLIENT 模式有意义（BINDING 是同机 JNI，没有 TLS 通道）。
+        if (config.mode == ConnectionMode.CLIENT && config.sslEnabled) {
+            System.setProperty(USE_IBM_CIPHER_MAPPINGS, "false")
+            // MQ 基础 Java 客户端**自己从 JSSE 系统属性构建 SSLContext**（不用 JVM
+            // 默认上下文 —— setDefault 对它无效），所以属性必须设全，包括 Type。
+            // 基准测试 combo3（仅系统属性、属性先于首次 SSL 使用）验证这是生效路径。
+            config.trustStorePath.takeIf { it.isNotBlank() }
+                ?.let { System.setProperty("javax.net.ssl.trustStore", it) }
+            config.trustStorePassword.takeIf { it.isNotBlank() }
+                ?.let { System.setProperty("javax.net.ssl.trustStorePassword", it) }
+            config.trustStorePath.takeIf { it.isNotBlank() }
+                ?.let { System.setProperty("javax.net.ssl.trustStoreType", "PKCS12") }
+            config.keyStorePath.takeIf { it.isNotBlank() }
+                ?.let { System.setProperty("javax.net.ssl.keyStore", it) }
+            config.keyStorePassword.takeIf { it.isNotBlank() }
+                ?.let { System.setProperty("javax.net.ssl.keyStorePassword", it) }
+            config.keyStorePath.takeIf { it.isNotBlank() }
+                ?.let { System.setProperty("javax.net.ssl.keyStoreType", "PKCS12") }
+            configureSslContext(config)
+        }
+        ibmMqLog.info(
+            "test connection: host=${config.host}:${config.port}, channel=${config.channel}, " +
+                "cipher=${config.cipherSuite.ifBlank { "(auto)" }}, ssl=${config.sslEnabled}, " +
+                "mappings=${System.getProperty(USE_IBM_CIPHER_MAPPINGS)}",
+        )
+
+        // 构造即发起连接；失败在这里直接抛 MQException。
+        val manager = MQQueueManager(config.queueManager.trim(), properties)
+        try {
+            // 连上即视为可达；不做更深的访问（列表 / 收发归正式连接的扫描链路）。
+        } finally {
+            // 用完即关：测试连接绝不留在 [resources] 里 —— 它不属于任何 connectionId。
+            manager.disconnect()
+        }
+    }
+
+    /**
+     * 用配置里的 p12 显式构建 SSLContext 并替换 JVM 默认上下文（双保险）。
+     *
+     * 注意：**主路径是上面的 JSSE 系统属性** —— MQ 基础 Java 客户端自己从
+     * `javax.net.ssl.*` 属性构建 SSL 上下文，`SSLContext.setDefault` 对它无效。
+     * 这里显式构建是给「其它走 JVM 默认上下文的 TLS 代码」兜底，也顺带提前
+     * 验证两个 p12 能否加载（口令错 / 文件坏在这里就炸，错误更直白）。
+     *
+     * 密钥库 / 信任库都按 PKCS12 读；某一边留空就退回 JVM 默认对应侧。
+     */
+    private fun configureSslContext(config: IbmMQConfig) {
+        val keyManagers = config.keyStorePath.takeIf { it.isNotBlank() }?.let { path ->
+            val store = KeyStore.getInstance("PKCS12").apply {
+                FileInputStream(path).use { load(it, config.keyStorePassword.toCharArray()) }
+            }
+            KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm()).apply {
+                init(store, config.keyStorePassword.toCharArray())
+            }.keyManagers
+        }
+        val trustManagers = config.trustStorePath.takeIf { it.isNotBlank() }?.let { path ->
+            val store = KeyStore.getInstance("PKCS12").apply {
+                FileInputStream(path).use { load(it, config.trustStorePassword.toCharArray()) }
+            }
+            TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm()).apply {
+                init(store)
+            }.trustManagers
+        }
+        if (keyManagers == null && trustManagers == null) return
+        val context = SSLContext.getInstance("TLS")
+        context.init(keyManagers, trustManagers, null)
+        SSLContext.setDefault(context)
     }
 
     /**

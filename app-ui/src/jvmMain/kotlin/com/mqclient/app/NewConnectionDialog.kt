@@ -174,12 +174,19 @@ internal fun NewConnectionDialog(
                 DialogFooter(
                     step = step,
                     hasForm = selectedServiceId != null && formStates.containsKey(selectedServiceId),
+                    // 模块面板在后台流程中（测试连接 / 保存中）时禁用「完成」，防重复提交。
+                    busy = selectedServiceId?.let { formStates[it]?.busy } == true,
                     onClose = onDismiss,
                     // 草稿保留：回第一页再进来，面板状态原样（秒切的一部分）。
                     onBack = { step = NewConnectionStep.SELECT },
                     onFinish = {
-                        // false = 失败，错误已由模块面板展示 —— 保持打开，什么都不做。
-                        if (selectedServiceId != null && formStates[selectedServiceId]?.submit() == true) {
+                        val state = selectedServiceId?.let { formStates[it] } ?: return@DialogFooter
+                        // 异步表单（保存前要测试连接）落盘成功后经 onSaved 回到这里；
+                        // 每次触发都重新赋值，保证回调捕获的是当前这次点击的环境。
+                        state.onSaved = { onConnectionCreated(); onDismiss() }
+                        // false = 失败（校验不过 / 转入后台异步流程），错误已由模块面板
+                        // 展示 —— 保持打开，什么都不做。
+                        if (state.submit()) {
                             onConnectionCreated()
                             onDismiss()
                         }
@@ -333,12 +340,14 @@ private fun CategorySideNav(
 /**
  * 共享 footer：第一步只有「取消」（点卡片即进第二步）；第二步「上一步」+
  * 「完成」—— 完成触发模块面板的 [com.mqclient.core.ConnectionFormState.submit]，
- * 失败时对话框保持打开；没有表单的类型只有「上一步」。
+ * 失败时对话框保持打开；没有表单的类型只有「上一步」。[busy] 时「完成」禁用
+ * （面板在后台流程中，见 [com.mqclient.core.ConnectionFormState.busy]）。
  */
 @Composable
 private fun DialogFooter(
     step: NewConnectionStep,
     hasForm: Boolean,
+    busy: Boolean,
     onClose: () -> Unit,
     onBack: () -> Unit,
     onFinish: () -> Unit,
@@ -367,7 +376,9 @@ private fun DialogFooter(
                 ) { Text(stringResource("common_back")) }
                 if (hasForm) {
                     Spacer(Modifier.width(8.dp))
-                    PressableButton(onClick = onFinish) { Text(stringResource("common_finish")) }
+                    PressableButton(onClick = onFinish, enabled = !busy) {
+                        Text(stringResource("common_finish"))
+                    }
                 }
             }
         }

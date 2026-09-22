@@ -1,18 +1,16 @@
 package com.mqclient.ibmmq
 
-import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.event.EventNames
 import com.mqclient.core.event.getString
 import com.mqclient.core.log.Log
-import com.mqclient.core.scheduler.JobScheduler
-import com.mqclient.core.scheduler.ScheduledJob
 import com.mqclient.core.spi.MODULE_ID_KEY
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.onEvent
 import com.mqclient.core.spi.onOwnEvents
-import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlin.jvm.Synchronized
 
 /**
@@ -24,49 +22,37 @@ internal const val MODULE_ID = "ibm-mq"
 /** 本模块的日志句柄：tag 与 [MODULE_ID] 同源，调用点不需要再写模块名。 */
 internal val ibmMqLog = Log.withTag(MODULE_ID)
 
+/** 任务类型（任务 ID 第三段）：`ibm-mq.<connectionId>.scan.messages`。 */
+internal const val JOB_SCAN_MESSAGES = "scan.messages"
+internal const val JOB_SCAN_OBJECTS = "scan.objects"
+
+/** 对象列表扫描的起步延迟：先把首拍让给消息扫描（见 IbmMQConnectionManager.registerScanJobs）。 */
+internal const val OBJECTS_FIRST_DELAY_MS = 5_000L
+
 /**
- * IBM MQ 模块的初始化入口。
+ * IBM MQ 模块的初始化入口 —— **显式连接模型**。
  *
- * 由 SPI 发现后经 `IbmMqServiceAdapter.initialize(context)` 调用（`ModuleRegistry` 在
- * 启动时逐个初始化模块），做五件事：
+ * 与旧模型的分界：启动时（以及 `connection.added` 时）**只登记 DISCONNECTED 上下文**，
+ * 不主动连接、不建 cache、不注册任何定时任务；扫描任务的注册挪到了
+ * [IbmMQConnectionManager.connect]（连接成功后按用户配置的间隔注册）。只有用户
+ * 显式动作（连接按钮 / 将来的 queue/topic 点击）才会经 [connectAsync] 建立连接。
+ *
+ * 做四件事：
  *  1. 用**前缀订阅**收自己的事件（`ibm-mq.*`），交给 [IbmMQEventHandler]；
- *  2. 订阅别的模块 / 核心的事件 —— `core.connection.added` 给新连接建任务，
- *     `core.connection.deleted` 把那条连接留下的任务和数据一起收掉；
- *  3. 给每条连接注册两条周期性扫描任务（消息数量 / 对象列表）；
- *  4. 按「连接状态上报」约定把连接状态报给核心（[ConnectionStore.reportStatus]）：
- *     建任务时是「连接中...」，第一条扫描结果回来才定 已连接 / 连接失败
- *     （见 [IbmMQService.scanMessageCounts]）；
- *  5. 为每条连接维护运行时上下文（[IbmMQConnectionContext]：该连接专属的缓存
- *     实例）：连接出现时建立，连接删除 / 模块销毁时清理。
+ *  2. 订阅核心的连接事件：`added` → 登记上下文；`updated` → 换配置快照
+ *     （已连接则断开，等用户重连）；`deleted` → 断开并摘除上下文与本地数据；
+ *  3. 为启动时已存在的连接补登记上下文（同样只是 DISCONNECTED 登记）；
+ *  4. 创建 [IbmMQConnectionManager]（连接生命周期）与 [IbmMQService]（业务操作）。
  *
  * 订阅挂在 `context.coroutineScope`（模块自己的 scope）上，返回的 [Job] 由本对象持有；
- * 定时任务挂在 `context.jobScheduler` 上，用任务 ID 前缀 `ibm-mq.` 圈住。[shutdown]
- * 时两者一起取消 —— 即「模块销毁时取消自己的订阅与任务」。
+ * [shutdown] 时先断开全部连接再取消订阅。
  */
 object IbmMQModule {
 
-    /** 任务类型（ID 的第三段）：`ibm-mq.<connectionId>.scan.messages`。 */
-    private const val JOB_SCAN_MESSAGES = "scan.messages"
-    private const val JOB_SCAN_OBJECTS = "scan.objects"
-
-    /** 消息数量变化快，对象列表变化慢 —— 两个间隔差着两个数量级。 */
-    private const val INTERVAL_5S = 5_000L
-    private const val INTERVAL_10MIN = 10 * 60 * 1_000L
-
-    /** 对象列表晚 10 秒起步：先把 5 秒那条链路让出来，别在启动瞬间挤在一起。 */
-    private const val OBJECTS_FIRST_DELAY = 10_000L
-
+    private var moduleContext: ServiceContext? = null
     private var service: IbmMQService? = null
-    private var scheduler: JobScheduler? = null
+    private var manager: IbmMQConnectionManager? = null
     private var subscriptions: List<Job> = emptyList()
-
-    /**
-     * connectionId → 该连接的运行时上下文（含它专属的 `CacheManager`）。
-     *
-     * 「每条连接一个缓存实例」的注册表：连接出现时建立、消失时摘除并 cleanup ——
-     * 缓存实例的生命周期严格跟着连接走（模块源码在 jvmMain，直接用 JVM 集合）。
-     */
-    private val connections = ConcurrentHashMap<String, IbmMQConnectionContext>()
 
     /**
      * 幂等：重复调用返回同一个 [IbmMQService]，不会重复注册订阅。
@@ -75,66 +61,51 @@ object IbmMQModule {
     fun initialize(context: ServiceContext): IbmMQService {
         service?.let { return it }
 
+        // 越早越好：MQ 的 JMQI 可能把 com.ibm.mq.cfg.* 属性在首次类加载时缓存，
+        // 任何 MQ 类被触碰之前就必须把 cipher 映射关掉（OpenJDK 只有标准 TLS_* 名）。
+        System.setProperty(USE_IBM_CIPHER_MAPPINGS, "false")
+
         val handler = IbmMQEventHandler()
         val created = IbmMQService(context)
-        val jobScheduler = context.jobScheduler
+        val connectionManager = IbmMQConnectionManager(context, created)
 
         subscriptions = listOf(
             // 自己发、自己收：只有 ibm-mq.* 会进这里。
             context.onOwnEvents { event -> handler.handle(event) },
-            // 跨模块：核心广播「连接被删除」，只有属于本模块的连接才处理。
-            context.onEvent(EventNames.CONNECTION_DELETED) { event ->
-                val connectionId = event.getString("connectionId") ?: return@onEvent
-                if (event.getString(MODULE_ID_KEY) == context.moduleId ||
-                    event.getString("type") == context.moduleId
-                ) {
-                    // 连接没了，它的定时任务也一起停：按前缀一次收干净，
-                    // 不用把任务 id 一个个记下来再 cancel。
-                    jobScheduler.cancelByPrefix(ScheduledJob.prefixFor(context.moduleId, connectionId))
-                    handler.cleanConnectionData(connectionId)
-                    // 连接级的缓存实例随连接一起销毁：先摘掉引用，再清空（谁创建谁清理）。
-                    connections.remove(connectionId)?.cleanup()
-                }
-            },
-            // 跨模块：新连接建好后给它配一套自己的任务（每条连接一组，互不影响）。
+            // 跨模块：核心广播连接变化，只处理属于本模块的连接（payload 里 `type`
+            // 即 serviceId，见 ConnectionStore.emitChange 的文档）。
             context.onEvent(EventNames.CONNECTION_ADDED) { event ->
                 val connectionId = event.getString("connectionId") ?: return@onEvent
-                // 和上面 DELETED 分支同一套判定：核心按文档只放 `type`，模块经
-                // ServiceContext.emit 转发时 payload 里只有 `moduleId`（没有 `type`），
-                // 两个都认才不会漏。只看 `type` 的话，后者永远进不来。
-                if (event.getString(MODULE_ID_KEY) != context.moduleId &&
-                    event.getString("type") != context.moduleId
-                ) {
-                    return@onEvent
-                }
-                // 先在界面上显示「连接中...」：真实的连接由扫描链路建立，
-                // 第一条扫描结果（scanMessageCounts）回来才定 已连接 / 连接失败。
-                reportStatus(connectionId, ConnectionStatus.Connecting)
-                // 上下文必须先于任务就位：5 秒心跳（runOnStart）会立刻扫描并写缓存，
-                // 顺序反了的话第一条扫描还没有缓存可写（connectionOrNull 仍是 null）。
-                ensureConnection(connectionId)
-                registerJobsForConnection(jobScheduler, created, connectionId)
+                if (!isOwnConnection(event, context)) return@onEvent
+                // 只登记，不连接 —— 显式连接模型的核心。
+                ownConnectionById(connectionId)?.let { connectionManager.ensureContext(it) }
+            },
+            context.onEvent(EventNames.CONNECTION_UPDATED) { event ->
+                val connectionId = event.getString("connectionId") ?: return@onEvent
+                if (!isOwnConnection(event, context)) return@onEvent
+                ownConnectionById(connectionId)?.let { connectionManager.updateContextConfig(it) }
+            },
+            context.onEvent(EventNames.CONNECTION_DELETED) { event ->
+                val connectionId = event.getString("connectionId") ?: return@onEvent
+                if (!isOwnConnection(event, context)) return@onEvent
+                // 断开（含任务与 cache 清理）+ 摘除上下文 + 清模块内记账。
+                connectionManager.remove(connectionId)
+                handler.cleanConnectionData(connectionId)
             },
         )
 
-        // 启动时已经在配置里的连接：[ConnectionStore] 是「现在有哪些」，而
-        // `core.connection.added` 是「刚发生了什么」。只订阅事件的话，重启之后要等
-        // 用户再新建一条连接才会有定时任务，所以这里按当前状态补一遍。
-        // （登记是幂等的：同 ID 重复注册只会顶掉旧的，不会跑两条协程。）
+        // 启动时已经在配置里的连接：补登记 DISCONNECTED 上下文。**不连接** ——
+        // 「启动即连」是旧模型的行为，显式连接模型下等用户动手。
         ConnectionStore.connections.value
             .filter { it.serviceId == context.moduleId }
-            .forEach { connection ->
-                // 同上：上下文先于任务 —— 第一条心跳扫描要有缓存可写。
-                ensureConnection(connection.id)
-                reportStatus(connection.id, ConnectionStatus.Connecting)
-                registerJobsForConnection(jobScheduler, created, connection.id)
-            }
+            .forEach { connectionManager.ensureContext(it) }
 
         service = created
-        scheduler = jobScheduler
+        manager = connectionManager
+        moduleContext = context
         ibmMqLog.info(
             "module initialized (moduleId=${context.moduleId}, " +
-                "jobs=${jobScheduler.getActiveJobs().filter { it.startsWith("$MODULE_ID.") }})",
+                "contexts=${connectionManager.allContexts().size}, all disconnected)",
         )
         return created
     }
@@ -144,94 +115,54 @@ object IbmMQModule {
     fun serviceOrNull(): IbmMQService? = service
 
     /**
-     * 一条连接的运行时上下文（也就是它专属缓存实例的持有者）；连接不存在时为 null。
-     *
-     * [IbmMQService] 通过它读写本连接的缓存；模块外部需要某条连接的缓存时也走这里。
+     * 一条连接的运行时上下文（状态 / cache / MQ 句柄的持有者）；未登记时为 null。
+     * [IbmMQService] 经它读写扫描缓存。
      */
-    fun connectionOrNull(connectionId: String): IbmMQConnectionContext? = connections[connectionId]
+    fun connectionOrNull(connectionId: String): IbmMQConnectionContext? =
+        manager?.contextOrNull(connectionId)
 
     /**
-     * 建立（或取回已存在的）连接上下文。ConcurrentHashMap 保证并发下同一条连接
-     * 也只会有一个实例。
+     * UI 的显式连接入口（连接按钮 / 点击对象类型）：在模块 scope 里跑
+     * [IbmMQConnectionManager.connect]，结果经状态上报与事件通知，不阻塞点击。
      */
-    private fun ensureConnection(connectionId: String): IbmMQConnectionContext =
-        connections.computeIfAbsent(connectionId) { IbmMQConnectionContext(it) }
+    fun connectAsync(connectionId: String) {
+        val connectionManager = manager ?: return
+        moduleContext?.coroutineScope?.launch { connectionManager.connect(connectionId) }
+    }
+
+    /** UI 的断开入口（fire-and-forget）。 */
+    fun disconnectAsync(connectionId: String) {
+        manager?.disconnectAsync(connectionId)
+    }
 
     /**
-     * 模块销毁：取消订阅、按前缀停掉本模块的全部定时任务，并释放服务资源。
-     *
-     * 先把状态摘干净再逐个释放：释放过程中抛错也不会让本对象停在「半关闭」状态，
-     * try/finally 保证后面几步照样执行。
+     * 模块销毁：先断开全部连接（取消任务 / 关句柄 / 清 cache），再取消订阅，
+     * 最后摘掉引用。顺序反了的话断开过程中发出的 `ibm-mq.*` 事件会无人处理。
      */
     @Synchronized
     fun shutdown() {
         val subscriptionsToCancel = subscriptions
-        val schedulerToStop = scheduler
-        val serviceToClose = service
+        val managerToStop = manager
         subscriptions = emptyList()
-        scheduler = null
+        manager = null
         service = null
         try {
-            subscriptionsToCancel.forEach(Job::cancel)
+            // 模块销毁是同步出口（ModuleRegistry.disposeServices 不挂起）：
+            // runBlocking 等全部连接断完再返回 —— 退出路径不能留下没关的句柄。
+            managerToStop?.let { manager -> runBlocking { manager.shutdownAll() } }
         } finally {
-            try {
-                // 任务 ID 的第一段就是模块名，所以「本模块的任务」= `ibm-mq.` 前缀。
-                schedulerToStop?.cancelByPrefix("$MODULE_ID.")
-            } finally {
-                try {
-                    serviceToClose?.close()
-                } finally {
-                    // 全部连接的缓存实例一并销毁：shutdown 之后本模块不再持有任何
-                    // 连接级数据（连接删除是单条清理，这里是兜底的全量清理）。
-                    connections.values.forEach { it.cleanup() }
-                    connections.clear()
-                }
-            }
+            subscriptionsToCancel.forEach(Job::cancel)
+            moduleContext = null
         }
     }
 
-    /**
-     * 按「连接状态上报」约定把状态报给核心（连接数据的唯一入口，见
-     * [ConnectionStore.reportStatus]）：模块只报事实，界面怎么画不归这里管。
-     * 状态没变时核心直接忽略，所以定时链路重复上报是安全的。
-     */
-    private fun reportStatus(connectionId: String, status: ConnectionStatus) {
-        ConnectionStore.reportStatus(connectionId, status, MODULE_ID)
-    }
+    /** 事件是否属于本模块的连接（`core.connection.*` 的 payload 里 `type` = serviceId）。 */
+    private fun isOwnConnection(
+        event: com.mqclient.core.event.AppEvent,
+        context: ServiceContext,
+    ): Boolean = event.getString(MODULE_ID_KEY) == context.moduleId ||
+        event.getString("type") == context.moduleId
 
-    /**
-     * 给一条连接注册它的全部定时任务。
-     *
-     * 幂等：同 ID 重复注册会顶掉旧的（见 [JobScheduler.schedule]），所以「启动时补注册」
-     * 和「事件触发的注册」可以并存，不会出现两条协程跑同一个任务。
-     *
-     * 两条任务一快一慢：消息数量是**心跳**（5 秒、注册后立刻跑，成功 / 失败顺便上报
-     * 连接状态），对象列表是**慢扫**（10 分钟、晚 10 秒起步）。两者共用 IbmMQService
-     * 里那把 scanLock，所以不会同时压到同一条连接上。
-     */
-    private fun registerJobsForConnection(
-        scheduler: JobScheduler,
-        service: IbmMQService,
-        connectionId: String,
-    ) {
-        // 任务 1：每 5 秒扫一次消息数量 —— UI 最关心的数字，变化快。
-        scheduler.schedule(
-            ScheduledJob(
-                id = ScheduledJob.idFor(MODULE_ID, connectionId, JOB_SCAN_MESSAGES),
-                intervalMs = INTERVAL_5S,
-                runOnStart = true,
-                action = { service.scanMessageCounts(connectionId) },
-            ),
-        )
-
-        // 任务 2：每 10 分钟扫一次对象列表（队列 / 主题 / 监听器）—— 变化慢。
-        scheduler.schedule(
-            ScheduledJob(
-                id = ScheduledJob.idFor(MODULE_ID, connectionId, JOB_SCAN_OBJECTS),
-                intervalMs = INTERVAL_10MIN,
-                initialDelayMs = OBJECTS_FIRST_DELAY,
-                action = { service.scanObjects(connectionId) },
-            ),
-        )
-    }
+    private fun ownConnectionById(connectionId: String) =
+        ConnectionStore.connections.value.firstOrNull { it.id == connectionId }
 }

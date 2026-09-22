@@ -1,5 +1,6 @@
 package com.mqclient.core
 
+import com.mqclient.core.cache.CacheManager
 import com.mqclient.core.event.EventBus
 import com.mqclient.core.event.EventBusErrorReporter
 import com.mqclient.core.event.EventNames
@@ -28,6 +29,12 @@ import kotlinx.coroutines.flow.asStateFlow
  * "property … has not been initialized"。
  */
 object CoreModule {
+
+    /**
+     * app-core 自己的全局缓存实例（核内数据用它；业务模块的数据各归各的
+     * 连接级缓存实例 —— 见 ibm-mq 的 IbmMQConnectionContext.cache，互不干扰）。
+     */
+    val coreCache: CacheManager = CacheManager()
 
     private var bus: EventBus? = null
     private var appScope: CoroutineScope? = null

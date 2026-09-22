@@ -13,6 +13,20 @@ object IbmMQEvents {
     /** 本模块事件的前缀，等于 `ServiceContext.moduleId + "."`。 */
     const val PREFIX = "ibm-mq."
 
+    // ---- 连接生命周期（显式连接模型下由 IbmMQConnectionManager 发出）----
+    // 连接状态的事实来源是 ConnectionStore（reportStatus 上报，侧边栏直接订阅）；
+    // 这三个事件是「刚发生了什么」，给需要响应式动作的订阅方用（如日志、将来的
+    // 自动重连）。
+
+    /** 连接建立成功（cache 与定时扫描任务已就位）；payload: `connectionId` */
+    const val CONNECTED = "ibm-mq.connection.connected"
+
+    /** 连接已断开（用户主动断开 / 模块关闭）；payload: `connectionId` / `reason` */
+    const val DISCONNECTED = "ibm-mq.connection.disconnected"
+
+    /** 连接尝试失败；payload: `connectionId` / `message` */
+    const val CONNECT_FAILED = "ibm-mq.connection.failed"
+
     /** 开始扫描；payload: `connectionId` */
     const val SCAN_STARTED = "ibm-mq.scan.started"
 
