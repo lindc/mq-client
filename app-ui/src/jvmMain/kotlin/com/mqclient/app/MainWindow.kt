@@ -3,6 +3,7 @@ package com.mqclient.app
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -40,6 +41,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import com.mqclient.aiui.AiContext
 import com.mqclient.aiui.AiPanel
 import com.mqclient.aiui.AiPanelState
@@ -64,6 +68,10 @@ private val WideSidebarThreshold = 840.dp
 
 private val TreeSidebarWidth = 280.dp
 private val RailSidebarWidth = 92.dp
+
+/** 树形侧栏可拖拽调整宽度的上下限（仅在窗口够宽、显示树形侧栏时生效）。 */
+private val MinSidebarWidth = 200.dp
+private val MaxSidebarWidth = 480.dp
 
 private val StatusBarHeight = 28.dp
 
@@ -134,6 +142,10 @@ fun MainWindow(
     var openTabs by remember { mutableStateOf(listOf<NavSelection>()) }
     var activeTab by remember { mutableStateOf<NavSelection?>(null) }
 
+    // 侧栏（树形）宽度：可由分隔条拖拽调整，默认与 TreeSidebarWidth 一致；rail 形态固定。
+    val density = LocalDensity.current
+    var sidebarWidth by remember { mutableStateOf(TreeSidebarWidth) }
+
     val connectionName = { sel: NavSelection ->
         connections.firstOrNull { it.id == sel.connectionId }?.name ?: sel.connectionId
     }
@@ -173,8 +185,13 @@ fun MainWindow(
                             onSelect = onNavSelect,
                             actions = connectionActions,
                             propertiesServiceIds = propertiesServiceIds,
-                            modifier = sidebarModifier.width(TreeSidebarWidth),
+                            modifier = sidebarModifier.width(sidebarWidth),
                         )
+                        // 可拖拽调整宽度的分隔条（仅树形侧栏；rail 形态固定）。
+                        SidebarResizeHandle { deltaPx ->
+                            val deltaDp = with(density) { deltaPx.toDp() }
+                            sidebarWidth = (sidebarWidth + deltaDp).coerceIn(MinSidebarWidth, MaxSidebarWidth)
+                        }
                     } else {
                         ModuleRail(
                             connections = connections,
@@ -184,8 +201,8 @@ fun MainWindow(
                             propertiesServiceIds = propertiesServiceIds,
                             modifier = sidebarModifier.width(RailSidebarWidth),
                         )
+                        VerticalDivider()
                     }
-                    VerticalDivider()
                 }
                 Column(modifier = Modifier.weight(1f).fillMaxSize()) {
                     if (openTabs.isNotEmpty()) {
@@ -380,6 +397,40 @@ private fun ObjectTypeWorkspace(
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
+        )
+    }
+}
+
+/**
+ * 侧栏（树形）的可拖拽宽度调整条：放在侧栏与内容区之间，左右拖动即改侧栏宽度。
+ * 视觉上是 1dp 竖线，但整条 6dp 宽都算命中区，好抓；鼠标悬停显示左右伸缩光标。
+ */
+@Composable
+private fun SidebarResizeHandle(onResize: (Float) -> Unit) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val hovered by interactionSource.collectIsHoveredAsState()
+    Box(
+        modifier =
+            Modifier
+                .fillMaxHeight()
+                .width(8.dp)
+                .hoverable(interactionSource)
+                .pointerInput(Unit) {
+                    detectHorizontalDragGestures { change, dragAmount ->
+                        change.consume()
+                        onResize(dragAmount)
+                    }
+                },
+    ) {
+        Box(
+            modifier =
+                Modifier
+                    .fillMaxHeight()
+                    .width(1.dp)
+                    .background(
+                        if (hovered) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.outlineVariant,
+                    ),
         )
     }
 }
