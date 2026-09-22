@@ -27,6 +27,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -42,8 +43,17 @@ import androidx.compose.ui.unit.sp
 import com.mqclient.aiui.AiContext
 import com.mqclient.aiui.AiPanel
 import com.mqclient.aiui.AiPanelState
+import com.mqclient.app.connection.ConnectionActionsImpl
+import com.mqclient.app.connection.ConnectionMenuDialogs
+import com.mqclient.app.connection.ConnectionMenuState
+import com.mqclient.app.connection.TestResultData
 import com.mqclient.core.ConnectionInfo
+import com.mqclient.core.ConnectionStore
+import com.mqclient.core.CoreModule
 import com.mqclient.core.ModuleRegistry
+import com.mqclient.core.event.getBoolean
+import com.mqclient.core.event.getLong
+import com.mqclient.core.event.getString
 
 /**
  * Window widths at or above this get the full tree sidebar; narrower windows
@@ -74,6 +84,29 @@ fun MainWindow(
     // 连接列表由调用方（Main.kt 里 collectAsState 一次）传进来 —— 这里原来是
     // `remember { ConnectionStore.connections }`，会把快照 remember 死，连接变化永远看不到。
     val uiByService = remember { ModuleRegistry.uis.associateBy { it.serviceId } }
+
+    // 右键菜单的动作与对话框状态：动作实现（ConnectionActionsImpl）是无 UI 的回调集，
+    // 对话框集中在文件尾的 ConnectionMenuDialogs 里渲染。
+    val menuState = remember { ConnectionMenuState() }
+    val connectionActions = remember(menuState) { ConnectionActionsImpl(menuState) }
+    val propertiesServiceIds =
+        remember { ModuleRegistry.propertiesUis.mapTo(mutableSetOf()) { it.serviceId } }
+
+    // 测试连接的结果（约束：弹出结果对话框）：横跨所有模块的后缀订阅 —— 事件约定
+    // 见 app-core ConnectionActions 的文档，宿主不关心是哪个模块发的。
+    LaunchedEffect(Unit) {
+        CoreModule.eventBus.onSuffix(".connection.test.completed", this) { event ->
+            val connectionId = event.getString("connectionId") ?: return@onSuffix
+            menuState.testResult = TestResultData(
+                connectionName =
+                    ConnectionStore.connections.value
+                        .firstOrNull { it.id == connectionId }?.name ?: connectionId,
+                success = event.getBoolean("success") ?: false,
+                message = event.getString("message").orEmpty(),
+                durationMs = event.getLong("durationMs") ?: 0L,
+            )
+        }
+    }
 
     // Level-2 rows (queue/listener/topic) each get their own closable tab;
     // level-1 rows keep showing the connection's page directly.
@@ -117,6 +150,8 @@ fun MainWindow(
                             connections = connections,
                             selection = selection,
                             onSelect = onNavSelect,
+                            actions = connectionActions,
+                            propertiesServiceIds = propertiesServiceIds,
                             modifier = sidebarModifier.width(TreeSidebarWidth),
                         )
                     } else {
@@ -189,6 +224,8 @@ fun MainWindow(
         }
         StatusBar(currentModuleName = selection?.let { connectionName(it) })
     }
+    // 右键菜单引出的对话框（删除确认 / 正在连接 / 连接失败 / 测试结果 / 队列管理器属性）。
+    ConnectionMenuDialogs(state = menuState, actions = connectionActions)
 }
 
 /**

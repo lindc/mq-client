@@ -43,8 +43,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.mqclient.app.connection.ConnectionContextMenu
+import com.mqclient.app.connection.ContextMenuBox
+import com.mqclient.core.ConnectionActions
 import com.mqclient.core.ConnectionInfo
 import com.mqclient.core.ConnectionStatus
+import com.mqclient.core.ModuleRegistry
 
 /**
  * What a tree entry points at. `objectType == null` selects the connection's
@@ -65,16 +69,26 @@ private val ObjectRowHeight = 32.dp
  * icon, then the name (with the MQ endpoint name in brackets) over the
  * `host:port` endpoint, with the connection state on the right.
  *
- * Every connection starts collapsed.
+ * Every connection starts collapsed. A connection row is right-clickable:
+ * [actions] + the row's `ServiceAdapter` (SPI) produce the context menu items,
+ * rendered by [ConnectionContextMenu] — the sidebar knows nothing about them.
+ *
+ * @param propertiesServiceIds 注册了 [com.mqclient.core.ConnectionPropertiesUi]
+ *   的模块 id 集合：没有属性面板的模块，菜单里不显示「查看属性」项。
  */
 @Composable
 fun ModuleTree(
     connections: List<ConnectionInfo>,
     selection: NavSelection?,
     onSelect: (NavSelection) -> Unit,
+    actions: ConnectionActions,
+    propertiesServiceIds: Set<String>,
     modifier: Modifier = Modifier,
 ) {
     var expandedIds by remember { mutableStateOf(emptySet<String>()) }
+    // 右键菜单一次只开一个：记的是连接 id，而不是每行一个布尔（状态多份会互相打架）。
+    var contextMenuForId by remember { mutableStateOf<String?>(null) }
+    val adaptersById = remember { ModuleRegistry.services.associateBy { it.id } }
 
     Column(
         modifier =
@@ -85,6 +99,21 @@ fun ModuleTree(
     ) {
         connections.forEach { connection ->
             val expanded = connection.id in expandedIds
+            val adapter = adaptersById[connection.serviceId]
+            val contextMenu: (@Composable () -> Unit)? =
+                if (adapter != null && contextMenuForId == connection.id) {
+                    {
+                        ConnectionContextMenu(
+                            connection = connection,
+                            adapter = adapter,
+                            actions = actions,
+                            hasPropertiesUi = connection.serviceId in propertiesServiceIds,
+                            onDismiss = { contextMenuForId = null },
+                        )
+                    }
+                } else {
+                    null
+                }
             ConnectionRow(
                 connection = connection,
                 expanded = expanded,
@@ -94,6 +123,8 @@ fun ModuleTree(
                     expandedIds =
                         if (expanded) expandedIds - connection.id else expandedIds + connection.id
                 },
+                onOpenContextMenu = { contextMenuForId = connection.id },
+                contextMenu = contextMenu,
             )
 
             if (expanded) {
@@ -113,6 +144,9 @@ fun ModuleTree(
 /**
  * One connection row: [status dot] [arrow] [middleware icon] [name [endpoint
  * name] / host:port] [state label].
+ *
+ * The row is wrapped in [ContextMenuBox] so a secondary (right) click opens
+ * [contextMenu] anchored to the row. Right-clicking does NOT change selection.
  */
 @Composable
 private fun ConnectionRow(
@@ -120,6 +154,8 @@ private fun ConnectionRow(
     expanded: Boolean,
     selected: Boolean,
     onClick: () -> Unit,
+    onOpenContextMenu: () -> Unit,
+    contextMenu: (@Composable () -> Unit)? = null,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val hovered by interactionSource.collectIsHoveredAsState()
@@ -130,66 +166,74 @@ private fun ConnectionRow(
             else -> Color.Transparent
         }
 
-    Row(
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .height(ConnectionRowHeight)
-                .clip(RoundedCornerShape(6.dp))
-                .background(rowColor)
-                .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
-                .padding(start = 6.dp, end = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    ContextMenuBox(
+        menuOpen = contextMenu != null,
+        onOpenMenu = onOpenContextMenu,
+        onDismissMenu = { /* 关闭由菜单自身的 onDismiss 处理（见 ConnectionContextMenu） */ },
+        menu = contextMenu ?: {},
+        modifier = Modifier.fillMaxWidth(),
     ) {
-        StatusDot(connection.status)
-        Spacer(Modifier.width(6.dp))
-        Text(
-            text = if (expanded) "▾" else "▸",
-            fontSize = 12.sp,
-            modifier = Modifier.width(14.dp),
-            textAlign = TextAlign.Center,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.width(6.dp))
-        Icon(
-            painter = middlewareIcon(connection.serviceId),
-            contentDescription = null,
-            // The artwork carries the brand colours; tinting would flatten it.
-            tint = Color.Unspecified,
-            modifier = Modifier.size(20.dp),
-        )
-        Spacer(Modifier.width(8.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .height(ConnectionRowHeight)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(rowColor)
+                    .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
+                    .padding(start = 6.dp, end = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            StatusDot(connection.status)
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = if (expanded) "▾" else "▸",
+                fontSize = 12.sp,
+                modifier = Modifier.width(14.dp),
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.width(6.dp))
+            Icon(
+                painter = middlewareIcon(connection.serviceId),
+                contentDescription = null,
+                // The artwork carries the brand colours; tinting would flatten it.
+                tint = Color.Unspecified,
+                modifier = Modifier.size(20.dp),
+            )
+            Spacer(Modifier.width(8.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = connection.name,
+                        style = MaterialTheme.typography.labelLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = "[${connection.mqName}]",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                }
                 Text(
-                    text = connection.name,
-                    style = MaterialTheme.typography.labelLarge,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
-                )
-                Spacer(Modifier.width(4.dp))
-                Text(
-                    text = "[${connection.mqName}]",
+                    text = connection.endpoint,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
+            Spacer(Modifier.width(8.dp))
             Text(
-                text = connection.endpoint,
+                text = connection.status.label,
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                color = statusColor(connection.status),
             )
         }
-        Spacer(Modifier.width(8.dp))
-        Text(
-            text = connection.status.label,
-            style = MaterialTheme.typography.labelSmall,
-            color = statusColor(connection.status),
-        )
     }
 }
 

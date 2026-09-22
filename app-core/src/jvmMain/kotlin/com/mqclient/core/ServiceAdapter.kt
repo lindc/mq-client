@@ -42,6 +42,22 @@ interface ServiceAdapter {
     fun initialize(context: ServiceContext) {}
 
     /**
+     * 提供一条连接的右键菜单项。默认实现返回 [DefaultConnectionMenu] 的通用菜单
+     * （连接/断开合并项、复制、测试、查看队列管理器属性、删除）；模块有特有动作时
+     * 覆盖它 —— 可以调 [DefaultConnectionMenu.build] 拿通用菜单再追加 / 替换。
+     *
+     * 返回的是**纯数据描述**（见 [ContextMenuItem]），渲染统一由宿主完成；
+     * 宿主在渲染前会过滤连续 / 首尾的分隔线。
+     *
+     * 「查看队列管理器属性」这个通用项只对注册了 [ConnectionPropertiesUi] 的模块
+     * 生效：宿主按 [DefaultConnectionMenu.ITEM_QMGR_PROPERTIES] 过滤，模块侧无需关心。
+     */
+    fun contextMenuItems(
+        connection: ConnectionInfo,
+        actions: ConnectionActions,
+    ): List<ContextMenuItem> = DefaultConnectionMenu.build(connection, actions)
+
+    /**
      * 模块销毁钩子：由 [ModuleRegistry.disposeServices] 在应用退出时**按初始化逆序**调用，
      * 模块在这里释放自己持有的资源：真实连接 / 会话 / 消费者 / 订阅 / 定时任务。
      *

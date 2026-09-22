@@ -32,6 +32,13 @@ object ModuleRegistry {
     val forms: List<ConnectionFormUi> by lazy { loadAll(ConnectionFormUi::class.java) }
 
     /**
+     * 各模块的连接属性面板（如 IBM MQ 的队列管理器属性，PCF 查询），见
+     * [ConnectionPropertiesUi]。宿主按 `serviceId` 匹配：注册了的模块才显示
+     * 「查看队列管理器属性」菜单项。
+     */
+    val propertiesUis: List<ConnectionPropertiesUi> by lazy { loadAll(ConnectionPropertiesUi::class.java) }
+
+    /**
      * 各模块的配置段迁移（见 [ConfigMigration]）。由 `ConfigManager.initOnStartup`
      * 在启动早期触发 —— 那时 [initializeServices] 还没跑，所以迁移实现不能依赖任何
      * 「模块已初始化」的状态。

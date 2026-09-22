@@ -27,6 +27,25 @@ object IbmMQEvents {
     /** 连接尝试失败；payload: `connectionId` / `message` */
     const val CONNECT_FAILED = "ibm-mq.connection.failed"
 
+    // ---- 显式动作请求（发送方是宿主 app-ui，见 app-core ConnectionActions 的事件约定）----
+    // 模块在 IbmMQModule.initialize 里精确订阅这三个名字并执行；不订阅的模块等于
+    // 不支持对应动作。payload 统一为 `connectionId`。
+
+    /** 请求建立连接（来自右键菜单 / 「查看属性」的先连接流程）。payload: `connectionId` */
+    const val CONNECT_REQUESTED = "ibm-mq.connection.connect"
+
+    /** 请求断开连接。payload: `connectionId` */
+    const val DISCONNECT_REQUESTED = "ibm-mq.connection.disconnect"
+
+    /** 请求测试连接（临时连接，用完即关）。payload: `connectionId` */
+    const val TEST_REQUESTED = "ibm-mq.connection.test"
+
+    /**
+     * 测试完成（成功失败都发）；payload: `connectionId` / `success`(Boolean) /
+     * `message`(String) / `durationMs`(Long)。宿主（app-ui）订阅它弹结果对话框。
+     */
+    const val TEST_COMPLETED = "ibm-mq.connection.test.completed"
+
     /** 开始扫描；payload: `connectionId` */
     const val SCAN_STARTED = "ibm-mq.scan.started"
 

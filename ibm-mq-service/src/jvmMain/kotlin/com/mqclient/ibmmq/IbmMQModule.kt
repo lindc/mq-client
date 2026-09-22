@@ -6,11 +6,14 @@ import com.mqclient.core.event.getString
 import com.mqclient.core.log.Log
 import com.mqclient.core.spi.MODULE_ID_KEY
 import com.mqclient.core.spi.ServiceContext
+import com.mqclient.core.spi.emit
 import com.mqclient.core.spi.onEvent
 import com.mqclient.core.spi.onOwnEvents
+import com.mqclient.ibmmq.event.IbmMQEvents
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlin.jvm.Synchronized
 
 /**
@@ -28,6 +31,9 @@ internal const val JOB_SCAN_OBJECTS = "scan.objects"
 
 /** 对象列表扫描的起步延迟：先把首拍让给消息扫描（见 IbmMQConnectionManager.registerScanJobs）。 */
 internal const val OBJECTS_FIRST_DELAY_MS = 5_000L
+
+/** 「测试连接」的兜底超时：MQ 的 connect 是阻塞 IO（见 IbmMQService.testConnection），不能无限等。 */
+internal const val TEST_TIMEOUT_MS = 30_000L
 
 /**
  * IBM MQ 模块的初始化入口 —— **显式连接模型**。
@@ -92,6 +98,21 @@ object IbmMQModule {
                 connectionManager.remove(connectionId)
                 handler.cleanConnectionData(connectionId)
             },
+            // ---- 显式动作请求（宿主 app-ui 的右键菜单，事件约定见 ConnectionActions）----
+            // 连接的 handler 挂起执行到 connect 完成：emit 是异步投递，但 handler
+            // 不跑完事件就不算消费 ——「查看属性先连接」的发起方订阅的是
+            // ConnectionStore 的状态变化，这里只保证请求被真正执行。
+            context.onEvent(IbmMQEvents.CONNECT_REQUESTED) { event ->
+                val connectionId = event.getString("connectionId") ?: return@onEvent
+                connectionManager.connect(connectionId)
+            },
+            context.onEvent(IbmMQEvents.DISCONNECT_REQUESTED) { event ->
+                val connectionId = event.getString("connectionId") ?: return@onEvent
+                connectionManager.disconnectNow(connectionId, reason = "menu request")
+            },
+            context.onEvent(IbmMQEvents.TEST_REQUESTED) { event ->
+                handleTestRequested(event, connectionManager, created)
+            },
         )
 
         // 启动时已经在配置里的连接：补登记 DISCONNECTED 上下文。**不连接** ——
@@ -154,6 +175,49 @@ object IbmMQModule {
             subscriptionsToCancel.forEach(Job::cancel)
             moduleContext = null
         }
+    }
+
+    /**
+     * 「测试连接」请求的处理：取该连接的配置快照发起一次**临时连接**（用完即关，
+     * 不影响正式连接的状态与定时任务），结果发 [IbmMQEvents.TEST_COMPLETED] ——
+     * 成功失败都发，宿主据此弹结果对话框。配置未登记（上下文不存在）按失败上报。
+     */
+    private suspend fun handleTestRequested(
+        event: com.mqclient.core.event.AppEvent,
+        connectionManager: IbmMQConnectionManager,
+        service: IbmMQService,
+    ) {
+        val connectionId = event.getString("connectionId") ?: return
+        val config = connectionManager.contextOrNull(connectionId)?.config
+        if (config == null) {
+            moduleContext?.emit(
+                name = IbmMQEvents.TEST_COMPLETED,
+                payload = mapOf(
+                    "connectionId" to connectionId,
+                    "success" to false,
+                    "message" to "连接 '$connectionId' 未登记",
+                    "durationMs" to 0L,
+                ),
+            )
+            return
+        }
+        val startedAt = System.currentTimeMillis()
+        val outcome = runCatching {
+            withTimeout(TEST_TIMEOUT_MS) { service.testConnection(config) }
+        }
+        moduleContext?.emit(
+            name = IbmMQEvents.TEST_COMPLETED,
+            payload = mapOf(
+                "connectionId" to connectionId,
+                "success" to outcome.isSuccess,
+                "message" to (outcome.exceptionOrNull()?.let { it.message ?: it::class.simpleName } ?: ""),
+                "durationMs" to (System.currentTimeMillis() - startedAt),
+            ),
+        )
+        ibmMqLog.info(
+            "test completed: connection=$connectionId success=${outcome.isSuccess} " +
+                "duration=${System.currentTimeMillis() - startedAt}ms",
+        )
     }
 
     /** 事件是否属于本模块的连接（`core.connection.*` 的 payload 里 `type` = serviceId）。 */
