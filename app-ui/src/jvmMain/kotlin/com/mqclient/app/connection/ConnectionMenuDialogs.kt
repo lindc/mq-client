@@ -15,7 +15,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.DpSize
@@ -39,7 +38,6 @@ fun ConnectionMenuDialogs(
     state: ConnectionMenuState,
     actions: ConnectionActionsImpl,
 ) {
-    val scope = rememberCoroutineScope()
     state.deleteTarget?.let { connection ->
         DeleteConfirmDialog(
             connection = connection,
@@ -64,8 +62,9 @@ fun ConnectionMenuDialogs(
             failure = failure,
             onRetry = {
                 state.connectFailure = null
-                // 重试重新走「先连接再查属性」的完整编排（挂起函数，进协程）。
-                scope.launch { actions.showQmgrProperties(failure.connectionId) }
+                // 重试重新走「先连接再查属性」的完整编排（挂起函数）；对话框本身可能
+                // 随状态清空而离开组合，动作必须跑在应用级 scope 上。
+                CoreModule.scope.launch { actions.showQmgrProperties(failure.connectionId) }
             },
             onDismiss = { state.connectFailure = null },
         )
@@ -76,7 +75,7 @@ fun ConnectionMenuDialogs(
             onRetry = {
                 state.connectError = null
                 // 普通连接失败只重试连接本身，不进「先连接再查属性」的编排。
-                scope.launch { actions.connect(failure.connectionId) }
+                CoreModule.scope.launch { actions.connect(failure.connectionId) }
             },
             onDismiss = { state.connectError = null },
         )

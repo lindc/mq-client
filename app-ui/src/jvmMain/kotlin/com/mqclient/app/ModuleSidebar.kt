@@ -42,6 +42,7 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.sp
 import com.mqclient.app.connection.ConnectionContextMenu
 import com.mqclient.app.connection.ContextMenuBox
@@ -86,8 +87,6 @@ fun ModuleTree(
     modifier: Modifier = Modifier,
 ) {
     var expandedIds by remember { mutableStateOf(emptySet<String>()) }
-    // 右键菜单一次只开一个：记的是连接 id，而不是每行一个布尔（状态多份会互相打架）。
-    var contextMenuForId by remember { mutableStateOf<String?>(null) }
     val adaptersById = remember { ModuleRegistry.services.associateBy { it.id } }
 
     Column(
@@ -99,20 +98,21 @@ fun ModuleTree(
     ) {
         connections.forEach { connection ->
             val expanded = connection.id in expandedIds
+            // 菜单的开关与光标位置由每行的 ContextMenuBox 自管，这里只把渲染槽
+            // （含该行的 adapter）递进去；没有 adapter 的连接右键无菜单。
             val adapter = adaptersById[connection.serviceId]
-            val contextMenu: (@Composable () -> Unit)? =
-                if (adapter != null && contextMenuForId == connection.id) {
-                    {
+            val contextMenu: ( @[Composable] (DpOffset, () -> Unit) -> Unit )? =
+                adapter?.let { svc ->
+                    @Composable { menuOffset: DpOffset, onDismiss: () -> Unit ->
                         ConnectionContextMenu(
                             connection = connection,
-                            adapter = adapter,
+                            adapter = svc,
                             actions = actions,
                             hasPropertiesUi = connection.serviceId in propertiesServiceIds,
-                            onDismiss = { contextMenuForId = null },
+                            menuOffset = menuOffset,
+                            onDismiss = onDismiss,
                         )
                     }
-                } else {
-                    null
                 }
             ConnectionRow(
                 connection = connection,
@@ -123,7 +123,6 @@ fun ModuleTree(
                     expandedIds =
                         if (expanded) expandedIds - connection.id else expandedIds + connection.id
                 },
-                onOpenContextMenu = { contextMenuForId = connection.id },
                 contextMenu = contextMenu,
             )
 
@@ -154,8 +153,7 @@ private fun ConnectionRow(
     expanded: Boolean,
     selected: Boolean,
     onClick: () -> Unit,
-    onOpenContextMenu: () -> Unit,
-    contextMenu: (@Composable () -> Unit)? = null,
+    contextMenu: ( @[Composable] (DpOffset, () -> Unit) -> Unit )? = null,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val hovered by interactionSource.collectIsHoveredAsState()
@@ -167,13 +165,9 @@ private fun ConnectionRow(
         }
 
     ContextMenuBox(
-        menuOpen = contextMenu != null,
-        onOpenMenu = onOpenContextMenu,
-        onDismissMenu = { /* 关闭由菜单自身的 onDismiss 处理（见 ConnectionContextMenu） */ },
-        menu = contextMenu ?: {},
         modifier = Modifier.fillMaxWidth(),
-    ) {
-        Row(
+        content = {
+            Row(
             modifier =
                 Modifier
                     .fillMaxWidth()
@@ -234,7 +228,9 @@ private fun ConnectionRow(
                 color = statusColor(connection.status),
             )
         }
-    }
+        },
+        menu = contextMenu ?: { _, _ -> },
+    )
 }
 
 /** Object-type leaf: dashed branch and the type name. */
