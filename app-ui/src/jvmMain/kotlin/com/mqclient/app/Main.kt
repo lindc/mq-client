@@ -75,6 +75,14 @@ fun main() {
     val bootConfig = ConfigStore.loadConfig()
     runBlocking { LanguageResources.load(bootConfig.general.language.toLanguageCode()) }
 
+    // 事件总线接线同样在窗口创建之前完成：任何组合里的 effect 都可能读到
+    // CoreModule.eventBus（AppRoot 的语言订阅、MainWindow 的测试结果 / 连接失败
+    // 订阅……），而 LaunchedEffect 之间**没有**可靠的先后保证 —— 这些 effect 挂在
+    // 不同的组合层级上（MainWindow 还在 BoxWithConstraints 的布局期子组合里），
+    // 曾经实测子层的订阅先于 bootstrap 跑，eventBus 还是 null 就炸了。总线先于
+    // 一切组合存在，这类读取才谈得上安全。
+    bootstrapEvents()
+
     nucleusApplication { AppRoot(bootConfig, onExit = { exitApplication() }) }
 }
 
@@ -87,13 +95,10 @@ fun main() {
  */
 @Composable
 private fun AppRoot(bootConfig: Config, onExit: () -> Unit) {
-    // 事件总线接线放在 effect 里而不是组合体内：组合应当无副作用（重组会重跑组合体，
-    // effect 只在首次组合提交后跑一次）。声明顺序有意义 —— 它必须排在所有读
-    // CoreModule.eventBus 的 effect 之前（比如下面重载字符串表那个）。
-    LaunchedEffect(Unit) { bootstrapEvents() }
     // 语言热切换：设置保存时 Main 会广播 core.language.changed，这里重载字符串表。
     // LanguageResources 换表时会 bump 内部的 Compose state，所以所有
     // stringResource() 读取方（整棵界面树）自动重组，不需要让全树换 key。
+    // （事件总线已在 main() 里初始化完毕，这里直接订阅即可。）
     LaunchedEffect(Unit) {
         CoreModule.eventBus.on(EventNames.LANGUAGE_CHANGED, this) { event ->
             val language = event.payload["language"] as? Language ?: return@on
@@ -311,7 +316,7 @@ private fun AppRoot(bootConfig: Config, onExit: () -> Unit) {
 }
 
 /**
- * 打开事件总线并完成启动接线：
+ * 打开事件总线并完成启动接线（**由 [main] 在窗口创建之前调用**）：
  *  1. 建应用级 scope（SupervisorJob + Dispatchers.Default，不用 GlobalScope）；
  *  2. CoreModule 拿到总线，数据库也在这里初始化（JDBC 单连接 → 单槽 IO 调度器串行化），
  *     之后模块读 CoreModule.eventBus / DatabaseManager 或注入的 ServiceContext；
