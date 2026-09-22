@@ -48,6 +48,13 @@ class ConnectionMenuState {
     /** 先连接流程的失败信息（弹错误对话框，带重试）。 */
     var connectFailure by mutableStateOf<ConnectFailure?>(null)
 
+    /**
+     * 一次**普通显式连接**的失败（右键菜单 / 模块面板的连接按钮，来源：
+     * `<serviceId>.connection.failed` 事件）。与 [connectFailure] 分开持有：
+     * 两者的重试语义不同 —— 前者重试整个「先连接再查属性」编排，后者只重试连接。
+     */
+    var connectError by mutableStateOf<ConnectFailure?>(null)
+
     /** 最近一次「测试连接」的结果（结果对话框）。 */
     var testResult by mutableStateOf<TestResultData?>(null)
 }

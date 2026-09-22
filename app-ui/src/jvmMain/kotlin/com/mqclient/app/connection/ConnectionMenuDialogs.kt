@@ -70,6 +70,17 @@ fun ConnectionMenuDialogs(
             onDismiss = { state.connectFailure = null },
         )
     }
+    state.connectError?.let { failure ->
+        ConnectFailedDialog(
+            failure = failure,
+            onRetry = {
+                state.connectError = null
+                // 普通连接失败只重试连接本身，不进「先连接再查属性」的编排。
+                scope.launch { actions.connect(failure.connectionId) }
+            },
+            onDismiss = { state.connectError = null },
+        )
+    }
     state.testResult?.let { result ->
         TestResultDialog(result = result, onDismiss = { state.testResult = null })
     }

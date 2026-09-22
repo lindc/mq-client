@@ -46,6 +46,7 @@ import com.mqclient.aiui.AiPanelState
 import com.mqclient.app.connection.ConnectionActionsImpl
 import com.mqclient.app.connection.ConnectionMenuDialogs
 import com.mqclient.app.connection.ConnectionMenuState
+import com.mqclient.app.connection.ConnectFailure
 import com.mqclient.app.connection.TestResultData
 import com.mqclient.core.ConnectionInfo
 import com.mqclient.core.ConnectionStore
@@ -104,6 +105,25 @@ fun MainWindow(
                 success = event.getBoolean("success") ?: false,
                 message = event.getString("message").orEmpty(),
                 durationMs = event.getLong("durationMs") ?: 0L,
+            )
+        }
+    }
+
+    // 显式连接失败（右键菜单 / 模块面板的连接按钮）→ 错误对话框：没有这个提示的话，
+    // 连接失败只剩状态点变红，用户不知道错在哪。`.connection.failed` 只有模块的
+    // connect 链路会发（扫描心跳失败发的是自己的 `.scan.messages.failed`），所以这条
+    // 订阅不会把后台任务失败也弹成对话框。「查看属性」的先连接流程自己消费失败事件
+    // （见 ConnectionActionsImpl.showQmgrProperties），期间跳过，避免双重弹窗。
+    LaunchedEffect(Unit) {
+        CoreModule.eventBus.onSuffix(".connection.failed", this) { event ->
+            if (menuState.connectingForProperties != null) return@onSuffix
+            val connectionId = event.getString("connectionId") ?: return@onSuffix
+            menuState.connectError = ConnectFailure(
+                connectionId = connectionId,
+                connectionName =
+                    ConnectionStore.connections.value
+                        .firstOrNull { it.id == connectionId }?.name ?: connectionId,
+                message = event.getString("message"),
             )
         }
     }
