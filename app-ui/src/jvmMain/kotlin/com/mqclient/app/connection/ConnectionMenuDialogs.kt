@@ -96,8 +96,8 @@ private fun DeleteConfirmDialog(connection: ConnectionInfo, onConfirm: () -> Uni
         title = { Text(stringResource("delete_confirm_title")) },
         text = { Text(stringResource("delete_confirm_text").format(connection.name)) },
         confirmButton = {
-            PressableButton(onClick = onConfirm) {
-                Text(stringResource("common_delete"), color = MaterialTheme.colorScheme.error)
+            PressableButton(onClick = onConfirm, danger = true) {
+                Text(stringResource("common_delete"))
             }
         },
         dismissButton = {

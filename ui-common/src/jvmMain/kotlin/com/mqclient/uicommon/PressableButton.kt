@@ -46,6 +46,10 @@ import androidx.compose.ui.unit.sp
  * 更长的按钮自然变宽，不受影响。图标按钮（如 ✕）传 `false` 退出这个约定。
  *
  * @param standardMinWidth 是否套用「4 字宽」的最小宽度；纯图标内容必须传 `false`。
+ * @param danger 危险操作样式：为 true 时背景走 `colorScheme.error`、文字走
+ *   `colorScheme.onError`（语义色，默认调色板保证对比度 ≥ 4.5:1），并忽略传入的
+ *   [containerColor] / [contentColor]。删除连接之类的破坏性操作用它，避免各调用处
+ *   各自硬编码 error 色、样式不一致。
  */
 @Composable
 fun PressableButton(
@@ -55,6 +59,7 @@ fun PressableButton(
     elevation: Dp = 2.dp,
     pressedScale: Float = 0.96f,
     standardMinWidth: Boolean = true,
+    danger: Boolean = false,
     containerColor: Color = MaterialTheme.colorScheme.primary,
     contentColor: Color = MaterialTheme.colorScheme.onPrimary,
     contentPadding: PaddingValues = ButtonDefaults.TextButtonContentPadding,
@@ -62,6 +67,11 @@ fun PressableButton(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
+    // danger 优先：走 error / onError 语义色对，忽略传入的 containerColor / contentColor。
+    val resolvedContainerColor =
+        if (danger) MaterialTheme.colorScheme.error else containerColor
+    val resolvedContentColor =
+        if (danger) MaterialTheme.colorScheme.onError else contentColor
     val scale by animateFloatAsState(if (pressed) pressedScale else 1f, label = "press-scale")
     val minWidthModifier = if (standardMinWidth) {
         val density = LocalDensity.current
@@ -81,8 +91,8 @@ fun PressableButton(
         onClick = onClick,
         enabled = enabled,
         shape = MaterialTheme.shapes.small,
-        color = containerColor,
-        contentColor = contentColor,
+        color = resolvedContainerColor,
+        contentColor = resolvedContentColor,
         shadowElevation = if (pressed) 0.dp else elevation,
         interactionSource = interactionSource,
         modifier = modifier
