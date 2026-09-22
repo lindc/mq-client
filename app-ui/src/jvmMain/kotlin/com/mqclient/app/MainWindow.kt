@@ -179,6 +179,8 @@ fun MainWindow(
                             connections = connections,
                             selection = selection,
                             onSelect = onNavSelect,
+                            actions = connectionActions,
+                            propertiesServiceIds = propertiesServiceIds,
                             modifier = sidebarModifier.width(RailSidebarWidth),
                         )
                     }

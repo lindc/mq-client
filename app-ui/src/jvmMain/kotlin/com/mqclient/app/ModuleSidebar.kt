@@ -317,16 +317,23 @@ private fun StatusDot(status: ConnectionStatus) {
 /**
  * Collapsed navigation for narrow windows: one pill per connection. Clicking
  * a pill opens the connection and shows a menu with its overview plus the
- * object types and their counts.
+ * object types and their counts. Right-clicking a pill opens the same
+ * connection context menu as the wide tree's rows ([ConnectionContextMenu]).
+ *
+ * @param propertiesServiceIds 注册了 [com.mqclient.core.ConnectionPropertiesUi]
+ *   的模块 id 集合（与 [ModuleTree] 同一份，宿主传入）。
  */
 @Composable
 fun ModuleRail(
     connections: List<ConnectionInfo>,
     selection: NavSelection?,
     onSelect: (NavSelection) -> Unit,
+    actions: ConnectionActions,
+    propertiesServiceIds: Set<String>,
     modifier: Modifier = Modifier,
 ) {
     var menuForId by remember { mutableStateOf<String?>(null) }
+    val adaptersById = remember { ModuleRegistry.services.associateBy { it.id } }
 
     Column(
         modifier =
@@ -345,37 +352,57 @@ fun ModuleRail(
                     hovered -> MaterialTheme.colorScheme.surfaceContainerHigh
                     else -> Color.Transparent
                 }
-
-            Box(modifier = Modifier.fillMaxWidth()) {
-                Box(
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(pillColor)
-                            .clickable(interactionSource = interactionSource, indication = null) {
-                                onSelect(NavSelection(connection.id))
-                                menuForId = connection.id
-                            }
-                            .padding(vertical = 10.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        StatusDot(connection.status)
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            text = connection.name,
-                            fontSize = 11.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            textAlign = TextAlign.Center,
-                            color =
-                                if (active) MaterialTheme.colorScheme.onSecondaryContainer
-                                else MaterialTheme.colorScheme.onSurfaceVariant,
+            val adapter = adaptersById[connection.serviceId]
+            val contextMenu: ( @[Composable] (DpOffset, () -> Unit) -> Unit )? =
+                adapter?.let { svc ->
+                    @Composable { menuOffset: DpOffset, onDismiss: () -> Unit ->
+                        ConnectionContextMenu(
+                            connection = connection,
+                            adapter = svc,
+                            actions = actions,
+                            hasPropertiesUi = connection.serviceId in propertiesServiceIds,
+                            menuOffset = menuOffset,
+                            onDismiss = onDismiss,
                         )
                     }
                 }
+
+            Box(modifier = Modifier.fillMaxWidth()) {
+                ContextMenuBox(
+                    modifier = Modifier.fillMaxWidth(),
+                    content = {
+                        Box(
+                            modifier =
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 8.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(pillColor)
+                                    .clickable(interactionSource = interactionSource, indication = null) {
+                                        onSelect(NavSelection(connection.id))
+                                        menuForId = connection.id
+                                    }
+                                    .padding(vertical = 10.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                StatusDot(connection.status)
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    text = connection.name,
+                                    fontSize = 11.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    textAlign = TextAlign.Center,
+                                    color =
+                                        if (active) MaterialTheme.colorScheme.onSecondaryContainer
+                                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    },
+                    menu = contextMenu ?: { _, _ -> },
+                )
 
                 DropdownMenu(
                     expanded = menuForId == connection.id,
