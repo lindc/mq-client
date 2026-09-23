@@ -40,6 +40,7 @@ include(
     ":openai-ui",
     ":ibm-mq-service", ":ibm-mq-ui",
     ":kafka-service", ":kafka-ui",
+    ":pulsar-service", ":pulsar-ui",
     ":artemis-service", ":artemis-ui",
     ":rabbitmq-service", ":rabbitmq-ui",
     ":rocketmq-service", ":rocketmq-ui",
