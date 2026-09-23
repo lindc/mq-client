@@ -4,6 +4,7 @@ import com.mqclient.core.event.AppEvent
 import com.mqclient.core.event.EventNames
 import java.io.File
 import java.nio.file.Files
+import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
@@ -142,6 +143,84 @@ class ConnectionStoreTest {
     }
 
     @Test
+    fun `update overwrites every field and persists the re-keyed connection`() = runBlocking {
+        ConnectionStore.create(connection("mq-01", "first", options = mapOf("vhost" to "/old")))
+
+        val result = ConnectionStore.update(
+            connection(
+                "mq-01",
+                "renamed",
+                options = mapOf("vhost" to "/prod", "channel" to "SYSTEM.DEF.SVRCONN"),
+                host = "mq.example.com",
+                port = 1415,
+                mqName = "QM2",
+            ),
+        )
+
+        assertTrue(result.isSuccess)
+        val stored = persisted().single()
+        assertTrue(stored.id != "mq-01", "落盘的就是换过新 id 的那份")
+        UUID.fromString(stored.id) // 必须是合法 UUID（解析失败直接抛错）
+        assertEquals("renamed", stored.name)
+        assertEquals("mq.example.com", stored.host)
+        assertEquals(1415, stored.port)
+        assertEquals("QM2", stored.mqName)
+        assertEquals(mapOf("vhost" to "/prod", "channel" to "SYSTEM.DEF.SVRCONN"), stored.options)
+        assertEquals(
+            ConnectionStore.connections.value.single().id,
+            stored.id,
+            "内存快照与磁盘是同一份（新 id）",
+        )
+    }
+
+    @Test
+    fun `update leaves other connections untouched`() = runBlocking {
+        ConnectionStore.create(
+            connection("mq-01", "first", host = "old.example.com", options = mapOf("vhost" to "/old")),
+        )
+        ConnectionStore.create(connection("mq-02", "second", host = "other.example.com"))
+
+        ConnectionStore.update(connection("mq-01", "renamed", host = "new.example.com"))
+
+        val (reIded, untouched) = ConnectionStore.connections.value.toList()
+        assertEquals("new.example.com", reIded.host)
+        assertEquals("mq-02", untouched.id, "别的连接 id 不动")
+        assertEquals("other.example.com", untouched.host, "别的连接字段一个字节都不改")
+        assertEquals("other.example.com", persisted().last().host)
+    }
+
+    @Test
+    fun `update always re-keys even when nothing else changed`() = runBlocking {
+        ConnectionStore.create(connection("mq-01", "first"))
+        awaitEvents(1)
+        events.clear()
+
+        val result = ConnectionStore.update(connection("mq-01", "first"))
+
+        assertTrue(result.isSuccess)
+        assertTrue(ConnectionStore.connections.value.single().id != "mq-01", "无变化也换新 id：一 id 一行快照是契约")
+        awaitEvents(2)
+        assertEquals(
+            listOf(EventNames.CONNECTION_ADDED, EventNames.CONNECTION_DELETED),
+            events.map { it.name },
+        )
+    }
+
+    @Test
+    fun `update failure paths do not broadcast or touch the disk`() = runBlocking {
+        ConnectionStore.create(connection("mq-01", "first"))
+        awaitEvents(1)
+        events.clear()
+
+        ConnectionStore.update(connection("mq-99", "ghost"))
+
+        delay(50)
+        assertEquals(0, events.size, "失败路径不发任何事件")
+        assertEquals(listOf("mq-01"), persisted().map { it.id }, "失败路径不写盘")
+        assertEquals(listOf("first"), ConnectionStore.connections.value.map { it.name }, "内存快照也不动")
+    }
+
+    @Test
     fun `delete removes the connection and broadcasts deleted`() = runBlocking {
         ConnectionStore.create(connection("mq-01", "first"))
         ConnectionStore.create(connection("mq-02", "second"))
@@ -237,13 +316,16 @@ class ConnectionStoreTest {
         name: String,
         serviceId: String = MODULE_ID,
         options: Map<String, String> = emptyMap(),
+        host: String = "localhost",
+        port: Int = 1414,
+        mqName: String = "QM1",
     ) = ConnectionInfo(
         id = id,
         name = name,
         serviceId = serviceId,
-        mqName = "QM1",
-        host = "localhost",
-        port = 1414,
+        mqName = mqName,
+        host = host,
+        port = port,
         options = options,
     )
 
