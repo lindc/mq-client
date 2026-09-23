@@ -23,10 +23,25 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.mqclient.core.AdapterUI
+import com.mqclient.core.ModuleI18nTable
+import com.mqclient.uicommon.i18n.stringResource
+import mq_client.pulsar_ui.generated.resources.Res
 
 class PulsarUI : AdapterUI {
     override val serviceId = "pulsar"
     override val title = "Pulsar"
+
+    /**
+     * 本模块私有 i18n 表（`files/i18n/pulsar_<lang>.json`）：占位页文案归自己的资源文件，
+     * 加翻译不需要动 ui-common 的公共表。读取必须用自己的 [Res]
+     * （compose 运行时资源按库包名隔离，见 [ModuleI18nTable]）。
+     */
+    override val i18nTables: List<ModuleI18nTable> = listOf(
+        ModuleI18nTable(base = "pulsar") { language ->
+            Res.readBytes("files/i18n/pulsar_$language.json").decodeToString()
+        },
+    )
+
     override val content: @Composable () -> Unit = { PulsarDemo() }
 }
 
@@ -45,50 +60,50 @@ private fun PulsarDemo() {
                 .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("Pulsar demo", style = MaterialTheme.typography.headlineSmall)
+        Text(stringResource("pulsar_demo_title"), style = MaterialTheme.typography.headlineSmall)
         Text(
-            "主题色来自 AppTheme 的 SeedColor，所有组件都读 MaterialTheme.colorScheme。",
+            stringResource("pulsar_demo_hint"),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("连接设置", style = MaterialTheme.typography.titleMedium)
+                Text(stringResource("pulsar_settings"), style = MaterialTheme.typography.titleMedium)
                 OutlinedTextField(
                     value = serviceUrl,
                     onValueChange = { serviceUrl = it },
-                    label = { Text("Service URL") },
-                    placeholder = { Text("pulsar://localhost:6650") },
+                    label = { Text(stringResource("pulsar_service_url")) },
+                    placeholder = { Text(stringResource("pulsar_service_url_ph")) },
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
                     value = tenant,
                     onValueChange = { tenant = it },
-                    label = { Text("Tenant") },
-                    placeholder = { Text("public") },
+                    label = { Text(stringResource("pulsar_tenant")) },
+                    placeholder = { Text(stringResource("pulsar_tenant_ph")) },
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
                     value = namespace,
                     onValueChange = { namespace = it },
-                    label = { Text("Namespace") },
-                    placeholder = { Text("default") },
+                    label = { Text(stringResource("pulsar_namespace")) },
+                    placeholder = { Text(stringResource("pulsar_namespace_ph")) },
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Switch(checked = enabled, onCheckedChange = { enabled = it })
-                    Text("启用批量发送")
+                    Text(stringResource("pulsar_enable_batch"))
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(checked = checked, onCheckedChange = { checked = it })
-                    Text("启用 TLS")
+                    Text(stringResource("pulsar_enable_tls"))
                 }
             }
         }
 
         Button(onClick = {}, modifier = Modifier.fillMaxWidth()) {
-            Text("连接")
+            Text(stringResource("pulsar_connect"))
         }
     }
 }
