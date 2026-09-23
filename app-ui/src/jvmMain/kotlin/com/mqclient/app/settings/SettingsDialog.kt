@@ -21,6 +21,10 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -50,13 +54,12 @@ import dev.nucleusframework.application.DecoratedDialog
 import dev.nucleusframework.window.windowDragArea
 
 /** Tabs the side nav can select. Order matches visual order top → bottom. */
-internal enum class SettingsTab(val icon: String, val key: String) {
-    GENERAL("\u2699\uFE0F", "settings_tab_general"),
-    APPEARANCE("\uD83C\uDFA8", "settings_tab_appearance"),
-    AI("\uD83E\uDD16", "settings_tab_ai"),
+internal enum class SettingsTab(val icon: ImageVector, val key: String) {
+    GENERAL(Icons.Default.Settings, "settings_tab_general"),
+    APPEARANCE(Icons.Default.Palette, "settings_tab_appearance"),
+    AI(Icons.Default.SmartToy, "settings_tab_ai"),
     ;
 
-    val title: String get() = "$icon ${stringResource(key)}"
     val tabName: String get() = stringResource(key)
 }
 
@@ -238,8 +241,16 @@ private fun SideNav(
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                Icon(
+                    imageVector = tab.icon,
+                    contentDescription = null,
+                    tint = if (isSelected) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(8.dp))
                 Text(
-                    text = tab.title,
+                    text = tab.tabName,
                     style = MaterialTheme.typography.bodyMedium,
                     color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer
                         else MaterialTheme.colorScheme.onSurfaceVariant,
