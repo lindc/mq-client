@@ -58,7 +58,8 @@ data class IbmMQFieldErrors(
  *
  * 保存链路见 [submit]；编辑模式见 [loadFrom] —— 密码三兄弟载入后只显示占位符，
  * 用户不动就沿用原值（原值留在 `original*` 字段里，构建配置时取回），一动就以
- * 新值为准。编辑模式落盘走 [ConnectionStore.update]（同 id 原位替换）。
+ * 新值为准。编辑模式落盘走 [ConnectionStore.update]（core 换发新 UUID：旧连接废弃、
+ * 新连接接任，快照 / 操作历史一 id 一行）。
  */
 class IbmMqConnectionFormState(
     defaultName: String,

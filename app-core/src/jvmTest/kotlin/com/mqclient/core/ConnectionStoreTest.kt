@@ -100,22 +100,33 @@ class ConnectionStoreTest {
     }
 
     @Test
-    fun `update replaces in place and broadcasts updated`() = runBlocking {
+    fun `update re-keys the connection and broadcasts deleted + added`() = runBlocking {
         ConnectionStore.create(connection("mq-01", "first"))
         ConnectionStore.create(connection("mq-02", "second"))
 
         val result = ConnectionStore.update(connection("mq-01", "renamed"))
 
         assertTrue(result.isSuccess)
-        assertEquals(listOf("mq-01", "mq-02"), ConnectionStore.connections.value.map { it.id }, "顺序不变")
-        assertEquals(listOf("renamed", "second"), ConnectionStore.connections.value.map { it.name })
+        val ids = ConnectionStore.connections.value.map { it.id }
+        assertEquals(2, ids.size)
+        assertTrue("mq-01" !in ids, "编辑 = 换发新 id（快照与历史关联一 id 一行），旧 id 不复存在")
+        assertEquals(listOf("renamed", "second"), ConnectionStore.connections.value.map { it.name }, "顺序不变")
         assertEquals(listOf("renamed", "second"), persisted().map { it.name })
 
-        awaitEvents(3)
+        awaitEvents(4)
         assertEquals(
-            listOf(EventNames.CONNECTION_ADDED, EventNames.CONNECTION_ADDED, EventNames.CONNECTION_UPDATED),
+            listOf(
+                EventNames.CONNECTION_ADDED,
+                EventNames.CONNECTION_ADDED,
+                EventNames.CONNECTION_ADDED,
+                EventNames.CONNECTION_DELETED,
+            ),
             events.map { it.name },
+            "换 id 由差异广播自然得出：新 id 是 added，旧 id 以 deleted 收尾",
         )
+        assertEquals("mq-01", events[3].payload["connectionId"], "旧 id 收到的是删除事件")
+        val reIdedId = events[2].payload["connectionId"]
+        assertEquals(listOf(reIdedId, "mq-02"), ids, "新 id 接任原位置")
     }
 
     @Test

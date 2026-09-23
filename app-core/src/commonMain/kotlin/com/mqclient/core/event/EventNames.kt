@@ -77,6 +77,15 @@ object EventNames {
     /** 连接删除落盘成功后；payload: `connectionId` / `type` / `name`。模块订阅它来清理自己的数据。 */
     const val CONNECTION_DELETED = "core.connection.deleted"
 
+    /**
+     * 连接快照已广播；订阅方（app-core 的 MqConnectionSnapshotHandler）把它写进
+     * mq_connection 表，供 operation_history 关联。发出方是各 MQ 模块 —— 只有模块
+     * 自己知道自己 options 里哪个键是逻辑容器（target）/ 用户名，所以 payload 由
+     * 模块组装（见 ibm-mq 模块的 IbmMQConnectionSnapshotEmitter）。
+     * payload: `connectionId` / `type` / `name` / `host` / `port` / `target` / `userName`。
+     */
+    const val MQ_CONNECTION_SNAPSHOT_CREATED = "core.mq.connection.snapshot.created"
+
     // AI 事件（`ai.*`）不在这里：契约常量跟着发出方走，现在在 ai-service 的
     // `AiEvents`（事件名）与 `AiPayloadKeys`（payload key）里 —— core 不再持有任何 AI 名字。
 }

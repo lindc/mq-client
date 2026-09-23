@@ -2,6 +2,7 @@ package com.mqclient.core
 
 import com.mqclient.core.event.EventNames
 import com.mqclient.core.log.Log
+import java.util.UUID
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -75,11 +76,17 @@ object ConnectionStore {
     }
 
     /**
-     * 编辑一条连接：按 id 原位替换（列表顺序不变）→ 落盘 → 广播 `core.connection.updated`。
+     * 编辑一条连接：按 id 定位（列表顺序不变）→ **换发新 UUID** → 落盘 → 广播事件。
      *
-     * 两条不变式：id 必须存在；**不允许改 [ConnectionInfo.serviceId]** —— 那等于换一套
-     * 协议，旧模块的订阅与定时任务要先收掉，语义上就是「删除 + 新建」，所以失败返回，
-     * 让调用方走 [delete] + [create]。
+     * 为什么换 id：连接的每一次保存都是一条**新身份**（mq_connection 快照与
+     * operation_history 都按 connection_id 关联，一 id 一行，关联查询不会因同一 id
+     * 多行快照而重复放大）。校验仍按**旧 id** 进行，两条不变式：id 必须存在；
+     * **不允许改 [ConnectionInfo.serviceId]** —— 那等于换一套协议，语义上就是
+     * 「删除 + 新建」，所以失败返回，让调用方走 [delete] + [create]。
+     *
+     * 事件由 [broadcastChanges] 按差异自动得出：旧 id 消失、新 id 出现，订阅方收到的
+     * 就是 `core.connection.deleted`（旧 id）+ `core.connection.added`（新 id）——
+     * 模块现有的清理 / 登记路径原样生效，不需要任何「改 id」的特判。
      */
     @Synchronized
     fun update(connection: ConnectionInfo): Result<Unit> {
@@ -96,7 +103,8 @@ object ConnectionStore {
                 ),
             )
         }
-        return saveAll(current.toMutableList().also { it[index] = connection })
+        val reIded = connection.copy(id = UUID.randomUUID().toString())
+        return saveAll(current.toMutableList().also { it[index] = reIded })
     }
 
     /**

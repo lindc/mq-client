@@ -91,6 +91,15 @@ object IbmMQModule {
                 if (!isOwnConnection(event, context)) return@onEvent
                 ownConnectionById(connectionId)?.let { connectionManager.updateContextConfig(it) }
             },
+            // 连接快照（mq_connection 表，供 operation_history 关联）：payload 组装在本模块
+            // （只有它认识 options 里的 qmgr / username 键），写库在 app-core 的
+            // MqConnectionSnapshotHandler —— 见 IbmMQConnectionSnapshotEmitter。编辑连接时
+            // core 换发新 id（本订阅收到的 added 即新快照），不另听 updated。
+            context.onEvent(EventNames.CONNECTION_ADDED) { event ->
+                if (isOwnConnection(event, context)) {
+                    IbmMQConnectionSnapshotEmitter.onConnectionSaved(event, context)
+                }
+            },
             context.onEvent(EventNames.CONNECTION_DELETED) { event ->
                 val connectionId = event.getString("connectionId") ?: return@onEvent
                 if (!isOwnConnection(event, context)) return@onEvent

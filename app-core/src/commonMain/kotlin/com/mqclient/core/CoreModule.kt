@@ -1,6 +1,8 @@
 package com.mqclient.core
 
 import com.mqclient.core.cache.CacheManager
+import com.mqclient.core.db.MqConnectionSnapshotHandler
+import com.mqclient.core.db.MqConnectionSnapshotRepository
 import com.mqclient.core.event.EventBus
 import com.mqclient.core.event.EventBusErrorReporter
 import com.mqclient.core.event.EventNames
@@ -39,6 +41,16 @@ object CoreModule {
     private var bus: EventBus? = null
     private var appScope: CoroutineScope? = null
     private var scheduler: JobScheduler? = null
+
+    /**
+     * 连接快照落库的处理器（mq_connection 表）：各 MQ 模块在 `core.connection.added /
+     * updated` 时组装 payload 广播 `core.mq.connection.snapshot.created`，这里统一写库。
+     *
+     * 订阅在 [initialize] 里挂到总线 scope（即应用 scope）上，随 [shutdown] 级联取消。
+     * handler 只在事件到达时才摸数据库（首写时建表，幂等），所以不依赖
+     * DatabaseManager 的初始化顺序；库没起来时报错走错误通道，不影响连接保存本身。
+     */
+    private val snapshotHandler = MqConnectionSnapshotHandler(MqConnectionSnapshotRepository)
 
     /** 应用级事件总线。在 [initialize] 之前访问会抛 [IllegalStateException]。 */
     val eventBus: EventBus
@@ -130,6 +142,8 @@ object CoreModule {
         appScope = scope
         bus = created
         scheduler = JobScheduler(scope, created)
+        // 连接快照落库（mq_connection 表）—— 订阅生命周期跟总线一致，见 snapshotHandler 的注释。
+        created.on(EventNames.MQ_CONNECTION_SNAPSHOT_CREATED) { event -> snapshotHandler.handle(event) }
         return created
     }
 

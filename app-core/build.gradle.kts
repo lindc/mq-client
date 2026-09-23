@@ -43,7 +43,14 @@ kotlin {
     }
 }
 
-// app-core deliberately defines NO tables/databases: every module owns its
-// own .sq files + generated Database (all sharing one SQLite file). The
-// plugin is applied here only so its version is aligned for downstream
-// modules that must apply it themselves.
+// mq_connection 表（连接历史快照，供 operation_history 关联查询）：app-core 目前唯一的表。
+// 写入走事件（`core.mq.connection.snapshot.created`，payload 由各 MQ 模块组装、
+// MqConnectionSnapshotHandler 落库），读走 MqConnectionSnapshotRepository。
+// 各业务模块的表仍归各模块自己的 .sq（见 ai-service 等），与 core 共享同一个 SQLite 文件。
+sqldelight {
+    databases {
+        create("CoreDatabase") {
+            packageName.set("com.mqclient.core.db")
+        }
+    }
+}
