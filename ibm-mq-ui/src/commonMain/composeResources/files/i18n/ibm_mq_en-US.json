@@ -1,0 +1,15 @@
+{
+  "nav_topology": "Topology",
+  "nav_command": "Command Console",
+  "nav_queues": "Queues",
+  "nav_topics": "Topics",
+  "nav_subscriptions": "Subscriptions",
+  "nav_channels": "Channels",
+  "nav_listeners": "Listeners",
+  "nav_services": "Services",
+  "nav_process_definitions": "Process Definitions",
+  "nav_namelists": "Namelists",
+  "nav_auth_info": "Authentication Information",
+  "nav_comm_info": "Communication Information",
+  "nav_security_policies": "Security Policies"
+}

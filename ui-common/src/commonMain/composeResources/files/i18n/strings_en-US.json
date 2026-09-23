@@ -5,7 +5,6 @@
   "menu_ai_assistant": "AI Assistant",
   "menu_about": "About",
   "menu_exit": "Exit",
-
   "about_title": "About MQClient",
   "about_app_name": "MQClient",
   "about_logo_description": "MQClient icon",
@@ -19,7 +18,6 @@
   "new_connection_form_todo": "The creation form for this type will arrive in a later version.",
   "common_close": "Close",
   "titlebar_clock": "Clock",
-
   "settings_title": "Settings",
   "settings_tab_general": "General",
   "settings_tab_appearance": "Appearance",
@@ -33,7 +31,6 @@
   "common_cancel": "Cancel",
   "common_finish": "Finish",
   "common_back": "Back",
-
   "settings_general_language": "Language",
   "language_simplified_chinese": "Simplified Chinese",
   "language_english": "English",
@@ -41,7 +38,6 @@
   "history_retention_note": "(older entries are auto-pruned)",
   "unit_days": "days",
   "common_range_format": "(range %1$s-%2$s)",
-
   "theme_label": "Theme",
   "theme_mode_system": "System",
   "theme_mode_light": "Light",
@@ -64,7 +60,6 @@
   "font_lxgw_label": "LXGW WenKai Mono",
   "font_size_label": "Font size",
   "unit_px": "px",
-
   "ai_default_service": "Default AI service",
   "ai_not_selected": "(not selected)",
   "ai_history_limit_label": "History message count",
@@ -90,7 +85,6 @@
   "ai_field_model": "Model",
   "ai_field_system_prompt": "System prompt",
   "ai_system_prompt_placeholder": "Optional — sets the AI's role and behaviour",
-
   "ai_panel_title": "AI Assistant",
   "ai_current_service": "Current service",
   "ai_context_label": "Context:",
@@ -101,20 +95,16 @@
   "ai_context_none": "No connection selected",
   "ai_provider_none": "No AI services",
   "ai_provider_pick": "Select AI",
-
   "conn_name_label": "Connection name",
   "conn_type_label": "Middleware type",
   "conn_test_connection": "Test Connection",
-
   "common_ok": "OK",
   "common_delete": "Delete",
   "common_edit": "Edit",
   "common_add": "Add",
   "common_search": "Search",
   "common_retry": "Retry",
-
   "settings_save_failed": "Failed to save: could not write config.json (%1$s)",
-
   "ibm_mq_section_basic": "Basic info",
   "ibm_mq_field_mode": "Connection mode",
   "ibm_mq_mode_client": "CLIENT (network)",
@@ -161,7 +151,6 @@
   "ibm_mq_action_connect": "Connect",
   "ibm_mq_action_reconnect": "Reconnect",
   "ibm_mq_action_disconnect": "Disconnect",
-
   "menu_connect": "Connect",
   "menu_connecting": "Connecting...",
   "menu_disconnect": "Disconnect",
@@ -174,8 +163,6 @@
   "connection_copy_suffix": " (copy)",
   "delete_confirm_title": "Delete Connection",
   "delete_confirm_text": "Delete connection \"%1$s\"? This cannot be undone.",
-  "common_delete": "Delete",
-  "common_retry": "Retry",
   "test_result_title": "Test Connection",
   "test_result_success": "Connection successful",
   "test_result_failed": "Connection failed",
@@ -203,5 +190,6 @@
   "qmgr_status_starting": "Starting",
   "qmgr_status_running": "Running",
   "qmgr_status_quiescing": "Quiescing",
-  "qmgr_status_standby": "Standby"
+  "qmgr_status_standby": "Standby",
+  "common_coming_soon": "Coming soon..."
 }

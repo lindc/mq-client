@@ -8,7 +8,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import com.mqclient.core.AdapterUI
+import com.mqclient.core.ModuleI18nTable
 import com.mqclient.uicommon.i18n.stringResource
+import mq_client.ibm_mq_ui.generated.resources.Res
 
 /**
  * IBM MQ 模块的主页面占位：连接的连接 / 断开等操作**不放这里** —— 将来挂在
@@ -18,6 +20,18 @@ import com.mqclient.uicommon.i18n.stringResource
 class IbmMqUI : AdapterUI {
     override val serviceId = "ibm-mq"
     override val title = "IBM MQ"
+
+    /**
+     * 本模块私有的 i18n 表（`files/i18n/ibm_mq_<lang>.json`）：导航项文案（`nav_*`）
+     * 等模块字符串归自己的资源文件，加文案不需要动 ui-common 的公共表。
+     * 读取必须用自己的 `Res`（compose 运行时资源按库包名隔离，见 [ModuleI18nTable]）。
+     */
+    override val i18nTables: List<ModuleI18nTable> = listOf(
+        ModuleI18nTable(base = "ibm_mq") { language ->
+            Res.readBytes("files/i18n/ibm_mq_$language.json").decodeToString()
+        },
+    )
+
     override val content: @Composable () -> Unit = {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(

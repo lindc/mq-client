@@ -5,7 +5,6 @@
   "menu_ai_assistant": "AI 助手",
   "menu_about": "关于",
   "menu_exit": "退出",
-
   "about_title": "关于 MQClient",
   "about_app_name": "MQClient",
   "about_logo_description": "MQClient 图标",
@@ -19,7 +18,6 @@
   "new_connection_form_todo": "该类型的创建表单将在后续版本提供。",
   "common_close": "关闭",
   "titlebar_clock": "时钟",
-
   "settings_title": "设置",
   "settings_tab_general": "通用",
   "settings_tab_appearance": "外观",
@@ -33,7 +31,6 @@
   "common_cancel": "取消",
   "common_finish": "完成",
   "common_back": "上一步",
-
   "settings_general_language": "语言",
   "language_simplified_chinese": "简体中文",
   "language_english": "English",
@@ -41,7 +38,6 @@
   "history_retention_note": "（超出后自动清理）",
   "unit_days": "天",
   "common_range_format": "（范围 %1$s-%2$s）",
-
   "theme_label": "主题",
   "theme_mode_system": "跟随系统",
   "theme_mode_light": "浅色",
@@ -64,7 +60,6 @@
   "font_lxgw_label": "霞鹜文楷 Mono",
   "font_size_label": "字号",
   "unit_px": "px",
-
   "ai_default_service": "默认 AI 服务",
   "ai_not_selected": "（未选择）",
   "ai_history_limit_label": "历史记录条数",
@@ -90,7 +85,6 @@
   "ai_field_model": "模型",
   "ai_field_system_prompt": "系统提示词",
   "ai_system_prompt_placeholder": "可选，用于设定 AI 的角色和行为",
-
   "ai_panel_title": "AI 助手",
   "ai_current_service": "当前服务",
   "ai_context_label": "上下文:",
@@ -101,20 +95,16 @@
   "ai_context_none": "未选中连接",
   "ai_provider_none": "无 AI 服务",
   "ai_provider_pick": "选择 AI",
-
   "conn_name_label": "连接名称",
   "conn_type_label": "中间件类型",
   "conn_test_connection": "测试连接",
-
   "common_ok": "确定",
   "common_delete": "删除",
   "common_edit": "编辑",
   "common_add": "添加",
   "common_search": "搜索",
   "common_retry": "重试",
-
   "settings_save_failed": "保存失败：无法写入 config.json（%1$s）",
-
   "ibm_mq_section_basic": "基础信息",
   "ibm_mq_field_mode": "连接模式",
   "ibm_mq_mode_client": "CLIENT（网络连接）",
@@ -161,7 +151,6 @@
   "ibm_mq_action_connect": "连接",
   "ibm_mq_action_reconnect": "重新连接",
   "ibm_mq_action_disconnect": "断开",
-
   "menu_connect": "连接",
   "menu_connecting": "连接中...",
   "menu_disconnect": "断开连接",
@@ -174,8 +163,6 @@
   "connection_copy_suffix": "（副本）",
   "delete_confirm_title": "删除连接",
   "delete_confirm_text": "确定要删除连接「%1$s」吗？此操作不可撤销。",
-  "common_delete": "删除",
-  "common_retry": "重试",
   "test_result_title": "测试连接",
   "test_result_success": "连接成功",
   "test_result_failed": "连接失败",
@@ -203,5 +190,6 @@
   "qmgr_status_starting": "正在启动",
   "qmgr_status_running": "运行中",
   "qmgr_status_quiescing": "正在静默",
-  "qmgr_status_standby": "待机"
+  "qmgr_status_standby": "待机",
+  "common_coming_soon": "功能开发中..."
 }

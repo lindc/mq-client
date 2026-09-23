@@ -58,6 +58,19 @@ interface ServiceAdapter {
     ): List<ContextMenuItem> = DefaultConnectionMenu.build(connection, actions)
 
     /**
+     * 提供一条连接在导航树里展开后的**二级菜单项**。默认空 —— 不贡献导航的模块
+     * （纯描述性 / 还没做面板的）展开后没有子项。
+     *
+     * 返回的是**纯数据描述**（见 [NavigationItem]），渲染与点击行为统一由宿主完成
+     * （点击 = 打开对应 Tab，同一 id 已打开则切换）；工具类与对象类条目由模块用
+     * 分隔线分组（`NavigationItem.separator(id)`）。
+     *
+     * [connection] 目前只用于模块按连接定制（将来做 per-connection 徽章等）；
+     * 静态菜单直接忽略它。宿主会缓存返回值（按连接 id），不要在这里做昂贵计算。
+     */
+    fun navigationItems(connection: ConnectionInfo): List<NavigationItem> = emptyList()
+
+    /**
      * 模块销毁钩子：由 [ModuleRegistry.disposeServices] 在应用退出时**按初始化逆序**调用，
      * 模块在这里释放自己持有的资源：真实连接 / 会话 / 消费者 / 订阅 / 定时任务。
      *

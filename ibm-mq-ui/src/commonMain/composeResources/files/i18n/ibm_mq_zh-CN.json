@@ -1,0 +1,15 @@
+{
+  "nav_topology": "拓扑图",
+  "nav_command": "命令控制台",
+  "nav_queues": "队列",
+  "nav_topics": "主题",
+  "nav_subscriptions": "订阅",
+  "nav_channels": "通道",
+  "nav_listeners": "监听器",
+  "nav_services": "服务",
+  "nav_process_definitions": "进程定义",
+  "nav_namelists": "名称列表",
+  "nav_auth_info": "认证信息",
+  "nav_comm_info": "通信信息",
+  "nav_security_policies": "安全策略"
+}

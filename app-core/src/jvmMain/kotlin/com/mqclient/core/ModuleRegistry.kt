@@ -32,6 +32,12 @@ object ModuleRegistry {
     val forms: List<ConnectionFormUi> by lazy { loadAll(ConnectionFormUi::class.java) }
 
     /**
+     * 各模块私有 i18n 表（见 [AdapterUI.i18nTables] 与 [ModuleI18nTable]）。
+     * `LanguageResources.load` 把它们与公共表合并进运行时全局表。
+     */
+    val i18nTables: List<ModuleI18nTable> by lazy { uis.flatMap { it.i18nTables } }
+
+    /**
      * 各模块的连接属性面板（如 IBM MQ 的队列管理器属性，PCF 查询），见
      * [ConnectionPropertiesUi]。宿主按 `serviceId` 匹配：注册了的模块才显示
      * 「查看队列管理器属性」菜单项。

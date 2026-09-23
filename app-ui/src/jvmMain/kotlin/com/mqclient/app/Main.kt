@@ -73,7 +73,11 @@ fun main() {
     // 不保证只执行一次（重组会重跑），更不该顺手在里面做文件 IO。
     ConfigStore.initOnStartup()
     val bootConfig = ConfigStore.loadConfig()
-    runBlocking { LanguageResources.load(bootConfig.general.language.toLanguageCode()) }
+    // 模块私有表（AdapterUI.i18nTables）与公共表合并进同一张运行时表 —— 触发一次
+    // SPI 发现（ModuleRegistry 惰性加载），只读元数据、不初始化模块，安全。
+    runBlocking {
+        LanguageResources.load(bootConfig.general.language.toLanguageCode(), ModuleRegistry.i18nTables)
+    }
 
     // 事件总线接线同样在窗口创建之前完成：任何组合里的 effect 都可能读到
     // CoreModule.eventBus（AppRoot 的语言订阅、MainWindow 的测试结果 / 连接失败
@@ -102,7 +106,7 @@ private fun AppRoot(bootConfig: Config, onExit: () -> Unit) {
     LaunchedEffect(Unit) {
         CoreModule.eventBus.on(EventNames.LANGUAGE_CHANGED, this) { event ->
             val language = event.payload["language"] as? Language ?: return@on
-            LanguageResources.load(language.toLanguageCode())
+            LanguageResources.load(language.toLanguageCode(), ModuleRegistry.i18nTables)
         }
     }
     var appConfig by remember { mutableStateOf(bootConfig) }

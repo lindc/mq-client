@@ -59,6 +59,7 @@ import com.mqclient.core.ModuleRegistry
 import com.mqclient.core.event.getBoolean
 import com.mqclient.core.event.getLong
 import com.mqclient.core.event.getString
+import com.mqclient.uicommon.i18n.stringResource
 
 /**
  * Window widths at or above this get the full tree sidebar; narrower windows
@@ -209,7 +210,8 @@ fun MainWindow(
                         ObjectTabStrip(
                             tabs = openTabs,
                             active = activeTab,
-                            tabTitle = { "${connectionName(it)} / ${it.objectType}" },
+                            // Tab 标题 = 连接名 / 导航项文案（nav_<id>，i18n）。
+                            tabTitle = { "${connectionName(it)} / ${stringResource("nav_" + it.objectType)}" },
                             onSelect = {
                                 activeTab = it
                                 onSelect(it)
@@ -372,8 +374,9 @@ private fun CloseButton(onClick: () -> Unit) {
 }
 
 /**
- * Placeholder workspace for a connection's object type
- * (queue / listener / topic) until the real object views land.
+ * Placeholder workspace for a connection's navigation item (queue / channel /
+ * command console / ...) until the real views land. Titles resolve through the
+ * `nav_<itemId>` i18n keys; the body is the shared "coming soon" copy.
  */
 @Composable
 private fun ObjectTypeWorkspace(
@@ -387,13 +390,13 @@ private fun ObjectTypeWorkspace(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
-            text = "$serviceName / $objectType",
+            text = "$serviceName / ${stringResource("nav_" + objectType)}",
             style = MaterialTheme.typography.titleMedium,
             textAlign = TextAlign.Center,
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            text = "Objects of this type will be listed here.",
+            text = stringResource("common_coming_soon"),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,

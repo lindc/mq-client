@@ -31,6 +31,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,16 +51,18 @@ import com.mqclient.core.ConnectionActions
 import com.mqclient.core.ConnectionInfo
 import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ModuleRegistry
+import com.mqclient.core.NavigationItem
+import com.mqclient.uicommon.i18n.stringResource
+import kotlinx.coroutines.launch
 
 /**
  * What a tree entry points at. `objectType == null` selects the connection's
  * overview (its [com.mqclient.core.AdapterUI] contribution); a non-null type
- * selects the object workspace of that kind.
+ * selects the object workspace of that kind. The type values are the
+ * [com.mqclient.core.NavigationItem] ids contributed by the connection's
+ * `ServiceAdapter` — the host treats them opaquely.
  */
 data class NavSelection(val connectionId: String, val objectType: String? = null)
-
-/** Object kinds offered under every connection — the tree's leaf level. */
-val ObjectTypes = listOf("queue", "listener", "topic")
 
 private val ConnectionRowHeight = 52.dp
 private val ObjectRowHeight = 32.dp
@@ -88,6 +91,7 @@ fun ModuleTree(
 ) {
     var expandedIds by remember { mutableStateOf(emptySet<String>()) }
     val adaptersById = remember { ModuleRegistry.services.associateBy { it.id } }
+    val scope = rememberCoroutineScope()
 
     Column(
         modifier =
@@ -127,13 +131,37 @@ fun ModuleTree(
             )
 
             if (expanded) {
-                ObjectTypes.forEachIndexed { index, type ->
-                    ObjectTypeRow(
-                        type = type,
-                        isLast = index == ObjectTypes.lastIndex,
-                        selected = selection == NavSelection(connection.id, type),
-                        onClick = { onSelect(NavSelection(connection.id, type)) },
-                    )
+                // 二级菜单来自模块的 SPI（ServiceAdapter.navigationItems）：
+                // 纯数据，宿主统一渲染；按连接 id 缓存，不随状态点跳变重算。
+                val navItems =
+                    remember(connection.id) { adapter?.navigationItems(connection) }.orEmpty()
+                navItems.forEachIndexed { index, item ->
+                    val isLast = index == navItems.lastIndex
+                    if (item.isSeparator) {
+                        HorizontalDivider(
+                            modifier =
+                                Modifier.padding(start = 36.dp, end = 8.dp, top = 3.dp, bottom = 3.dp),
+                        )
+                    } else {
+                        NavigationItemRow(
+                            item = item,
+                            enabled = connection.status != ConnectionStatus.Connecting,
+                            selected = selection == NavSelection(connection.id, item.id),
+                            hasSiblingBelow = !isLast,
+                            onClick = {
+                                // 未连接 / 失败：点击即隐式连接（后台发 connect 事件），
+                                // Tab 照常打开 —— 占位内容不依赖连接状态，后续真实视图
+                                // 自己感知状态。连接中禁点（约束 3），上面 enabled 已挡。
+                                if (
+                                    connection.status == ConnectionStatus.Disconnected ||
+                                    connection.status == ConnectionStatus.Failed
+                                ) {
+                                    scope.launch { actions.connect(connection.id) }
+                                }
+                                onSelect(NavSelection(connection.id, item.id))
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -233,12 +261,18 @@ private fun ConnectionRow(
     )
 }
 
-/** Object-type leaf: dashed branch and the type name. */
+/**
+ * 二级导航项：虚线分支 + emoji 图标 + 本地化标题 + 可选数量徽章。
+ *
+ * [enabled] = false（连接中）时整行不可点、文字降透明度；标题经
+ * `stringResource(item.titleKey)` 解析，语言切换自动重组。
+ */
 @Composable
-private fun ObjectTypeRow(
-    type: String,
-    isLast: Boolean,
+private fun NavigationItemRow(
+    item: NavigationItem,
+    enabled: Boolean,
     selected: Boolean,
+    hasSiblingBelow: Boolean,
     onClick: () -> Unit,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
@@ -257,18 +291,40 @@ private fun ObjectTypeRow(
                 .height(ObjectRowHeight)
                 .clip(RoundedCornerShape(6.dp))
                 .background(rowColor)
-                .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
+                .clickable(
+                    interactionSource = interactionSource,
+                    indication = null,
+                    enabled = enabled,
+                    onClick = onClick,
+                )
                 .padding(start = 6.dp, end = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        BranchLine(color = MaterialTheme.colorScheme.outlineVariant, hasSiblingBelow = !isLast)
+        BranchLine(color = MaterialTheme.colorScheme.outlineVariant, hasSiblingBelow = hasSiblingBelow)
+        item.icon?.takeIf { it.isNotEmpty() }?.let { emoji ->
+            Text(
+                text = emoji,
+                fontSize = 12.sp,
+            )
+            Spacer(Modifier.width(6.dp))
+        }
         Text(
-            text = type,
+            text = stringResource(item.titleKey),
             style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color =
+                if (enabled) MaterialTheme.colorScheme.onSurfaceVariant
+                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
         )
+        item.badge?.let { count ->
+            Text(
+                text = count.toString(),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
@@ -334,6 +390,7 @@ fun ModuleRail(
 ) {
     var menuForId by remember { mutableStateOf<String?>(null) }
     val adaptersById = remember { ModuleRegistry.services.associateBy { it.id } }
+    val scope = rememberCoroutineScope()
 
     Column(
         modifier =
@@ -425,22 +482,37 @@ fun ModuleRail(
                         },
                     )
                     HorizontalDivider()
-                    ObjectTypes.forEach { type ->
-                        val selected = selection == NavSelection(connection.id, type)
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    type,
-                                    color =
-                                        if (selected) MaterialTheme.colorScheme.primary
-                                        else MaterialTheme.colorScheme.onSurface,
-                                )
-                            },
-                            onClick = {
-                                menuForId = null
-                                onSelect(NavSelection(connection.id, type))
-                            },
-                        )
+                    // 二级菜单与树形侧栏同一份 SPI 数据（分隔线渲染成菜单分隔条）。
+                    val navItems =
+                        remember(connection.id) { adapter?.navigationItems(connection) }.orEmpty()
+                    navItems.forEach { item ->
+                        if (item.isSeparator) {
+                            HorizontalDivider()
+                        } else {
+                            val selected = selection == NavSelection(connection.id, item.id)
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        stringResource(item.titleKey),
+                                        color =
+                                            if (selected) MaterialTheme.colorScheme.primary
+                                            else MaterialTheme.colorScheme.onSurface,
+                                    )
+                                },
+                                enabled = connection.status != ConnectionStatus.Connecting,
+                                onClick = {
+                                    menuForId = null
+                                    // 未连接 / 失败：隐式连接（与树形侧栏同一行为）。
+                                    if (
+                                        connection.status == ConnectionStatus.Disconnected ||
+                                        connection.status == ConnectionStatus.Failed
+                                    ) {
+                                        scope.launch { actions.connect(connection.id) }
+                                    }
+                                    onSelect(NavSelection(connection.id, item.id))
+                                },
+                            )
+                        }
                     }
                 }
             }

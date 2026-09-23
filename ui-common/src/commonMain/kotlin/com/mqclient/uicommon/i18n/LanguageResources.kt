@@ -3,6 +3,7 @@ package com.mqclient.uicommon.i18n
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.mqclient.core.ModuleI18nTable
 import com.mqclient.core.log.Log
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
@@ -14,7 +15,11 @@ import mq_client.ui_common.generated.resources.Res
  *
  * String tables live in bundled JSON resources
  * (`composeResources/files/i18n/strings_<lang>.json`) and are loaded at
- * startup according to `config.toml`'s language. Access is a plain global
+ * startup according to `config.toml`'s language. Business modules can ship
+ * their own tables (`composeResources/files/i18n/<base>_<lang>.json`, base
+ * declared via `AdapterUI.i18nTableBase`) which are merged into the same
+ * runtime table — keys are owned by the module that declares them, so adding
+ * module copy never touches the shared file. Access is a plain global
  * lookup — no CompositionLocal; live refresh comes from [revision] (a Compose
  * state bumped by [load]), so every composable that called [stringResource]
  * re-renders on the new table. The trigger is `core.language.changed` on the
@@ -67,15 +72,43 @@ object LanguageResources {
      * Loads the string table for [language] ("zh-CN" / "en-US"; anything else
      * — including null — means Chinese). Chinese is always parsed first and
      * acts as the base; English only overrides keys it actually provides.
+     *
+     * [moduleTables] 是各业务模块的私有表（`AdapterUI.i18nTables`，由 ModuleRegistry
+     * 从 SPI 收集；读取器由模块自己提供 —— compose 运行时资源按库包名隔离，宿主
+     * 无法跨库按路径读）。每个表按语言取内容、与同语言的公共表合并（模块键覆盖
+     * 公共键；base 全应用唯一，正常不会撞）。英文缺键照旧回落中文 —— 回落链是
+     * 模块英文 → 模块中文 → 公共英文 → 公共中文 → key 本身。
      */
-    suspend fun load(language: String?) {
-        val zh = parse(readOrNull(STRINGS_ZH_PATH))
+    suspend fun load(
+        language: String?,
+        moduleTables: List<ModuleI18nTable> = emptyList(),
+    ) {
         val wantEn = language.equals(LANGUAGE_EN_US, ignoreCase = true)
-        val en = if (wantEn) parse(readOrNull(STRINGS_EN_PATH)) else emptyMap()
+        val zh = parse(readOrNull(STRINGS_ZH_PATH)) + moduleTableContent(moduleTables, LANGUAGE_ZH_CN)
+        val en =
+            if (wantEn) {
+                parse(readOrNull(STRINGS_EN_PATH)) + moduleTableContent(moduleTables, LANGUAGE_EN_US)
+            } else {
+                emptyMap()
+            }
         table = if (wantEn) zh + en else zh
         loadedLanguage = if (wantEn) LANGUAGE_EN_US else LANGUAGE_ZH_CN
         // 通知所有已订阅的组合（见 revision 的注释）。
         revision++
+    }
+
+    /**
+     * 合并所有模块表在 [language] 语言下的内容。单个表读取失败只跳过它自己
+     * （记日志，键回落到公共表 / key 本身），不让一个坏模块拖垮整张表。
+     */
+    private suspend fun moduleTableContent(
+        tables: List<ModuleI18nTable>,
+        language: String,
+    ): Map<String, String> = tables.fold(emptyMap()) { acc, table ->
+        val text = runCatching { table.reader(language) }
+            .onFailure { Log.error(LOG_TAG, "failed to read module table '${table.base}': $it") }
+            .getOrNull()
+        acc + parse(text)
     }
 
     /** Code of the currently loaded table, or null before the first [load]. */
