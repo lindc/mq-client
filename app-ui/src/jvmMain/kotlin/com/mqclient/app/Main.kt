@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -185,7 +186,22 @@ private fun AppRoot(bootConfig: Config, onExit: () -> Unit) {
                 // （如各业务模块的命令控制台），避免每个模块各包一层 Scaffold。
                 val snackbarHostState = remember { SnackbarHostState() }
                 CompositionLocalProvider(LocalSnackbarHostState.provides(snackbarHostState)) {
-                    Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) {
+                    Scaffold(
+                        snackbarHost = {
+                            SnackbarHost(snackbarHostState) { data ->
+                                // 不用 inverseSurface/inverseOnSurface：本主题（MaterialKolor
+                                // TonalSpot）浅色模式下这对反色对比度过低（深字配黑底）。
+                                // secondaryContainer/onSecondaryContainer 是配套色对：
+                                // 浅色主题浅底深字、深色主题深底浅字；即使 contentColor
+                                // 被内层忽略，回退到的 onSurface 也与该底色保持可读。
+                                Snackbar(
+                                    snackbarData = data,
+                                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                                )
+                            }
+                        },
+                    ) {
                 WindowScaffold(
                     modifier = Modifier.macOSLargeCornerRadius().onPreviewKeyEvent { event ->
                         // Cmd+Shift+A on macOS, Ctrl+Shift+A elsewhere — toggles

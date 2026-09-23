@@ -81,9 +81,13 @@ class MqscConsoleViewModel internal constructor(
     fun execute() {
         if (isExecuting) return
         val tfv = textFieldValue
-        val (source, lineOffset) = if (tfv.selection.start != tfv.selection.end) {
-            tfv.text.substring(tfv.selection.start, tfv.selection.end) to
-                tfv.text.substring(0, tfv.selection.start).count { it == '\n' }
+        // selection 在反向选择（从后往前拖）时 start > end，必须用 min/max 归一，
+        // 否则 substring(start, end) 会抛 StringIndexOutOfBoundsException。
+        val selStart = tfv.selection.min
+        val selEnd = tfv.selection.max
+        val (source, lineOffset) = if (selStart != selEnd) {
+            tfv.text.substring(selStart, selEnd) to
+                tfv.text.substring(0, selStart).count { it == '\n' }
         } else {
             tfv.text to 0
         }
