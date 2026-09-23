@@ -38,14 +38,21 @@ class MqscExecutor(
             currentCoroutineContext().ensureActive()
 
             onCommandStart(cmd.lineNumber)
-            val result = executeOne(connectionId, cmd)
+            // 缩写展开（dis q(*) → DISPLAY QLOCAL(*)）：结果与历史都记展开后的
+            // 文本 —— 那是真正发给队列管理器的内容，回显对齐 runmqsc 的习惯。
+            val expanded = MqscCommandExpander.expand(cmd.text)
+            if (expanded != cmd.text) {
+                ibmMqLog.debug("mqsc expanded: line=${cmd.lineNumber} '${cmd.text.trim()}' -> '${expanded.trim()}'")
+            }
+            val executed = cmd.copy(text = expanded)
+            val result = executeOne(connectionId, executed)
             onResult(result)
             runCatching {
                 historyRepository.add(
                     MqscHistoryItem(
                         id = 0,
                         connectionId = connectionId,
-                        command = cmd.text,
+                        command = executed.text,
                         success = result.success,
                         createdTime = System.currentTimeMillis(),
                     ),
