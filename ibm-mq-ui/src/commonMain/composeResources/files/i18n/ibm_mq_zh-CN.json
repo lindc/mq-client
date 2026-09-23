@@ -15,6 +15,8 @@
   "mqsc_execute": "执行",
   "mqsc_cancel": "取消",
   "mqsc_clear": "清空",
+  "mqsc_open_file": "打开文件",
+  "mqsc_export": "导出结果",
   "mqsc_status_ready": "就绪",
   "mqsc_status_executing": "执行中…",
   "mqsc_status_commands": "共 %d 条命令",

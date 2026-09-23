@@ -27,6 +27,8 @@ kotlin {
         jvmMain.dependencies {
             // FileKit 文件选择器（证书路径的「浏览…」按钮）。选择器 API 在 dialogs 模块。
             implementation(libs.filekit.dialogs)
+            // FileKit Compose 文件选择器（命令控制台的「打开文件」/「导出结果」按钮）。
+            implementation(libs.filekit.dialogs.compose)
         }
     }
 }

@@ -68,6 +68,8 @@ kuiver = { module = "io.github.justdeko:kuiver", version.ref = "kuiver" }
 
 # FileKit dialogs: 文件选择器（ibm-mq-ui 的证书路径选择）。传 filekit-core。
 filekit-dialogs = { module = "io.github.vinceglb:filekit-dialogs", version.ref = "filekit" }
+# FileKit Compose 文件选择器（命令控制台的「打开文件」/「导出结果」按钮）。传 filekit-dialogs / filekit-core。
+filekit-dialogs-compose = { module = "io.github.vinceglb:filekit-dialogs-compose", version.ref = "filekit" }
 
 [plugins]
 kotlinMultiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }

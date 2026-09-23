@@ -13,10 +13,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.mqclient.ibmmq.ui.command.model.CommandStatus
 
 private const val LINE_HEIGHT_SP = 24
 
@@ -25,11 +25,15 @@ private const val LINE_HEIGHT_SP = 24
  *
  * 行高对齐：文本 lineHeight 固定 24sp，与状态列 / 行号列的 24dp 行高匹配
  * （默认 fontScale 下逐行对齐；大字号系统下会有像素级漂移，可接受）。
+ *
+ * 文本组件保持 [BasicTextField]，但 value 用 [TextFieldValue]（而非纯 String），
+ * 以便读取选中态（执行选中文本）。
  */
 @Composable
 fun MqscEditor(
     commands: List<com.mqclient.ibmmq.ui.command.model.CommandLine>,
-    onTextChange: (String) -> Unit,
+    textFieldValue: TextFieldValue,
+    onValueChange: (TextFieldValue) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scrollState = rememberScrollState()
@@ -44,8 +48,8 @@ fun MqscEditor(
             modifier = Modifier.verticalScroll(scrollState),
         )
         BasicTextField(
-            value = commands.joinToString("\n") { it.text },
-            onValueChange = onTextChange,
+            value = textFieldValue,
+            onValueChange = onValueChange,
             visualTransformation = MqscSyntaxTransformation(),
             textStyle = TextStyle(
                 fontFamily = FontFamily.Monospace,

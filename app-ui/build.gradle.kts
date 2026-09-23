@@ -51,6 +51,8 @@ kotlin {
         }
         jvmMain.dependencies {
             implementation(compose.desktop.currentOs)
+            // FileKit：在 main() 里统一 FileKit.init(appId)，所有模块共用同一套文件选择器。
+            implementation(libs.filekit.dialogs)
         }
         jvmTest.dependencies {
             implementation(kotlin("test"))

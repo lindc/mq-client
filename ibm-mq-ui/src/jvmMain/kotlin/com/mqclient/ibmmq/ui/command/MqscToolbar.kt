@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.CircularProgressIndicator
@@ -30,6 +32,9 @@ fun MqscToolbar(
     onExecute: () -> Unit,
     onCancel: () -> Unit,
     onClear: () -> Unit,
+    onOpenFile: () -> Unit,
+    onExport: () -> Unit,
+    hasOutput: Boolean,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -57,6 +62,19 @@ fun MqscToolbar(
             text = stringResource("mqsc_clear"),
             onClick = onClear,
             enabled = !isExecuting,
+        )
+        // 新增：打开文件 / 导出结果，追加在「清空」右侧。
+        ToolbarButton(
+            icon = Icons.Default.FolderOpen,
+            text = stringResource("mqsc_open_file"),
+            onClick = onOpenFile,
+            enabled = !isExecuting,
+        )
+        ToolbarButton(
+            icon = Icons.Default.FileDownload,
+            text = stringResource("mqsc_export"),
+            onClick = onExport,
+            enabled = !isExecuting && hasOutput,
         )
         Spacer(Modifier.weight(1f))
         if (isExecuting) {

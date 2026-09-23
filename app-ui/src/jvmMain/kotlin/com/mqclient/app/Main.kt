@@ -5,7 +5,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -40,7 +44,9 @@ import com.mqclient.core.event.EventNames
 import com.mqclient.core.log.Log
 import com.mqclient.uicommon.i18n.LanguageResources
 import com.mqclient.uicommon.i18n.stringResource
+import com.mqclient.uicommon.LocalSnackbarHostState
 import dev.nucleusframework.application.DecoratedWindow
+import io.github.vinceglb.filekit.FileKit
 import dev.nucleusframework.application.nucleusApplication
 import dev.nucleusframework.window.NucleusDecoratedWindowTheme
 import dev.nucleusframework.window.TitleBarPlacement
@@ -72,6 +78,9 @@ fun main() {
     // 不该进组合体 —— 组合发生在窗口创建之后、首帧之前（会卡首帧），而且组合体
     // 不保证只执行一次（重组会重跑），更不该顺手在里面做文件 IO。
     ConfigStore.initOnStartup()
+    // FileKit 在 JVM 端要求先 init（只用于它的 app 目录），全应用只此一处；
+    // 命令控制台与连接表单的文件选择器都依赖它，统一在入口初始化最稳妥。
+    FileKit.init(appId = "mqclient")
     val bootConfig = ConfigStore.loadConfig()
     // 模块私有表（AdapterUI.i18nTables）与公共表合并进同一张运行时表 —— 触发一次
     // SPI 发现（ModuleRegistry 惰性加载），只读元数据、不初始化模块，安全。
@@ -171,6 +180,12 @@ private fun AppRoot(bootConfig: Config, onExit: () -> Unit) {
                         objectType = sel.objectType,
                     )
                 }
+                // 应用级 Snackbar 宿主：包一层 Scaffold + SnackbarHost，并通过
+                // CompositionLocal 把 SnackbarHostState 下发给任意深层 Composable
+                // （如各业务模块的命令控制台），避免每个模块各包一层 Scaffold。
+                val snackbarHostState = remember { SnackbarHostState() }
+                CompositionLocalProvider(LocalSnackbarHostState.provides(snackbarHostState)) {
+                    Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) {
                 WindowScaffold(
                     modifier = Modifier.macOSLargeCornerRadius().onPreviewKeyEvent { event ->
                         // Cmd+Shift+A on macOS, Ctrl+Shift+A elsewhere — toggles
@@ -237,6 +252,8 @@ private fun AppRoot(bootConfig: Config, onExit: () -> Unit) {
                             ConfigStore.loadConfigOrNull()?.let { loaded -> appConfig = loaded }
                         },
                     )
+                    }
+                }
                 }
                 if (showAbout) {
                     AboutDialog(onDismiss = { showAbout = false })
