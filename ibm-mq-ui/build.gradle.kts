@@ -22,5 +22,9 @@ kotlin {
             // 表单字段组件（LabeledField / PressableButton / SettingsDropdownRow）与 i18n。
             implementation(projects.uiCommon)
         }
+        jvmMain.dependencies {
+            // FileKit 文件选择器（证书路径的「浏览…」按钮）。选择器 API 在 dialogs 模块。
+            implementation(libs.filekit.dialogs)
+        }
     }
 }

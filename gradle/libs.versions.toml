@@ -16,6 +16,9 @@ ktor = "3.2.3"
 ktoml = "0.7.1"
 # Kuiver — Compose Multiplatform UI 组件库。
 kuiver = "0.4.2"
+# FileKit — 本地文件选择对话框（JVM 端：Windows 走 JNA 原生 IFileDialog）。
+# 注意选择器 API 在 dialogs 模块，core 只是它的传递依赖（PlatformFile 抽象所在）。
+filekit = "0.16.0"
 
 [libraries]
 # Compose Multiplatform
@@ -62,6 +65,9 @@ ktoml-file = { module = "com.akuleshov7:ktoml-file-jvm", version.ref = "ktoml" }
 
 # Kuiver — Compose Multiplatform UI 组件库.
 kuiver = { module = "io.github.justdeko:kuiver", version.ref = "kuiver" }
+
+# FileKit dialogs: 文件选择器（ibm-mq-ui 的证书路径选择）。传 filekit-core。
+filekit-dialogs = { module = "io.github.vinceglb:filekit-dialogs", version.ref = "filekit" }
 
 [plugins]
 kotlinMultiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
