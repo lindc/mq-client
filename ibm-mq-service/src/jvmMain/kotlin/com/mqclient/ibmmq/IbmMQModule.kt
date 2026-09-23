@@ -9,6 +9,9 @@ import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.emit
 import com.mqclient.core.spi.onEvent
 import com.mqclient.core.spi.onOwnEvents
+import com.mqclient.ibmmq.command.MqscExecutor
+import com.mqclient.ibmmq.command.MqscHistoryRepository
+import com.mqclient.ibmmq.command.MqscPcfSender
 import com.mqclient.ibmmq.event.IbmMQEvents
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -58,6 +61,7 @@ object IbmMQModule {
     private var moduleContext: ServiceContext? = null
     private var service: IbmMQService? = null
     private var manager: IbmMQConnectionManager? = null
+    private var mqscExecutor: MqscExecutor? = null
     private var subscriptions: List<Job> = emptyList()
 
     /**
@@ -76,6 +80,8 @@ object IbmMQModule {
         val handler = IbmMQEventHandler()
         val created = IbmMQService(context)
         val connectionManager = IbmMQConnectionManager(context, created)
+        // MQSC 控制台的执行器：历史仓库是模块级单例（内存版），生命周期跟模块走。
+        mqscExecutor = MqscExecutor(MqscPcfSender(), MqscHistoryRepository())
 
         subscriptions = listOf(
             // 自己发、自己收：只有 ibm-mq.* 会进这里。
@@ -162,10 +168,15 @@ object IbmMQModule {
         moduleContext?.coroutineScope?.launch { connectionManager.connect(connectionId) }
     }
 
-    /** UI 的断开入口（fire-and-forget）。 */
+    /**
+     * UI 的断开入口（fire-and-forget）。
+     */
     fun disconnectAsync(connectionId: String) {
         manager?.disconnectAsync(connectionId)
     }
+
+    /** MQSC 执行器；模块未初始化时为 null（UI 侧据此回落占位页）。 */
+    fun mqscExecutorOrNull(): MqscExecutor? = mqscExecutor
 
     /**
      * 模块销毁：先断开全部连接（取消任务 / 关句柄 / 清 cache），再取消订阅，
@@ -178,6 +189,7 @@ object IbmMQModule {
         subscriptions = emptyList()
         manager = null
         service = null
+        mqscExecutor = null
         try {
             // 模块销毁是同步出口（ModuleRegistry.disposeServices 不挂起）：
             // runBlocking 等全部连接断完再返回 —— 退出路径不能留下没关的句柄。

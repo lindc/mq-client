@@ -33,4 +33,13 @@ interface AdapterUI {
 
     /** The composable content rendered when this module is selected. */
     val content: @Composable () -> Unit
+
+    /**
+     * 按导航项（`NavigationItem.id`，即 Tab 的 objectType）贡献的 Tab 内容；
+     * 返回 null（默认）= 宿主回落「coming soon」占位页。
+     *
+     * 每次进入 Tab 都会重新调用 —— 模块应返回轻量的组合 lambda，状态留在
+     * `remember` / ViewModel 层（按 [connectionId] 记）。
+     */
+    fun contentFor(objectType: String, connectionId: String): (@Composable () -> Unit)? = null
 }

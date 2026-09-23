@@ -1,0 +1,65 @@
+package com.mqclient.ibmmq.ui.command
+
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.dp
+import com.mqclient.uicommon.i18n.stringResource
+
+/**
+ * 危险命令（DELETE / CLEAR / ALTER / STOP / RESET，见 [MqscParser.isDangerous]）
+ * 的二次确认框：展示将要执行的命令全文，确认后才真正跑。
+ */
+@Composable
+fun DangerousCommandDialog(
+    command: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource("mqsc_dangerous_title")) },
+        text = {
+            Column {
+                Text(stringResource("mqsc_dangerous_message"))
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = command,
+                    fontFamily = FontFamily.Monospace,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .padding(8.dp),
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.error,
+                ),
+            ) {
+                Text(stringResource("mqsc_dangerous_confirm"))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource("common_cancel"))
+            }
+        },
+    )
+}

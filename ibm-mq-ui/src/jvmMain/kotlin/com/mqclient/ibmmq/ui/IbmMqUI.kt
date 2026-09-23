@@ -5,10 +5,15 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import com.mqclient.core.AdapterUI
 import com.mqclient.core.ModuleI18nTable
+import com.mqclient.ibmmq.IbmMQModule
+import com.mqclient.ibmmq.ui.command.MqscConsolePanel
+import com.mqclient.ibmmq.ui.command.MqscConsoleViewModel
 import com.mqclient.uicommon.i18n.stringResource
 import mq_client.ibm_mq_ui.generated.resources.Res
 
@@ -39,6 +44,23 @@ class IbmMqUI : AdapterUI {
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+    }
+
+    /**
+     * 「命令控制台」（objectType = `command`）由本模块贡献真实内容；其余导航项
+     * 继续走宿主占位。模块未初始化（拿不到执行器）时也回落占位 —— 极端时序下
+     * 不崩、不破 Tab。
+     */
+    override fun contentFor(objectType: String, connectionId: String): (@Composable () -> Unit)? {
+        if (objectType != "command") return null
+        val executor = IbmMQModule.mqscExecutorOrNull() ?: return null
+        return {
+            val scope = rememberCoroutineScope()
+            val state = remember(connectionId) {
+                MqscConsoleViewModel(connectionId, executor, scope)
+            }
+            MqscConsolePanel(state = state, modifier = Modifier.fillMaxSize())
         }
     }
 }

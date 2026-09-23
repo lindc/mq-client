@@ -246,11 +246,20 @@ fun MainWindow(
                             }
 
                             else -> {
-                                ObjectTypeWorkspace(
-                                    serviceName = connectionName(current),
-                                    objectType = current.objectType,
-                                    modifier = Modifier.fillMaxSize(),
-                                )
+                                // 优先取模块自己贡献的 Tab 内容（AdapterUI.contentFor），
+                                // 没有才回落「coming soon」占位。
+                                val tabConnection = connections.firstOrNull { it.id == current.connectionId }
+                                val tabUi = tabConnection?.let { uiByService[it.serviceId] }
+                                val tabContent = tabUi?.contentFor(current.objectType, current.connectionId)
+                                if (tabContent != null) {
+                                    tabContent()
+                                } else {
+                                    ObjectTypeWorkspace(
+                                        serviceName = connectionName(current),
+                                        objectType = current.objectType,
+                                        modifier = Modifier.fillMaxSize(),
+                                    )
+                                }
                             }
                         }
                     }

@@ -1,0 +1,96 @@
+package com.mqclient.ibmmq.command
+
+import com.ibm.mq.pcf.PCFException
+import com.mqclient.ibmmq.command.model.MqscCommand
+import com.mqclient.ibmmq.command.model.MqscHistoryItem
+import com.mqclient.ibmmq.command.model.MqscResult
+import com.mqclient.ibmmq.ibmMqLog
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+
+/**
+ * MQSC 命令执行编排：逐条顺序执行（MQSC 控制台语义 —— 后一条常依赖前一条），
+ * 注释与空行跳过；每条前后回调给 UI 更新状态列，结果与历史各走各的出口。
+ *
+ * 取消：跑在调用方的协程里，逐条边界检查 [ensureActive] —— cancel 后当条命令
+ * 跑完即停（PCF 调用本身不响应中断），已执行的条目照常上报。
+ */
+class MqscExecutor(
+    private val pcfExecutor: PcfExecutor,
+    private val historyRepository: MqscHistoryRepository,
+) {
+
+    /**
+     * 顺序执行 [commands]（跳过注释 / 空行）。
+     *
+     * @param onCommandStart 命令开始执行（行号）—— UI 把状态列标成 EXECUTING。
+     * @param onResult 单条完成 —— UI 追加输出区条目并更新状态列。
+     */
+    suspend fun execute(
+        connectionId: String,
+        commands: List<MqscCommand>,
+        onCommandStart: (Int) -> Unit,
+        onResult: (MqscResult) -> Unit,
+    ) {
+        commands.forEach { cmd ->
+            if (cmd.isComment || cmd.isBlank) return@forEach
+            currentCoroutineContext().ensureActive()
+
+            onCommandStart(cmd.lineNumber)
+            val result = executeOne(connectionId, cmd)
+            onResult(result)
+            runCatching {
+                historyRepository.add(
+                    MqscHistoryItem(
+                        id = 0,
+                        connectionId = connectionId,
+                        command = cmd.text,
+                        success = result.success,
+                        createdTime = System.currentTimeMillis(),
+                    ),
+                )
+            }
+        }
+    }
+
+    private suspend fun executeOne(connectionId: String, cmd: MqscCommand): MqscResult {
+        val startTime = System.currentTimeMillis()
+        return try {
+            val lines = pcfExecutor.executeMqsc(connectionId, cmd.text.trim())
+            MqscResult(
+                lineNumber = cmd.lineNumber,
+                command = cmd.text,
+                success = true,
+                output = lines.joinToString("\n"),
+                duration = System.currentTimeMillis() - startTime,
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: PCFException) {
+            // 完整留痕：命令服务器只给 reason，全量信息是排障（对照 AMQERR01.LOG）的起点。
+            ibmMqLog.warn(
+                "mqsc PCFException: line=${cmd.lineNumber} command=${cmd.text} " +
+                    "reasonCode=${e.reasonCode} completionCode=${e.completionCode} message=${e.message}",
+            )
+            MqscResult(
+                lineNumber = cmd.lineNumber,
+                command = cmd.text,
+                success = false,
+                output = "",
+                duration = System.currentTimeMillis() - startTime,
+                errorCode = e.reasonCode,
+                errorMessage = MqrcTranslator.translate(e.reasonCode),
+            )
+        } catch (e: Exception) {
+            MqscResult(
+                lineNumber = cmd.lineNumber,
+                command = cmd.text,
+                success = false,
+                output = "",
+                duration = System.currentTimeMillis() - startTime,
+                errorMessage = e.message ?: e::class.simpleName ?: "unknown",
+            )
+        }
+    }
+}
