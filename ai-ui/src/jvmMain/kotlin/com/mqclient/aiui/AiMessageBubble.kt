@@ -13,6 +13,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ThumbDown
+import androidx.compose.material.icons.filled.ThumbUp
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -30,8 +36,8 @@ import androidx.compose.ui.unit.dp
  * USER messages render right-aligned with the primary container colour;
  * ASSISTANT messages render left-aligned on a subtle surface variant.
  *
- * Icons are plain text glyphs (📋 👍 👎) so the module stays free of the
- * material-icons-extended dependency.
+ * Action icons are Material Icons (extended) — emoji glyphs depend on the
+ * system font and render as tofu boxes on minimal Linux installs.
  */
 @Composable
 fun AiMessageBubble(
@@ -92,7 +98,11 @@ private fun BubbleActions(
             onClick = { clipboard.setText(AnnotatedString(content)) },
             contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
         ) {
-            Text("📋", style = MaterialTheme.typography.labelSmall)
+            Icon(
+                imageVector = Icons.Default.ContentCopy,
+                contentDescription = null,
+                modifier = Modifier.size(14.dp),
+            )
             Spacer(Modifier.width(4.dp))
             Text("复制", style = MaterialTheme.typography.labelSmall)
         }
@@ -100,11 +110,12 @@ private fun BubbleActions(
             onClick = { onFeedback(if (feedback == true) null else true) },
             contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
         ) {
-            Text(
-                "👍",
-                style = MaterialTheme.typography.labelSmall,
-                color = if (feedback == true) MaterialTheme.colorScheme.primary
+            Icon(
+                imageVector = Icons.Default.ThumbUp,
+                contentDescription = null,
+                tint = if (feedback == true) MaterialTheme.colorScheme.primary
                     else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(14.dp),
             )
             Spacer(Modifier.width(4.dp))
             Text("有用", style = MaterialTheme.typography.labelSmall)
@@ -113,11 +124,12 @@ private fun BubbleActions(
             onClick = { onFeedback(if (feedback == false) null else false) },
             contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
         ) {
-            Text(
-                "👎",
-                style = MaterialTheme.typography.labelSmall,
-                color = if (feedback == false) MaterialTheme.colorScheme.error
+            Icon(
+                imageVector = Icons.Default.ThumbDown,
+                contentDescription = null,
+                tint = if (feedback == false) MaterialTheme.colorScheme.error
                     else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(14.dp),
             )
             Spacer(Modifier.width(4.dp))
             Text("无用", style = MaterialTheme.typography.labelSmall)

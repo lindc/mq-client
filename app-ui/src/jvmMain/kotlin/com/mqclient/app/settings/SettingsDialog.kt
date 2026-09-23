@@ -19,6 +19,10 @@ import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -206,7 +210,7 @@ private fun HeaderBar(selectedTab: SettingsTab, onClose: () -> Unit) {
             standardMinWidth = false, // ✕ 是图标按钮，不套「4 字宽」标准。
             containerColor = MaterialTheme.colorScheme.surfaceVariant,
             contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-        ) { Text("\u2715") }
+        ) { Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(18.dp)) }
     }
 }
 

@@ -19,6 +19,8 @@ kotlin {
             implementation(libs.material.kolor)
             implementation(compose.material3)
             implementation(compose.components.resources)
+            // Material Icons Extended：跨平台一致的矢量图标（Linux 无 Emoji 字体也能正常显示）。
+            implementation(compose.materialIconsExtended)
 
             // Shared UI primitives (PressableButton, …) — both :app-ui and
             // :ai-panel consume these so they stay visually consistent.

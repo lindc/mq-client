@@ -19,6 +19,8 @@ kotlin {
             implementation(libs.compose.runtime)
             implementation(libs.compose.foundation)
             implementation(compose.material3)
+            // Material Icons Extended：跨平台一致的矢量图标（Linux 无 Emoji 字体也能正常显示）。
+            implementation(compose.materialIconsExtended)
             implementation(libs.kotlinx.serialization.json)
         }
         jvmTest.dependencies {

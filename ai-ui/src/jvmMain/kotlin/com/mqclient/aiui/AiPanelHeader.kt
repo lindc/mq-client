@@ -12,6 +12,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -36,8 +42,9 @@ import com.mqclient.uicommon.i18n.stringResource
  * entries. Selecting one writes its id back to
  * [com.mqclient.core.AiConfig.activeConnectionId].
  *
- * Glyphs are plain text (🤖 ✕ ▼) so the module doesn't pull in
- * material-icons-extended. Buttons stay as [TextButton] — lightweight,
+ * Icons are Material Icons (extended); the module now pulls that dependency —
+ * emoji glyphs depend on the system font and break on minimal Linux installs.
+ * Buttons stay as [TextButton] — lightweight,
  * no shadow / press-scale animation, so they don't fight the rest of the
  * title bar's chrome.
  */
@@ -61,7 +68,11 @@ fun AiPanelHeader(
                 .padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("🤖", style = MaterialTheme.typography.titleMedium)
+            Icon(
+                imageVector = Icons.Default.SmartToy,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+            )
             Spacer(Modifier.width(8.dp))
             Text(
                 stringResource("ai_panel_title"),
@@ -75,7 +86,11 @@ fun AiPanelHeader(
                 onConnectionSelected = onConnectionSelected,
             )
             TextButton(onClick = onDismiss) {
-                Text("✕", style = MaterialTheme.typography.titleMedium)
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
             }
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -107,8 +122,16 @@ private fun ConnectionDropdownButton(
         connections.forEach { connection ->
             val isActive = connection.id == activeConnectionId
             DropdownMenuItem(
-                text = {
-                    Text(if (isActive) "✓ ${connection.name}" else "   ${connection.name}")
+                text = { Text(connection.name) },
+                // active 项加 Check 图标；lambda 恒给（内容可为空），保证各行缩进一致。
+                leadingIcon = {
+                    if (isActive) {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                        )
+                    }
                 },
                 onClick = {
                     expanded = false
@@ -129,11 +152,20 @@ private fun ContextRow(context: AiContext?) {
         )
         Spacer(Modifier.width(6.dp))
         if (context?.connectionName != null) {
-            Text(
-                "${context.connectionName} ✅",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    context.connectionName,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(Modifier.width(4.dp))
+                Icon(
+                    imageVector = Icons.Default.Check,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(14.dp),
+                )
+            }
             context.objectType?.let { type ->
                 Spacer(Modifier.width(6.dp))
                 Text(

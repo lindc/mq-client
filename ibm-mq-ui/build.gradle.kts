@@ -19,6 +19,8 @@ kotlin {
             implementation(compose.material3)
             // composeResources（品牌图标 drawable）需要资源 API 才能生成访问器。
             implementation(compose.components.resources)
+            // Material Icons Extended：密码可见性切换等小图标，跨平台（Linux 无 Emoji 字体）一致。
+            implementation(compose.materialIconsExtended)
             // 表单字段组件（LabeledField / PressableButton / SettingsDropdownRow）与 i18n。
             implementation(projects.uiCommon)
         }

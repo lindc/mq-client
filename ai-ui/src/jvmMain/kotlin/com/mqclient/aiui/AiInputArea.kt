@@ -13,6 +13,13 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Icon
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -99,10 +106,11 @@ fun AiInputArea(
                     // 流式中换成「停止」：没有它用户只能等回复自然结束 —— 长回复、
                     // 卡住的服务端都下不来。
                     IconButton(onClick = onCancel) {
-                        Text(
-                            "■",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.primary,
+                        Icon(
+                            imageVector = Icons.Default.Stop,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp),
                         )
                     }
                 } else {
@@ -116,25 +124,35 @@ fun AiInputArea(
                         },
                         enabled = text.isNotBlank(),
                     ) {
-                        Text(
-                            "➤",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = if (text.isNotBlank()) MaterialTheme.colorScheme.primary
+                        Icon(
+                            imageVector = Icons.Default.Send,
+                            contentDescription = null,
+                            tint = if (text.isNotBlank()) MaterialTheme.colorScheme.primary
                                 else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp),
                         )
                     }
                 }
             }
         }
         Spacer(Modifier.height(4.dp))
-        Text(
-            text = if (context?.connectionName != null) {
-                stringResource("ai_context_attached")
-            } else {
-                stringResource("ai_context_missing")
-            },
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // 附件状态图标替代原字符串里的 📎 前缀（emoji 依赖系统字体）。
+            Icon(
+                imageVector = if (context?.connectionName != null) Icons.Default.Link else Icons.Default.LinkOff,
+                contentDescription = null,
+                modifier = Modifier.size(12.dp),
+            )
+            Spacer(Modifier.width(4.dp))
+            Text(
+                text = if (context?.connectionName != null) {
+                    stringResource("ai_context_attached")
+                } else {
+                    stringResource("ai_context_missing")
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }

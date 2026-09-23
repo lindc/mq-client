@@ -17,24 +17,25 @@ class IbmMqServiceAdapter : ServiceAdapter {
      * （队列 / 主题 / 订阅 / 通道 / 监听器 / 服务 / 进程定义 / 名称列表 / 认证信息 /
      * 通信信息 / 安全策略）。纯数据 —— 点击行为（开 Tab / 隐式连接）由宿主统一处理；
      * id 即 Tab 的 object type（`NavSelection.objectType`），宿主按 `nav_<id>` 解析文案。
+     * iconId 与 id 同值：宿主按它解析 Material Icons 图标（emoji 已废弃，Linux 无字体）。
      */
     override fun navigationItems(connection: ConnectionInfo): List<NavigationItem> = listOf(
         // ===== 工具类 =====
-        NavigationItem(id = "topology", titleKey = "nav_topology", icon = "🗺️", isTool = true),
-        NavigationItem(id = "command", titleKey = "nav_command", icon = "⌨️", isTool = true),
+        NavigationItem(id = "topology", titleKey = "nav_topology", iconId = "topology", isTool = true),
+        NavigationItem(id = "command", titleKey = "nav_command", iconId = "command", isTool = true),
         NavigationItem.separator("tools.objects"),
         // ===== 对象类型 =====
-        NavigationItem(id = "queues", titleKey = "nav_queues", icon = "📥"),
-        NavigationItem(id = "topics", titleKey = "nav_topics", icon = "📢"),
-        NavigationItem(id = "subscriptions", titleKey = "nav_subscriptions", icon = "📬"),
-        NavigationItem(id = "channels", titleKey = "nav_channels", icon = "🔗"),
-        NavigationItem(id = "listeners", titleKey = "nav_listeners", icon = "👂"),
-        NavigationItem(id = "services", titleKey = "nav_services", icon = "⚙️"),
-        NavigationItem(id = "processDefinitions", titleKey = "nav_process_definitions", icon = "📄"),
-        NavigationItem(id = "namelists", titleKey = "nav_namelists", icon = "📋"),
-        NavigationItem(id = "authInfo", titleKey = "nav_auth_info", icon = "🔐"),
-        NavigationItem(id = "commInfo", titleKey = "nav_comm_info", icon = "📡"),
-        NavigationItem(id = "securityPolicies", titleKey = "nav_security_policies", icon = "🛡️"),
+        NavigationItem(id = "queues", titleKey = "nav_queues", iconId = "queues"),
+        NavigationItem(id = "topics", titleKey = "nav_topics", iconId = "topics"),
+        NavigationItem(id = "subscriptions", titleKey = "nav_subscriptions", iconId = "subscriptions"),
+        NavigationItem(id = "channels", titleKey = "nav_channels", iconId = "channels"),
+        NavigationItem(id = "listeners", titleKey = "nav_listeners", iconId = "listeners"),
+        NavigationItem(id = "services", titleKey = "nav_services", iconId = "services"),
+        NavigationItem(id = "processDefinitions", titleKey = "nav_process_definitions", iconId = "processDefinitions"),
+        NavigationItem(id = "namelists", titleKey = "nav_namelists", iconId = "namelists"),
+        NavigationItem(id = "authInfo", titleKey = "nav_auth_info", iconId = "authInfo"),
+        NavigationItem(id = "commInfo", titleKey = "nav_comm_info", iconId = "commInfo"),
+        NavigationItem(id = "securityPolicies", titleKey = "nav_security_policies", iconId = "securityPolicies"),
     )
 
     /**

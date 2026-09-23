@@ -10,6 +10,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -115,7 +119,7 @@ internal fun EditConnectionDialog(
                         standardMinWidth = false, // ✕ 是图标按钮，不套「4 字宽」标准。
                         containerColor = MaterialTheme.colorScheme.surfaceVariant,
                         contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    ) { Text("✕") }
+                    ) { Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(18.dp)) }
                 }
                 HorizontalDivider()
                 // 面板内容：复用创建第二步的同一份 Composable（Content）。

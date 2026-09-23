@@ -262,7 +262,7 @@ private fun ConnectionRow(
 }
 
 /**
- * 二级导航项：虚线分支 + emoji 图标 + 本地化标题 + 可选数量徽章。
+ * 二级导航项：虚线分支 + Material 图标 + 本地化标题 + 可选数量徽章。
  *
  * [enabled] = false（连接中）时整行不可点、文字降透明度；标题经
  * `stringResource(item.titleKey)` 解析，语言切换自动重组。
@@ -301,10 +301,16 @@ private fun NavigationItemRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         BranchLine(color = MaterialTheme.colorScheme.outlineVariant, hasSiblingBelow = hasSiblingBelow)
-        item.icon?.takeIf { it.isNotEmpty() }?.let { emoji ->
-            Text(
-                text = emoji,
-                fontSize = 12.sp,
+        item.iconId?.let { iconId ->
+            // Material Icons 矢量图（不用 emoji：依赖系统字体，Linux 下显示为方块）。
+            // 透明度跟随标题的禁用态，行内两元素视觉状态一致。
+            Icon(
+                imageVector = navigationIcon(iconId),
+                contentDescription = null,
+                tint =
+                    if (enabled) MaterialTheme.colorScheme.onSurfaceVariant
+                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                modifier = Modifier.size(16.dp),
             )
             Spacer(Modifier.width(6.dp))
         }

@@ -18,6 +18,12 @@ import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.Icon
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
@@ -309,9 +315,11 @@ private fun ConnectionCard(
                             .padding(horizontal = 8.dp),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(
-                            text = if (tokenVisible) "🙈" else "👁",
-                            style = MaterialTheme.typography.bodyMedium,
+                        // Material 图标替代 emoji（🙈/👁）：Linux 无 Emoji 字体也能正常显示。
+                        Icon(
+                            imageVector = if (tokenVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp),
                         )
                     }
                 },
@@ -401,11 +409,21 @@ private fun ConnectionCard(
             }
             Spacer(Modifier.width(8.dp))
             testResult?.let { ok ->
-                Text(
-                    text = if (ok) stringResource("ai_test_ok") else stringResource("ai_test_fail"),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // 结果图标替代原字符串里的 ✔/✘ 前缀（emoji 依赖系统字体）。
+                    Icon(
+                        imageVector = if (ok) Icons.Default.Check else Icons.Default.Close,
+                        contentDescription = null,
+                        tint = if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(14.dp),
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = if (ok) stringResource("ai_test_ok") else stringResource("ai_test_fail"),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                    )
+                }
             }
             Spacer(Modifier.weight(1f))
             PressableButton(

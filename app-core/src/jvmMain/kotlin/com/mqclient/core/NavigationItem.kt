@@ -24,8 +24,12 @@ data class NavigationItem(
     val id: String,
     /** 国际化 key；分隔线（[isSeparator] = true）时为空串。 */
     val titleKey: String,
-    /** 图标（emoji 字符，如 `"📥"`）；null / 空串不显示。 */
-    val icon: String? = null,
+    /**
+     * 图标标识符（如 `"queues"`，与 [id] 同一命名空间）；宿主（app-ui）负责把它
+     * 解析成 Material Icons 矢量图 —— 本类是纯数据，不持有任何图形。null 不显示。
+     * 不再存 emoji 字符：Emoji 依赖系统字体，Linux 下显示为方块/问号。
+     */
+    val iconId: String? = null,
     /** 工具类条目（拓扑图 / 命令控制台等），与对象类条目用分隔线分组；渲染上暂不区分。 */
     val isTool: Boolean = false,
     /** 数量徽章（对象扫描完成后的条数）；null = 未扫描，不显示。 */

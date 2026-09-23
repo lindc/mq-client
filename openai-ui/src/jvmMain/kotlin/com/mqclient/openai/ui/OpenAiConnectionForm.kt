@@ -10,6 +10,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -159,10 +164,12 @@ class OpenAiConnectionForm : ConnectionFormUi {
                                             .padding(horizontal = 8.dp),
                                     contentAlignment = Alignment.Center,
                                 ) {
-                                    Text(
-                                        text = if (tokenVisible) "🙈" else "👁",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                    )
+                                // Material 图标替代 emoji（🙈/👁）：Linux 无 Emoji 字体也能正常显示。
+                                Icon(
+                                    imageVector = if (tokenVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp),
+                                )
                                 }
                             },
                         )
