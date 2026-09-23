@@ -37,6 +37,11 @@ class IbmMQConnectionManager(
     private val service: IbmMQService,
 ) {
 
+    // 二次保障：模块初始化路径（IbmMQModule.initialize）已配过，这里兜底防直连绕过。
+    init {
+        IbmMQClientLogConfigurator.init()
+    }
+
     private val contexts = ConcurrentHashMap<String, IbmMQConnectionContext>()
     private val locks = ConcurrentHashMap<String, Mutex>()
 

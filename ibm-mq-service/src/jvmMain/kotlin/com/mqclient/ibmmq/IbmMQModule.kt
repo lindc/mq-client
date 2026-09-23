@@ -70,6 +70,8 @@ object IbmMQModule {
         // 越早越好：MQ 的 JMQI 可能把 com.ibm.mq.cfg.* 属性在首次类加载时缓存，
         // 任何 MQ 类被触碰之前就必须把 cipher 映射关掉（OpenJDK 只有标准 TLS_* 名）。
         System.setProperty(USE_IBM_CIPHER_MAPPINGS, "false")
+        // 同一时机约束：MQ 客户端在首次类加载时读取日志属性并缓存，晚了就会落 cwd。
+        IbmMQClientLogConfigurator.init()
 
         val handler = IbmMQEventHandler()
         val created = IbmMQService(context)
