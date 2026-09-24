@@ -12,10 +12,12 @@ import com.mqclient.ibmmq.event.IbmMQEvents
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 
 /**
  * IBM MQ 连接的生命周期管理：**显式连接模型**的中枢。
@@ -108,7 +110,20 @@ class IbmMQConnectionManager(
         ctx.lastError = null
         try {
             val manager = withContext(Dispatchers.IO) {
-                MQQueueManager(ctx.config.queueManager.trim(), mqProperties(ctx.config))
+                try {
+                    // 连接阶段超时（connectionTimeout 配置，默认 30s）：MQ 的 TCP
+                    // 握手没有短超时，掉网时能挂十几分钟 —— 必须罩住。超时转成
+                    // 普通异常，不能以「取消」形状逃进下面的 CancellationException
+                    // 分支（否则连接状态永远停在 Connecting）。
+                    withTimeout(ctx.config.connectionTimeout * 1_000L) {
+                        MQQueueManager(ctx.config.queueManager.trim(), mqProperties(ctx.config))
+                    }
+                } catch (e: TimeoutCancellationException) {
+                    throw IllegalStateException(
+                        "连接超时（${ctx.config.connectionTimeout}s）——检查主机 / 端口 / 网络",
+                        e,
+                    )
+                }
             }
             ctx.mqConnection = manager
             ctx.cache = CacheManager()
