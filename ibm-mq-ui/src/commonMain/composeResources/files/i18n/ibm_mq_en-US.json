@@ -82,5 +82,17 @@
   "namelist_scan_failed": "Failed to scan namelists: %s",
   "namelist_search_placeholder": "Search namelists…",
   "namelist_refresh": "Refresh",
-  "namelist_action_properties": "Properties"
+  "namelist_action_properties": "Properties",
+  "auth_info_loading": "Loading authentication information…",
+  "auth_info_load_failed": "Failed to load authentication information: %s",
+  "auth_info_scan_failed": "Failed to scan authentication information: %s",
+  "auth_info_search_placeholder": "Search authentication information…",
+  "auth_info_refresh": "Refresh",
+  "auth_info_action_properties": "Properties",
+  "comm_info_loading": "Loading communication information…",
+  "comm_info_load_failed": "Failed to load communication information: %s",
+  "comm_info_scan_failed": "Failed to scan communication information: %s",
+  "comm_info_search_placeholder": "Search communication information…",
+  "comm_info_refresh": "Refresh",
+  "comm_info_action_properties": "Properties"
 }

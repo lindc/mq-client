@@ -132,6 +132,24 @@ class IbmMqUI : AdapterUI {
                     )
                 }
             }
+            "authInfo" -> {
+                if (IbmMQModule.serviceOrNull() == null) return null
+                {
+                    AuthInfoListPanel(
+                        connectionId = connectionId,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+            }
+            "commInfo" -> {
+                if (IbmMQModule.serviceOrNull() == null) return null
+                {
+                    CommInfoListPanel(
+                        connectionId = connectionId,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+            }
             else -> null
         }
     }

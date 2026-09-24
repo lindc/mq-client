@@ -82,5 +82,17 @@
   "namelist_scan_failed": "名称列表扫描失败：%s",
   "namelist_search_placeholder": "搜索名称列表…",
   "namelist_refresh": "刷新",
-  "namelist_action_properties": "属性"
+  "namelist_action_properties": "属性",
+  "auth_info_loading": "正在加载认证信息…",
+  "auth_info_load_failed": "认证信息加载失败：%s",
+  "auth_info_scan_failed": "认证信息扫描失败：%s",
+  "auth_info_search_placeholder": "搜索认证信息…",
+  "auth_info_refresh": "刷新",
+  "auth_info_action_properties": "属性",
+  "comm_info_loading": "正在加载通信信息…",
+  "comm_info_load_failed": "通信信息加载失败：%s",
+  "comm_info_scan_failed": "通信信息扫描失败：%s",
+  "comm_info_search_placeholder": "搜索通信信息…",
+  "comm_info_refresh": "刷新",
+  "comm_info_action_properties": "属性"
 }
