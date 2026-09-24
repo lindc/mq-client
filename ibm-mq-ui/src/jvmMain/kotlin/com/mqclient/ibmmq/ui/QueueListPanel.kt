@@ -24,8 +24,9 @@ import androidx.compose.ui.unit.dp
 import com.mqclient.core.ContextMenuItem
 import com.mqclient.core.CoreModule
 import com.mqclient.ibmmq.IbmMQModule
-import com.mqclient.ibmmq.QueueSnapshot
 import com.mqclient.ibmmq.event.IbmMQEvents
+import com.mqclient.ibmmq.pcf.MqObjectSnapshot
+import com.mqclient.ibmmq.pcf.MqObjectType
 import com.mqclient.mqui.command.ToolbarButton
 import com.mqclient.mqui.common.CompactSearchField
 import com.mqclient.mqui.objectlist.ObjectCardData
@@ -42,7 +43,7 @@ private val ToolbarSpacing = 8.dp
  * 队列列表（导航 `queues` Tab 的内容）：接 mq-ui 通用 [ObjectListPanel]。
  *
  * 数据姿势与 QMGR 属性面板一致：直接经 [IbmMQModule.serviceOrNull] 调
- * ibm-mq-service。队列快照来自**扫描缓存**（[IbmMQService.cachedQueues]，只读
+ * ibm-mq-service。队列快照来自**扫描缓存**（[IbmMQService.cachedObjects]，只读
  * 不碰 MQ）；「刷新」按钮触发 [IbmMQService.scanObjects] 重扫，扫描完成的事件
  * （OBJECTS / MESSAGES / SCAN_COMPLETED）驱动列表自动刷新 —— 手动与定时扫描
  * 共享同一条响应链路。
@@ -55,7 +56,7 @@ fun QueueListPanel(
     connectionId: String,
     modifier: Modifier = Modifier,
 ) {
-    var queues by remember(connectionId) { mutableStateOf(emptyList<QueueSnapshot>()) }
+    var queues by remember(connectionId) { mutableStateOf(emptyList<MqObjectSnapshot>()) }
     var loading by remember(connectionId) { mutableStateOf(true) }
     var searchText by remember { mutableStateOf("") }
 
@@ -66,11 +67,11 @@ fun QueueListPanel(
     LaunchedEffect(connectionId) {
         val service = IbmMQModule.serviceOrNull()
         if (service != null) {
-            queues = service.cachedQueues(connectionId)
+            queues = service.cachedObjects(connectionId, MqObjectType.QUEUE)
             if (queues.isEmpty()) {
                 // 首次打开且缓存为空：主动扫一轮（未连接等失败安静吞掉 —— 空态即可）。
                 runCatching { service.scanObjects(connectionId) }
-                    .onSuccess { queues = service.cachedQueues(connectionId) }
+                    .onSuccess { queues = service.cachedObjects(connectionId, MqObjectType.QUEUE) }
             }
         }
         loading = false
@@ -84,7 +85,7 @@ fun QueueListPanel(
         ).forEach { name ->
             bus.on(name, this) { event ->
                 if ((event.payload["connectionId"] as? String) == connectionId) {
-                    queues = IbmMQModule.serviceOrNull()?.cachedQueues(connectionId) ?: emptyList()
+                    queues = IbmMQModule.serviceOrNull()?.cachedObjects(connectionId, MqObjectType.QUEUE) ?: emptyList()
                 }
             }
         }
@@ -132,9 +133,9 @@ fun QueueListPanel(
     )
 }
 
-/** QueueSnapshot → ObjectCardData：状态图标按消息数二值化（有消息=绿勾活跃，无=灰点空闲）。 */
-private fun QueueSnapshot.toCardData(): ObjectCardData {
-    val active = messageCount > 0
+/** MqObjectSnapshot → ObjectCardData：状态图标按消息数二值化（有消息=绿勾活跃，无=灰点空闲）。 */
+private fun MqObjectSnapshot.toCardData(): ObjectCardData {
+    val active = (messageCount ?: 0) > 0
     return ObjectCardData(
         id = name,
         title = name,
@@ -142,7 +143,7 @@ private fun QueueSnapshot.toCardData(): ObjectCardData {
         statusIcon = if (active) Icons.Filled.CheckCircle else Icons.Filled.Circle,
         statusIconTint = if (active) Color(0xFF4CAF50) else Color(0xFF9E9E9E),
         statusText = stringResource(if (active) "queue_status_active" else "queue_status_idle"),
-        metricValue = messageCount.toString(),
+        metricValue = (messageCount ?: 0).toString(),
     )
 }
 
