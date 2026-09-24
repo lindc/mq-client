@@ -27,5 +27,8 @@
   "queue_type_model": "模型队列",
   "queue_type_unknown": "未知队列",
   "queue_toolbar_show_system": "显示系统",
-  "queue_toolbar_hide_system": "隐藏系统"
+  "queue_toolbar_hide_system": "隐藏系统",
+  "queue_action_properties": "属性",
+  "queue_action_messages": "消息处理",
+  "queue_status_warning": "接近满"
 }

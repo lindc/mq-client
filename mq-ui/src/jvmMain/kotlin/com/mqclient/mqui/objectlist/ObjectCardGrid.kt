@@ -14,7 +14,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.mqclient.core.ContextMenuItem
 
 /**
  * 对象卡片网格：[LazyVerticalGrid] 自适应列数（[GridCells.Adaptive] 按
@@ -23,13 +22,13 @@ import com.mqclient.core.ContextMenuItem
  *
  * 卡片宽度限制在 [maxCardWidth] 以内（与「新建连接」对话框的卡片一致）：
  * 列宽超过上限时（宽屏 + 少列）卡片不再被拉宽，在列内居中、两侧留白。
+ * 操作按钮随 [ObjectCardData.actions] 内嵌在卡片上，网格不感知操作语义。
  */
 @Composable
 fun ObjectCardGrid(
     items: List<ObjectCardData>,
     onCardClick: (ObjectCardData) -> Unit,
     onCardDoubleClick: (ObjectCardData) -> Unit,
-    contextMenuProvider: (ObjectCardData) -> List<ContextMenuItem>,
     modifier: Modifier = Modifier,
     minCardWidth: Dp = 240.dp,
     maxCardWidth: Dp = 280.dp,
@@ -53,7 +52,6 @@ fun ObjectCardGrid(
             ) {
                 ObjectCard(
                     data = item,
-                    contextMenu = contextMenuProvider(item),
                     onClick = { onCardClick(item) },
                     onDoubleClick = { onCardDoubleClick(item) },
                     modifier = Modifier

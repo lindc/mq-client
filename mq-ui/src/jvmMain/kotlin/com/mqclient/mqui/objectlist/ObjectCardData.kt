@@ -26,4 +26,6 @@ data class ObjectCardData(
     val statusText: String? = null,
     /** 右侧数值（如队列深度 / 消息数）；null 不显示。 */
     val metricValue: String? = null,
+    /** 第 1 行的操作按钮（[CardAction]，由各 MQ 模块构造）；空则不渲染。 */
+    val actions: List<CardAction> = emptyList(),
 )

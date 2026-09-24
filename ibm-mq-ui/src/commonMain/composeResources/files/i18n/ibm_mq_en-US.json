@@ -27,5 +27,8 @@
   "queue_type_model": "Model queue",
   "queue_type_unknown": "Unknown queue",
   "queue_toolbar_show_system": "Show System",
-  "queue_toolbar_hide_system": "Hide System"
+  "queue_toolbar_hide_system": "Hide System",
+  "queue_action_properties": "Properties",
+  "queue_action_messages": "Messages",
+  "queue_status_warning": "Nearly full"
 }

@@ -22,7 +22,6 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import com.mqclient.core.ConnectionStore
-import com.mqclient.core.ContextMenuItem
 import com.mqclient.core.CoreModule
 import com.mqclient.ibmmq.IbmMQConfig
 import com.mqclient.ibmmq.IbmMQModule
@@ -32,7 +31,6 @@ import com.mqclient.ibmmq.pcf.MqObjectSnapshot
 import com.mqclient.ibmmq.pcf.MqObjectType
 import com.mqclient.mqui.command.ToolbarButton
 import com.mqclient.mqui.common.CompactSearchField
-import com.mqclient.mqui.objectlist.ObjectCardData
 import com.mqclient.mqui.objectlist.ObjectListPanel
 import com.mqclient.uicommon.LocalSnackbarHostState
 import com.mqclient.uicommon.i18n.stringResource
@@ -51,12 +49,15 @@ private val ToolbarSpacing = 8.dp
  * （OBJECTS / MESSAGES / SCAN_COMPLETED）驱动列表自动刷新 —— 手动与定时扫描
  * 共享同一条响应链路。
  *
- * 尚未做的事：卡片单击（无选中态）与双击（队列详情 Tab 未做）都是空动作；
- * 右键菜单目前只有「复制名称」。
+ * 尚未做的事：队列详情 Tab（双击目标）与队列属性 Dialog——单击 / 双击经
+ * [onOpenProperties] / [onOpenMessages] 回调留给宿主；操作按钮目前有
+ * 复制名称 / 属性 / 消息处理（后两者回调由宿主提供，暂为空动作）。
  */
 @Composable
 fun QueueListPanel(
     connectionId: String,
+    onOpenProperties: (String) -> Unit = {},
+    onOpenMessages: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var queues by remember(connectionId) { mutableStateOf(emptyList<MqObjectSnapshot>()) }
@@ -125,16 +126,19 @@ fun QueueListPanel(
     }
 
     ObjectListPanel(
-        items = filtered.map { it.toCardData(warningThreshold) },
-        onCardClick = { /* 无选中态（ObjectListPanel 约定），留空 */ },
-        onCardDoubleClick = { /* 队列详情 Tab 未做，先无动作 */ },
-        contextMenuProvider = { card ->
-            listOf(
-                ContextMenuItem(id = "queue.copy.name", title = "queue_copy_name") {
-                    clipboard.setText(AnnotatedString(card.title))
-                },
+        items = filtered.map { queue ->
+            queue.toQueueCardData(
+                warningThreshold = warningThreshold,
+                actions = QueueCardActions.create(
+                    queueName = queue.name,
+                    onCopyName = { clipboard.setText(AnnotatedString(queue.name)) },
+                    onOpenProperties = { onOpenProperties(queue.name) },
+                    onOpenMessages = { onOpenMessages(queue.name) },
+                ),
             )
         },
+        onCardClick = { card -> onOpenProperties(card.id) },
+        onCardDoubleClick = { card -> onOpenMessages(card.id) },
         toolbarContent = {
             QueueListToolbar(
                 searchText = searchText,
@@ -151,26 +155,9 @@ fun QueueListPanel(
 }
 
 /**
- * MqObjectSnapshot → ObjectCardData：typeIcon 按队列类型解析；状态显示只有两种 ——
- * 使用率（currentDepth / maxDepth）达到告警阈值（[warningThreshold]%）时显示红色
- * 警告图标，否则第 2 行左侧留空（maxDepth 未知——如心跳先于慢扫建快照——不算告警）。
+ * MqObjectSnapshot → ObjectCardData 的转换（[QueueCardAdapter]）。
+ * 已迁移至 QueueCardAdapter.kt 的 toQueueCardData。
  */
-private fun MqObjectSnapshot.toCardData(warningThreshold: Int): ObjectCardData {
-    val currentDepth = currentDepth ?: 0
-    val maxDepth = maxDepth ?: 0
-    val usageRatio = if (maxDepth > 0) currentDepth.toFloat() / maxDepth else 0f
-    val hasWarning = maxDepth > 0 && usageRatio >= warningThreshold / 100f
-
-    return ObjectCardData(
-        id = name,
-        title = name,
-        typeIcon = QueueIconResolver.resolveIcon(this),
-        statusIcon = if (hasWarning) Icons.Filled.Warning else null,
-        statusIconTint = if (hasWarning) Color(0xFFF44336) else null,
-        statusText = null,
-        metricValue = (messageCount ?: 0).toString(),
-    )
-}
 
 /** 工具栏 Slot 内容：紧凑搜索框（左，占满剩余宽度）+ 刷新按钮（右），同高 32dp。 */
 @Composable

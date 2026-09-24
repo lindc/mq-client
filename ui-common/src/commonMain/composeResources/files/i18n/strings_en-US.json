@@ -220,6 +220,5 @@
   "console_export_failed": "Export failed: %s",
   "console_unknown_error": "Unknown error",
   "object_list_empty": "No data",
-  "object_card_more": "More actions",
   "common_clear": "Clear"
 }

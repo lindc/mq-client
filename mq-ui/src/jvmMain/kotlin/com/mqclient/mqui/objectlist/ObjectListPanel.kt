@@ -12,14 +12,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.mqclient.core.ContextMenuItem
 
 /**
  * 对象列表主 Panel（对外唯一入口）：顶部工具栏 Slot（可选）+ 卡片网格，
  * 支持加载态与空态。
  *
  * 面板不感知任何具体 MQ：卡片数据（[ObjectCardData]）由各 MQ 模块转换，
- * 右键菜单（[ContextMenuItem]）由 [contextMenuProvider] 提供，工具栏内容
+ * 操作按钮随 [ObjectCardData.actions] 内嵌在卡片上，工具栏内容
  * 由 [toolbarContent] Slot 注入。
  */
 @Composable
@@ -27,7 +26,6 @@ fun ObjectListPanel(
     items: List<ObjectCardData>,
     onCardClick: (ObjectCardData) -> Unit,
     onCardDoubleClick: (ObjectCardData) -> Unit,
-    contextMenuProvider: (ObjectCardData) -> List<ContextMenuItem>,
     modifier: Modifier = Modifier,
     /** Slot：顶部工具栏（搜索 / 筛选 / 刷新等，各 MQ 模块自定义）；不提供则不显示这一行。 */
     toolbarContent: (@Composable () -> Unit)? = null,
@@ -68,7 +66,6 @@ fun ObjectListPanel(
                     items = items,
                     onCardClick = onCardClick,
                     onCardDoubleClick = onCardDoubleClick,
-                    contextMenuProvider = contextMenuProvider,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
