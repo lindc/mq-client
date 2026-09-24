@@ -33,10 +33,13 @@ data class IbmMQConfig(
     val messageScanIntervalSeconds: Int = 10,
     /** 对象列表（队列/主题/监听器）扫描间隔（分钟）。 */
     val objectScanIntervalMinutes: Int = 60,
+    /** 队列深度告警阈值（百分比，50-100）：队列使用率超过它时界面显示告警。 */
+    val queueDepthWarningThreshold: Int = 85,
 ) {
     companion object {
         const val DEFAULT_PORT = 1414
         const val DEFAULT_CHANNEL = "SYSTEM.DEF.SVRCONN"
+        const val DEFAULT_QUEUE_DEPTH_WARNING_THRESHOLD = 85
     }
 }
 
@@ -63,6 +66,7 @@ private object OptionKeys {
     const val CONNECTION_TIMEOUT = "connectionTimeout"
     const val MESSAGE_SCAN_INTERVAL = "messageScanIntervalSeconds"
     const val OBJECT_SCAN_INTERVAL = "objectScanIntervalMinutes"
+    const val QUEUE_DEPTH_WARNING_THRESHOLD = "queueDepthWarningThreshold"
 }
 
 /** 摊平成 [ConnectionInfo.options]（值全字符串；敏感键落盘时由序列化器加密）。 */
@@ -85,6 +89,7 @@ fun IbmMQConfig.toOptions(): Map<String, String> = buildMap {
     put(OptionKeys.CONNECTION_TIMEOUT, connectionTimeout.toString())
     put(OptionKeys.MESSAGE_SCAN_INTERVAL, messageScanIntervalSeconds.toString())
     put(OptionKeys.OBJECT_SCAN_INTERVAL, objectScanIntervalMinutes.toString())
+    put(OptionKeys.QUEUE_DEPTH_WARNING_THRESHOLD, queueDepthWarningThreshold.toString())
 }
 
 /** 从 [ConnectionInfo.options] 还原；缺键 / 解析失败回落默认值。 */
@@ -111,5 +116,7 @@ fun ibmMQConfigFromOptions(options: Map<String, String>): IbmMQConfig {
         connectionTimeout = int(OptionKeys.CONNECTION_TIMEOUT, 30),
         messageScanIntervalSeconds = int(OptionKeys.MESSAGE_SCAN_INTERVAL, 10),
         objectScanIntervalMinutes = int(OptionKeys.OBJECT_SCAN_INTERVAL, 60),
+        queueDepthWarningThreshold =
+            int(OptionKeys.QUEUE_DEPTH_WARNING_THRESHOLD, IbmMQConfig.DEFAULT_QUEUE_DEPTH_WARNING_THRESHOLD),
     )
 }

@@ -218,5 +218,8 @@
   "console_file_read_failed": "Cannot read file: %s",
   "console_exported": "Exported to %s",
   "console_export_failed": "Export failed: %s",
-  "console_unknown_error": "Unknown error"
+  "console_unknown_error": "Unknown error",
+  "object_list_empty": "No data",
+  "object_card_more": "More actions",
+  "common_clear": "Clear"
 }

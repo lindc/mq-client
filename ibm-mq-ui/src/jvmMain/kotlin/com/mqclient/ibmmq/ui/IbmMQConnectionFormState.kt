@@ -44,11 +44,13 @@ data class IbmMQFieldErrors(
     val connectionTimeout: String? = null,
     val messageScanInterval: String? = null,
     val objectScanInterval: String? = null,
+    val queueDepthWarningThreshold: String? = null,
 ) {
     val hasAny: Boolean
         get() = queueManager != null || host != null || port != null || channel != null ||
             ccsid != null || connectionTimeout != null ||
-            messageScanInterval != null || objectScanInterval != null
+            messageScanInterval != null || objectScanInterval != null ||
+            queueDepthWarningThreshold != null
 }
 
 /**
@@ -78,6 +80,8 @@ class IbmMqConnectionFormState(
         const val MSG_INTERVAL_MAX = 3600
         const val OBJ_INTERVAL_MIN = 1
         const val OBJ_INTERVAL_MAX = 1440
+        const val THRESHOLD_MIN = 50
+        const val THRESHOLD_MAX = 100
     }
 
     /** ---------------- 宿主契约（busy / onSaved）---------------- */
@@ -126,6 +130,9 @@ class IbmMqConnectionFormState(
     var connectionTimeout by mutableStateOf("30")
     var messageScanInterval by mutableStateOf("10")
     var objectScanInterval by mutableStateOf("60")
+    var queueDepthWarningThreshold by mutableStateOf(
+        IbmMQConfig.DEFAULT_QUEUE_DEPTH_WARNING_THRESHOLD.toString(),
+    )
 
     // 编辑模式的原密码与「用户动过没有」标记：没动过 → 构建时沿用原值，
     // 界面上只显示占位符（见 loadFrom）。
@@ -186,6 +193,20 @@ class IbmMqConnectionFormState(
         if (o == null || o !in OBJ_INTERVAL_MIN..OBJ_INTERVAL_MAX) {
             e = e.copy(objectScanInterval = stringResource("ibm_mq_error_obj_interval_range"))
         }
+        // 告警阈值按 spec 分三种错误：空 / 非数字 / 超范围（其他数字字段是
+        // 一条范围消息兜底 —— 本字段的空值与超范围对用户语义不同，分开展示）。
+        val th = queueDepthWarningThreshold.trim()
+        val thValue = th.toIntOrNull()
+        e =
+            when {
+                th.isEmpty() ->
+                    e.copy(queueDepthWarningThreshold = stringResource("ibm_mq_error_threshold_empty"))
+                thValue == null ->
+                    e.copy(queueDepthWarningThreshold = stringResource("ibm_mq_error_number_invalid"))
+                thValue !in THRESHOLD_MIN..THRESHOLD_MAX ->
+                    e.copy(queueDepthWarningThreshold = stringResource("ibm_mq_error_threshold_range"))
+                else -> e
+            }
         errors = e
         return !e.hasAny
     }
@@ -215,6 +236,9 @@ class IbmMqConnectionFormState(
         connectionTimeout = connectionTimeout.trim().toIntOrNull() ?: 30,
         messageScanIntervalSeconds = messageScanInterval.trim().toIntOrNull() ?: 10,
         objectScanIntervalMinutes = objectScanInterval.trim().toIntOrNull() ?: 60,
+        queueDepthWarningThreshold =
+            queueDepthWarningThreshold.trim().toIntOrNull()
+                ?: IbmMQConfig.DEFAULT_QUEUE_DEPTH_WARNING_THRESHOLD,
     )
 
     /** 编辑模式未动过的密码沿用原值；动过 / 新建 → 用输入值。 */
@@ -243,6 +267,8 @@ class IbmMqConnectionFormState(
         connectionTimeout = "30"
         messageScanInterval = "10"
         objectScanInterval = "60"
+        queueDepthWarningThreshold =
+            IbmMQConfig.DEFAULT_QUEUE_DEPTH_WARNING_THRESHOLD.toString()
         originalPassword = ""
         originalTrustStorePassword = ""
         originalKeyStorePassword = ""
@@ -280,6 +306,7 @@ class IbmMqConnectionFormState(
         connectionTimeout = config.connectionTimeout.toString()
         messageScanInterval = config.messageScanIntervalSeconds.toString()
         objectScanInterval = config.objectScanIntervalMinutes.toString()
+        queueDepthWarningThreshold = config.queueDepthWarningThreshold.toString()
 
         originalPassword = config.password
         originalTrustStorePassword = config.trustStorePassword

@@ -235,6 +235,16 @@ internal fun IbmMQConnectionFormContent(state: IbmMqConnectionFormState) {
             onChange = { state.objectScanInterval = it; state.clearErrors() },
             errorMessage = state.errors.objectScanInterval,
         )
+        Spacer(Modifier.height(12.dp))
+        TextRow(
+            label = stringResource("ibm_mq_field_queue_depth_threshold"),
+            value = state.queueDepthWarningThreshold,
+            // 只放行数字：粘贴进来的非数字字符直接滤掉（空值由校验拦）。
+            onChange = { state.queueDepthWarningThreshold = it.filter(Char::isDigit); state.clearErrors() },
+            errorMessage = state.errors.queueDepthWarningThreshold,
+            suffix = "%",
+            hint = stringResource("ibm_mq_hint_queue_depth_threshold"),
+        )
 
         // 测试进行中的提示（保存按钮已由宿主按 busy 禁用）。
         if (state.saveState == SaveState.Testing) {
@@ -331,6 +341,8 @@ private fun TextRow(
     modifier: Modifier = Modifier,
     placeholder: String? = null,
     errorMessage: String? = null,
+    suffix: String? = null,
+    hint: String? = null,
 ) {
     LabeledField(label) {
         OutlinedTextField(
@@ -340,9 +352,25 @@ private fun TextRow(
             singleLine = true,
             isError = errorMessage != null,
             placeholder = { placeholder?.let { Text(it) } },
+            suffix = { suffix?.let { Text(it) } },
         )
     }
     FieldError(errorMessage)
+    FieldHint(hint)
+}
+
+/** 字段下方的中性提示小字（输入约束 / 字段用途说明）；无内容时不占位。 */
+@Composable
+private fun FieldHint(message: String?) {
+    if (message != null) {
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = message,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
 }
 
 /**

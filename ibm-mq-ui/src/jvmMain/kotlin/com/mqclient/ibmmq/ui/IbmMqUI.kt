@@ -45,18 +45,31 @@ class IbmMqUI : AdapterUI {
     }
 
     /**
-     * 「命令控制台」（objectType = `command`）由本模块贡献真实内容；其余导航项
-     * 继续走宿主占位。模块未初始化（拿不到执行器）时也回落占位 —— 极端时序下
-     * 不崩、不破 Tab。
+     * 模块贡献真实内容的导航项：`command`（命令控制台）/ `queues`（队列列表）；
+     * 其余继续走宿主占位。模块未初始化（拿不到 service / 执行器）时也回落占位
+     * —— 极端时序下不崩、不破 Tab。
      */
     override fun contentFor(objectType: String, connectionId: String): (@Composable () -> Unit)? {
-        if (objectType != "command") return null
-        if (IbmMQModule.mqscExecutorOrNull() == null) return null
-        return {
-            IbmMqCommandConsolePanel(
-                connectionId = connectionId,
-                modifier = Modifier.fillMaxSize(),
-            )
+        return when (objectType) {
+            "command" -> {
+                if (IbmMQModule.mqscExecutorOrNull() == null) return null
+                {
+                    IbmMqCommandConsolePanel(
+                        connectionId = connectionId,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+            }
+            "queues" -> {
+                if (IbmMQModule.serviceOrNull() == null) return null
+                {
+                    QueueListPanel(
+                        connectionId = connectionId,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+            }
+            else -> null
         }
     }
 }

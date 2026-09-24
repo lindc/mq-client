@@ -17,6 +17,9 @@ kotlin {
             api(compose.ui)
             // stringResource / LocalSnackbarHostState 等 UI 公共设施。
             implementation(projects.uiCommon)
+            // 对象列表组件用到的 app-core 类型（ContextMenuItem / CoreModule，
+            // 均在 jvmMain 源集 —— 见 objectlist 包的说明）。
+            implementation(projects.appCore)
             implementation(libs.compose.runtime)
             implementation(libs.compose.foundation)
             implementation(compose.material3)

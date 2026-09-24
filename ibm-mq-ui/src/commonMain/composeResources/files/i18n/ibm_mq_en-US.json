@@ -11,5 +11,15 @@
   "nav_namelists": "Namelists",
   "nav_auth_info": "Authentication Information",
   "nav_comm_info": "Communication Information",
-  "nav_security_policies": "Security Policies"
+  "nav_security_policies": "Security Policies",
+  "queue_search_placeholder": "Search queues…",
+  "queue_refresh": "Refresh",
+  "queue_status_active": "Active",
+  "queue_status_idle": "Idle",
+  "queue_copy_name": "Copy name",
+  "queue_scan_failed": "Queue scan failed: %s",
+  "ibm_mq_field_queue_depth_threshold": "Queue Depth Warning Threshold",
+  "ibm_mq_hint_queue_depth_threshold": "Show a warning icon when queue usage exceeds this percentage",
+  "ibm_mq_error_threshold_empty": "Queue depth warning threshold is required",
+  "ibm_mq_error_threshold_range": "Range: 50-100"
 }

@@ -218,5 +218,8 @@
   "console_file_read_failed": "无法读取文件：%s",
   "console_exported": "已导出到 %s",
   "console_export_failed": "导出失败：%s",
-  "console_unknown_error": "未知错误"
+  "console_unknown_error": "未知错误",
+  "object_list_empty": "暂无数据",
+  "object_card_more": "更多操作",
+  "common_clear": "清空"
 }
