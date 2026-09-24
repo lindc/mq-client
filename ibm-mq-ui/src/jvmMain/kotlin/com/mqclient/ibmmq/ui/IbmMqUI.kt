@@ -96,6 +96,24 @@ class IbmMqUI : AdapterUI {
                     )
                 }
             }
+            "listeners" -> {
+                if (IbmMQModule.serviceOrNull() == null) return null
+                {
+                    ListenerListPanel(
+                        connectionId = connectionId,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+            }
+            "services" -> {
+                if (IbmMQModule.serviceOrNull() == null) return null
+                {
+                    ServiceListPanel(
+                        connectionId = connectionId,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+            }
             else -> null
         }
     }

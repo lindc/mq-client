@@ -56,5 +56,20 @@
   "subscription_scan_failed": "Failed to scan subscriptions: %s",
   "subscription_search_placeholder": "Search subscriptions…",
   "subscription_refresh": "Refresh",
-  "subscription_action_properties": "Properties"
+  "subscription_action_properties": "Properties",
+  "listener_loading": "Loading listeners…",
+  "listener_load_failed": "Failed to load listeners: %s",
+  "listener_scan_failed": "Failed to scan listeners: %s",
+  "listener_search_placeholder": "Search listeners…",
+  "listener_refresh": "Refresh",
+  "listener_action_properties": "Properties",
+  "listener_status_running": "Running",
+  "listener_status_stopped": "Stopped",
+  "listener_status_unknown": "Unknown",
+  "service_loading": "Loading services…",
+  "service_load_failed": "Failed to load services: %s",
+  "service_scan_failed": "Failed to scan services: %s",
+  "service_search_placeholder": "Search services…",
+  "service_refresh": "Refresh",
+  "service_action_properties": "Properties"
 }
