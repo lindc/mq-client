@@ -233,6 +233,9 @@ class IbmMQService(private val context: ServiceContext) {
                 QueueSnapshot(name = name, depth = depth, messageCount = depth)
             }
             writeQueuesToCache(connectionId, queues)
+            // 同步把最新深度回写进全属性快照（curDepth）——慢扫 60 分钟一轮，
+            // 不回写的话读 objects.queues 的 UI 会看到 1 小时前的深度。
+            updateCachedQueueDepths(connectionId, counts)
             context.emit(
                 name = IbmMQEvents.MESSAGES_SCANNED,
                 payload = mapOf(
@@ -388,6 +391,30 @@ class IbmMQService(private val context: ServiceContext) {
         queues.forEach { queue ->
             cache.put(messageCountKey(queue.name), queue.messageCount, ttlMs = QUEUE_MESSAGE_COUNT_TTL_MS)
         }
+    }
+
+    /**
+     * 把心跳扫到的最新深度回写进全属性快照（objects.queues 的 curDepth）：
+     * 慢扫 60 分钟一轮，不回写的话读全属性快照的 UI 会看到最长 1 小时前的深度。
+     * 只更新两边都有的队列；全属性快照还没被慢扫创建时安静跳过。
+     */
+    private fun updateCachedQueueDepths(connectionId: String, counts: List<Pair<String, Int>>) {
+        val cache = cacheOf(connectionId) ?: return
+        val snapshots = cache.getAs<List<MqObjectSnapshot>>(objectsKey(MqObjectType.QUEUE)) ?: return
+        if (snapshots.isEmpty()) return
+        val fresh = counts.toMap()
+        cache.put(
+            objectsKey(MqObjectType.QUEUE),
+            snapshots.map { snapshot ->
+                val depth = fresh[snapshot.name] ?: return@map snapshot
+                snapshot.copy(
+                    currentDepth = depth,
+                    messageCount = depth,
+                    attributes = snapshot.attributes + ("MQIA_CURRENT_Q_DEPTH" to depth),
+                )
+            },
+            ttlMs = OBJECTS_FULL_TTL_MS,
+        )
     }
 
     /** 连接处于 CONNECTED 时的上下文；否则 null —— 显式连接模型的扫描守卫。 */
