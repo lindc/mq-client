@@ -18,8 +18,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.CoreModule
@@ -51,7 +49,7 @@ private val ToolbarSpacing = 8.dp
  *
  * 尚未做的事：队列详情 Tab（双击目标）与队列属性 Dialog——单击 / 双击经
  * [onOpenProperties] / [onOpenMessages] 回调留给宿主；操作按钮目前有
- * 复制名称 / 属性 / 消息处理（后两者回调由宿主提供，暂为空动作）。
+ * 属性（全部队列）与消息处理（仅普通本地队列），回调由宿主提供（暂为空动作）。
  */
 @Composable
 fun QueueListPanel(
@@ -76,7 +74,6 @@ fun QueueListPanel(
 
     val snackbarHostState = LocalSnackbarHostState.current
     val scope = rememberCoroutineScope()
-    val clipboard = LocalClipboardManager.current
 
     LaunchedEffect(connectionId) {
         val service = IbmMQModule.serviceOrNull()
@@ -130,8 +127,7 @@ fun QueueListPanel(
             queue.toQueueCardData(
                 warningThreshold = warningThreshold,
                 actions = QueueCardActions.create(
-                    queueName = queue.name,
-                    onCopyName = { clipboard.setText(AnnotatedString(queue.name)) },
+                    snapshot = queue,
                     onOpenProperties = { onOpenProperties(queue.name) },
                     onOpenMessages = { onOpenMessages(queue.name) },
                 ),
