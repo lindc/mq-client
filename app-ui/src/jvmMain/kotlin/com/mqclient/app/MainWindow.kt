@@ -151,6 +151,18 @@ fun MainWindow(
         connections.firstOrNull { it.id == sel.connectionId }?.name ?: sel.connectionId
     }
 
+    // 导航项 id → 国际化 titleKey：Tab 标题取 NavigationItem.titleKey，与侧边栏菜单
+    // 保持一致；不再硬编码 `nav_${id}`（后者对多词 id 会拼出错误 key，如
+    // nav_processDefinitions）。用第一条连接 Representative 取菜单项，拿不到时回退
+    // 到 `nav_${id}`（纯描述性模块无连接时仍可用）。
+    val titleKeyByObjectType = remember(connections) {
+        val representative = connections.firstOrNull() ?: return@remember emptyMap<String, String>()
+        ModuleRegistry.services
+            .flatMap { adapter -> adapter.navigationItems(representative) }
+            .filter { !it.isSeparator && it.titleKey.isNotBlank() }
+            .associateBy({ it.id }, { it.titleKey })
+    }
+
     fun openTab(tab: NavSelection) {
         if (tab !in openTabs) openTabs = openTabs + tab
         activeTab = tab
@@ -210,8 +222,11 @@ fun MainWindow(
                         ObjectTabStrip(
                             tabs = openTabs,
                             active = activeTab,
-                            // Tab 标题 = 连接名 / 导航项文案（nav_<id>，i18n）。
-                            tabTitle = { "${connectionName(it)} / ${stringResource("nav_" + it.objectType)}" },
+                            // Tab 标题 = 连接名 / 导航项文案（取 NavigationItem.titleKey，i18n）。
+                            tabTitle = {
+                                val titleKey = titleKeyByObjectType[it.objectType] ?: ("nav_" + it.objectType)
+                                "${connectionName(it)} / ${stringResource(titleKey)}"
+                            },
                             onSelect = {
                                 activeTab = it
                                 onSelect(it)
@@ -257,6 +272,7 @@ fun MainWindow(
                                     ObjectTypeWorkspace(
                                         serviceName = connectionName(current),
                                         objectType = current.objectType,
+                                        titleKeyByObjectType = titleKeyByObjectType,
                                         modifier = Modifier.fillMaxSize(),
                                     )
                                 }
@@ -385,12 +401,13 @@ private fun CloseButton(onClick: () -> Unit) {
 /**
  * Placeholder workspace for a connection's navigation item (queue / channel /
  * command console / ...) until the real views land. Titles resolve through the
- * `nav_<itemId>` i18n keys; the body is the shared "coming soon" copy.
+ * navigation item's [titleKey]; the body is the shared "coming soon" copy.
  */
 @Composable
 private fun ObjectTypeWorkspace(
     serviceName: String,
     objectType: String,
+    titleKeyByObjectType: Map<String, String>,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -398,8 +415,9 @@ private fun ObjectTypeWorkspace(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        val titleKey = titleKeyByObjectType[objectType] ?: ("nav_" + objectType)
         Text(
-            text = "$serviceName / ${stringResource("nav_" + objectType)}",
+            text = "$serviceName / ${stringResource(titleKey)}",
             style = MaterialTheme.typography.titleMedium,
             textAlign = TextAlign.Center,
         )

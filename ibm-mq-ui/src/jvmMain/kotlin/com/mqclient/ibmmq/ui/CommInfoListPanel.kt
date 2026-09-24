@@ -25,6 +25,7 @@ fun CommInfoListPanel(
     modifier: Modifier = Modifier,
 ) {
     var searchText by remember { mutableStateOf("") }
+    var showSystem by remember { mutableStateOf(false) }
     val state = rememberMqObjectListState(
         connectionId = connectionId,
         objectType = MqObjectType.COMM_INFO,
@@ -40,7 +41,9 @@ fun CommInfoListPanel(
         // 空列表的呈现交给 ObjectListPanel（其内部自带空态 + 工具栏），故此处恒返回 false。
         emptyCheck = { false },
         content = { commInfos ->
-            val filtered = commInfos.filter { it.name.contains(searchText, ignoreCase = true) }
+            val filtered = commInfos
+                .filter { it.name.contains(searchText, ignoreCase = true) }
+                .filter { showSystem || !isSystemObject(it.name) }
             ObjectListPanel(
                 items = filtered.map { commInfo ->
                     commInfo.toCommInfoCardData(
@@ -60,6 +63,14 @@ fun CommInfoListPanel(
                         refreshing = state.isRefreshing,
                         placeholder = stringResource("comm_info_search_placeholder"),
                         refreshText = stringResource("comm_info_refresh"),
+                        trailingContent = {
+                            SystemObjectToggleButton(
+                                showSystem = showSystem,
+                                onToggle = { showSystem = !showSystem },
+                                showText = stringResource("toolbar_show_system"),
+                                hideText = stringResource("toolbar_hide_system"),
+                            )
+                        },
                     )
                 },
                 loading = false,

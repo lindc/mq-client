@@ -26,6 +26,7 @@ fun ChannelListPanel(
     modifier: Modifier = Modifier,
 ) {
     var searchText by remember { mutableStateOf("") }
+    var showSystem by remember { mutableStateOf(false) }
     val state = rememberMqObjectListState(
         connectionId = connectionId,
         objectType = MqObjectType.CHANNEL,
@@ -41,7 +42,9 @@ fun ChannelListPanel(
         // 空列表的呈现交给 ObjectListPanel（其内部自带空态 + 工具栏），故此处恒返回 false。
         emptyCheck = { false },
         content = { channels ->
-            val filtered = channels.filter { it.name.contains(searchText, ignoreCase = true) }
+            val filtered = channels
+                .filter { it.name.contains(searchText, ignoreCase = true) }
+                .filter { showSystem || !isSystemObject(it.name) }
             ObjectListPanel(
                 items = filtered.map { channel ->
                     channel.toChannelCardData(
@@ -61,6 +64,14 @@ fun ChannelListPanel(
                         refreshing = state.isRefreshing,
                         placeholder = stringResource("channel_search_placeholder"),
                         refreshText = stringResource("channel_refresh"),
+                        trailingContent = {
+                            SystemObjectToggleButton(
+                                showSystem = showSystem,
+                                onToggle = { showSystem = !showSystem },
+                                showText = stringResource("toolbar_show_system"),
+                                hideText = stringResource("toolbar_hide_system"),
+                            )
+                        },
                     )
                 },
                 loading = false,

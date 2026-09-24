@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -61,4 +63,29 @@ fun ObjectListToolbar(
             trailingContent()
         }
     }
+}
+
+/**
+ * 系统对象判定：IBM MQ 默认系统对象以 `SYSTEM.` 开头（大小写不敏感）。
+ * 队列的 `AMQ.*` 临时队列在 [isSystemOrTempQueue] 里额外判断。
+ */
+fun isSystemObject(name: String): Boolean =
+    name.trim().uppercase().startsWith("SYSTEM.")
+
+/**
+ * 系统对象显隐切换按钮：所有对象列表页共用，文字由调用方传入 i18n 文案。
+ * 状态由页面持有，默认隐藏系统对象，点击后显示。
+ */
+@Composable
+fun SystemObjectToggleButton(
+    showSystem: Boolean,
+    onToggle: () -> Unit,
+    showText: String,
+    hideText: String,
+) {
+    ToolbarButton(
+        icon = if (showSystem) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+        text = if (showSystem) hideText else showText,
+        onClick = onToggle,
+    )
 }

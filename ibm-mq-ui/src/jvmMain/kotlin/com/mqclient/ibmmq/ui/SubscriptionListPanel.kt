@@ -25,6 +25,7 @@ fun SubscriptionListPanel(
     modifier: Modifier = Modifier,
 ) {
     var searchText by remember { mutableStateOf("") }
+    var showSystem by remember { mutableStateOf(false) }
     val state = rememberMqObjectListState(
         connectionId = connectionId,
         objectType = MqObjectType.SUBSCRIPTION,
@@ -40,7 +41,9 @@ fun SubscriptionListPanel(
         // 空列表的呈现交给 ObjectListPanel（其内部自带空态 + 工具栏），故此处恒返回 false。
         emptyCheck = { false },
         content = { subscriptions ->
-            val filtered = subscriptions.filter { it.name.contains(searchText, ignoreCase = true) }
+            val filtered = subscriptions
+                .filter { it.name.contains(searchText, ignoreCase = true) }
+                .filter { showSystem || !isSystemObject(it.name) }
             ObjectListPanel(
                 items = filtered.map { subscription ->
                     subscription.toSubscriptionCardData(
@@ -60,6 +63,14 @@ fun SubscriptionListPanel(
                         refreshing = state.isRefreshing,
                         placeholder = stringResource("subscription_search_placeholder"),
                         refreshText = stringResource("subscription_refresh"),
+                        trailingContent = {
+                            SystemObjectToggleButton(
+                                showSystem = showSystem,
+                                onToggle = { showSystem = !showSystem },
+                                showText = stringResource("toolbar_show_system"),
+                                hideText = stringResource("toolbar_hide_system"),
+                            )
+                        },
                     )
                 },
                 loading = false,

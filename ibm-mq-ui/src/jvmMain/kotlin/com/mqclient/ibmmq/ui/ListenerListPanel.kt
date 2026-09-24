@@ -25,6 +25,7 @@ fun ListenerListPanel(
     modifier: Modifier = Modifier,
 ) {
     var searchText by remember { mutableStateOf("") }
+    var showSystem by remember { mutableStateOf(false) }
     val state = rememberMqObjectListState(
         connectionId = connectionId,
         objectType = MqObjectType.LISTENER,
@@ -40,7 +41,9 @@ fun ListenerListPanel(
         // 空列表的呈现交给 ObjectListPanel（其内部自带空态 + 工具栏），故此处恒返回 false。
         emptyCheck = { false },
         content = { listeners ->
-            val filtered = listeners.filter { it.name.contains(searchText, ignoreCase = true) }
+            val filtered = listeners
+                .filter { it.name.contains(searchText, ignoreCase = true) }
+                .filter { showSystem || !isSystemObject(it.name) }
             ObjectListPanel(
                 items = filtered.map { listener ->
                     listener.toListenerCardData(
@@ -60,6 +63,14 @@ fun ListenerListPanel(
                         refreshing = state.isRefreshing,
                         placeholder = stringResource("listener_search_placeholder"),
                         refreshText = stringResource("listener_refresh"),
+                        trailingContent = {
+                            SystemObjectToggleButton(
+                                showSystem = showSystem,
+                                onToggle = { showSystem = !showSystem },
+                                showText = stringResource("toolbar_show_system"),
+                                hideText = stringResource("toolbar_hide_system"),
+                            )
+                        },
                     )
                 },
                 loading = false,

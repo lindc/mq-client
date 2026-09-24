@@ -25,6 +25,7 @@ fun NamelistListPanel(
     modifier: Modifier = Modifier,
 ) {
     var searchText by remember { mutableStateOf("") }
+    var showSystem by remember { mutableStateOf(false) }
     val state = rememberMqObjectListState(
         connectionId = connectionId,
         objectType = MqObjectType.NAMELIST,
@@ -40,7 +41,9 @@ fun NamelistListPanel(
         // 空列表的呈现交给 ObjectListPanel（其内部自带空态 + 工具栏），故此处恒返回 false。
         emptyCheck = { false },
         content = { namelists ->
-            val filtered = namelists.filter { it.name.contains(searchText, ignoreCase = true) }
+            val filtered = namelists
+                .filter { it.name.contains(searchText, ignoreCase = true) }
+                .filter { showSystem || !isSystemObject(it.name) }
             ObjectListPanel(
                 items = filtered.map { namelist ->
                     namelist.toNamelistCardData(
@@ -60,6 +63,14 @@ fun NamelistListPanel(
                         refreshing = state.isRefreshing,
                         placeholder = stringResource("namelist_search_placeholder"),
                         refreshText = stringResource("namelist_refresh"),
+                        trailingContent = {
+                            SystemObjectToggleButton(
+                                showSystem = showSystem,
+                                onToggle = { showSystem = !showSystem },
+                                showText = stringResource("toolbar_show_system"),
+                                hideText = stringResource("toolbar_hide_system"),
+                            )
+                        },
                     )
                 },
                 loading = false,
