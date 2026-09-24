@@ -2,6 +2,69 @@
 
 本文件记录 MQClient 的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [Unreleased] — 2026-09-24
+
+### Added
+
+- **mq-ui 通用对象列表组件**（新模块，包 `com.mqclient.mqui.objectlist`）：
+  `ObjectListPanel`（工具栏 Slot + 加载/空态）+ `ObjectCardGrid`（LazyVerticalGrid
+  自适应列数，卡宽 240–280dp 居中）+ `ObjectCard`（严格 2 行，64dp 定高）+
+  `CompactSearchField`（32dp 紧凑搜索框，BasicTextField 自绘，聚焦过渡 + 清除按钮）。
+- **卡片操作按钮化**：`CardAction`（id / icon / tooltip i18n key / enabled /
+  isDangerous / onClick）由各 MQ 模块构造，`ObjectCardData.actions` 内嵌渲染
+  （24dp 按钮 + 16dp 图标 + TooltipArea 悬停提示，禁用降透明、危险红色）。
+- **IBM MQ 队列列表**（QueueListPanel）：搜索 / 刷新 / 系统队列显隐切换
+  （SYSTEM.* 与 AMQ.* 前缀，默认隐藏），卡片类型图标按 MQQT/MQUS 解析
+  （本地 Inbox / 传输 LocalShipping / 远程 CloudUpload / 别名 AltRoute /
+  模型 FileCopy，未知 HelpOutline）。
+- **PCF 全对象扫描**（ibm-mq-service `pcf/PcfObjectScanner`）：11 类 MQ 对象
+  INQUIRE 通配符查询 + 属性/状态响应合并成 `MqObjectSnapshot`，单类 60s 超时、
+  2035 无权限跳过，慢扫 60 分钟全量替换、心跳 10 秒 add-or-update 刷新
+  队列 curDepth 与通道运行状态。替换原 mock `fetchQueues/fetchTopics/fetchListeners`。
+- **队列深度告警阈值**：连接配置新增 `queueDepthWarningThreshold`（默认 85，
+  范围 50-100 校验），队列卡片使用率（CURDEPTH/MAXDEPTH）达到阈值时显示红色
+  Warning 图标 + "接近满"，否则第 2 行左侧留空。
+- **连接阶段超时**：`IbmMQConnectionManager.connect` 与真机验证用
+  `connectionTimeout` 配置（默认 30s）罩住 MQQueueManager 连接——掉网不再挂十几分钟。
+
+### Changed
+
+- **队列缓存收敛为单一快照**：删除 `QueueSnapshot` / `KEY_QUEUES` /
+  `queue.<name>.messageCount` 等双份缓存，心跳与慢扫统一读写
+  `objects.<type>`（`MqObjectSnapshot`，TTL 90 分钟）；心跳 add-or-update 刷
+  curDepth，慢扫全量替换（顺带清理 QMGR 上已删除的对象）。
+- **ObjectCard 操作改内联按钮**：删除右键菜单与 "..." 按钮
+  （`ObjectCardContextMenu` 下线），`ObjectCardGrid` / `ObjectListPanel`
+  移除 `contextMenuProvider`；`ContextMenuItem` 保留供侧边栏连接菜单。
+- **mq-base 模块**（新增）：`MQServiceAdapter` 统一 `category = "MQ"`，
+  六个 MQ service adapter 换基类；`MQConstants` 收纳通用常量。
+
+### Fixed
+
+- `INQUIRE_Q_MGR` 通配符参数回 3097（MQRCCF_Q_MGR_NAME_ERROR）——省略名字参数
+  即返回本机队列管理器。
+- MQ 连接阶段无短超时：QMGR 掉线时 TCP 握手挂 11 分钟——连接与验证统一套
+  connectionTimeout。
+- PCF 定长字符串解码尾部残留填充区垃圾字节（主题名出现 `TOPICX` 之类尾渣）——
+  解码后同时 trim 空格与 NUL。
+
+### Tests
+
+- `PcfObjectScannerConversionTest`（8 例）：属性提取 / 名称映射 / 快照合并
+  离线验证（PCFMessage 可无连接构造），并据此修正了 MQConstants.lookup 不可用、
+  legacy 与 headers 两套 PCF 类层次混用两个问题。
+- `QueueIconResolverTest`（5 例）：MQQT/MQUS 常量值经 javap 核实后的类型解析回归。
+- `PcfObjectScannerLiveTest`：真机端到端验证（读 config.toml 解密链路 → 连接 →
+  实扫 QM1 全 11 类对象），QMGR 掉线时自动 SKIP 不污染 CI。
+
+### Notes
+
+- `MQConstants.lookup(value, prefix)` 对 PCF 参数 ID 实测返回 null；值→名映射用
+  反射枚举 CMQ* 接口常量实现（`MqAttributeNameMapper`），同值常量跨族碰撞需按
+  "前缀_" 过滤。
+- legacy `com.ibm.mq.pcf` 与 `com.ibm.mq.headers.pcf` 两套 PCF 类层次不可混用：
+  legacy `PCFMessage.getParameters()` 的元素必须强转 legacy `PCFParameter`。
+
 ## [Unreleased] — 2026-09-23
 
 ### Added
