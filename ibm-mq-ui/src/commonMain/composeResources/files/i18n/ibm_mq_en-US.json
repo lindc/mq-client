@@ -32,5 +32,17 @@
   "queue_toolbar_hide_system": "Hide System",
   "queue_action_properties": "Properties",
   "queue_action_messages": "Messages",
-  "queue_status_warning": "Nearly full"
+  "queue_status_warning": "Nearly full",
+  "channel_loading": "Loading channels…",
+  "channel_load_failed": "Failed to load channels: %s",
+  "channel_scan_failed": "Failed to scan channels: %s",
+  "channel_search_placeholder": "Search channels…",
+  "channel_refresh": "Refresh",
+  "channel_action_properties": "Properties",
+  "channel_status_running": "Running",
+  "channel_status_retrying": "Retrying",
+  "channel_status_stopped": "Stopped",
+  "channel_status_binding": "Binding",
+  "channel_status_initializing": "Initializing",
+  "channel_status_unknown": "Unknown"
 }

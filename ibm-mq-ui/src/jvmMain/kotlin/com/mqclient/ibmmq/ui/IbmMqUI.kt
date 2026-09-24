@@ -69,6 +69,15 @@ class IbmMqUI : AdapterUI {
                     )
                 }
             }
+            "channels" -> {
+                if (IbmMQModule.serviceOrNull() == null) return null
+                {
+                    ChannelListPanel(
+                        connectionId = connectionId,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+            }
             else -> null
         }
     }
