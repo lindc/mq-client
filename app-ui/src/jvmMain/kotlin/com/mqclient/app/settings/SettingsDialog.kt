@@ -20,10 +20,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
@@ -57,7 +57,7 @@ import dev.nucleusframework.window.windowDragArea
 internal enum class SettingsTab(val icon: ImageVector, val key: String) {
     GENERAL(Icons.Default.Settings, "settings_tab_general"),
     APPEARANCE(Icons.Default.Palette, "settings_tab_appearance"),
-    AI(Icons.Default.SmartToy, "settings_tab_ai"),
+    AI(Icons.Default.Android, "settings_tab_ai"),
     ;
 
     val tabName: String get() = stringResource(key)
