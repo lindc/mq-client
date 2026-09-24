@@ -13,6 +13,8 @@
   "nav_comm_info": "Communication Information",
   "nav_security_policies": "Security Policies",
   "queue_search_placeholder": "Search queues…",
+  "queue_loading": "Loading queues…",
+  "queue_load_failed": "Failed to load queues: %s",
   "queue_refresh": "Refresh",
   "queue_copy_name": "Copy name",
   "queue_scan_failed": "Queue scan failed: %s",
