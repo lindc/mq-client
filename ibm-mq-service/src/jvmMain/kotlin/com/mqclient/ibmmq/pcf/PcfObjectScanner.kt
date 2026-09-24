@@ -402,12 +402,14 @@ internal fun readableValue(value: Any?): Any? = when (value) {
     else -> value
 }
 
-/** 取字符串参数（兼容 String / ByteArray 两种底层形态）。 */
+/** 取字符串参数（兼容 String / ByteArray 两种底层形态）。
+ *  PCF 字符串按固定宽度补尾随空格（通道名 20 字符等），末尾 NUL 与空格都去掉 ——
+ *  MQ 对象名本身不含尾随空格，留着只会污染卡片标题与 LazyGrid 的 key。 */
 internal fun PCFMessage.stringValue(selector: Int): String? = when (val value = getParameterValue(selector)) {
     null -> null
-    is String -> value.trimEnd('\u0000')
-    is ByteArray -> value.decodeToString().trimEnd('\u0000')
-    else -> value.toString()
+    is String -> value.trimEnd('\u0000').trimEnd()
+    is ByteArray -> value.decodeToString().trimEnd('\u0000').trimEnd()
+    else -> value.toString().trimEnd('\u0000').trimEnd()
 }
 
 /** 取整型参数（非 Int 一律 null，调用方用 null 语义兜底）。 */

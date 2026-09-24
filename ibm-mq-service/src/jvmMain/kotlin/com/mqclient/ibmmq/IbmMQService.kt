@@ -340,21 +340,32 @@ class IbmMQService(private val context: ServiceContext) {
         val cache = cacheOf(connectionId) ?: return
         val key = objectsKey(MqObjectType.QUEUE)
         val existing = cache.getAs<List<MqObjectSnapshot>>(key) ?: emptyList()
-        val byName = existing.associateBy { it.name }
-        val merged = counts.map { (name, depth) ->
-            byName[name]?.copy(
-                currentDepth = depth,
-                messageCount = depth,
-                attributes = byName.getValue(name).attributes + ("MQIA_CURRENT_Q_DEPTH" to depth),
-            ) ?: MqObjectSnapshot(
-                name = name,
-                type = MqObjectType.QUEUE,
-                currentDepth = depth,
-                messageCount = depth,
-                attributes = mapOf("MQIA_CURRENT_Q_DEPTH" to depth),
-            )
+        // 真·add-or-update：以既有列表为基础，只更新 / 追加，**绝不删除**没有状态行的对象
+        // （INQUIRE_Q_STATUS 覆盖不到别名 / 远程队列等，全量替换会把它们误删；已删除对象
+        // 由慢扫全量替换负责）。同名计数多行（理论上不会，但兜底）只取一次。
+        val updated = existing.toMutableList()
+        val seen = mutableSetOf<String>()
+        for ((name, depth) in counts) {
+            if (!seen.add(name)) continue
+            val idx = updated.indexOfFirst { it.name == name }
+            if (idx >= 0) {
+                val prev = updated[idx]
+                updated[idx] = prev.copy(
+                    currentDepth = depth,
+                    messageCount = depth,
+                    attributes = prev.attributes + ("MQIA_CURRENT_Q_DEPTH" to depth),
+                )
+            } else {
+                updated += MqObjectSnapshot(
+                    name = name,
+                    type = MqObjectType.QUEUE,
+                    currentDepth = depth,
+                    messageCount = depth,
+                    attributes = mapOf("MQIA_CURRENT_Q_DEPTH" to depth),
+                )
+            }
         }
-        cache.put(key, merged, ttlMs = OBJECTS_FULL_TTL_MS)
+        cache.put(key, updated, ttlMs = OBJECTS_FULL_TTL_MS)
     }
 
     /**
@@ -366,20 +377,33 @@ class IbmMQService(private val context: ServiceContext) {
         val cache = cacheOf(connectionId) ?: return
         val key = objectsKey(MqObjectType.CHANNEL)
         val existing = cache.getAs<List<MqObjectSnapshot>>(key) ?: emptyList()
-        val byName = existing.associateBy { it.name }
-        val merged = statuses.map { (name, statusValue) ->
+        // INQUIRE_CHANNEL_STATUS 一个通道**定义**会返回多行（如 SVRCONN 上多个活动连接），
+        // 同名去重只取一次，否则列表里出现重复 name → ObjectCardData.id 重复 → LazyGrid
+        // 抛 IllegalArgumentException("Key ... was already used")。
+        // 同时是真正的 add-or-update：保留既有通道（停掉的通道没有状态行也不该被删），
+        // 只更新已有项的状态、追加本次新出现的通道，绝不整体替换掉慢扫扫到的列表。
+        val updated = existing.toMutableList()
+        val seen = mutableSetOf<String>()
+        for ((name, statusValue) in statuses) {
+            if (!seen.add(name)) continue
             val statusName = channelStatusName(statusValue)
-            byName[name]?.copy(
-                channelStatus = statusName,
-                attributes = byName.getValue(name).attributes + ("MQIACH_CHANNEL_STATUS" to statusValue),
-            ) ?: MqObjectSnapshot(
-                name = name,
-                type = MqObjectType.CHANNEL,
-                channelStatus = statusName,
-                attributes = mapOf("MQIACH_CHANNEL_STATUS" to statusValue),
-            )
+            val idx = updated.indexOfFirst { it.name == name }
+            if (idx >= 0) {
+                val prev = updated[idx]
+                updated[idx] = prev.copy(
+                    channelStatus = statusName,
+                    attributes = prev.attributes + ("MQIACH_CHANNEL_STATUS" to statusValue),
+                )
+            } else {
+                updated += MqObjectSnapshot(
+                    name = name,
+                    type = MqObjectType.CHANNEL,
+                    channelStatus = statusName,
+                    attributes = mapOf("MQIACH_CHANNEL_STATUS" to statusValue),
+                )
+            }
         }
-        cache.put(key, merged, ttlMs = OBJECTS_FULL_TTL_MS)
+        cache.put(key, updated, ttlMs = OBJECTS_FULL_TTL_MS)
     }
 
     /** 连接处于 CONNECTED 时的上下文；否则 null —— 显式连接模型的扫描守卫。 */
