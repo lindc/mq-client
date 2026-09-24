@@ -71,5 +71,11 @@
   "service_scan_failed": "Failed to scan services: %s",
   "service_search_placeholder": "Search services…",
   "service_refresh": "Refresh",
-  "service_action_properties": "Properties"
+  "service_action_properties": "Properties",
+  "process_definition_loading": "Loading process definitions…",
+  "process_definition_load_failed": "Failed to load process definitions: %s",
+  "process_definition_scan_failed": "Failed to scan process definitions: %s",
+  "process_definition_search_placeholder": "Search process definitions…",
+  "process_definition_refresh": "Refresh",
+  "process_definition_action_properties": "Properties"
 }

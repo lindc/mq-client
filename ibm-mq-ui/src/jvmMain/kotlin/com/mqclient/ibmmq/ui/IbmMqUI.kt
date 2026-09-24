@@ -114,6 +114,15 @@ class IbmMqUI : AdapterUI {
                     )
                 }
             }
+            "processDefinitions" -> {
+                if (IbmMQModule.serviceOrNull() == null) return null
+                {
+                    ProcessListPanel(
+                        connectionId = connectionId,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+            }
             else -> null
         }
     }

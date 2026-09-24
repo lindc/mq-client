@@ -71,5 +71,11 @@
   "service_scan_failed": "服务扫描失败：%s",
   "service_search_placeholder": "搜索服务…",
   "service_refresh": "刷新",
-  "service_action_properties": "属性"
+  "service_action_properties": "属性",
+  "process_definition_loading": "正在加载进程定义…",
+  "process_definition_load_failed": "进程定义加载失败：%s",
+  "process_definition_scan_failed": "进程定义扫描失败：%s",
+  "process_definition_search_placeholder": "搜索进程定义…",
+  "process_definition_refresh": "刷新",
+  "process_definition_action_properties": "属性"
 }
