@@ -31,14 +31,9 @@ object QueueCardActions {
         onOpenProperties: () -> Unit,
         onOpenMessages: () -> Unit,
     ): List<CardAction> {
-        val actions = mutableListOf(
-            CardAction(
-                id = "queue.properties",
-                icon = Icons.Default.Info,
-                tooltip = "queue_action_properties",
-                onClick = onOpenProperties,
-            ),
-        )
+        val actions = mutableListOf<CardAction>()
+        // 消息按钮（仅普通本地队列有）放前面，属性按钮恒在最后 —— 各对象类型的
+        // 尾按钮保持一致（选中后同位置操作）。
         if (QueueIconResolver.resolveType(snapshot) == QueueType.LOCAL) {
             actions += CardAction(
                 id = "queue.messages",
@@ -47,6 +42,12 @@ object QueueCardActions {
                 onClick = onOpenMessages,
             )
         }
+        actions += CardAction(
+            id = "queue.properties",
+            icon = Icons.Default.Info,
+            tooltip = "queue_action_properties",
+            onClick = onOpenProperties,
+        )
         return actions
     }
 }

@@ -21,9 +21,9 @@ class QueueCardActionsTest {
     )
 
     @Test
-    fun `normal local queue gets properties and messages buttons`() {
+    fun `normal local queue gets messages then properties buttons`() {
         val actions = QueueCardActions.create(snapshot(1, 0), {}, {})
-        assertEquals(listOf("queue.properties", "queue.messages"), actions.map { it.id })
+        assertEquals(listOf("queue.messages", "queue.properties"), actions.map { it.id })
     }
 
     @Test
