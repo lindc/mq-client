@@ -1,11 +1,11 @@
 package com.mqclient.artemis
 
-import com.mqclient.core.ServiceAdapter
+import com.mqclient.mq.base.MQServiceAdapter
 
-class ArtemisServiceAdapter : ServiceAdapter {
+class ArtemisServiceAdapter : MQServiceAdapter() {
     override val id = MODULE_ID // 模块名唯一定义处：ArtemisModule.kt 顶层 const
     override val name = "Artemis"
     override val description = "Artemis connection and management"
     override val protocol = "AMQP / OpenWire"
-    override val category = "MQ"
+    // category = "MQ" 由 MQServiceAdapter 统一提供
 }

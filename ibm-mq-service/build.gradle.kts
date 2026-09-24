@@ -9,6 +9,9 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             implementation(projects.appCore)
+            // MQ 公共基类（MQServiceAdapter：category="MQ"）。api 暴露，
+            // 消费方（app-ui SPI 注册）能看到完整父类链。
+            api(projects.mqBase)
             // mq-ui 通用命令控制台的接口与模型（CommandExecutor / CommandParser /
             // SyntaxHighlighter / CommandResult…）。语法高亮的 AnnotatedString 等
             // compose ui-text 类型由 mq-ui 以 api 传递过来，本模块不直接引 compose。

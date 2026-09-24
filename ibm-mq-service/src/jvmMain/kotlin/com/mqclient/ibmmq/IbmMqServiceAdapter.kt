@@ -2,15 +2,15 @@ package com.mqclient.ibmmq
 
 import com.mqclient.core.ConnectionInfo
 import com.mqclient.core.NavigationItem
-import com.mqclient.core.ServiceAdapter
 import com.mqclient.core.spi.ServiceContext
+import com.mqclient.mq.base.MQServiceAdapter
 
-class IbmMqServiceAdapter : ServiceAdapter {
+class IbmMqServiceAdapter : MQServiceAdapter() {
     override val id = MODULE_ID // 模块名唯一定义处：IbmMQModule.kt 顶层 const
     override val name = "IBM MQ"
     override val description = "IBM MQ connection and management"
     override val protocol = "MQI"
-    override val category = "MQ"
+    // category = "MQ" 由 MQServiceAdapter 统一提供
 
     /**
      * 导航树二级菜单：工具类（拓扑图 / 命令控制台）在前，分隔线之后是 MQ 对象类型
