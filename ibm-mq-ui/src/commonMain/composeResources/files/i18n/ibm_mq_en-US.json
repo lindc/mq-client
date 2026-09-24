@@ -11,7 +11,6 @@
   "nav_namelists": "Namelists",
   "nav_auth_info": "Authentication Information",
   "nav_comm_info": "Communication Information",
-  "nav_security_policies": "Security Policies",
   "queue_search_placeholder": "Search queues…",
   "queue_loading": "Loading queues…",
   "queue_load_failed": "Failed to load queues: %s",

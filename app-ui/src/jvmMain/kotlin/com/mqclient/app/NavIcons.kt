@@ -41,6 +41,5 @@ internal fun navigationIcon(iconId: String): ImageVector =
         "namelists" -> Icons.Filled.List
         "authInfo" -> Icons.Filled.Lock
         "commInfo" -> Icons.Filled.SettingsInputAntenna
-        "securityPolicies" -> Icons.Filled.Security
         else -> Icons.Filled.Circle
     }

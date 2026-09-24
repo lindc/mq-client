@@ -35,7 +35,6 @@ class IbmMqServiceAdapter : MQServiceAdapter() {
         NavigationItem(id = "namelists", titleKey = "nav_namelists", iconId = "namelists"),
         NavigationItem(id = "authInfo", titleKey = "nav_auth_info", iconId = "authInfo"),
         NavigationItem(id = "commInfo", titleKey = "nav_comm_info", iconId = "commInfo"),
-        NavigationItem(id = "securityPolicies", titleKey = "nav_security_policies", iconId = "securityPolicies"),
     )
 
     /**
