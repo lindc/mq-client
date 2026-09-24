@@ -87,6 +87,15 @@ class IbmMqUI : AdapterUI {
                     )
                 }
             }
+            "subscriptions" -> {
+                if (IbmMQModule.serviceOrNull() == null) return null
+                {
+                    SubscriptionListPanel(
+                        connectionId = connectionId,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+            }
             else -> null
         }
     }

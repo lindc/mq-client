@@ -50,5 +50,11 @@
   "topic_scan_failed": "主题扫描失败：%s",
   "topic_search_placeholder": "搜索主题…",
   "topic_refresh": "刷新",
-  "topic_action_properties": "属性"
+  "topic_action_properties": "属性",
+  "subscription_loading": "正在加载订阅…",
+  "subscription_load_failed": "订阅加载失败：%s",
+  "subscription_scan_failed": "订阅扫描失败：%s",
+  "subscription_search_placeholder": "搜索订阅…",
+  "subscription_refresh": "刷新",
+  "subscription_action_properties": "属性"
 }
