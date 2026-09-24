@@ -101,7 +101,7 @@ data class QmgrProperties(
  *    属性，写入每连接专属的 [CacheManager]（`objects.<type>` 键，TTL 90 分钟）。
  *
  * 缓存：每条连接的快照存在它专属的 CacheManager 里（入口见 [IbmMQModule.connectionOrNull]）：
- * 扫描链路负责刷新（write-through），cachedQueues / cachedObjects / cachedQueueMessageCount
+ * 扫描链路负责刷新（write-through），cachedQueues / cachedObjects / cachedQueueManager
  * 是只读入口 —— 读不碰 MQ，刷新不阻塞读。
  */
 class IbmMQService(private val context: ServiceContext) {
@@ -116,12 +116,6 @@ class IbmMQService(private val context: ServiceContext) {
          * 略长于扫描间隔就不会在两次扫描之间出现空窗。
          */
         const val OBJECTS_TTL_MS = 15 * 60 * 1_000L
-
-        /** 单队列消息数的 TTL：5 秒心跳刷新一次，TTL 只做失联兜底。 */
-        const val QUEUE_MESSAGE_COUNT_TTL_MS = 60 * 1_000L
-
-        /** 单队列消息数的 key：`queue.<name>.messageCount`。 */
-        fun messageCountKey(queueName: String): String = "queue.$queueName.messageCount"
 
         /**
          * 全对象扫描（MqObjectSnapshot）的 TTL：90 分钟，比 60 分钟的慢扫间隔长
@@ -366,20 +360,7 @@ class IbmMQService(private val context: ServiceContext) {
     fun cachedQueueManager(connectionId: String): MqObjectSnapshot? =
         cacheOf(connectionId)?.getAs(objectsKey(MqObjectType.QUEUE_MANAGER))
 
-    /**
-     * 读单个队列的最近消息数（缓存值；没有 / 已过期返回 null）。
-     * 5 秒心跳每次扫描都会刷新它，适合界面直接读来展示。
-     */
-    fun cachedQueueMessageCount(connectionId: String, queueName: String): Int? =
-        cacheOf(connectionId)?.getAs<Int>(messageCountKey(queueName))
 
-    /**
-     * 失效某个队列的全部缓存（队列被删除 / 清空后由调用方主动触发）。
-     * 演示按前缀批量清理：key 形如 `queue.<名称>.messageCount`。
-     */
-    fun invalidateQueueCache(connectionId: String, queueName: String) {
-        cacheOf(connectionId)?.removeByPrefix("queue.$queueName.")
-    }
 
     /**
      * 扫描链路的写缓存助手：心跳 / 手动扫描 / 对象扫描三条 fetchQueues 链路共用。
@@ -388,9 +369,6 @@ class IbmMQService(private val context: ServiceContext) {
     private fun writeQueuesToCache(connectionId: String, queues: List<QueueSnapshot>) {
         val cache = cacheOf(connectionId) ?: return
         cache.put(KEY_QUEUES, queues, ttlMs = OBJECTS_TTL_MS)
-        queues.forEach { queue ->
-            cache.put(messageCountKey(queue.name), queue.messageCount, ttlMs = QUEUE_MESSAGE_COUNT_TTL_MS)
-        }
     }
 
     /**
