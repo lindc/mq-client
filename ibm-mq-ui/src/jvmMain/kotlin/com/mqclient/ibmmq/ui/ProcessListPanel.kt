@@ -63,14 +63,9 @@ fun ProcessListPanel(
                         refreshing = state.isRefreshing,
                         placeholder = stringResource("process_definition_search_placeholder"),
                         refreshText = stringResource("process_definition_refresh"),
-                        trailingContent = {
-                            SystemObjectToggleButton(
-                                showSystem = showSystem,
-                                onToggle = { showSystem = !showSystem },
-                                showText = stringResource("toolbar_show_system"),
-                                hideText = stringResource("toolbar_hide_system"),
-                            )
-                        },
+                        showSystemToggle = true,
+                        showSystem = showSystem,
+                        onShowSystemChange = { showSystem = !showSystem },
                     )
                 },
                 loading = false,

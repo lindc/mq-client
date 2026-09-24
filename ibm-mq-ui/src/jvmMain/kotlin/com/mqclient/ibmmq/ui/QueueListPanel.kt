@@ -84,15 +84,9 @@ fun QueueListPanel(
                         refreshing = state.isRefreshing,
                         placeholder = stringResource("queue_search_placeholder"),
                         refreshText = stringResource("queue_refresh"),
-                        // 系统队列显隐切换：文字是「点击后会发生的动作」——隐藏时显示「显示系统」。
-                        trailingContent = {
-                            SystemObjectToggleButton(
-                                showSystem = showSystem,
-                                onToggle = { showSystem = !showSystem },
-                                showText = stringResource("toolbar_show_system"),
-                                hideText = stringResource("toolbar_hide_system"),
-                            )
-                        },
+                        showSystemToggle = true,
+                        showSystem = showSystem,
+                        onShowSystemChange = { showSystem = !showSystem },
                     )
                 },
                 loading = false,

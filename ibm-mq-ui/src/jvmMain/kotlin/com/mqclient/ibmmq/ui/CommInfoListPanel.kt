@@ -63,14 +63,9 @@ fun CommInfoListPanel(
                         refreshing = state.isRefreshing,
                         placeholder = stringResource("comm_info_search_placeholder"),
                         refreshText = stringResource("comm_info_refresh"),
-                        trailingContent = {
-                            SystemObjectToggleButton(
-                                showSystem = showSystem,
-                                onToggle = { showSystem = !showSystem },
-                                showText = stringResource("toolbar_show_system"),
-                                hideText = stringResource("toolbar_hide_system"),
-                            )
-                        },
+                        showSystemToggle = true,
+                        showSystem = showSystem,
+                        onShowSystemChange = { showSystem = !showSystem },
                     )
                 },
                 loading = false,
