@@ -44,5 +44,11 @@
   "channel_status_stopped": "Stopped",
   "channel_status_binding": "Binding",
   "channel_status_initializing": "Initializing",
-  "channel_status_unknown": "Unknown"
+  "channel_status_unknown": "Unknown",
+  "topic_loading": "Loading topics…",
+  "topic_load_failed": "Failed to load topics: %s",
+  "topic_scan_failed": "Failed to scan topics: %s",
+  "topic_search_placeholder": "Search topics…",
+  "topic_refresh": "Refresh",
+  "topic_action_properties": "Properties"
 }

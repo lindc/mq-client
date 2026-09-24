@@ -78,6 +78,15 @@ class IbmMqUI : AdapterUI {
                     )
                 }
             }
+            "topics" -> {
+                if (IbmMQModule.serviceOrNull() == null) return null
+                {
+                    TopicListPanel(
+                        connectionId = connectionId,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+            }
             else -> null
         }
     }
