@@ -11,6 +11,9 @@ import com.mqclient.core.event.EventNames
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.emit
 import com.mqclient.ibmmq.event.IbmMQEvents
+import com.mqclient.ibmmq.pcf.MqObjectSnapshot
+import com.mqclient.ibmmq.pcf.MqObjectType
+import com.mqclient.ibmmq.pcf.PcfObjectScanner
 import java.io.FileInputStream
 import java.security.KeyStore
 import java.util.concurrent.ConcurrentHashMap
@@ -92,12 +95,14 @@ data class QmgrProperties(
  * 业务代码只认 [ServiceContext]（总线 + 模块 scope），不认全局单例，也不关心谁在
  * 监听它发出的事件。
  *
- * ⚠️ 骨架：仓库当前没有任何 IBM MQ 客户端依赖（见 `ibm-mq-service/build.gradle.kts`），
- * 所以 [fetchQueues] 是模拟实现。接真库时只替换它，事件部分不用动。
+ * 扫描链路（真 PCF，[PcfObjectScanner]）：
+ *  - 心跳快扫（默认 10s）：INQUIRE_Q_STATUS 一条拿全部本地队列的当前深度；
+ *  - 对象慢扫（默认 60min）：[PcfObjectScanner.scanAll] 扫齐 11 类对象的完整
+ *    属性，写入每连接专属的 [CacheManager]（`objects.<type>` 键，TTL 90 分钟）。
  *
  * 缓存：每条连接的快照存在它专属的 CacheManager 里（入口见 [IbmMQModule.connectionOrNull]）：
- * 扫描链路负责刷新（write-through），[cachedQueues] / [cachedQueueMessageCount] 是
- * 只读入口 —— 读不碰 MQ，刷新不阻塞读。
+ * 扫描链路负责刷新（write-through），cachedQueues / cachedObjects / cachedQueueMessageCount
+ * 是只读入口 —— 读不碰 MQ，刷新不阻塞读。
  */
 class IbmMQService(private val context: ServiceContext) {
 
@@ -105,12 +110,8 @@ class IbmMQService(private val context: ServiceContext) {
         /** 队列快照的 key（实例隔离数据，所以 key 不需要连接前缀）。 */
         const val KEY_QUEUES = "queues"
 
-        /** 主题 / 监听器列表的 key。 */
-        const val KEY_TOPICS = "topics"
-        const val KEY_LISTENERS = "listeners"
-
         /**
-         * 对象列表 / 队列快照的 TTL：比 10 分钟的对象扫描间隔略长一截 ——
+         * 队列快照的 TTL：比 10 分钟的对象扫描间隔略长一截 ——
          * 扫描是主动刷新，TTL 只是「连接失联后数据别永远烂在缓存里」的兜底，
          * 略长于扫描间隔就不会在两次扫描之间出现空窗。
          */
@@ -121,10 +122,37 @@ class IbmMQService(private val context: ServiceContext) {
 
         /** 单队列消息数的 key：`queue.<name>.messageCount`。 */
         fun messageCountKey(queueName: String): String = "queue.$queueName.messageCount"
+
+        /**
+         * 全对象扫描（MqObjectSnapshot）的 TTL：90 分钟，比 60 分钟的慢扫间隔长
+         * 一截 —— 同样只是「失联后数据别永远烂在缓存里」的兜底。
+         */
+        const val OBJECTS_FULL_TTL_MS = 90 * 60 * 1_000L
+
+        /** 全对象扫描的缓存 key 前缀：`objects.<type>`。 */
+        const val OBJECTS_KEY_PREFIX = "objects."
+
+        /** [MqObjectType] → 缓存 key 后缀（如 queues / channels / authInfos）。 */
+        fun objectsKey(type: MqObjectType): String = OBJECTS_KEY_PREFIX + when (type) {
+            MqObjectType.QUEUE_MANAGER -> "qmgr"
+            MqObjectType.QUEUE -> "queues"
+            MqObjectType.CHANNEL -> "channels"
+            MqObjectType.TOPIC -> "topics"
+            MqObjectType.SUBSCRIPTION -> "subscriptions"
+            MqObjectType.LISTENER -> "listeners"
+            MqObjectType.SERVICE -> "services"
+            MqObjectType.PROCESS -> "processes"
+            MqObjectType.NAMELIST -> "namelists"
+            MqObjectType.AUTH_INFO -> "authInfos"
+            MqObjectType.COMM_INFO -> "commInfos"
+        }
     }
 
     /** 同一模块内多次扫描串行执行，避免重叠扫描互相覆盖结果。 */
     private val scanLock = Mutex()
+
+    /** PCF 全对象扫描器（每次查询自建 agent，可并发）。 */
+    private val objectScanner = PcfObjectScanner()
 
     /**
      * 当前手动扫描的协程。
@@ -153,7 +181,11 @@ class IbmMQService(private val context: ServiceContext) {
                 // ServiceContext.emit 自动补上。
                 context.emit(IbmMQEvents.SCAN_STARTED, mapOf("connectionId" to connectionId))
                 try {
-                    val queues = fetchQueues(connectionId)
+                    // 真 PCF：与心跳同一条 INQUIRE_Q_STATUS 快扫链路。
+                    val counts = objectScanner.scanQueueStatuses(connectionId)
+                    val queues = counts.map { (name, depth) ->
+                        QueueSnapshot(name = name, depth = depth, messageCount = depth)
+                    }
                     writeQueuesToCache(connectionId, queues)
                     context.emit(
                         name = IbmMQEvents.SCAN_COMPLETED,
@@ -194,7 +226,12 @@ class IbmMQService(private val context: ServiceContext) {
     suspend fun scanMessageCounts(connectionId: String) = scanLock.withLock {
         val ctx = connectedContext(connectionId) ?: return@withLock
         try {
-            val queues = fetchQueues(connectionId)
+            // 真 PCF：INQUIRE_Q_STATUS 一条拿全部本地队列的当前深度（心跳要轻，
+            // 不查全量属性）。队列列表本身的属性由慢扫（scanObjects）维护。
+            val counts = objectScanner.scanQueueStatuses(connectionId)
+            val queues = counts.map { (name, depth) ->
+                QueueSnapshot(name = name, depth = depth, messageCount = depth)
+            }
             writeQueuesToCache(connectionId, queues)
             context.emit(
                 name = IbmMQEvents.MESSAGES_SCANNED,
@@ -227,36 +264,68 @@ class IbmMQService(private val context: ServiceContext) {
 
     /**
      * 定时任务入口（`ibm-mq.<connectionId>.scan.objects`，间隔来自连接配置）：扫一次
-     * 对象列表。状态守卫同 [scanMessageCounts]。
+     * **全部 11 类对象**的完整属性。状态守卫同 [scanMessageCounts]。
      *
-     * 队列 / 主题 / 监听器一次拿全再发一条事件，订阅方（UI）就不会看到「队列已更新、
-     * 主题还是旧的」这种中间态。落库交给 [saveObjects]。
+     * 一次 scanAll 内部按类型并发查（每类独立 agent、独立 60s 超时），单类失败
+     * （无权限 / 超时）只跳过该类 —— 队列管理器上不是每个用户都有全部对象的查看权。
+     * 结果写进该连接的缓存（`objects.<type>`，TTL 90 分钟），并同步刷新旧版
+     * [KEY_QUEUES] 队列快照（心跳链路与队列列表 UI 共用的读入口）。完成后发
+     * OBJECTS_SCANNED，订阅方（UI）读缓存刷新 —— 全程不碰 UI 线程。
      */
     suspend fun scanObjects(connectionId: String) = scanLock.withLock {
         connectedContext(connectionId) ?: return@withLock
         try {
-            val queues = fetchQueues(connectionId)
-            val topics = fetchTopics(connectionId)
-            val listeners = fetchListeners(connectionId)
+            val result = objectScanner.scanAll(connectionId)
 
-            saveObjects(connectionId, queues, topics, listeners)
+            val cache = cacheOf(connectionId)
+            cache?.put(objectsKey(MqObjectType.QUEUE_MANAGER), result.queueManager, ttlMs = OBJECTS_FULL_TTL_MS)
+            cache?.put(objectsKey(MqObjectType.QUEUE), result.queues, ttlMs = OBJECTS_FULL_TTL_MS)
+            cache?.put(objectsKey(MqObjectType.CHANNEL), result.channels, ttlMs = OBJECTS_FULL_TTL_MS)
+            cache?.put(objectsKey(MqObjectType.TOPIC), result.topics, ttlMs = OBJECTS_FULL_TTL_MS)
+            cache?.put(objectsKey(MqObjectType.SUBSCRIPTION), result.subscriptions, ttlMs = OBJECTS_FULL_TTL_MS)
+            cache?.put(objectsKey(MqObjectType.LISTENER), result.listeners, ttlMs = OBJECTS_FULL_TTL_MS)
+            cache?.put(objectsKey(MqObjectType.SERVICE), result.services, ttlMs = OBJECTS_FULL_TTL_MS)
+            cache?.put(objectsKey(MqObjectType.PROCESS), result.processes, ttlMs = OBJECTS_FULL_TTL_MS)
+            cache?.put(objectsKey(MqObjectType.NAMELIST), result.namelists, ttlMs = OBJECTS_FULL_TTL_MS)
+            cache?.put(objectsKey(MqObjectType.AUTH_INFO), result.authInfos, ttlMs = OBJECTS_FULL_TTL_MS)
+            cache?.put(objectsKey(MqObjectType.COMM_INFO), result.commInfos, ttlMs = OBJECTS_FULL_TTL_MS)
 
-            // 写缓存（write-through）：三份快照一次写全，订阅方读到的是同一轮扫描的
-            // 结果；lastUpdatedAt 由 CacheManager 自己刷新。
-            writeQueuesToCache(connectionId, queues)
-            cacheOf(connectionId)?.let { cache ->
-                cache.put(KEY_TOPICS, topics, ttlMs = OBJECTS_TTL_MS)
-                cache.put(KEY_LISTENERS, listeners, ttlMs = OBJECTS_TTL_MS)
-            }
+            // 旧版队列快照（KEY_QUEUES + 单队列消息数 key）同步刷新：心跳链路与
+            // 队列列表 UI 读的是这份，不能出现「慢扫数据真、心跳数据假」的混搭。
+            writeQueuesToCache(
+                connectionId,
+                result.queues.map { q ->
+                    QueueSnapshot(
+                        name = q.name,
+                        depth = q.currentDepth ?: 0,
+                        messageCount = q.messageCount ?: 0,
+                    )
+                },
+            )
 
             context.emit(
                 name = IbmMQEvents.OBJECTS_SCANNED,
                 payload = mapOf(
                     "connectionId" to connectionId,
-                    "queueCount" to queues.size,
-                    "topicCount" to topics.size,
-                    "listenerCount" to listeners.size,
+                    "queueCount" to result.queues.size,
+                    "channelCount" to result.channels.size,
+                    "topicCount" to result.topics.size,
+                    "subscriptionCount" to result.subscriptions.size,
+                    "listenerCount" to result.listeners.size,
+                    "serviceCount" to result.services.size,
+                    "processCount" to result.processes.size,
+                    "namelistCount" to result.namelists.size,
+                    "authInfoCount" to result.authInfos.size,
+                    "commInfoCount" to result.commInfos.size,
                 ),
+            )
+            ibmMqLog.info(
+                "objects scanned: connection=$connectionId queues=${result.queues.size} " +
+                    "channels=${result.channels.size} topics=${result.topics.size} " +
+                    "subscriptions=${result.subscriptions.size} listeners=${result.listeners.size} " +
+                    "services=${result.services.size} processes=${result.processes.size} " +
+                    "namelists=${result.namelists.size} authInfos=${result.authInfos.size} " +
+                    "commInfos=${result.commInfos.size}",
             )
         } catch (cancellation: CancellationException) {
             throw cancellation
@@ -281,6 +350,18 @@ class IbmMQService(private val context: ServiceContext) {
      */
     fun cachedQueues(connectionId: String): List<QueueSnapshot> =
         cacheOf(connectionId)?.getAs<List<QueueSnapshot>>(KEY_QUEUES) ?: emptyList()
+
+    /**
+     * 读当前缓存的**全属性对象快照**（慢扫产物）：只查缓存、不碰 MQ、不挂起。
+     * 键值结构见 [objectsKey]；没有缓存 / 该类型本轮扫描失败时返回空列表
+     * （QMGR 单对象在 `objects.qmgr`，用 [cachedQueueManager] 读）。
+     */
+    fun cachedObjects(connectionId: String, type: MqObjectType): List<MqObjectSnapshot> =
+        cacheOf(connectionId)?.getAs(objectsKey(type)) ?: emptyList()
+
+    /** 队列管理器自身的全属性快照（慢扫产物；本轮失败 / 未扫过为 null）。 */
+    fun cachedQueueManager(connectionId: String): MqObjectSnapshot? =
+        cacheOf(connectionId)?.getAs(objectsKey(MqObjectType.QUEUE_MANAGER))
 
     /**
      * 读单个队列的最近消息数（缓存值；没有 / 已过期返回 null）。
@@ -488,48 +569,6 @@ class IbmMQService(private val context: ServiceContext) {
         } finally {
             runCatching { agent.disconnect() }
         }
-    }
-
-    /**
-     * TODO 接真库：换成 IBM MQ 的 PCF 查询（`PCFMessageAgent`）或 JMS 浏览。
-     * 现在返回一批假数据，好让 `started → completed` 这条事件链路端到端跑起来。
-     */
-    private suspend fun fetchQueues(connectionId: String): List<QueueSnapshot> {
-        delay(300)
-        return listOf(
-            QueueSnapshot("$connectionId.DEV.QUEUE1", depth = 12, messageCount = 12),
-            QueueSnapshot("$connectionId.DEV.QUEUE2", depth = 0, messageCount = 0),
-        )
-    }
-
-    /**
-     * TODO 接真库：PCF 查询主题列表（`PCFMessageAgent`）或 MQSC `DISPLAY TOPIC`。
-     * 现在返回空列表，好让 `scan.objects` 这条定时链路能端到端跑完。
-     */
-    private suspend fun fetchTopics(connectionId: String): List<String> {
-        delay(200)
-        return emptyList()
-    }
-
-    /** TODO 接真库：MQSC `DISPLAY LISTENER`。 */
-    private suspend fun fetchListeners(connectionId: String): List<String> {
-        delay(200)
-        return emptyList()
-    }
-
-    /**
-     * TODO 接真库：把对象快照落到本模块自己的表里。
-     *
-     * 表归模块自己管（见 app-core 的 DatabaseManager）：要落库就在 `ibm-mq-service`
-     * 下加自己的 .sq 文件并 apply SQLDelight 插件，不要往 app-core 里塞业务表。
-     */
-    private suspend fun saveObjects(
-        connectionId: String,
-        queues: List<QueueSnapshot>,
-        topics: List<String>,
-        listeners: List<String>,
-    ) {
-        // 占位：等本模块的 schema 就位再写。
     }
 }
 
