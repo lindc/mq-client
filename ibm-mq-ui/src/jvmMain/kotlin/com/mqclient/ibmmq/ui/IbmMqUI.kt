@@ -123,6 +123,15 @@ class IbmMqUI : AdapterUI {
                     )
                 }
             }
+            "namelists" -> {
+                if (IbmMQModule.serviceOrNull() == null) return null
+                {
+                    NamelistListPanel(
+                        connectionId = connectionId,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+            }
             else -> null
         }
     }

@@ -77,5 +77,11 @@
   "process_definition_scan_failed": "进程定义扫描失败：%s",
   "process_definition_search_placeholder": "搜索进程定义…",
   "process_definition_refresh": "刷新",
-  "process_definition_action_properties": "属性"
+  "process_definition_action_properties": "属性",
+  "namelist_loading": "正在加载名称列表…",
+  "namelist_load_failed": "名称列表加载失败：%s",
+  "namelist_scan_failed": "名称列表扫描失败：%s",
+  "namelist_search_placeholder": "搜索名称列表…",
+  "namelist_refresh": "刷新",
+  "namelist_action_properties": "属性"
 }

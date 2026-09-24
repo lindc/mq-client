@@ -77,5 +77,11 @@
   "process_definition_scan_failed": "Failed to scan process definitions: %s",
   "process_definition_search_placeholder": "Search process definitions…",
   "process_definition_refresh": "Refresh",
-  "process_definition_action_properties": "Properties"
+  "process_definition_action_properties": "Properties",
+  "namelist_loading": "Loading namelists…",
+  "namelist_load_failed": "Failed to load namelists: %s",
+  "namelist_scan_failed": "Failed to scan namelists: %s",
+  "namelist_search_placeholder": "Search namelists…",
+  "namelist_refresh": "Refresh",
+  "namelist_action_properties": "Properties"
 }
