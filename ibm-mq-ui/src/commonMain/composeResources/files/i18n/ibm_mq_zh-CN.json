@@ -14,8 +14,6 @@
   "nav_security_policies": "安全策略",
   "queue_search_placeholder": "搜索队列…",
   "queue_refresh": "刷新",
-  "queue_status_active": "活跃",
-  "queue_status_idle": "空闲",
   "queue_copy_name": "复制名称",
   "queue_scan_failed": "队列扫描失败：%s",
   "ibm_mq_field_queue_depth_threshold": "队列深度告警阈值",

@@ -14,8 +14,6 @@
   "nav_security_policies": "Security Policies",
   "queue_search_placeholder": "Search queues…",
   "queue_refresh": "Refresh",
-  "queue_status_active": "Active",
-  "queue_status_idle": "Idle",
   "queue_copy_name": "Copy name",
   "queue_scan_failed": "Queue scan failed: %s",
   "ibm_mq_field_queue_depth_threshold": "Queue Depth Warning Threshold",

@@ -4,10 +4,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -22,9 +21,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
+import com.mqclient.core.ConnectionStore
 import com.mqclient.core.ContextMenuItem
 import com.mqclient.core.CoreModule
+import com.mqclient.ibmmq.IbmMQConfig
 import com.mqclient.ibmmq.IbmMQModule
+import com.mqclient.ibmmq.ibmMQConfigFromOptions
 import com.mqclient.ibmmq.event.IbmMQEvents
 import com.mqclient.ibmmq.pcf.MqObjectSnapshot
 import com.mqclient.ibmmq.pcf.MqObjectType
@@ -63,6 +65,13 @@ fun QueueListPanel(
 
     // 默认隐藏系统 / 临时队列（SYSTEM.* / AMQ.*），列表更清爽；按钮切换显示。
     var showSystemQueues by remember { mutableStateOf(false) }
+
+    // 队列深度告警阈值（%）：从连接配置读取（queueDepthWarningThreshold，默认 85）。
+    val warningThreshold = remember(connectionId) {
+        ConnectionStore.connections.value.firstOrNull { it.id == connectionId }
+            ?.let { ibmMQConfigFromOptions(it.options).queueDepthWarningThreshold }
+            ?: IbmMQConfig.DEFAULT_QUEUE_DEPTH_WARNING_THRESHOLD
+    }
 
     val snackbarHostState = LocalSnackbarHostState.current
     val scope = rememberCoroutineScope()
@@ -116,7 +125,7 @@ fun QueueListPanel(
     }
 
     ObjectListPanel(
-        items = filtered.map { it.toCardData() },
+        items = filtered.map { it.toCardData(warningThreshold) },
         onCardClick = { /* 无选中态（ObjectListPanel 约定），留空 */ },
         onCardDoubleClick = { /* 队列详情 Tab 未做，先无动作 */ },
         contextMenuProvider = { card ->
@@ -141,16 +150,24 @@ fun QueueListPanel(
     )
 }
 
-/** MqObjectSnapshot → ObjectCardData：typeIcon 按队列类型解析，状态图标按消息数二值化（有消息=绿勾活跃，无=灰点空闲）。 */
-private fun MqObjectSnapshot.toCardData(): ObjectCardData {
-    val active = (messageCount ?: 0) > 0
+/**
+ * MqObjectSnapshot → ObjectCardData：typeIcon 按队列类型解析；状态显示只有两种 ——
+ * 使用率（currentDepth / maxDepth）达到告警阈值（[warningThreshold]%）时显示红色
+ * 警告图标，否则第 2 行左侧留空（maxDepth 未知——如心跳先于慢扫建快照——不算告警）。
+ */
+private fun MqObjectSnapshot.toCardData(warningThreshold: Int): ObjectCardData {
+    val currentDepth = currentDepth ?: 0
+    val maxDepth = maxDepth ?: 0
+    val usageRatio = if (maxDepth > 0) currentDepth.toFloat() / maxDepth else 0f
+    val hasWarning = maxDepth > 0 && usageRatio >= warningThreshold / 100f
+
     return ObjectCardData(
         id = name,
         title = name,
         typeIcon = QueueIconResolver.resolveIcon(this),
-        statusIcon = if (active) Icons.Filled.CheckCircle else Icons.Filled.Circle,
-        statusIconTint = if (active) Color(0xFF4CAF50) else Color(0xFF9E9E9E),
-        statusText = stringResource(if (active) "queue_status_active" else "queue_status_idle"),
+        statusIcon = if (hasWarning) Icons.Filled.Warning else null,
+        statusIconTint = if (hasWarning) Color(0xFFF44336) else null,
+        statusText = null,
         metricValue = (messageCount ?: 0).toString(),
     )
 }
