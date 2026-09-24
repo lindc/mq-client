@@ -1,4 +1,4 @@
-package com.mqclient.ibmmq.ui.command
+package com.mqclient.mqui.command
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -13,15 +13,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.mqclient.ibmmq.command.model.MqscResult
+import com.mqclient.mqui.command.model.CommandResult
 import com.mqclient.uicommon.i18n.stringResource
 
 /**
- * 输出区：逐条结果卡片（[MqscResultItem]）；没有结果时给空态文案。
+ * 输出区：逐条结果卡片（[CommandResultItem]）；没有结果时给空态文案。
  */
 @Composable
-fun MqscOutputView(
-    results: List<MqscResult>,
+fun CommandOutputView(
+    results: List<CommandResult>,
     modifier: Modifier = Modifier,
 ) {
     if (results.isEmpty()) {
@@ -30,7 +30,7 @@ fun MqscOutputView(
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                text = stringResource("mqsc_output_empty"),
+                text = stringResource("console_output_empty"),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -43,7 +43,7 @@ fun MqscOutputView(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             items(results) { result ->
-                MqscResultItem(result = result)
+                CommandResultItem(result = result)
             }
         }
     }

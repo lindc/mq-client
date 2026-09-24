@@ -5,15 +5,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import com.mqclient.core.AdapterUI
 import com.mqclient.core.ModuleI18nTable
 import com.mqclient.ibmmq.IbmMQModule
-import com.mqclient.ibmmq.ui.command.MqscConsolePanel
-import com.mqclient.ibmmq.ui.command.MqscConsoleViewModel
+import com.mqclient.ibmmq.ui.command.IbmMqCommandConsolePanel
 import com.mqclient.uicommon.i18n.stringResource
 import mq_client.ibm_mq_ui.generated.resources.Res
 
@@ -54,13 +51,12 @@ class IbmMqUI : AdapterUI {
      */
     override fun contentFor(objectType: String, connectionId: String): (@Composable () -> Unit)? {
         if (objectType != "command") return null
-        val executor = IbmMQModule.mqscExecutorOrNull() ?: return null
+        if (IbmMQModule.mqscExecutorOrNull() == null) return null
         return {
-            val scope = rememberCoroutineScope()
-            val state = remember(connectionId) {
-                MqscConsoleViewModel(connectionId, executor, scope)
-            }
-            MqscConsolePanel(state = state, modifier = Modifier.fillMaxSize())
+            IbmMqCommandConsolePanel(
+                connectionId = connectionId,
+                modifier = Modifier.fillMaxSize(),
+            )
         }
     }
 }

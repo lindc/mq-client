@@ -1,4 +1,4 @@
-package com.mqclient.ibmmq.ui.command
+package com.mqclient.mqui.command
 
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -19,8 +19,8 @@ import androidx.compose.ui.unit.dp
 import com.mqclient.uicommon.i18n.stringResource
 
 /**
- * 危险命令（DELETE / CLEAR / ALTER / STOP / RESET，见 [MqscParser.isDangerous]）
- * 的二次确认框：展示将要执行的命令全文，确认后才真正跑。
+ * 危险命令（由注入的 [com.mqclient.mqui.command.api.CommandParser.isDangerous]
+ * 判定）的二次确认框：展示将要执行的命令全文，确认后才真正跑。
  */
 @Composable
 fun DangerousCommandDialog(
@@ -30,10 +30,10 @@ fun DangerousCommandDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource("mqsc_dangerous_title")) },
+        title = { Text(stringResource("console_dangerous_title")) },
         text = {
             Column {
-                Text(stringResource("mqsc_dangerous_message"))
+                Text(stringResource("console_dangerous_message"))
                 Spacer(Modifier.height(8.dp))
                 Text(
                     text = command,
@@ -53,7 +53,7 @@ fun DangerousCommandDialog(
                     containerColor = MaterialTheme.colorScheme.error,
                 ),
             ) {
-                Text(stringResource("mqsc_dangerous_confirm"))
+                Text(stringResource("console_dangerous_confirm"))
             }
         },
         dismissButton = {

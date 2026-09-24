@@ -1,4 +1,4 @@
-package com.mqclient.ibmmq.ui.command
+package com.mqclient.mqui.command
 
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.background

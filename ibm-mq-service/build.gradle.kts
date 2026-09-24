@@ -9,6 +9,10 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             implementation(projects.appCore)
+            // mq-ui 通用命令控制台的接口与模型（CommandExecutor / CommandParser /
+            // SyntaxHighlighter / CommandResult…）。语法高亮的 AnnotatedString 等
+            // compose ui-text 类型由 mq-ui 以 api 传递过来，本模块不直接引 compose。
+            implementation(projects.mqUi)
         }
         jvmMain.dependencies {
             implementation("com.ibm.mq:com.ibm.mq.allclient:10.0.0.5")

@@ -1,4 +1,4 @@
-package com.mqclient.ibmmq.ui.command
+package com.mqclient.mqui.command
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -24,10 +24,11 @@ import com.mqclient.uicommon.i18n.stringResource
 
 /**
  * 控制台工具栏（DBeaver 风格）：扁平按钮（[ToolbarButton]），执行中右侧小进度圈，
- * 底部细分隔线与编辑区隔开。
+ * 底部细分隔线与编辑区隔开。按钮语义全类型通用：执行 / 取消 / 清空 /
+ * 打开文件 / 导出结果。
  */
 @Composable
-fun MqscToolbar(
+fun CommandToolbar(
     isExecuting: Boolean,
     onExecute: () -> Unit,
     onCancel: () -> Unit,
@@ -47,32 +48,31 @@ fun MqscToolbar(
     ) {
         ToolbarButton(
             icon = Icons.Default.PlayArrow,
-            text = stringResource("mqsc_execute"),
+            text = stringResource("console_execute"),
             onClick = onExecute,
             enabled = !isExecuting,
         )
         ToolbarButton(
             icon = Icons.Default.Stop,
-            text = stringResource("mqsc_cancel"),
+            text = stringResource("console_cancel"),
             onClick = onCancel,
             enabled = isExecuting,
         )
         ToolbarButton(
             icon = Icons.Default.Delete,
-            text = stringResource("mqsc_clear"),
+            text = stringResource("console_clear"),
             onClick = onClear,
             enabled = !isExecuting,
         )
-        // 新增：打开文件 / 导出结果，追加在「清空」右侧。
         ToolbarButton(
             icon = Icons.Default.FolderOpen,
-            text = stringResource("mqsc_open_file"),
+            text = stringResource("console_open_file"),
             onClick = onOpenFile,
             enabled = !isExecuting,
         )
         ToolbarButton(
             icon = Icons.Default.FileDownload,
-            text = stringResource("mqsc_export"),
+            text = stringResource("console_export"),
             onClick = onExport,
             enabled = !isExecuting && hasOutput,
         )

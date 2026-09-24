@@ -1,4 +1,4 @@
-package com.mqclient.ibmmq.ui.command
+package com.mqclient.mqui.command
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -22,6 +22,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
@@ -37,7 +38,7 @@ import java.awt.Cursor
  * 同一套手法），光标用系统手型。
  */
 @Composable
-internal fun ToolbarButton(
+fun ToolbarButton(
     icon: ImageVector,
     text: String,
     onClick: () -> Unit,
@@ -55,15 +56,15 @@ internal fun ToolbarButton(
             .clip(RoundedCornerShape(6.dp))
             .background(
                 when {
-                    !enabled -> androidx.compose.ui.graphics.Color.Transparent
+                    !enabled -> Color.Transparent
                     hovered -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                    else -> androidx.compose.ui.graphics.Color.Transparent
+                    else -> Color.Transparent
                 },
             )
             .hoverable(interactionSource)
             // 手写点击检测而不是 clickable：clickable 内部自带 focusable，按下会把
             // 焦点从 BasicTextField 抢走并收起选区，「执行」读到空选区就会跑全部
-            // 命令（MqscConsoleViewModel.execute 依赖 selection）。工具栏按钮不应
+            // 命令（CommandConsoleViewModel.execute 依赖 selection）。工具栏按钮不应
             // 夺焦 —— 与 IDE 工具栏行为一致。
             .pointerInput(enabled) {
                 awaitEachGesture {

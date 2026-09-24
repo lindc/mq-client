@@ -1,4 +1,4 @@
-package com.mqclient.ibmmq.ui.command
+package com.mqclient.mqui.command
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -19,8 +19,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import com.mqclient.ibmmq.ui.command.model.CommandLine
-import com.mqclient.ibmmq.ui.command.model.CommandStatus
+import com.mqclient.mqui.command.model.CommandLine
+import com.mqclient.mqui.command.model.CommandStatus
 
 /** 语义色：成功绿 / 失败红。与侧栏 statusColor 同理，不走主题种子色（会被用户调跑）。 */
 private val SuccessGreen = Color(0xFF4CAF50)

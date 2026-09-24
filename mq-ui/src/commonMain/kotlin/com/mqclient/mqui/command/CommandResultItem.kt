@@ -1,4 +1,4 @@
-package com.mqclient.ibmmq.ui.command
+package com.mqclient.mqui.command
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
@@ -34,18 +34,22 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.mqclient.ibmmq.command.model.MqscResult
+import com.mqclient.mqui.command.model.CommandResult
 import com.mqclient.uicommon.i18n.stringResource
 
 private val SuccessGreen = Color(0xFF4CAF50)
 private val FailedRed = Color(0xFFF44336)
 
+/** 模板里的 %d / %s 换成实际值（stringResource 无格式化参数，全项目用这一手约定）。 */
+private fun String.withArg(arg: Any): String = replace("%d", arg.toString()).replace("%s", arg.toString())
+
 /**
  * 输出区的单条结果卡片：标题行（状态图标 + 命令 + 耗时 + 折叠钮）+ 可折叠的
- * 输出 / 错误详情。默认展开 —— 控制台的输出就是主内容，收起是次要操作。
+ * 展开命令 / 输出 / 错误详情。默认展开 —— 控制台的输出就是主内容，收起是次要操作。
+ * `output` 已由 service 层格式化，这里只做展示。
  */
 @Composable
-fun MqscResultItem(result: MqscResult) {
+fun CommandResultItem(result: CommandResult) {
     var expanded by remember { mutableStateOf(true) }
 
     Card(
@@ -71,7 +75,7 @@ fun MqscResultItem(result: MqscResult) {
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    text = "${stringResource("mqsc_result_line").replace("%d", result.lineNumber.toString())}: ${result.command}",
+                    text = "${stringResource("console_result_line").withArg(result.lineNumber)}: ${result.command}",
                     style = MaterialTheme.typography.bodyMedium,
                     fontFamily = FontFamily.Monospace,
                     maxLines = 1,
@@ -79,7 +83,7 @@ fun MqscResultItem(result: MqscResult) {
                     modifier = Modifier.weight(1f),
                 )
                 Text(
-                    text = stringResource("mqsc_duration").replace("%d", result.duration.toString()),
+                    text = stringResource("console_duration").withArg(result.duration),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -93,6 +97,16 @@ fun MqscResultItem(result: MqscResult) {
             AnimatedVisibility(visible = expanded) {
                 Column {
                     HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                    // 缩写被展开时回显真正发给服务端的命令（对齐 runmqsc 的习惯）。
+                    result.expandedCommand?.let { expandedCmd ->
+                        Text(
+                            text = stringResource("console_result_expanded").withArg(expandedCmd.trim()),
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
+                        )
+                    }
                     ResultBody(result)
                 }
             }
@@ -101,10 +115,10 @@ fun MqscResultItem(result: MqscResult) {
 }
 
 @Composable
-private fun ResultBody(result: MqscResult) {
+private fun ResultBody(result: CommandResult) {
     if (result.success) {
         Text(
-            text = result.output.ifBlank { stringResource("mqsc_output_none") },
+            text = result.output.ifBlank { stringResource("console_output_none") },
             style = MaterialTheme.typography.bodySmall,
             fontFamily = FontFamily.Monospace,
             color = MaterialTheme.colorScheme.onSurface,
@@ -112,16 +126,16 @@ private fun ResultBody(result: MqscResult) {
         )
     } else {
         Text(
-            text = stringResource("mqsc_error_code")
-                .replace("%s", result.errorCode?.toString() ?: "-"),
+            text = stringResource("console_error_code")
+                .withArg(result.errorCode?.toString() ?: "-"),
             style = MaterialTheme.typography.bodySmall,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.error,
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            text = stringResource("mqsc_error_reason")
-                .replace("%s", result.errorMessage ?: ""),
+            text = stringResource("console_error_reason")
+                .withArg(result.errorMessage ?: ""),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.error,
         )

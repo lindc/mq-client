@@ -44,21 +44,32 @@ class MqscExecutor(
             if (expanded != cmd.text) {
                 ibmMqLog.debug("mqsc expanded: line=${cmd.lineNumber} '${cmd.text.trim()}' -> '${expanded.trim()}'")
             }
-            val executed = cmd.copy(text = expanded)
-            val result = executeOne(connectionId, executed)
+            val result = executeSingle(connectionId, expanded, cmd.lineNumber)
             onResult(result)
-            runCatching {
-                historyRepository.add(
-                    MqscHistoryItem(
-                        id = 0,
-                        connectionId = connectionId,
-                        command = executed.text,
-                        success = result.success,
-                        createdTime = System.currentTimeMillis(),
-                    ),
-                )
-            }
         }
+    }
+
+    /**
+     * 执行单条（已展开的）命令并落历史。批量编排（[execute]）与 mq-ui 通用控制台的
+     * 适配层（MqscCommandExecutor）共用这一个出口，保证格式化 / 错误翻译 / 历史
+     * 记录行为一致。
+     *
+     * @param command 已展开的命令文本（调用方负责缩写展开）。
+     */
+    suspend fun executeSingle(connectionId: String, command: String, lineNumber: Int): MqscResult {
+        val result = executeOne(connectionId, MqscCommand(lineNumber = lineNumber, text = command))
+        runCatching {
+            historyRepository.add(
+                MqscHistoryItem(
+                    id = 0,
+                    connectionId = connectionId,
+                    command = command,
+                    success = result.success,
+                    createdTime = System.currentTimeMillis(),
+                ),
+            )
+        }
+        return result
     }
 
     private suspend fun executeOne(connectionId: String, cmd: MqscCommand): MqscResult {

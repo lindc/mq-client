@@ -14,6 +14,8 @@ kotlin {
             // 新建连接表单（ConnectionFormUi 实现）用本模块对应的 service：
             // IbmMQConfig / IbmMQModule（testConnection）都在那里。
             implementation(projects.ibmMqService)
+            // 通用命令控制台 UI（CommandConsolePanel 等）已抽到 mq-ui，本模块只做注入组装。
+            implementation(projects.mqUi)
             implementation(libs.compose.runtime)
             implementation(libs.compose.foundation)
             implementation(compose.material3)

@@ -1,4 +1,4 @@
-package com.mqclient.ibmmq.ui.command
+package com.mqclient.mqui.command
 
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
@@ -6,28 +6,30 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
-import com.mqclient.ibmmq.command.MqscExecutor
-import com.mqclient.ibmmq.command.MqscParser
-import com.mqclient.ibmmq.command.model.MqscResult
-import com.mqclient.ibmmq.ui.command.model.CommandLine
-import com.mqclient.ibmmq.ui.command.model.CommandStatus
+import com.mqclient.mqui.command.model.CommandLine
+import com.mqclient.mqui.command.model.CommandResult
+import com.mqclient.mqui.command.model.CommandStatus
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 
 /**
- * MQSC 控制台的桥接层（UI ↔ [MqscExecutor]）。按项目约定不用 androidx ViewModel
- * （工程无该依赖），与 ai-ui 的 AiPanelState 同一模式：`@Stable` 类持有 Compose 状态，
- * 协程 scope 由组合侧（rememberCoroutineScope）注入 —— cancel 收掉自己的 Job，
- * 不影响 scope 上别的协程。
+ * 命令控制台的桥接层（UI ↔ [CommandExecutor]）。按项目约定不用 androidx ViewModel
+ * （工程无该依赖）：`@Stable` 类持有 Compose 状态，协程 scope 由组合侧
+ * （rememberCoroutineScope）注入 —— cancel 收掉自己的 Job，不影响 scope 上别的协程。
  *
  * 状态列语义：只反映**最近一次执行**；文本任何编辑都重置全部状态（注释行 / 空行
  * 不动），输出区结果保留。
+ *
+ * 执行编排（顺序逐条、跳过注释空行、取消在条目边界生效）在本类里完成；
+ * 单条命令的展开 / 发送 / 格式化在实现方（[CommandExecutor.execute]）。
  */
 @Stable
-class MqscConsoleViewModel internal constructor(
-    private val connectionId: String,
-    private val executor: MqscExecutor,
+class CommandConsoleViewModel(
+    private val config: CommandConsoleConfig,
     private val scope: CoroutineScope,
 ) {
 
@@ -40,7 +42,7 @@ class MqscConsoleViewModel internal constructor(
         private set
 
     /** 最近一次执行的结果（按完成顺序追加）。 */
-    var results: List<MqscResult> by mutableStateOf(emptyList())
+    var results: List<CommandResult> by mutableStateOf(emptyList())
         private set
 
     var isExecuting: Boolean by mutableStateOf(false)
@@ -75,8 +77,8 @@ class MqscConsoleViewModel internal constructor(
 
     /**
      * 执行入口：没有可执行命令时忽略；先过危险命令检查。
-     * 若输入区有选中文本，只把选中部分作为执行源（[lineOffset] 记下来用于状态列对齐），
-     * 否则提交全文。选中态与内容都不清除。
+     * 若输入区有选中文本，只把选中部分作为执行源（[pendingLineOffset] 记下来用于
+     * 状态列对齐），否则提交全文。选中态与内容都不清除。
      */
     fun execute() {
         if (isExecuting) return
@@ -91,10 +93,10 @@ class MqscConsoleViewModel internal constructor(
         } else {
             tfv.text to 0
         }
-        val parsed = MqscParser.parse(source)
-        if (parsed.all { it.isComment || it.isBlank }) return
+        val parsed = config.commandParser.parse(source)
+        if (parsed.all { it.status == CommandStatus.SKIPPED }) return
         val dangerous = parsed
-            .firstOrNull { !it.isComment && MqscParser.isDangerous(it.text) }
+            .firstOrNull { it.status != CommandStatus.SKIPPED && config.commandParser.isDangerous(it.text) }
             ?.text
         if (dangerous != null) {
             pendingSource = source
@@ -111,7 +113,7 @@ class MqscConsoleViewModel internal constructor(
         val source = pendingSource ?: textFieldValue.text
         val offset = pendingLineOffset
         pendingSource = null
-        start(MqscParser.parse(source), offset)
+        start(config.commandParser.parse(source), offset)
     }
 
     fun dismissDangerous() {
@@ -119,7 +121,7 @@ class MqscConsoleViewModel internal constructor(
         pendingSource = null
     }
 
-    /** 取消：当条命令跑完即停（PCF 调用不响应中断），后续条目不再执行。 */
+    /** 取消：当条命令跑完即停（网络调用不响应中断），后续条目不再执行。 */
     fun cancel() {
         job?.cancel()
         job = null
@@ -134,22 +136,39 @@ class MqscConsoleViewModel internal constructor(
     }
 
     private fun start(
-        parsed: List<com.mqclient.ibmmq.command.model.MqscCommand>,
+        parsed: List<CommandLine>,
         lineOffset: Int,
     ) {
         job = scope.launch {
             isExecuting = true
             results = emptyList()
             statuses = List(textFieldValue.text.lines().size) { CommandStatus.NOT_EXECUTED }
-            executor.execute(
-                connectionId = connectionId,
-                commands = parsed,
-                onCommandStart = { line -> setStatus(lineOffset + line, CommandStatus.EXECUTING) },
-                onResult = { result ->
+            parsed.forEachIndexed { index, line ->
+                if (line.status == CommandStatus.SKIPPED) return@forEachIndexed
+                // 条目边界检查取消：cancel 后当条跑完即停，已执行条目照常上报。
+                currentCoroutineContext().ensureActive()
+
+                val lineNumber = lineOffset + index + 1
+                setStatus(lineNumber, CommandStatus.EXECUTING)
+                try {
+                    val result = config.commandExecutor.execute(line.text, lineNumber)
                     results = results + result
-                    setStatus(lineOffset + result.lineNumber, if (result.success) CommandStatus.SUCCESS else CommandStatus.FAILED)
-                },
-            )
+                    setStatus(result.lineNumber, if (result.success) CommandStatus.SUCCESS else CommandStatus.FAILED)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    val result = CommandResult(
+                        lineNumber = lineNumber,
+                        command = line.text,
+                        success = false,
+                        output = "",
+                        duration = 0,
+                        errorMessage = e.message ?: e::class.simpleName,
+                    )
+                    results = results + result
+                    setStatus(lineNumber, CommandStatus.FAILED)
+                }
+            }
             isExecuting = false
         }
     }
@@ -161,8 +180,8 @@ class MqscConsoleViewModel internal constructor(
     }
 }
 
-/** 供 UI 从 [CommandLine] 列表角度读取（对齐 spec 的渲染接口）。 */
-val MqscConsoleViewModel.commandLines: List<CommandLine>
+/** 供 UI 从 [CommandLine] 列表角度读取（对齐状态列 / 行号列的渲染接口）。 */
+val CommandConsoleViewModel.commandLines: List<CommandLine>
     get() = textFieldValue.text.lines().mapIndexed { index, line ->
         CommandLine(text = line, status = statuses.getOrElse(index) { CommandStatus.NOT_EXECUTED })
     }

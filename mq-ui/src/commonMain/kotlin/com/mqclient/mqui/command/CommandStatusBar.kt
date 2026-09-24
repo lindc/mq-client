@@ -1,4 +1,4 @@
-package com.mqclient.ibmmq.ui.command
+package com.mqclient.mqui.command
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -23,7 +23,7 @@ private fun String.withArg(arg: Any): String = replace("%d", arg.toString()).rep
  * 状态栏：就绪提示 / 命令数 / 成功失败计数 / 总耗时。计数为零的段不显示。
  */
 @Composable
-fun MqscStatusBar(
+fun CommandStatusBar(
     commandCount: Int,
     successCount: Int,
     failedCount: Int,
@@ -39,33 +39,33 @@ fun MqscStatusBar(
         horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text(
-            text = if (isExecuting) stringResource("mqsc_status_executing")
-            else stringResource("mqsc_status_ready"),
+            text = if (isExecuting) stringResource("console_status_executing")
+            else stringResource("console_status_ready"),
             style = MaterialTheme.typography.bodySmall,
         )
         if (commandCount > 0) {
             Text(
-                text = stringResource("mqsc_status_commands").withArg(commandCount),
+                text = stringResource("console_status_commands").withArg(commandCount),
                 style = MaterialTheme.typography.bodySmall,
             )
         }
         if (successCount > 0) {
             Text(
-                text = stringResource("mqsc_status_success").withArg(successCount),
+                text = stringResource("console_status_success").withArg(successCount),
                 style = MaterialTheme.typography.bodySmall,
                 color = SuccessGreen,
             )
         }
         if (failedCount > 0) {
             Text(
-                text = stringResource("mqsc_status_failed").withArg(failedCount),
+                text = stringResource("console_status_failed").withArg(failedCount),
                 style = MaterialTheme.typography.bodySmall,
                 color = FailedRed,
             )
         }
         if (totalDuration > 0) {
             Text(
-                text = stringResource("mqsc_status_duration").withArg(totalDuration),
+                text = stringResource("console_status_duration").withArg(totalDuration),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

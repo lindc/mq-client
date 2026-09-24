@@ -1,4 +1,4 @@
-package com.mqclient.ibmmq.ui.command.model
+package com.mqclient.mqui.command.model
 
 /**
  * 编辑器一行（文本 + 执行状态）。状态只对「最近一次执行」有意义，编辑文本即重置。
