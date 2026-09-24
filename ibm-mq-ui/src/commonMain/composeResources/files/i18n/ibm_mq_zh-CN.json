@@ -21,5 +21,13 @@
   "ibm_mq_field_queue_depth_threshold": "队列深度告警阈值",
   "ibm_mq_hint_queue_depth_threshold": "队列使用率超过此百分比时显示告警图标",
   "ibm_mq_error_threshold_empty": "队列深度告警阈值不能为空",
-  "ibm_mq_error_threshold_range": "取值范围：50-100"
+  "ibm_mq_error_threshold_range": "取值范围：50-100",
+  "queue_type_local": "本地队列",
+  "queue_type_transmission": "传输队列",
+  "queue_type_remote": "远程队列",
+  "queue_type_alias": "别名队列",
+  "queue_type_model": "模型队列",
+  "queue_type_unknown": "未知队列",
+  "queue_toolbar_show_system": "显示系统",
+  "queue_toolbar_hide_system": "隐藏系统"
 }

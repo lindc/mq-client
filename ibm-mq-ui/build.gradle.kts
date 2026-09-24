@@ -32,5 +32,8 @@ kotlin {
             // FileKit Compose 文件选择器（命令控制台的「打开文件」/「导出结果」按钮）。
             implementation(libs.filekit.dialogs.compose)
         }
+        jvmTest.dependencies {
+            implementation(kotlin("test"))
+        }
     }
 }

@@ -111,6 +111,24 @@ class PcfObjectScanner {
         }
     }
 
+    /**
+     * 通道状态快扫（心跳用）：只发 INQUIRE_CHANNEL_STATUS 一条，取名字 + 运行状态
+     * 原始值（MQIACH_CHANNEL_STATUS，MQCHS_*；可读名用 [channelStatusName] 转）。
+     */
+    suspend fun scanChannelStatuses(connectionId: String): List<Pair<String, Int>> =
+        withAgent(connectionId) { scanChannelStatusesWith(it) }
+
+    internal suspend fun scanChannelStatusesWith(agent: PCFMessageAgent): List<Pair<String, Int>> {
+        val responses = inquire(agent, MQConstants.MQCMD_INQUIRE_CHANNEL_STATUS) {
+            addParameter(MQConstants.MQCACH_CHANNEL_NAME, "*")
+        }
+        return responses.mapNotNull { response ->
+            val name = response.stringValue(MQConstants.MQCACH_CHANNEL_NAME) ?: return@mapNotNull null
+            val status = response.intValue(MQConstants.MQIACH_CHANNEL_STATUS) ?: return@mapNotNull null
+            name to status
+        }
+    }
+
     /** 所有通道：INQUIRE_CHANNEL + INQUIRE_CHANNEL_STATUS（运行状态）合并。 */
     suspend fun scanChannels(connectionId: String): List<MqObjectSnapshot> =
         withAgent(connectionId) { scanChannelsWith(it) }

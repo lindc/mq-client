@@ -6,8 +6,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Circle
-import androidx.compose.material.icons.filled.Inbox
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -60,6 +61,9 @@ fun QueueListPanel(
     var loading by remember(connectionId) { mutableStateOf(true) }
     var searchText by remember { mutableStateOf("") }
 
+    // 默认隐藏系统 / 临时队列（SYSTEM.* / AMQ.*），列表更清爽；按钮切换显示。
+    var showSystemQueues by remember { mutableStateOf(false) }
+
     val snackbarHostState = LocalSnackbarHostState.current
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
@@ -107,6 +111,8 @@ fun QueueListPanel(
 
     val filtered = queues.filter { q ->
         searchText.isEmpty() || q.name.contains(searchText, ignoreCase = true)
+    }.filter { q ->
+        showSystemQueues || !isSystemOrTempQueue(q.name)
     }
 
     ObjectListPanel(
@@ -126,6 +132,8 @@ fun QueueListPanel(
                 onSearchChange = { searchText = it },
                 onRefresh = ::refresh,
                 refreshing = loading,
+                showSystemQueues = showSystemQueues,
+                onToggleSystemQueues = { showSystemQueues = !showSystemQueues },
             )
         },
         loading = loading,
@@ -133,13 +141,13 @@ fun QueueListPanel(
     )
 }
 
-/** MqObjectSnapshot → ObjectCardData：状态图标按消息数二值化（有消息=绿勾活跃，无=灰点空闲）。 */
+/** MqObjectSnapshot → ObjectCardData：typeIcon 按队列类型解析，状态图标按消息数二值化（有消息=绿勾活跃，无=灰点空闲）。 */
 private fun MqObjectSnapshot.toCardData(): ObjectCardData {
     val active = (messageCount ?: 0) > 0
     return ObjectCardData(
         id = name,
         title = name,
-        typeIcon = Icons.Filled.Inbox,
+        typeIcon = QueueIconResolver.resolveIcon(this),
         statusIcon = if (active) Icons.Filled.CheckCircle else Icons.Filled.Circle,
         statusIconTint = if (active) Color(0xFF4CAF50) else Color(0xFF9E9E9E),
         statusText = stringResource(if (active) "queue_status_active" else "queue_status_idle"),
@@ -154,6 +162,8 @@ private fun QueueListToolbar(
     onSearchChange: (String) -> Unit,
     onRefresh: () -> Unit,
     refreshing: Boolean,
+    showSystemQueues: Boolean,
+    onToggleSystemQueues: () -> Unit,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -172,9 +182,21 @@ private fun QueueListToolbar(
             onClick = onRefresh,
             enabled = !refreshing,
         )
+        // 系统队列显隐切换：文字是「点击后会发生的动作」——隐藏时显示「显示系统」。
+        ToolbarButton(
+            icon = if (showSystemQueues) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+            text = stringResource(if (showSystemQueues) "queue_toolbar_hide_system" else "queue_toolbar_show_system"),
+            onClick = onToggleSystemQueues,
+        )
     }
 }
 
 /** stringResource 无格式化参数；%s / %1$s 占位替换（全项目约定）。 */
 private fun String.withArg(arg: Any): String =
     replace("%1\$s", arg.toString()).replace("%s", arg.toString())
+
+/** 系统队列 / 临时队列判定：`SYSTEM.` 或 `AMQ.` 开头（大小写不敏感），默认隐藏。 */
+internal fun isSystemOrTempQueue(queueName: String): Boolean {
+    val name = queueName.uppercase()
+    return name.startsWith("SYSTEM.") || name.startsWith("AMQ.")
+}

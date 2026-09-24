@@ -14,6 +14,7 @@ import com.mqclient.ibmmq.event.IbmMQEvents
 import com.mqclient.ibmmq.pcf.MqObjectSnapshot
 import com.mqclient.ibmmq.pcf.MqObjectType
 import com.mqclient.ibmmq.pcf.PcfObjectScanner
+import com.mqclient.ibmmq.pcf.channelStatusName
 import java.io.FileInputStream
 import java.security.KeyStore
 import java.util.concurrent.ConcurrentHashMap
@@ -93,8 +94,9 @@ data class QmgrProperties(
  * 监听它发出的事件。
  *
  * 扫描链路（真 PCF，[PcfObjectScanner]）：
- *  - 心跳快扫（默认 10s）：INQUIRE_Q_STATUS 一条拿全部本地队列的当前深度，
- *    add-or-update 进 `objects.queues`（新队列以最小快照追加，全属性等慢扫补全）；
+ *  - 心跳快扫（默认 10s）：INQUIRE_Q_STATUS / INQUIRE_CHANNEL_STATUS 两条，拿全部
+ *    本地队列的当前深度与通道的运行状态，add-or-update 进 `objects.queues` /
+ *    `objects.channels`（新对象以最小快照追加，全属性等慢扫补全）；
  *  - 对象慢扫（默认 60min）：[PcfObjectScanner.scanAll] 扫齐 11 类对象的完整
  *    属性，写入每连接专属的 [CacheManager]（`objects.<type>` 键，TTL 90 分钟）。
  *
@@ -163,15 +165,18 @@ class IbmMQService(private val context: ServiceContext) {
                 // ServiceContext.emit 自动补上。
                 context.emit(IbmMQEvents.SCAN_STARTED, mapOf("connectionId" to connectionId))
                 try {
-                    // 真 PCF：与心跳同一条 INQUIRE_Q_STATUS 快扫链路。
+                    // 真 PCF：与心跳同一条快扫链路（队列深度 + 通道状态）。
                     val counts = objectScanner.scanQueueStatuses(connectionId)
                     syncQueueDepths(connectionId, counts)
+                    val channelStatuses = objectScanner.scanChannelStatuses(connectionId)
+                    syncChannelStatuses(connectionId, channelStatuses)
                     context.emit(
                         name = IbmMQEvents.SCAN_COMPLETED,
                         payload = mapOf(
                             "connectionId" to connectionId,
                             "queueCount" to counts.size,
                             "totalMessages" to counts.sumOf { it.second },
+                            "channelCount" to channelStatuses.size,
                         ),
                     )
                 } catch (cancellation: CancellationException) {
@@ -195,8 +200,8 @@ class IbmMQService(private val context: ServiceContext) {
 
     /**
      * 定时任务入口（`ibm-mq.<connectionId>.scan.messages`，间隔来自连接配置）：扫一次
-     * 消息数量。**状态守卫**：非 CONNECTED（未连 / 连接中 / 已失败）直接跳过 ——
-     * 连接失败后任务不注销、靠状态守卫空转，用户重连后自动恢复。
+     * 消息数量 + 通道运行状态。**状态守卫**：非 CONNECTED（未连 / 连接中 / 已失败）
+     * 直接跳过 —— 连接失败后任务不注销、靠状态守卫空转，用户重连后自动恢复。
      *
      * 与 [startScan] 共用一把 [scanLock]：定时扫描和用户手动扫描不会同时压到同一条连接上。
      * 业务错误在这里就转成 `*.failed` 事件了 —— 能落到调度器 `JOB_FAILED` 的是「意料之外」
@@ -205,10 +210,13 @@ class IbmMQService(private val context: ServiceContext) {
     suspend fun scanMessageCounts(connectionId: String) = scanLock.withLock {
         val ctx = connectedContext(connectionId) ?: return@withLock
         try {
-            // 真 PCF：INQUIRE_Q_STATUS 一条拿全部本地队列的当前深度（心跳要轻，
-            // 不查全量属性）。队列列表本身的属性由慢扫（scanObjects）维护。
+            // 真 PCF：INQUIRE_Q_STATUS / INQUIRE_CHANNEL_STATUS 各一条，拿全部
+            // 本地队列的当前深度与通道的运行状态（心跳要轻，不查全量属性）。
+            // 队列 / 通道列表本身的静态属性由慢扫（scanObjects）维护。
             val counts = objectScanner.scanQueueStatuses(connectionId)
             syncQueueDepths(connectionId, counts)
+            val channelStatuses = objectScanner.scanChannelStatuses(connectionId)
+            syncChannelStatuses(connectionId, channelStatuses)
             context.emit(
                 name = IbmMQEvents.MESSAGES_SCANNED,
                 payload = mapOf(
@@ -344,6 +352,31 @@ class IbmMQService(private val context: ServiceContext) {
                 currentDepth = depth,
                 messageCount = depth,
                 attributes = mapOf("MQIA_CURRENT_Q_DEPTH" to depth),
+            )
+        }
+        cache.put(key, merged, ttlMs = OBJECTS_FULL_TTL_MS)
+    }
+
+    /**
+     * 心跳的通道状态同步（add-or-update）：更新 objects.channels 的 channelStatus /
+     * attributes[MQIACH_CHANNEL_STATUS]；本次 status 新出现的通道以最小快照追加。
+     * 只增改不删（与 [syncQueueDepths] 同理），已删除通道的清理由慢扫全量替换负责。
+     */
+    private fun syncChannelStatuses(connectionId: String, statuses: List<Pair<String, Int>>) {
+        val cache = cacheOf(connectionId) ?: return
+        val key = objectsKey(MqObjectType.CHANNEL)
+        val existing = cache.getAs<List<MqObjectSnapshot>>(key) ?: emptyList()
+        val byName = existing.associateBy { it.name }
+        val merged = statuses.map { (name, statusValue) ->
+            val statusName = channelStatusName(statusValue)
+            byName[name]?.copy(
+                channelStatus = statusName,
+                attributes = byName.getValue(name).attributes + ("MQIACH_CHANNEL_STATUS" to statusValue),
+            ) ?: MqObjectSnapshot(
+                name = name,
+                type = MqObjectType.CHANNEL,
+                channelStatus = statusName,
+                attributes = mapOf("MQIACH_CHANNEL_STATUS" to statusValue),
             )
         }
         cache.put(key, merged, ttlMs = OBJECTS_FULL_TTL_MS)

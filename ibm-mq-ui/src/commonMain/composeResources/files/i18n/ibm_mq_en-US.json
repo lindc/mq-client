@@ -21,5 +21,13 @@
   "ibm_mq_field_queue_depth_threshold": "Queue Depth Warning Threshold",
   "ibm_mq_hint_queue_depth_threshold": "Show a warning icon when queue usage exceeds this percentage",
   "ibm_mq_error_threshold_empty": "Queue depth warning threshold is required",
-  "ibm_mq_error_threshold_range": "Range: 50-100"
+  "ibm_mq_error_threshold_range": "Range: 50-100",
+  "queue_type_local": "Local queue",
+  "queue_type_transmission": "Transmission queue",
+  "queue_type_remote": "Remote queue",
+  "queue_type_alias": "Alias queue",
+  "queue_type_model": "Model queue",
+  "queue_type_unknown": "Unknown queue",
+  "queue_toolbar_show_system": "Show System",
+  "queue_toolbar_hide_system": "Hide System"
 }
