@@ -18,6 +18,8 @@ data class ObjectCardData(
     val title: String,
     /** 第 1 行：类型图标；null 不显示。 */
     val typeIcon: ImageVector? = null,
+    /** 类型图标悬停文案（如「发送通道」/「未知类型」）；null 不显示 tooltip。 */
+    val typeLabel: String? = null,
     /** 第 2 行：状态图标（各模块自定义语义）；null 不显示。 */
     val statusIcon: ImageVector? = null,
     /** 状态图标（与状态文字）的颜色；null 用主题的 onSurfaceVariant。 */

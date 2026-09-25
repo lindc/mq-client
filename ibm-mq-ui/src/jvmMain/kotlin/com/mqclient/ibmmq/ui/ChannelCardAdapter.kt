@@ -37,6 +37,7 @@ internal fun MqObjectSnapshot.toChannelCardData(
         id = name,
         title = name,
         typeIcon = ChannelIconResolver.resolveIcon(this),
+        typeLabel = ChannelIconResolver.resolveLabel(this),
         statusIcon = when {
             isRunning -> Icons.Default.CheckCircle
             isUnknown -> Icons.Default.Warning

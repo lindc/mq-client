@@ -55,6 +55,7 @@ private val CardPaddingVertical = 10.dp
  * 交互：单击 [onClick]、双击 [onDoubleClick]（整卡可点，操作按钮除外）；
  * 悬停背景 / 边框 150ms 过渡。
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ObjectCard(
     data: ObjectCardData,
@@ -104,12 +105,34 @@ fun ObjectCard(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 data.typeIcon?.let { icon ->
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(16.dp),
-                    )
+                    val label = data.typeLabel
+                    val iconNode: @Composable () -> Unit = {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = label,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                    if (label != null) {
+                        TooltipArea(
+                            tooltip = {
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant,
+                                    shadowElevation = 4.dp,
+                                ) {
+                                    Text(
+                                        text = label,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                }
+                            },
+                        ) { iconNode() }
+                    } else {
+                        iconNode()
+                    }
                     Spacer(Modifier.width(8.dp))
                 }
                 Text(
