@@ -2,6 +2,7 @@ package com.mqclient.ibmmq.ui
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.ui.graphics.Color
 import com.mqclient.ibmmq.pcf.MqObjectSnapshot
@@ -9,10 +10,17 @@ import com.mqclient.mqui.objectlist.CardAction
 import com.mqclient.mqui.objectlist.ObjectCardData
 import com.mqclient.uicommon.i18n.stringResource
 
+/** 非运行态的中性灰（已停止 / 未运行 / 启动中等都属正常状态，不当作错误告警）。 */
+private val CHANNEL_STATUS_NEUTRAL = Color(0xFF9E9E9E)
+
 /**
  * 通道快照 → ObjectCardData 的适配（ChannelCardAdapter），镜像 [MqObjectSnapshot.toQueueCardData]：
- * typeIcon 按通道类型解析（[ChannelIconResolver]）；状态显示只有两种 —— 通道处于 `RUNNING`
- * 时显示绿色对勾 + 状态文案，否则显示红色警告图标 + 状态文案（RETRYING / STOPPED / BINDING…）。
+ * typeIcon 按通道类型解析（[ChannelIconResolver]）；状态分三档 ——
+ *  - `RUNNING`：绿色对勾 + 文案；
+ *  - 已知状态（含 `STOPPED` / `RETRYING` / `STARTING`… 以及「已定义但无状态行」的「未运行」）：
+ *    中性灰圆点 + 文案，不当作错误告警；
+ *  - 真正未知 / 待加载（`channelStatus == null` 且连 `channelType` 都还没有，即快扫最小快照
+ *    尚未补全）：红色警告图标 + 「未知状态」，提示信息缺失而非通道故障。
  * 操作按钮由调用方经 [actions] 注入。
  */
 internal fun MqObjectSnapshot.toChannelCardData(
@@ -20,19 +28,36 @@ internal fun MqObjectSnapshot.toChannelCardData(
 ): ObjectCardData {
     val status = channelStatus
     val isRunning = status == "RUNNING"
+    // 「已定义但无状态行」：慢扫见过通道定义（channelType 非空）却没拿到运行时状态，
+    // 典型如停止中的发送通道——属正常，显示中性「未运行」，不当作红色告警。
+    val isDefinedInactive = channelType != null && status == null
+    // 真正待加载 / 未知：连通道类型都尚未补全的最小快照，信息缺失，标红提示。
+    val isUnknown = status == null && !isDefinedInactive
     return ObjectCardData(
         id = name,
         title = name,
         typeIcon = ChannelIconResolver.resolveIcon(this),
-        statusIcon = if (isRunning) Icons.Default.CheckCircle else Icons.Default.Warning,
-        statusIconTint = if (isRunning) Color(0xFF4CAF50) else Color(0xFFF44336),
-        statusText = status?.let { channelStatusText(it) } ?: stringResource("channel_status_unknown"),
+        statusIcon = when {
+            isRunning -> Icons.Default.CheckCircle
+            isUnknown -> Icons.Default.Warning
+            else -> Icons.Default.Circle
+        },
+        statusIconTint = when {
+            isRunning -> Color(0xFF4CAF50)
+            isUnknown -> Color(0xFFF44336)
+            else -> CHANNEL_STATUS_NEUTRAL
+        },
+        statusText = when {
+            status != null -> channelStatusText(status)
+            isDefinedInactive -> stringResource("channel_status_inactive")
+            else -> stringResource("channel_status_unknown")
+        },
         metricValue = null,
         actions = actions,
     )
 }
 
-/** 通道运行状态 → i18n 文案（未知状态回退到原始英文状态码，不丢信息）。 */
+/** 通道运行状态 → i18n 文案（未覆盖的状态值回退到原始英文状态码，不丢信息）。 */
 internal fun channelStatusText(status: String): String {
     val key = when (status) {
         "RUNNING" -> "channel_status_running"
@@ -40,6 +65,11 @@ internal fun channelStatusText(status: String): String {
         "STOPPED" -> "channel_status_stopped"
         "BINDING" -> "channel_status_binding"
         "INITIALIZING" -> "channel_status_initializing"
+        "STARTING" -> "channel_status_starting"
+        "STOPPING" -> "channel_status_stopping"
+        "PAUSED" -> "channel_status_paused"
+        "REQUESTING" -> "channel_status_requesting"
+        "INACTIVE" -> "channel_status_inactive"
         else -> null
     }
     return key?.let { stringResource(it) } ?: status

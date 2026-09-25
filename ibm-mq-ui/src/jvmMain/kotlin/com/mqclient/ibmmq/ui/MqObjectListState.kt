@@ -72,9 +72,11 @@ fun rememberMqObjectListState(
             return
         }
 
-        // 热缓存：直接落地，避免无谓的 Loading 闪烁。
+        // 热缓存：但若只是快扫写的最小快照（不含子类型 channelType / MQIA_Q_TYPE），
+        // 直接渲染会先显示问号图标、慢扫补全后再闪成正确图标（见下方说明）。因此这类
+        // 「未带类型的快照」视为尚未就绪，落入下方慢扫路径，保持加载态直到类型补全。
         val cached = service.cachedObjects(connectionId, objectType)
-        if (cached.isNotEmpty()) {
+        if (cached.isNotEmpty() && cached.isTyped(objectType)) {
             delayUntilMin(start)
             loadState = LoadState.Success(cached)
             return
@@ -93,7 +95,12 @@ fun rememberMqObjectListState(
 
         val after = service.cachedObjects(connectionId, objectType)
         delayUntilMin(start)
-        if (after.isNotEmpty()) {
+        // 非空且已带类型 → 安全落地（慢扫产物，图标正确，不会闪问号）；
+        // 其余两种情况都保持 Loading，等慢扫经 OBJECTS_SCANNED 事件翻 Success：
+        //  - 空列表：可能是连接尚未就绪（scanObjects no-op）或该类型无对象，沿用原语义
+        //    不提交空态，避免空白窗体；
+        //  - 非空但无类型（快扫最小快照）：等慢扫补全类型，避免先渲染问号再闪。
+        if (after.isNotEmpty() && after.isTyped(objectType)) {
             loadState = LoadState.Success(after)
         }
         // 否则保持 Loading：真实扫描完成经事件总线（下方订阅）翻 Success，期间持续显示进度圈。
@@ -102,11 +109,22 @@ fun rememberMqObjectListState(
     LaunchedEffect(connectionId) {
         loadInitial()
 
-        // 扫描完成 → 重读缓存（三条扫描链路任一完成都刷新；payload 过滤本连接）。
-        // 处于「加载中」或「已加载」时都刷新：覆盖「连接未就绪 → 稍后真正扫描完成」的落地。
+        // 慢扫完成 → 重读缓存翻 Success：慢扫产物一定带类型，可安全落地（「加载中」或
+        // 「已加载」时都接收，覆盖「连接未就绪 → 稍后真正扫描完成」的落地）。
         val bus = CoreModule.eventBus
+        bus.on(IbmMQEvents.OBJECTS_SCANNED, this) { event ->
+            if ((event.payload["connectionId"] as? String) == connectionId) {
+                val latest =
+                    IbmMQModule.serviceOrNull()?.cachedObjects(connectionId, objectType) ?: emptyList()
+                if (loadState is LoadState.Success || loadState is LoadState.Loading) {
+                    loadState = LoadState.Success(latest)
+                }
+            }
+        }
+        // 快扫（心跳 / 手动快扫）只补深度 / 状态，写入的是「无类型最小快照」——它若覆盖已带
+        // 类型的列表会重新触发问号闪烁。因此只在该连接已成功展示、且本次数据仍带类型时更新；
+        // 已带类型的列表在快扫 add-or-update 下会保留 channelType / MQIA_Q_TYPE，故可放心刷新。
         listOf(
-            IbmMQEvents.OBJECTS_SCANNED,
             IbmMQEvents.MESSAGES_SCANNED,
             IbmMQEvents.SCAN_COMPLETED,
         ).forEach { name ->
@@ -114,7 +132,7 @@ fun rememberMqObjectListState(
                 if ((event.payload["connectionId"] as? String) == connectionId) {
                     val latest =
                         IbmMQModule.serviceOrNull()?.cachedObjects(connectionId, objectType) ?: emptyList()
-                    if (loadState is LoadState.Success || loadState is LoadState.Loading) {
+                    if (loadState is LoadState.Success && latest.isTyped(objectType)) {
                         loadState = LoadState.Success(latest)
                     }
                 }
@@ -148,3 +166,17 @@ fun rememberMqObjectListState(
 /** stringResource 无格式化参数；%s / %1$s 占位替换（全项目约定，仅此一份实现）。 */
 internal fun String.withArg(arg: Any): String =
     replace("%1\$s", arg.toString()).replace("%s", arg.toString())
+
+/**
+ * 列表快照是否已带「子类型」字段（图标解析依赖）：通道看 [MqObjectSnapshot.channelType]，
+ * 队列看 `attributes["MQIA_Q_TYPE"]`。这两类字段**只**由慢扫（MQCMD_INQUIRE_CHANNEL /
+ * MQCMD_INQUIRE_Q）写入；心跳快扫写入的是无类型最小快照。
+ *
+ * 未带类型的快照直接渲染会先显示问号图标、慢扫补全后再闪成正确图标，故视为「尚未就绪」，
+ * 列表保持加载态直到慢扫补全类型。其它对象类型不走子类型图标解析，一律视为已就绪。
+ */
+private fun List<MqObjectSnapshot>.isTyped(objectType: MqObjectType): Boolean = when (objectType) {
+    MqObjectType.CHANNEL -> any { it.channelType != null }
+    MqObjectType.QUEUE -> any { it.attributes.containsKey("MQIA_Q_TYPE") }
+    else -> true
+}
