@@ -30,4 +30,9 @@ data class ObjectCardData(
     val metricValue: String? = null,
     /** 第 1 行的操作按钮（[CardAction]，由各 MQ 模块构造）；空则不渲染。 */
     val actions: List<CardAction> = emptyList(),
+    /**
+     * 正在执行的动作 id 集合（[CardAction.id]）。命中的按钮显示内联转圈并禁用点击，
+     * 用于「启动 / 停止」这类异步动作——执行期间不允许重复触发，也给出可见的反馈。
+     */
+    val executingActionIds: Set<String> = emptySet(),
 )

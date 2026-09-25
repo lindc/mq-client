@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -143,7 +144,7 @@ fun ObjectCard(
                     modifier = Modifier.weight(1f),
                 )
                 data.actions.forEach { action ->
-                    ActionIconButton(action)
+                    ActionIconButton(action, executing = action.id in data.executingActionIds)
                 }
             }
             Row(
@@ -194,7 +195,7 @@ fun ObjectCard(
 /** 操作按钮：24dp 点击区 + 16dp 图标，TooltipArea 悬停显示 i18n 提示。 */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ActionIconButton(action: CardAction) {
+private fun ActionIconButton(action: CardAction, executing: Boolean) {
     TooltipArea(
         tooltip = {
             Surface(
@@ -212,19 +213,27 @@ private fun ActionIconButton(action: CardAction) {
     ) {
         IconButton(
             onClick = action.onClick,
-            enabled = action.enabled,
+            enabled = action.enabled && !executing,
             modifier = Modifier.size(24.dp),
         ) {
-            Icon(
-                imageVector = action.icon,
-                contentDescription = stringResource(action.tooltip),
-                modifier = Modifier.size(16.dp),
-                tint = when {
-                    !action.enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
-                    action.isDangerous -> MaterialTheme.colorScheme.error
-                    else -> MaterialTheme.colorScheme.onSurfaceVariant
-                },
-            )
+            if (executing) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(16.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                Icon(
+                    imageVector = action.icon,
+                    contentDescription = stringResource(action.tooltip),
+                    modifier = Modifier.size(16.dp),
+                    tint = when {
+                        !action.enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
+                        action.isDangerous -> MaterialTheme.colorScheme.error
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            }
         }
     }
 }
