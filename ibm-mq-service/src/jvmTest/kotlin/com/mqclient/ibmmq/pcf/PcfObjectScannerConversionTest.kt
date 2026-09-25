@@ -87,10 +87,16 @@ class PcfObjectScannerConversionTest {
     }
 
     @Test
-    fun `listener status without client constant falls back to STATE_`() {
-        // MQLSR_* 常量未收录进 allclient（javap 核实）—— 反查不到时给数字兜底，不猜
-        val fallback = listenerStatusName(999999)
-        assertEquals("STATE_999999", fallback)
+    fun `listener status resolves to readable name`() {
+        // allclient jar 里没有 MQLSS_*/MQLSR_* 命名常量，改为手写映射，不再把原始数字
+        // 直接拼成 STATE_n 暴露给用户。
+        assertEquals("RUNNING", listenerStatusName(2))
+        assertEquals("NOT_RUNNING", listenerStatusName(0))
+        assertEquals("STARTING", listenerStatusName(1))
+        assertEquals("STOPPING", listenerStatusName(3))
+        // 未知值：返回 UNKNOWN（由适配器显示「未知」+ 记日志），不是 STATE_n
+        assertEquals("UNKNOWN", listenerStatusName(999999))
+        // 无状态行（没拿到状态值）：保持 null，适配器显示「未启动」
         assertNull(listenerStatusName(null))
     }
 }

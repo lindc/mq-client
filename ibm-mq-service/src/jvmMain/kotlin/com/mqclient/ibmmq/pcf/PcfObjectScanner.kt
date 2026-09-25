@@ -462,5 +462,23 @@ internal fun channelStatusName(value: Int?): String? =
 internal fun channelTypeName(value: Int?): String? =
     value?.let { MqAttributeNameMapper.lookupName(it, "MQCHT") }?.substringAfter("MQCHT_") ?: value?.let { "TYPE_$it" }
 
+/**
+ * 监听器状态值 → 可读短名。**不能**走 [MqAttributeNameMapper]，因为 IBM MQ 的
+ * allclient jar 里根本没有 `MQLSS_*` / `MQLSR_*` 这类命名常量（已核实），反射反查
+ * 必然返回 null，之前因此把状态值直接拼成 `STATE_2` 暴露给用户。这里手写映射：
+ *  - 0 = 未运行 / 1 = 启动中 / 2 = 运行中 / 3 = 停止中（与 IBM MQ 文档一致，且实测
+ *    `STATE_2` 对应运行中的监听器）；
+ *  - 其它值：记日志原始值并返回 `UNKNOWN`，由适配器显示「未知」而非裸状态码。
+ */
 internal fun listenerStatusName(value: Int?): String? =
-    value?.let { MqAttributeNameMapper.lookupName(it, "MQLSR") }?.substringAfter("MQLSR_") ?: value?.let { "STATE_$it" }
+    when (value) {
+        null -> null
+        0 -> "NOT_RUNNING"
+        1 -> "STARTING"
+        2 -> "RUNNING"
+        3 -> "STOPPING"
+        else -> {
+            ibmMqLog.warn("未识别的监听器状态值（已标记 UNKNOWN）: $value")
+            "UNKNOWN"
+        }
+    }
