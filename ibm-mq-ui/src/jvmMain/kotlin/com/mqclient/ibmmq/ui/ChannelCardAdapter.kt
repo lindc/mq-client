@@ -25,6 +25,7 @@ private val CHANNEL_STATUS_NEUTRAL = Color(0xFF9E9E9E)
  */
 internal fun MqObjectSnapshot.toChannelCardData(
     actions: List<CardAction> = emptyList(),
+    executingActionIds: Set<String> = emptySet(),
 ): ObjectCardData {
     val status = channelStatus
     val isRunning = status == "RUNNING"
@@ -55,6 +56,7 @@ internal fun MqObjectSnapshot.toChannelCardData(
         },
         metricValue = null,
         actions = actions,
+        executingActionIds = executingActionIds,
     )
 }
 

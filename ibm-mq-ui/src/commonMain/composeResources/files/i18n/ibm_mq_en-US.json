@@ -38,6 +38,8 @@
   "channel_search_placeholder": "Search channels…",
   "channel_refresh": "Refresh",
   "channel_action_properties": "Properties",
+  "channel_action_start": "Start channel",
+  "channel_action_stop": "Stop channel",
   "channel_status_running": "Running",
   "channel_status_retrying": "Retrying",
   "channel_status_stopped": "Stopped",
@@ -113,5 +115,10 @@
   "comm_info_scan_failed": "Failed to scan communication information: %s",
   "comm_info_search_placeholder": "Search communication information…",
   "comm_info_refresh": "Refresh",
-  "comm_info_action_properties": "Properties"
+  "comm_info_action_properties": "Properties",
+  "operation_busy": "Operation in progress, please wait",
+  "operation_unknown_state": "State unknown, operation unavailable",
+  "operation_failed": "Operation failed: %s",
+  "channel_start_success": "Channel %s started",
+  "channel_stop_success": "Channel %s stopped"
 }

@@ -38,6 +38,8 @@
   "channel_search_placeholder": "搜索通道…",
   "channel_refresh": "刷新",
   "channel_action_properties": "属性",
+  "channel_action_start": "启动通道",
+  "channel_action_stop": "停止通道",
   "channel_status_running": "运行中",
   "channel_status_retrying": "重试中",
   "channel_status_stopped": "已停止",
@@ -113,5 +115,10 @@
   "comm_info_scan_failed": "通信信息扫描失败：%s",
   "comm_info_search_placeholder": "搜索通信信息…",
   "comm_info_refresh": "刷新",
-  "comm_info_action_properties": "属性"
+  "comm_info_action_properties": "属性",
+  "operation_busy": "操作进行中，请稍候",
+  "operation_unknown_state": "状态未知，暂时无法操作",
+  "operation_failed": "操作失败：%s",
+  "channel_start_success": "通道 %s 已启动",
+  "channel_stop_success": "通道 %s 已停止"
 }
