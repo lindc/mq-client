@@ -30,6 +30,7 @@ private val log = Log.withTag("ibm-mq-ui")
  */
 internal fun MqObjectSnapshot.toListenerCardData(
     actions: List<CardAction> = emptyList(),
+    executingActionIds: Set<String> = emptySet(),
 ): ObjectCardData {
     val status = listenerStatus
     val isRunning = status == "RUNNING"
@@ -56,6 +57,7 @@ internal fun MqObjectSnapshot.toListenerCardData(
         },
         metricValue = port?.toString(),
         actions = actions,
+        executingActionIds = executingActionIds,
     )
 }
 

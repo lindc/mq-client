@@ -5,18 +5,30 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import com.mqclient.ibmmq.IbmMQModule
 import com.mqclient.ibmmq.pcf.MqObjectType
+import com.mqclient.mqui.command.DangerousCommandDialog
 import com.mqclient.mqui.objectlist.ObjectListPanel
 import com.mqclient.mqui.state.LoadStateContent
+import com.mqclient.uicommon.LocalSnackbarHostState
 import com.mqclient.uicommon.i18n.stringResource
+import kotlinx.coroutines.launch
 
 /**
  * 监听器列表（导航 `listeners` Tab）：复用 [rememberMqObjectListState] 统一加载状态机 +
  * 通用 [ObjectListToolbar] + [ObjectListPanel]，与所有对象类型列表页同一套加载语义。
  *
  * 监听器无队列深度阈值、无系统/临时隐藏，工具栏只保留搜索 + 刷新。
+ *
+ * 卡片上的【启动 / 停止】走现有 MQSC 命令通道（[IbmMQModule.mqscExecutorOrNull] →
+ * `START/STOP LISTENER` 文本经 `MQCMD_ESCAPE` 下发）：
+ *  - 启动直接执行；停止是危险操作，先弹 [DangerousCommandDialog] 二次确认；
+ *  - 执行期间对应卡片显示内联转圈并禁用按钮（[executingActionIds]）；
+ *  - 结果经 Snackbar 提示（失败带 [com.mqclient.ibmmq.command.MqrcTranslator] 原因），
+ *    成功则 [rememberMqObjectListState.refresh] 拉取最新状态。
  */
 @Composable
 fun ListenerListPanel(
@@ -32,6 +44,37 @@ fun ListenerListPanel(
         loadFailedText = { e -> stringResource("listener_load_failed").withArg(e.message ?: e::class.simpleName ?: "") },
         scanFailedText = { e -> stringResource("listener_scan_failed").withArg(e.message ?: e::class.simpleName ?: "") },
     )
+    val scope = rememberCoroutineScope()
+    val snackbarHostState = LocalSnackbarHostState.current
+    var executingNames by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var pendingStop by remember { mutableStateOf<Pair<String, String>?>(null) }
+
+    suspend fun runMqsc(name: String, command: String, successKey: String) {
+        val executor = IbmMQModule.mqscExecutorOrNull() ?: return
+        executingNames = executingNames + name
+        val result = executor.executeSingle(connectionId, command, 1)
+        executingNames = executingNames - name
+        val message = if (result.success) {
+            stringResource(successKey).withArg(name)
+        } else {
+            stringResource("operation_failed")
+                .withArg(result.errorMessage ?: "MQRC ${result.errorCode ?: "?"}")
+        }
+        snackbarHostState.showSnackbar(message)
+        // 成功才刷新（状态已变）；失败保留原状，不浪费一次全量扫描。
+        if (result.success) state.refresh()
+    }
+
+    fun executingIdsFor(name: String): Set<String> =
+        if (name in executingNames) setOf("listener.start", "listener.stop") else emptySet()
+
+    fun startListener(name: String) {
+        scope.launch { runMqsc(name, "START LISTENER('$name')", "listener_start_success") }
+    }
+
+    fun requestStopListener(name: String) {
+        pendingStop = name to "STOP LISTENER('$name')"
+    }
 
     LoadStateContent(
         state = state.loadState,
@@ -50,7 +93,10 @@ fun ListenerListPanel(
                         actions = ListenerCardActions.create(
                             snapshot = listener,
                             onOpenProperties = { onOpenProperties(listener.name) },
+                            onStart = { startListener(listener.name) },
+                            onStop = { requestStopListener(listener.name) },
                         ),
+                        executingActionIds = executingIdsFor(listener.name),
                     )
                 },
                 onCardClick = { card -> onOpenProperties(card.id) },
@@ -71,6 +117,16 @@ fun ListenerListPanel(
                 loading = false,
                 modifier = Modifier.fillMaxSize(),
             )
+            pendingStop?.let { (name, command) ->
+                DangerousCommandDialog(
+                    command = command,
+                    onConfirm = {
+                        pendingStop = null
+                        scope.launch { runMqsc(name, command, "listener_stop_success") }
+                    },
+                    onDismiss = { pendingStop = null },
+                )
+            }
         },
     )
 }

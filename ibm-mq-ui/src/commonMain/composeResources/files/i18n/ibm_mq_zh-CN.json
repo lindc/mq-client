@@ -79,6 +79,8 @@
   "listener_search_placeholder": "搜索监听器…",
   "listener_refresh": "刷新",
   "listener_action_properties": "属性",
+  "listener_action_start": "启动监听器",
+  "listener_action_stop": "停止监听器",
   "listener_status_running": "运行中",
   "listener_status_stopped": "已停止",
   "listener_status_unknown": "未知状态",
@@ -120,5 +122,7 @@
   "operation_unknown_state": "状态未知，暂时无法操作",
   "operation_failed": "操作失败：%s",
   "channel_start_success": "通道 %s 已启动",
-  "channel_stop_success": "通道 %s 已停止"
+  "channel_stop_success": "通道 %s 已停止",
+  "listener_start_success": "监听器 %s 已启动",
+  "listener_stop_success": "监听器 %s 已停止"
 }

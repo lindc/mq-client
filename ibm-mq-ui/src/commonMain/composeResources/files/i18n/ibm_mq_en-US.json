@@ -79,6 +79,8 @@
   "listener_search_placeholder": "Search listeners…",
   "listener_refresh": "Refresh",
   "listener_action_properties": "Properties",
+  "listener_action_start": "Start listener",
+  "listener_action_stop": "Stop listener",
   "listener_status_running": "Running",
   "listener_status_stopped": "Stopped",
   "listener_status_unknown": "Unknown",
@@ -120,5 +122,7 @@
   "operation_unknown_state": "State unknown, operation unavailable",
   "operation_failed": "Operation failed: %s",
   "channel_start_success": "Channel %s started",
-  "channel_stop_success": "Channel %s stopped"
+  "channel_stop_success": "Channel %s stopped",
+  "listener_start_success": "Listener %s started",
+  "listener_stop_success": "Listener %s stopped"
 }
