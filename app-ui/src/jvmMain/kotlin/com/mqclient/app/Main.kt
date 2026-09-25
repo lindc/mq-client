@@ -47,6 +47,9 @@ import com.mqclient.uicommon.i18n.LanguageResources
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.LocalSnackbarHostState
 import dev.nucleusframework.application.DecoratedWindow
+import mq_client.app_ui.generated.resources.Res
+import mq_client.app_ui.generated.resources.logo
+import org.jetbrains.compose.resources.painterResource
 import io.github.vinceglb.filekit.FileKit
 import dev.nucleusframework.application.nucleusApplication
 import dev.nucleusframework.window.NucleusDecoratedWindowTheme
@@ -136,7 +139,13 @@ private fun AppRoot(bootConfig: Config, onExit: () -> Unit) {
             onExit()
         }
     }
-    DecoratedWindow(onCloseRequest = closeApp, title = "MQ Client") {
+    DecoratedWindow(
+        onCloseRequest = closeApp,
+        title = "MQ Client",
+        // 用品牌 logo 替换运行时的默认 Java 咖啡杯图标（任务栏 / 标题栏）。
+        // logo.png 已是 app-ui 的 composeResources，AboutDialog 同样引用。
+        icon = painterResource(Res.drawable.logo),
+    ) {
         // Resolve dark/light once at the top so the window-chrome theme
         // (NucleusDecoratedWindowTheme) and the content theme (AppTheme)
         // share a single source of truth — otherwise the title bar would
