@@ -123,6 +123,10 @@
   "operation_failed": "操作失败：%s",
   "channel_start_success": "通道 %s 已启动",
   "channel_stop_success": "通道 %s 已停止",
+  "channel_operation_timeout": "操作已发送，但状态未在预期时间内变更，请手动刷新",
+  "channel_operation_timeout_error": "操作已发送，但状态未在预期时间内变更（轮询出错：%s），请手动刷新",
+  "listener_operation_timeout": "操作已发送，但状态未在预期时间内变更，请手动刷新",
+  "listener_operation_timeout_error": "操作已发送，但状态未在预期时间内变更（轮询出错：%s），请手动刷新",
   "listener_start_success": "监听器 %s 已启动",
   "listener_stop_success": "监听器 %s 已停止"
 }

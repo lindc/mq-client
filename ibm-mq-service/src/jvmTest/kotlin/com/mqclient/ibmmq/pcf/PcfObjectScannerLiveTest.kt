@@ -1,11 +1,17 @@
 package com.mqclient.ibmmq.pcf
 
 import com.ibm.mq.MQQueueManager
+import com.ibm.mq.constants.MQConstants
+import com.ibm.mq.pcf.PCFException
+import com.ibm.mq.pcf.PCFMessage
+import com.ibm.mq.pcf.PCFMessageAgent
 import com.mqclient.core.ConnectionStore
 import com.mqclient.ibmmq.IbmMQConfig
 import com.mqclient.ibmmq.ibmMQConfigFromOptions
 import com.mqclient.ibmmq.mqProperties
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
 import kotlin.test.assertTrue
 import kotlin.test.fail
@@ -107,6 +113,86 @@ class PcfObjectScannerLiveTest {
                 runCatching { agent.disconnect() }
             }
         } finally {
+            runCatching { manager.disconnect() }
+        }
+    }
+
+    /**
+     * 真机验证「停止监听器」的轮询路径（复刻 UI 的 STOP LISTENER + 状态轮询）：
+     * 先 START 让 LSNR.QM1 进入 RUNNING，再 STOP，随后轮询 [PcfObjectScanner.queryListenerStatusWith]，
+     * 断言——停止后**不再抛 2085**（MQRC_UNKNOWN_OBJECT_NAME 已被兜底为空结果，即 NOT_RUNNING），
+     * 且最终轮询收敛到空结果（监听器已停）。这正是对 2085 误报修复的回归验证。
+     *
+     * 没有配置 / 没有网络 / 目标监听器不存在时打印 LIVE SKIP 并通过，不让环境问题污染离线 CI。
+     */
+    @Test
+    fun liveStopListenerPoll() = runBlocking {
+        val connections = ConnectionStore.connections.value.filter { it.serviceId == "ibm-mq" }
+        if (connections.isEmpty()) { println("LIVE SKIP: config.toml 里没有 IBM MQ 连接"); return@runBlocking }
+        val info = connections.first()
+        val config = ibmMQConfigFromOptions(info.options)
+
+        val manager = try {
+            withTimeout(config.connectionTimeout * 1_000L) { MQQueueManager(config.queueManager, mqProperties(config)) }
+        } catch (t: Throwable) { println("LIVE SKIP: 连接失败（QMGR 不在线？）：${t.message}"); return@runBlocking }
+
+        val agent = PCFMessageAgent(manager)
+        try {
+            val scanner = PcfObjectScanner()
+            val name = "LSNR.QM1"
+            if (scanner.scanListenersWith(agent).none { it.name == name }) {
+                println("LIVE SKIP: $name 不存在"); return@runBlocking
+            }
+
+            fun runMqsc(cmd: String) {
+                val req = PCFMessage(MQConstants.MQCMD_ESCAPE).apply {
+                    addParameter(MQConstants.MQIACF_ESCAPE_TYPE, MQConstants.MQET_MQSC)
+                    addParameter(MQConstants.MQCACF_ESCAPE_TEXT, cmd)
+                }
+                agent.send(req)
+            }
+
+            // 先确保进入 RUNNING 才开始验证停止：START 后轮询到非空状态。
+            runCatching { runMqsc("START LISTENER('$name')") }
+            var running = false
+            repeat(10) {
+                delay(500)
+                val s = scanner.queryListenerStatusWith(agent, name)
+                if (s.isNotEmpty()) { running = true; return@repeat }
+            }
+            println("LIVE start '$name' running=$running")
+            if (!running) { println("LIVE SKIP: 无法让 $name 进入 RUNNING，跳过停止验证"); return@runBlocking }
+
+            // 复刻 UI：发 STOP，命令成功即进入轮询。
+            runMqsc("STOP LISTENER('$name')")
+
+            // 轮询：验证不再抛 2085，且最终回到空结果（NOT_RUNNING）。
+            var hit2085 = false
+            var finalEmpty = false
+            repeat(20) {
+                delay(1_000)
+                val r = try {
+                    Result.success(scanner.queryListenerStatusWith(agent, name))
+                } catch (e: Throwable) {
+                    Result.failure<List<Pair<String, Int>>>(e)
+                }
+                if (r.isSuccess) {
+                    val list = r.getOrNull()!!
+                    if (list.isEmpty()) { finalEmpty = true; println("LIVE poll#$it: 空（已停 → NOT_RUNNING）"); return@repeat }
+                    else println("LIVE poll#$it: $list")
+                } else {
+                    val e = r.exceptionOrNull()!!
+                    val rc = (e as? PCFException)?.reasonCode
+                    if (rc == MQConstants.MQRC_UNKNOWN_OBJECT_NAME) hit2085 = true
+                    println("LIVE poll#$it: 异常 ${e::class.simpleName} rc=$rc")
+                }
+            }
+            println("LIVE result: hit2085=$hit2085 finalEmpty=$finalEmpty")
+            assertTrue(!hit2085, "停止后轮询仍抛 2085，说明 2085 兜底未生效")
+            assertTrue(finalEmpty, "停止后 30s 内未收敛到 NOT_RUNNING（空结果）")
+            println("LIVE PASS: 停止 LSNR.QM1 后轮询正常收敛到 NOT_RUNNING，无 2085 误报")
+        } finally {
+            runCatching { agent.disconnect() }
             runCatching { manager.disconnect() }
         }
     }

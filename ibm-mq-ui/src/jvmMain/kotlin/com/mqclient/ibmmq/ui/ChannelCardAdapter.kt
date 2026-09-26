@@ -21,11 +21,14 @@ private val CHANNEL_STATUS_NEUTRAL = Color(0xFF9E9E9E)
  *    中性灰圆点 + 文案，不当作错误告警；
  *  - 真正未知 / 待加载（`channelStatus == null` 且连 `channelType` 都还没有，即快扫最小快照
  *    尚未补全）：红色警告图标 + 「未知状态」，提示信息缺失而非通道故障。
- * 操作按钮由调用方经 [actions] 注入。
+ * 操作按钮由调用方经 [actions] 注入；[executingTarget] 非空（"RUNNING" / "STOPPED"）
+ * 表示该通道的启停操作正在执行（命令已发、轮询未完成），状态文案改显「启动中 / 停止中」，
+ * 不再显示旧状态或已翻面的真实状态（IBM MQ 命令异步生效，真实值要等轮询结束才可靠）。
  */
 internal fun MqObjectSnapshot.toChannelCardData(
     actions: List<CardAction> = emptyList(),
     executingActionIds: Set<String> = emptySet(),
+    executingTarget: String? = null,
 ): ObjectCardData {
     val status = channelStatus
     val isRunning = status == "RUNNING"
@@ -40,16 +43,21 @@ internal fun MqObjectSnapshot.toChannelCardData(
         typeIcon = ChannelIconResolver.resolveIcon(this),
         typeLabel = ChannelIconResolver.resolveLabel(this),
         statusIcon = when {
+            // 启停执行中：图标与「启动中/停止中」文案一致，用中性点，不显示旧状态的绿勾/红叉。
+            executingTarget != null -> Icons.Default.Circle
             isRunning -> Icons.Default.CheckCircle
             isUnknown -> Icons.Default.Warning
             else -> Icons.Default.Circle
         },
         statusIconTint = when {
+            executingTarget != null -> CHANNEL_STATUS_NEUTRAL
             isRunning -> Color(0xFF4CAF50)
             isUnknown -> Color(0xFFF44336)
             else -> CHANNEL_STATUS_NEUTRAL
         },
         statusText = when {
+            executingTarget == "RUNNING" -> stringResource("channel_status_starting")
+            executingTarget == "STOPPED" -> stringResource("channel_status_stopping")
             status != null -> channelStatusText(status)
             isDefinedInactive -> stringResource("channel_status_inactive")
             else -> stringResource("channel_status_unknown")

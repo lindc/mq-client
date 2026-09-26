@@ -15,6 +15,7 @@ import com.mqclient.ibmmq.pcf.MqObjectSnapshot
 import com.mqclient.ibmmq.pcf.MqObjectType
 import com.mqclient.ibmmq.pcf.PcfObjectScanner
 import com.mqclient.ibmmq.pcf.channelStatusName
+import com.mqclient.ibmmq.pcf.listenerStatusName
 import java.io.FileInputStream
 import java.security.KeyStore
 import java.util.concurrent.ConcurrentHashMap
@@ -196,6 +197,78 @@ class IbmMQService(private val context: ServiceContext) {
         // 先登记新协程、再取消旧的：getAndSet 是原子的，两个线程同时调 startScan 也
         // 只有一方能拿到「上一个」并取消它，不会留下两条并行扫描。
         scanJob.getAndSet(started)?.cancel()
+    }
+
+    /**
+     * 轮询单个通道的真实状态（通道启停命令返回成功≠状态已变，IBM MQ 的 STOP/START 异步）：
+     *  - INQUIRE_CHANNEL_STATUS 只查该通道，写回缓存（add-or-update，保留 channelType），
+     *    并广播 [IbmMQEvents.MESSAGES_SCANNED] 让列表状态机刷新；
+     *  - 返回可读状态名（RUNNING / STOPPED …）；通道已停（无状态行）返回 "STOPPED"；
+     *  - 通道还不在缓存里（列表尚未扫描）返回 null，由调用方继续轮询；
+     *  - 查询本身失败（连接断开 / 权限不足 / 超时）直接抛异常，不静默，由调用方决定是否计入失败。
+     * 该方法只动单条通道缓存，不会删除其它通道，也不触发整轮全量扫描。
+     */
+    suspend fun pollChannelStatus(connectionId: String, name: String): String? {
+        val statuses = objectScanner.queryChannelStatus(connectionId, name)
+        val cache = cacheOf(connectionId) ?: return null
+        val key = objectsKey(MqObjectType.CHANNEL)
+        val existing = cache.getAs<List<MqObjectSnapshot>>(key) ?: emptyList()
+        val idx = existing.indexOfFirst { it.name == name }
+        if (idx < 0) return null // 列表尚未扫描到该通道，无法确认状态，交给轮询下一轮
+        val resolved = statuses.firstOrNull()?.let { channelStatusName(it.second) } ?: "STOPPED"
+        val statusValue = statuses.firstOrNull()?.second
+        val updated = existing.toMutableList().apply {
+            this[idx] = existing[idx].copy(
+                channelStatus = resolved,
+                attributes = existing[idx].attributes + ("MQIACH_CHANNEL_STATUS" to (statusValue ?: -1)),
+            )
+        }
+        cache.put(key, updated, ttlMs = OBJECTS_FULL_TTL_MS)
+        context.emit(
+            name = IbmMQEvents.MESSAGES_SCANNED,
+            payload = mapOf(
+                "connectionId" to connectionId,
+                "queueCount" to 0,
+                "totalMessages" to 0,
+            ),
+        )
+        return resolved
+    }
+
+    /**
+     * 轮询单个监听器的真实状态（监听器启停命令返回成功≠状态已变，IBM MQ 的 START/STOP 异步）：
+     *  - INQUIRE_LISTENER_STATUS 只查该监听器，写回缓存（add-or-update，保留 port 等属性），
+     *    并广播 [IbmMQEvents.MESSAGES_SCANNED] 让列表状态机刷新；
+     *  - 返回可读状态名（RUNNING / NOT_RUNNING …）；监听器已停（无状态行）返回 "NOT_RUNNING"；
+     *  - 监听器还不在缓存里（列表尚未扫描）返回 null，由调用方继续轮询；
+     *  - 查询本身失败（连接断开 / 权限不足 / 超时）直接抛异常，不静默，由调用方决定是否计入失败。
+     * 该方法只动单条监听器缓存，不会删除其它监听器，也不触发整轮全量扫描。
+     */
+    suspend fun pollListenerStatus(connectionId: String, name: String): String? {
+        val statuses = objectScanner.queryListenerStatus(connectionId, name)
+        val cache = cacheOf(connectionId) ?: return null
+        val key = objectsKey(MqObjectType.LISTENER)
+        val existing = cache.getAs<List<MqObjectSnapshot>>(key) ?: emptyList()
+        val idx = existing.indexOfFirst { it.name == name }
+        if (idx < 0) return null // 列表尚未扫描到该监听器，无法确认状态，交给轮询下一轮
+        val resolved = statuses.firstOrNull()?.let { listenerStatusName(it.second) } ?: "NOT_RUNNING"
+        val statusValue = statuses.firstOrNull()?.second
+        val updated = existing.toMutableList().apply {
+            this[idx] = existing[idx].copy(
+                listenerStatus = resolved,
+                attributes = existing[idx].attributes + ("MQIACH_LISTENER_STATUS" to (statusValue ?: -1)),
+            )
+        }
+        cache.put(key, updated, ttlMs = OBJECTS_FULL_TTL_MS)
+        context.emit(
+            name = IbmMQEvents.MESSAGES_SCANNED,
+            payload = mapOf(
+                "connectionId" to connectionId,
+                "queueCount" to 0,
+                "totalMessages" to 0,
+            ),
+        )
+        return resolved
     }
 
     /**

@@ -17,6 +17,9 @@ import com.mqclient.mqui.objectlist.CardAction
  * 启动 / 停止规则：
  *  - **连接型通道**（SVRCONN / CLNTCONN / MQTT / AMQP）本身没有「启动 / 停止」语义，
  *    直接隐藏这两个按钮（按用户确认：此类通道不暴露启停）；
+ *  - **接收通道（RECEIVER）**：由远端发送方发起（应答端无法主动拨出），本地 START 无意义，
+ *    且集群通道（CLUSRCVR / CLUSSDR）由集群 / 通道发起器自动管理 —— 两者的启停按钮都
+ *    隐藏（按用户确认）；
  *  - 其余类型：
  *      - 运行态（RUNNING / BINDING / PAUSED / REQUESTING / RETRYING）→ 只显示【停止】
  *        （RETRYING 用 `MODE(FORCE)`，仍是危险操作，走二次确认）；
@@ -35,13 +38,17 @@ object ChannelCardActions {
         ChannelType.CLIENT_CONN,
         ChannelType.MQTT,
         ChannelType.AMQP,
+        // 接收通道由远端发送方发起（应答端无法主动拨出，本地 START 无意义）；
+        // 集群通道由集群 / 通道发起器自动管理 —— 启停按钮都不暴露（按用户确认）。
+        ChannelType.RECEIVER,
+        ChannelType.CLUSTER,
     )
 
     /** 运行态：仅允许停止。 */
-    private val RUNNING_LIKE = setOf("RUNNING", "BINDING", "PAUSED", "REQUESTING", "RETRYING")
+    internal val RUNNING_LIKE = setOf("RUNNING", "BINDING", "PAUSED", "REQUESTING", "RETRYING")
 
     /** 停止 / 未运行态：允许启动（含已定义但无状态行的「未运行」）。 */
-    private val STOPPED_LIKE = setOf("STOPPED", "INACTIVE")
+    internal val STOPPED_LIKE = setOf("STOPPED", "INACTIVE")
 
     /** 中间态：启停都禁用。 */
     private val BUSY_LIKE = setOf("STARTING", "STOPPING", "INITIALIZING")

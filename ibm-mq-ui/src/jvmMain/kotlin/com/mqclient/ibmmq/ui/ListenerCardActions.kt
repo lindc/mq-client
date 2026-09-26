@@ -26,10 +26,10 @@ import com.mqclient.mqui.objectlist.CardAction
 object ListenerCardActions {
 
     /** 运行态：仅允许停止。 */
-    private val RUNNING_LIKE = setOf("RUNNING")
+    internal val RUNNING_LIKE = setOf("RUNNING")
 
     /** 停止 / 未启动态：允许启动（null = 已定义但无状态行，即未启动）。 */
-    private val STOPPED_LIKE = setOf("NOT_RUNNING")
+    internal val STOPPED_LIKE = setOf("NOT_RUNNING")
 
     /** 中间态：启停都禁用。 */
     private val BUSY_LIKE = setOf("STARTING", "STOPPING")

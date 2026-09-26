@@ -129,6 +129,25 @@ class PcfObjectScanner {
         }
     }
 
+    /**
+     * 单通道状态查询（通道启停后轮询用）：INQUIRE_CHANNEL_STATUS 只查指定通道名，
+     * 返回该通道的状态行（一个通道定义可能对应多行，如 SVRCONN 上的多个活动连接），
+     * 每行是 名字 → MQIACH_CHANNEL_STATUS 原始值。通道已完全停止（无状态行）返回空列表。
+     */
+    suspend fun queryChannelStatus(connectionId: String, name: String): List<Pair<String, Int>> =
+        withAgent(connectionId) { queryChannelStatusWith(it, name) }
+
+    internal suspend fun queryChannelStatusWith(agent: PCFMessageAgent, name: String): List<Pair<String, Int>> {
+        val responses = inquire(agent, MQConstants.MQCMD_INQUIRE_CHANNEL_STATUS) {
+            addParameter(MQConstants.MQCACH_CHANNEL_NAME, name)
+        }
+        return responses.mapNotNull { response ->
+            val n = response.stringValue(MQConstants.MQCACH_CHANNEL_NAME) ?: return@mapNotNull null
+            val status = response.intValue(MQConstants.MQIACH_CHANNEL_STATUS) ?: return@mapNotNull null
+            n to status
+        }
+    }
+
     /** 所有通道：INQUIRE_CHANNEL + INQUIRE_CHANNEL_STATUS（运行状态）合并。 */
     suspend fun scanChannels(connectionId: String): List<MqObjectSnapshot> =
         withAgent(connectionId) { scanChannelsWith(it) }
@@ -191,6 +210,32 @@ class PcfObjectScanner {
                 port = status?.intValue(MQConstants.MQIACH_PORT)
                     ?: response.intValue(MQConstants.MQIACH_PORT),
             )
+        }
+    }
+
+    /**
+     * 单监听器状态查询（启停后轮询用）：INQUIRE_LISTENER_STATUS 只查指定监听器名，
+     * 返回该监听器的状态行（名字 → MQIACH_LISTENER_STATUS 原始值）。监听器已停（无状态行）返回空列表。
+     */
+    suspend fun queryListenerStatus(connectionId: String, name: String): List<Pair<String, Int>> =
+        withAgent(connectionId) { queryListenerStatusWith(it, name) }
+
+    internal suspend fun queryListenerStatusWith(agent: PCFMessageAgent, name: String): List<Pair<String, Int>> {
+        // 注意：INQUIRE_LISTENER_STATUS 对**未运行的监听器**（按名字查询）不返回空结果，
+        // 而是回 MQCC_FAILED + MQRC_UNKNOWN_OBJECT_NAME (2085) —— 这正是「已停」的信号，
+        // 必须转成空列表（pollListenerStatus 据此解析为 NOT_RUNNING），否则轮询会一直报错。
+        val responses = try {
+            inquire(agent, MQConstants.MQCMD_INQUIRE_LISTENER_STATUS) {
+                addParameter(MQConstants.MQCACH_LISTENER_NAME, name)
+            }
+        } catch (e: PCFException) {
+            if (e.reasonCode == MQConstants.MQRC_UNKNOWN_OBJECT_NAME) return emptyList()
+            throw e
+        }
+        return responses.mapNotNull { response ->
+            val n = response.stringValue(MQConstants.MQCACH_LISTENER_NAME) ?: return@mapNotNull null
+            val status = response.intValue(MQConstants.MQIACH_LISTENER_STATUS) ?: return@mapNotNull null
+            n to status
         }
     }
 

@@ -123,6 +123,10 @@
   "operation_failed": "Operation failed: %s",
   "channel_start_success": "Channel %s started",
   "channel_stop_success": "Channel %s stopped",
+  "channel_operation_timeout": "Command sent, but status did not change within the expected time. Please refresh manually",
+  "channel_operation_timeout_error": "Command sent, but status did not change within the expected time (polling error: %s). Please refresh manually",
+  "listener_operation_timeout": "Command sent, but status did not change within the expected time. Please refresh manually",
+  "listener_operation_timeout_error": "Command sent, but status did not change within the expected time (polling error: %s). Please refresh manually",
   "listener_start_success": "Listener %s started",
   "listener_stop_success": "Listener %s stopped"
 }
