@@ -12,6 +12,8 @@ import com.mqclient.ibmmq.event.IbmMQEvents
 import com.mqclient.ibmmq.pcf.MqObjectSnapshot
 import com.mqclient.ibmmq.pcf.MqObjectType
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
@@ -160,6 +162,35 @@ class IbmMQTopologyProviderTest {
         bus.emit(IbmMQEvents.CONNECTED, mapOf("connectionId" to "other"))
         assertFalse(scannedOther.isCompleted, "不应为其它连接触发扫描")
 
+        provider.dispose()
+    }
+
+    @Test
+    fun `immediate scan notifies UI via dataChanged after objects scanned`() = runBlocking {
+        val bus = EventBus(this, EventBusErrorReporter.Logging)
+        // 真实的 IbmMqServiceTopologySource.scan 走 IbmMQService.scanObjects，完成后发出
+        // OBJECTS_SCANNED；这里让假 source 在 scan 时模拟该事件，端到端校验「扫描完成 → UI 重建」。
+        val source = object : IbmMqTopologySource {
+            override fun isConnected(connectionId: String) = true
+            override fun snapshots(connectionId: String, type: MqObjectType) = emptyList<MqObjectSnapshot>()
+            override fun queueManager(connectionId: String): MqObjectSnapshot? = null
+            override suspend fun scan(connectionId: String) {
+                bus.emit(IbmMQEvents.OBJECTS_SCANNED, mapOf("connectionId" to connectionId))
+            }
+        }
+        val provider = IbmMQTopologyProvider(source, bus)
+        val changed = CompletableDeferred<String>()
+        // UNDISPATCHED：让收集协程在 refresh 之前就同步进入 collect，成为 dataChanged 的活跃订阅者。
+        // _dataChanged 是 replay=0 的 SharedFlow，若发射时还没有订阅者，那次发射会被直接丢弃，导致下面
+        // 永远等不到；UNDISPATCHED 保证订阅先于 refresh 内 scan 触发的 OBJECTS_SCANNED 发射。
+        val collector = launch(start = CoroutineStart.UNDISPATCHED) {
+            provider.dataChanged.collect { changed.complete(it) }
+        }
+        // 已连接：refresh 立即扫一次；扫完经 OBJECTS_SCANNED → dataChanged 通知面板重建图。
+        provider.refresh("c1")
+        val cid = withTimeout(2000) { changed.await() }
+        assertEquals("c1", cid)
+        collector.cancel()
         provider.dispose()
     }
 
