@@ -14,6 +14,9 @@ kotlin {
             // 新建连接表单（ConnectionFormUi 实现）用本模块对应的 service：
             // IbmMQConfig / IbmMQModule（testConnection）都在那里。
             implementation(projects.ibmMqService)
+            // 通用拓扑图渲染层：提供 TopologyPanel / TopologyStyleRegistry；本模块只登记
+            // IBM MQ 各对象类型的图标/颜色样式，渲染逻辑不依赖具体中间件。
+            implementation(projects.topologyUi)
             // 通用命令控制台 UI（CommandConsolePanel 等）已抽到 mq-ui，本模块只做注入组装。
             implementation(projects.mqUi)
             implementation(libs.compose.runtime)

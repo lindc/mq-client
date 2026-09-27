@@ -31,6 +31,7 @@ dependencyResolutionManagement {
 }
 
 include(
+    ":graph-core",
     ":app-core",
     ":app-ui",
     ":ai-ui",
@@ -46,4 +47,5 @@ include(
     ":artemis-service", ":artemis-ui",
     ":rabbitmq-service", ":rabbitmq-ui",
     ":rocketmq-service", ":rocketmq-ui",
+    ":topology-ui",
 )

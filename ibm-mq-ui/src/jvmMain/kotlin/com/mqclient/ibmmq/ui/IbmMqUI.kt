@@ -11,6 +11,7 @@ import com.mqclient.core.AdapterUI
 import com.mqclient.core.ModuleI18nTable
 import com.mqclient.ibmmq.IbmMQModule
 import com.mqclient.ibmmq.ui.command.IbmMqCommandConsolePanel
+import com.mqclient.topology.ui.TopologyPanel
 import com.mqclient.uicommon.i18n.stringResource
 import mq_client.ibm_mq_ui.generated.resources.Res
 
@@ -22,6 +23,11 @@ import mq_client.ibm_mq_ui.generated.resources.Res
 class IbmMqUI : AdapterUI {
     override val serviceId = "ibm-mq"
     override val title = "IBM MQ"
+
+    init {
+        // 登记 IBM MQ 各对象类型在拓扑图里的图标 / 颜色（渲染层按 (serviceId, type) 查表）。
+        IbmMqTopologyStyle.register(serviceId)
+    }
 
     /**
      * 本模块私有的 i18n 表（`files/i18n/ibm_mq_<lang>.json`）：导航项文案（`nav_*`）
@@ -51,6 +57,15 @@ class IbmMqUI : AdapterUI {
      */
     override fun contentFor(objectType: String, connectionId: String): (@Composable () -> Unit)? {
         return when (objectType) {
+            "topology" -> {
+                if (IbmMQModule.serviceOrNull() == null) return null
+                {
+                    TopologyPanel(
+                        connectionId = connectionId,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+            }
             "command" -> {
                 if (IbmMQModule.mqscExecutorOrNull() == null) return null
                 {

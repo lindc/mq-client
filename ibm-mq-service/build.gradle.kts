@@ -9,6 +9,8 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             implementation(projects.appCore)
+            // 拓扑通用图模型（graph-core：点/边/图），buildGraph 产出 TopologyGraph。
+            implementation(projects.graphCore)
             // MQ 公共基类（MQServiceAdapter：category="MQ"）。api 暴露，
             // 消费方（app-ui SPI 注册）能看到完整父类链。
             api(projects.mqBase)
