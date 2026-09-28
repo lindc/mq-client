@@ -128,5 +128,6 @@
   "listener_operation_timeout": "Command sent, but status did not change within the expected time. Please refresh manually",
   "listener_operation_timeout_error": "Command sent, but status did not change within the expected time (polling error: %s). Please refresh manually",
   "listener_start_success": "Listener %s started",
-  "listener_stop_success": "Listener %s stopped"
+  "listener_stop_success": "Listener %s stopped",
+  "topology_view": "View in topology"
 }

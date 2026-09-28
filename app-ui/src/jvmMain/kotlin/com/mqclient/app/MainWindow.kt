@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import com.mqclient.core.topology.TopologyFocusHolder
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -135,6 +136,14 @@ fun MainWindow(
                         .firstOrNull { it.id == connectionId }?.name ?: connectionId,
                 message = event.getString("message"),
             )
+        }
+    }
+
+    // 列表页「在拓扑图中查看」写入焦点后，这里把对应连接切到拓扑 Tab；
+    // 面板自身在打开时消费焦点（按连接隔离），从而以该对象为中心展开 1 跳。
+    LaunchedEffect(Unit) {
+        TopologyFocusHolder.openRequests.collect { req ->
+            onSelect(NavSelection(req.connectionId, "topology"))
         }
     }
 

@@ -50,7 +50,7 @@ fun SubscriptionListPanel(
                         actions = SubscriptionCardActions.create(
                             snapshot = subscription,
                             onOpenProperties = { onOpenProperties(subscription.name) },
-                        ),
+                        ) + topologyViewAction(connectionId, subscription.name),
                     )
                 },
                 onCardClick = { card -> onOpenProperties(card.id) },

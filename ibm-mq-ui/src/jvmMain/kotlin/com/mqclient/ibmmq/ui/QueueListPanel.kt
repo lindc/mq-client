@@ -71,7 +71,7 @@ fun QueueListPanel(
                             snapshot = queue,
                             onOpenProperties = { onOpenProperties(queue.name) },
                             onOpenMessages = { onOpenMessages(queue.name) },
-                        ),
+                        ) + topologyViewAction(connectionId, queue.name),
                     )
                 },
                 onCardClick = { card -> onOpenProperties(card.id) },

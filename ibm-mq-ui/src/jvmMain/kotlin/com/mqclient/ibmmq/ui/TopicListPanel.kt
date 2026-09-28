@@ -50,7 +50,7 @@ fun TopicListPanel(
                         actions = TopicCardActions.create(
                             snapshot = topic,
                             onOpenProperties = { onOpenProperties(topic.name) },
-                        ),
+                        ) + topologyViewAction(connectionId, topic.name),
                     )
                 },
                 onCardClick = { card -> onOpenProperties(card.id) },

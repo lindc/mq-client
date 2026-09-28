@@ -132,29 +132,31 @@ internal class IbmMQTopologyProvider(
                 // Alias → 目标（队列或主题；目标类型由 BASE_TYPE 区分，这里只按名字连线）
                 s.type == MqObjectType.QUEUE && s.queueType() == "MQQT_ALIAS" ->
                     link(s.name, s.aliasTarget(), null)
-                // Remote → 传输队列
+                // Remote → 传输队列：消息投递链路（实线）。
                 s.type == MqObjectType.QUEUE && s.queueType() == "MQQT_REMOTE" ->
-                    link(s.name, s.attrStr("MQCA_XMIT_Q_NAME"), EdgeStyle.DASHED)
-                // 传输队列没有指向通道的属性，反向查：通道的 XMITQ == 本传输队列名
+                    link(s.name, s.attrStr("MQCA_XMIT_Q_NAME"), null)
+                // 传输队列没有指向通道的属性，反向查：通道的 XMITQ == 本传输队列名。
+                // XMITQ↔通道是消息实际流转的链路（实线）。
                 s.type == MqObjectType.QUEUE &&
                     s.queueType() == "MQQT_LOCAL" && s.usage() == MQUS_TRANSMISSION ->
                     for (c in all) if (c.type == MqObjectType.CHANNEL &&
                         c.channelXmitQ() == s.name
                     ) {
-                        link(s.name, c.name, EdgeStyle.DASHED)
+                        link(s.name, c.name, null)
                     }
-                // 主题 → 订阅：优先用订阅自带的所属主题对象名（MQCA_TOPIC_NAME）；
+                // 主题 → 订阅：订阅关系（虚线，订阅不搬运消息、只是转发规则）。
+                // 优先用订阅自带的所属主题对象名（MQCA_TOPIC_NAME）；
                 // 缺失时按主题串做宽松匹配（去掉尾部 '/' 后相等）。
                 s.type == MqObjectType.TOPIC ->
                     for (sub in all) if (sub.type == MqObjectType.SUBSCRIPTION) {
                         val byName_ = sub.attrStr("MQCA_TOPIC_NAME") == s.name
                         val byStr = sub.attrStr("MQCA_TOPIC_NAME").isNullOrBlank() &&
                             topicStringsMatch(sub.subscriptionTopicStr(), s.attrStr("MQCA_TOPIC_STRING") ?: s.name)
-                        if (byName_ || byStr) link(s.name, sub.name, null)
+                        if (byName_ || byStr) link(s.name, sub.name, EdgeStyle.DASHED)
                     }
-                // 订阅 → 目标队列（DEST；可为 local / remote / alias）
+                // 订阅 → 目标队列（DEST；可为 local / remote / alias）：同样是订阅转发关系（虚线）。
                 s.type == MqObjectType.SUBSCRIPTION ->
-                    link(s.name, s.subscriptionDest(), null)
+                    link(s.name, s.subscriptionDest(), EdgeStyle.DASHED)
                 // 本地队列 / 通道等：由对端（alias / remote / xmitq / 订阅）连回来
                 else -> {}
             }

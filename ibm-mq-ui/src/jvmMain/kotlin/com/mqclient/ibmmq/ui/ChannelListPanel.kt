@@ -171,7 +171,7 @@ fun ChannelListPanel(
                             onOpenProperties = { onOpenProperties(channel.name) },
                             onStart = { startChannel(channel.name) },
                             onStop = { requestStopChannel(channel.name, channel.channelStatus) },
-                        ),
+                        ) + topologyViewAction(connectionId, channel.name),
                         executingActionIds = executingIdsFor(channel.name),
                         executingTarget = executingActions[channel.name],
                     )
