@@ -1,14 +1,19 @@
 package com.mqclient.mqui.objectlist
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.TooltipArea
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,12 +33,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -41,6 +44,9 @@ import androidx.compose.ui.unit.sp
 import com.mqclient.uicommon.i18n.stringResource
 
 private const val HOVER_ANIM_MS = 150
+
+/** 卡片圆角与阴影共用同一形状；12dp 与「新建连接」卡片一致（大圆角阴影更柔）。 */
+private val CardShape = RoundedCornerShape(12.dp)
 
 /** 卡片内边距：水平 12dp；垂直 10dp（10 + 20 + 4 + 20 + 10 = 卡片定高 64dp）。 */
 private val CardPaddingHorizontal = 12.dp
@@ -54,7 +60,13 @@ private val CardPaddingVertical = 10.dp
  * 第 2 行：状态图标（可选）+ 状态文字（可选）+ 数值（可选）。
  *
  * 交互：单击 [onClick]、双击 [onDoubleClick]（整卡可点，操作按钮除外）；
- * 悬停背景 / 边框 150ms 过渡。
+ * 悬停阴影抬升 + 边框变色（与「新建连接」卡片一致）：默认 0dp、悬停 4dp、
+ * 按下 0dp，150ms 过渡。阴影用 [Modifier.shadow]（clip = false，避免被圆角裁掉），
+ * 背景固定 surface —— 由阴影做层次，不靠背景色变化。
+ *
+ * 点击/双击走 [detectTapGestures]（Surface onClick 不支持双击），因此按下状态
+ * 由单独的 pointerInput 手动 emit [PressInteraction] 到同一个 interactionSource，
+ * 与 hoverable 共用一套交互源。
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -66,32 +78,59 @@ fun ObjectCard(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isHovered by interactionSource.collectIsHoveredAsState()
-    val backgroundColor by animateColorAsState(
+    val isPressed by interactionSource.collectIsPressedAsState()
+
+    // 阴影抬升：与「新建连接」卡片完全一致 —— 默认 0dp、悬停 4dp、按下归零
+    //（阴影颜色用默认值，柔和感来自大圆角 + 适中的 elevation，不调 spotColor）。
+    val elevation by animateDpAsState(
         targetValue =
-            if (isHovered) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-            else MaterialTheme.colorScheme.surface,
+            when {
+                isPressed -> 0.dp
+                isHovered -> 4.dp
+                else -> 0.dp
+            },
         animationSpec = tween(HOVER_ANIM_MS),
-        label = "objectCardBackground",
+        label = "objectCardElevation",
     )
+    // 边框颜色：按下实色 primary、悬停半透明 primary、默认 outlineVariant。
     val borderColor by animateColorAsState(
         targetValue =
-            if (isHovered) MaterialTheme.colorScheme.outline
-            else MaterialTheme.colorScheme.outlineVariant,
+            when {
+                isPressed -> MaterialTheme.colorScheme.primary
+                isHovered -> MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                else -> MaterialTheme.colorScheme.outlineVariant
+            },
         animationSpec = tween(HOVER_ANIM_MS),
         label = "objectCardBorder",
     )
 
     Surface(
         modifier = modifier
+            // 阴影在 Surface 之外画：clip = false，否则阴影被圆角裁剪。
+            .shadow(elevation = elevation, shape = CardShape, clip = false)
             .hoverable(interactionSource)
+            // 按下状态：observe down/up 并 emit 到 interactionSource
+            //（detectTapGestures 不产生 PressInteraction）。
+            .pointerInput(interactionSource) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val press = PressInteraction.Press(down.position)
+                    interactionSource.tryEmit(press)
+                    // 所有指针抬起（或被取消，同样表现为 pressed=false）即按下结束。
+                    do {
+                        val event = awaitPointerEvent()
+                    } while (event.changes.any { it.pressed })
+                    interactionSource.tryEmit(PressInteraction.Release(press))
+                }
+            }
             .pointerInput(onClick, onDoubleClick) {
                 detectTapGestures(
                     onTap = { onClick() },
                     onDoubleTap = { onDoubleClick() },
                 )
             },
-        shape = RoundedCornerShape(8.dp),
-        color = backgroundColor,
+        shape = CardShape,
+        color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, borderColor),
     ) {
         Column(
