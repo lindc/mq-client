@@ -439,10 +439,12 @@ internal fun extractAttributes(response: PCFMessage): Map<String, Any?> {
     return result
 }
 
-/** PCF 值转可读形态：byte[]（字符串类参数的底层形态）解码去 NUL，数组拼串。 */
+/** PCF 值转可读形态：byte[]（字符串类参数的底层形态）解码后去 NUL 与**尾随空格**，
+ *  数组拼串。PCF 字符串按固定宽度补空格（如队列名 48 字符），不 trim 的话
+ *  "CUSTOMER.LOCAL.Q     " 这类值永远匹配不上按干净名字建的索引 —— 拓扑边曾因此全断。 */
 internal fun readableValue(value: Any?): Any? = when (value) {
     null -> null
-    is ByteArray -> value.decodeToString().trimEnd('\u0000')
+    is ByteArray -> value.decodeToString().trimEnd('\u0000').trimEnd()
     is Array<*> -> value.joinToString(", ") { readableValue(it)?.toString().orEmpty() }
     else -> value
 }

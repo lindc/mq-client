@@ -265,7 +265,7 @@ internal class IbmMQTopologyProvider(
         (attributes["MQIA_USAGE"] as? Int) ?: 0
 
     private fun MqObjectSnapshot.attrStr(key: String): String? =
-        attributes[key]?.toString()?.takeIf { it.isNotBlank() }
+        attributes[key]?.toString()?.trim()?.takeIf { it.isNotBlank() }
 
     /**
      * Alias 目标（TARGET）：MQ 9.3+/10 的 INQUIRE_Q 响应不带 TARGQ 参数，
