@@ -166,18 +166,8 @@ fun TopologyPanel(
             // 避免在非组合的 remember 闭包里调用 @Composable 的取色函数。
             val scheme = MaterialTheme.colorScheme
 
-            // TopologyGraph → kuiver 图模型。节点 id 就是对象名；尺寸给固定卡片尺寸，
-            // 布局按此排布，节点内容插槽里的 NodeCard 与之对齐。
-            val kuiverGraph = remember(g) {
-                buildKuiver {
-                    g.nodes.forEach { node ->
-                        addNode(KuiverNode(node.name, NodeDimensions(CARD_W.dp, CARD_H.dp)))
-                    }
-                    g.edges.forEach { edge ->
-                        addEdge(KuiverEdge(fromId = edge.from, toId = edge.to))
-                    }
-                }
-            }
+            // TopologyGraph → kuiver 图模型（映射逻辑抽成顶层函数便于单测）。
+            val kuiverGraph = remember(g) { g.toKuiver() }
 
             // viewer state 不按 g 重建（保留缩放 / 平移 / 手工拖拽位置），
             // 图数据变化经 updateKuiver 换图并按 policy 重排。
@@ -189,7 +179,13 @@ fun TopologyPanel(
                     nodeSpacing = V_GAP.dp,
                 ),
             )
-            LaunchedEffect(kuiverGraph) { viewerState.updateKuiver(kuiverGraph) }
+            // updateKuiver 只换图数据不触发布局（实测字节码），必须跟一次 relayout()
+            // 递增 layoutGeneration，让分层布局真正吃进新图（否则所有节点落在默认
+            // 单列位置、边不渲染）。
+            LaunchedEffect(kuiverGraph) {
+                viewerState.updateKuiver(kuiverGraph)
+                viewerState.relayout()
+            }
 
             // 边样式：按 from/to 查回原 TopologyEdge（虚线）与两端语义色（颜色）。
             // 注意 graph-core 也有个 EdgeStyle（DASHED 枚举），这里 import 别名区分。
@@ -388,6 +384,15 @@ private const val CARD_W = 180
 private const val CARD_H = 64
 private const val H_GAP = 80
 private const val V_GAP = 24
+
+/**
+ * [TopologyGraph] → kuiver 图模型：节点 id 就是对象名；尺寸给固定卡片尺寸
+ * （节点内容插槽里的 [NodeCard] 与之对齐），边按 from/to 直连。
+ */
+internal fun TopologyGraph.toKuiver(): Kuiver = buildKuiver {
+    nodes.forEach { node -> addNode(KuiverNode(node.name, NodeDimensions(CARD_W.dp, CARD_H.dp))) }
+    edges.forEach { edge -> addEdge(KuiverEdge(fromId = edge.from, toId = edge.to)) }
+}
 
 /** 节点强调色：语义 [NodeColor]（非 NORMAL）优先用主题色，否则用该类型的注册强调色。 */
 private fun nodeAccent(node: TopologyNode, style: TopologyStyle, scheme: androidx.compose.material3.ColorScheme): Color = when (node.color) {

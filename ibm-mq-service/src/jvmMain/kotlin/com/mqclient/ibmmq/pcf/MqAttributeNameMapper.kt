@@ -17,8 +17,12 @@ import java.util.concurrent.ConcurrentHashMap
  */
 object MqAttributeNameMapper {
 
-    /** PCF 参数 ID 的五族名字前缀（注意 MQCA_ 不带尾下划线会误吞 MQIACF_，全带）。 */
-    private val ID_PREFIXES = listOf("MQCACH_", "MQCACF_", "MQIACF_", "MQCA_", "MQIA_")
+    /**
+     * PCF 参数 ID 的六族名字前缀（注意 MQCA_ 不带尾下划线会误吞 MQIACF_，全带）。
+     * MQIACH_（通道整型选择器，如 MQIACH_CHANNEL_TYPE=1511）曾是漏网之鱼 —— 缺了它
+     * 所有通道整型属性都落成 `ATTR_<id>`，拓扑边提取等按可读键取值的逻辑全部落空。
+     */
+    private val ID_PREFIXES = listOf("MQCACH_", "MQCACF_", "MQIACF_", "MQIACH_", "MQCA_", "MQIA_")
 
     private val cache = ConcurrentHashMap<Int, String>()
 

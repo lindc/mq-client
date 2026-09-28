@@ -40,8 +40,12 @@ class IbmMQTopologyProviderTest {
         attributes = mapOf("MQIA_Q_TYPE" to qType, "MQIA_USAGE" to usage) + extra,
     )
 
-    private fun alias(name: String, target: String) =
-        queue(name, MQConstants.MQQT_ALIAS, extra = mapOf("MQCA_TARGET_Q_NAME" to target))
+    private fun alias(name: String, target: String, baseType: Int = MQConstants.MQOT_Q) =
+        queue(
+            name, MQConstants.MQQT_ALIAS,
+            // MQ 9.3+/10 的 INQUIRE_Q 响应不带 TARGQ，目标经 BASE_OBJECT_NAME 携带
+            extra = mapOf("MQCA_BASE_OBJECT_NAME" to target, "MQIA_BASE_TYPE" to baseType),
+        )
 
     private fun remote(name: String, xmitq: String, remoteQmgr: String? = null) =
         queue(
@@ -63,7 +67,8 @@ class IbmMQTopologyProviderTest {
         type = MqObjectType.CHANNEL,
         channelStatus = status,
         channelType = channelType,
-        attributes = mapOf("MQCA_XMIT_Q_NAME" to xmitq),
+        // 通道族属性用 MQCACH_ 前缀（XMITQ 实测键）
+        attributes = mapOf("MQCACH_XMIT_Q_NAME" to xmitq),
     )
 
     private fun listener(name: String, port: Int? = null) =
@@ -72,12 +77,20 @@ class IbmMQTopologyProviderTest {
     private fun topic(name: String) =
         MqObjectSnapshot(name = name, type = MqObjectType.TOPIC)
 
-    private fun subscription(name: String, topicName: String) =
-        MqObjectSnapshot(
-            name = name,
-            type = MqObjectType.SUBSCRIPTION,
-            attributes = mapOf("MQCA_TOPIC_NAME" to topicName),
-        )
+    private fun subscription(
+        name: String,
+        topicName: String?,
+        topicStr: String? = null,
+        dest: String? = null,
+    ) = MqObjectSnapshot(
+        name = name,
+        type = MqObjectType.SUBSCRIPTION,
+        attributes = buildMap {
+            topicName?.let { put("MQCA_TOPIC_NAME", it) }
+            topicStr?.let { put("MQCA_TOPIC_STRING", it) }
+            dest?.let { put("MQCACF_DESTINATION", it) }
+        },
+    )
 
     @Test
     fun `returns empty graph when not connected`() {
@@ -249,18 +262,78 @@ class IbmMQTopologyProviderTest {
     }
 
     @Test
-    fun `listener connects to its queue manager`() {
+    fun `excludes queue manager and listener nodes`() {
         val qmgr = MqObjectSnapshot(name = "QM1", type = MqObjectType.QUEUE_MANAGER)
         val provider = IbmMQTopologyProvider(
-            FakeSource(qmgr = qmgr, listeners = listOf(listener("LISTENER.1", port = 1414))),
+            FakeSource(
+                qmgr = qmgr,
+                queues = listOf(queue("APP.Q", MQConstants.MQQT_LOCAL)),
+                listeners = listOf(listener("LISTENER.1", port = 1414)),
+            ),
         )
-        val graph = runBlocking { provider.buildGraph("c1", "LISTENER.1", "listener", depth = 1) }
+        val graph = runBlocking { provider.buildGraph("c1", "", "", depth = 2) }
 
-        assertEquals(setOf("LISTENER.1", "QM1"), graph.nodes.map { it.name }.toSet())
-        val l = graph.nodes.single { it.name == "LISTENER.1" }
-        assertEquals("listener", l.type)
-        assertEquals(":1414", l.badge)
-        assertEquals("qmgr", graph.nodes.single { it.name == "QM1" }.type)
+        // QMGR / Listener 不进图（属性在对象面板单独看），只留业务队列
+        assertEquals(setOf("APP.Q"), graph.nodes.map { it.name }.toSet())
+        assertTrue(graph.nodes.none { it.type == "qmgr" || it.type == "listener" })
+        assertEquals(0, graph.edges.size)
+    }
+
+    @Test
+    fun `alias queue links to its topic target`() {
+        val provider = IbmMQTopologyProvider(
+            FakeSource(
+                queues = listOf(
+                    alias("ALIAS.PAY", "PAY.TOPIC", baseType = MQConstants.MQOT_TOPIC),
+                ),
+                topics = listOf(topic("PAY.TOPIC")),
+            ),
+        )
+        val graph = runBlocking { provider.buildGraph("c1", "", "", depth = 2) }
+
+        assertEquals(setOf("ALIAS.PAY", "PAY.TOPIC"), graph.nodes.map { it.name }.toSet())
+        assertEquals(1, graph.edges.size)
+        assertEquals(setOf("ALIAS.PAY", "PAY.TOPIC"), graph.edges.first().let { setOf(it.from, it.to) })
+    }
+
+    @Test
+    fun `subscription links to its destination queue`() {
+        val provider = IbmMQTopologyProvider(
+            FakeSource(
+                topics = listOf(topic("TOPIC.A")),
+                subscriptions = listOf(subscription("SUB.1", topicName = "TOPIC.A", dest = "ORDER.LOCAL.Q")),
+                queues = listOf(queue("ORDER.LOCAL.Q", MQConstants.MQQT_LOCAL, currentDepth = 2)),
+            ),
+        )
+        val graph = runBlocking { provider.buildGraph("c1", "", "", depth = 2) }
+
+        assertEquals(
+            setOf("TOPIC.A", "SUB.1", "ORDER.LOCAL.Q"),
+            graph.nodes.map { it.name }.toSet(),
+        )
+        assertEquals(2, graph.edges.size)
+        val pairs = graph.edges.map { setOf(it.from, it.to) }
+        assertTrue(pairs.contains(setOf("TOPIC.A", "SUB.1")))
+        assertTrue(pairs.contains(setOf("SUB.1", "ORDER.LOCAL.Q")))
+    }
+
+    @Test
+    fun `topic falls back to topic string match when subscription has no topic name`() {
+        val shippingTopic = MqObjectSnapshot(
+            name = "SHIPPING",
+            type = MqObjectType.TOPIC,
+            attributes = mapOf("MQCA_TOPIC_STRING" to "shipping"),
+        )
+        val provider = IbmMQTopologyProvider(
+            FakeSource(
+                topics = listOf(shippingTopic),
+                // 无 MQCA_TOPIC_NAME（省缺），只有 TOPICSTR；尾部 '/' 应被容忍
+                subscriptions = listOf(subscription("SUB.1", topicName = null, topicStr = "shipping/")),
+            ),
+        )
+        val graph = runBlocking { provider.buildGraph("c1", "", "", depth = 2) }
+
+        assertEquals(setOf("SHIPPING", "SUB.1"), graph.nodes.map { it.name }.toSet())
         assertEquals(1, graph.edges.size)
     }
 

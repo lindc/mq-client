@@ -27,17 +27,22 @@ import kotlinx.coroutines.Job
  * IBM MQ 的拓扑提供方：把本连接的 [MqObjectSnapshot] 缓存（对象慢扫产物）映射成通用
  * [TopologyGraph]。只读缓存、不碰 MQ；连接未建立或缓存为空时返回空图（拓扑是辅助视图）。
  *
- * 链路关系来自快照的 [MqObjectSnapshot.attributes]（原始 PCF 参数键）：
- *  - alias 队列 → 目标队列（MQCA_TARGET_Q_NAME）
- *  - remote 队列 → 传输队列（MQCA_XMIT_Q_NAME），再经它找 sender 通道（通道的 MQCA_XMIT_Q_NAME）
- *  - 监听器 → 本队列管理器
- *  - 主题 → 订阅（订阅的 MQCA_TOPIC_NAME 匹配）
+ * 链路关系来自快照的 [MqObjectSnapshot.attributes]（PCF 参数键，键名由
+ * [MqAttributeNameMapper] 反查；实测于 MQ 9.3+/10）：
+ *  - alias 队列 → 目标（本版本响应不带 TARGQ，目标在 MQCA_BASE_OBJECT_NAME 携带，
+ *    MQIA_BASE_TYPE 区分目标为队列(1)/主题；旧键 MQCA_TARGQ / MQCA_TARGET_Q_NAME 作回落）
+ *  - remote 队列 → 传输队列（MQCA_XMIT_Q_NAME），再反向找通道（通道的 XMITQ 键是
+ *    MQCACH_XMIT_Q_NAME —— 通道族用 MQCACH_ 前缀，不是 MQCA_）
+ *  - 主题 → 订阅（订阅自带 MQCA_TOPIC_NAME 指向主题对象；缺失时按 MQCA_TOPIC_STRING
+ *    与主题名/主题串做「去尾部 /」的宽松匹配）
+ *  - 订阅 → 目标队列（MQCACF_DESTINATION）
  *
  * 注意：alias/remote/xmitq 在 IBM MQ 里不是独立对象类型，而是 QUEUE + MQIA_Q_TYPE /
  * MQIA_USAGE，映射成我们的字符串 type（"alias_queue" / "remote_queue" / "xmitq" / "queue"）。
  *
- * 不纳入系统对象：名称以 `SYSTEM` / `AMQ` 开头的对象（系统队列、系统通道等）一律过滤，
- * 拓扑只展示用户业务对象之间的链路。
+ * 只画业务链路的 7 类对象：alias / local / remote / xmitq 队列、topic、subscription、
+ * channel。QMGR / Listener / Service / Process / Namelist 等不进图（属性在对象面板单独看）。
+ * 不纳入系统对象：名称以 `SYSTEM` / `AMQ` 开头的对象（系统队列、系统通道等）一律过滤。
  *
  * 数据就绪遵循「先连接 → 全面扫描 → 出图」：[refresh] 触发一次对象慢扫（未连接则 no-op，
  * 由连接后的定时扫描接管），[dataChanged] 在慢扫完成后发出对应 connectionId 通知 UI 重建。
@@ -104,50 +109,53 @@ internal class IbmMQTopologyProvider(
     ): TopologyGraph {
         if (!source.isConnected(connectionId)) return emptyGraph(connectionId)
 
-        val qmgr = source.queueManager(connectionId)
+        // 只画业务链路的 7 类对象；QMGR / Listener 不进图，MQQT_MODEL（模板队列）同样跳过。
         val all = buildList {
             addAll(source.snapshots(connectionId, MqObjectType.QUEUE).filterNotSystem())
             addAll(source.snapshots(connectionId, MqObjectType.CHANNEL).filterNotSystem())
-            addAll(source.snapshots(connectionId, MqObjectType.LISTENER).filterNotSystem())
             addAll(source.snapshots(connectionId, MqObjectType.TOPIC).filterNotSystem())
             addAll(source.snapshots(connectionId, MqObjectType.SUBSCRIPTION).filterNotSystem())
-            if (qmgr != null && !qmgr.name.isSystemObject()) add(qmgr)
-        }
+        }.filterNot { it.type == MqObjectType.QUEUE && it.queueType() == "MQQT_MODEL" }
         if (all.isEmpty()) return emptyGraph(connectionId)
         val byName = all.associateBy { it.name }
 
         // 无向邻接表：双向展开，自然覆盖「上游 + 下游各 depth 层」。
         val adj = mutableMapOf<String, MutableList<Pair<String, EdgeStyle?>>>()
         fun link(a: String, b: String?, style: EdgeStyle?) {
-            if (b == null || b !in byName) return
+            if (b == null || b == a || b !in byName) return
             adj.getOrPut(a) { mutableListOf() } += b to style
             adj.getOrPut(b) { mutableListOf() } += a to style
         }
 
-        val qmgrName = qmgr?.name
         for (s in all) {
             when {
+                // Alias → 目标（队列或主题；目标类型由 BASE_TYPE 区分，这里只按名字连线）
                 s.type == MqObjectType.QUEUE && s.queueType() == "MQQT_ALIAS" ->
-                    link(s.name, s.attrStr("MQCA_TARGET_Q_NAME"), null)
+                    link(s.name, s.aliasTarget(), null)
+                // Remote → 传输队列
                 s.type == MqObjectType.QUEUE && s.queueType() == "MQQT_REMOTE" ->
                     link(s.name, s.attrStr("MQCA_XMIT_Q_NAME"), EdgeStyle.DASHED)
+                // 传输队列没有指向通道的属性，反向查：通道的 XMITQ == 本传输队列名
                 s.type == MqObjectType.QUEUE &&
                     s.queueType() == "MQQT_LOCAL" && s.usage() == MQUS_TRANSMISSION ->
-                    // xmitq：找 sender 通道（通道的 MQCA_XMIT_Q_NAME 同名）
                     for (c in all) if (c.type == MqObjectType.CHANNEL &&
-                        c.attrStr("MQCA_XMIT_Q_NAME") == s.name
+                        c.channelXmitQ() == s.name
                     ) {
                         link(s.name, c.name, EdgeStyle.DASHED)
                     }
-                s.type == MqObjectType.LISTENER && qmgrName != null ->
-                    link(s.name, qmgrName, null)
+                // 主题 → 订阅：优先用订阅自带的所属主题对象名（MQCA_TOPIC_NAME）；
+                // 缺失时按主题串做宽松匹配（去掉尾部 '/' 后相等）。
                 s.type == MqObjectType.TOPIC ->
-                    for (sub in all) if (sub.type == MqObjectType.SUBSCRIPTION &&
-                        sub.attrStr("MQCA_TOPIC_NAME") == s.name
-                    ) {
-                        link(s.name, sub.name, null)
+                    for (sub in all) if (sub.type == MqObjectType.SUBSCRIPTION) {
+                        val byName_ = sub.attrStr("MQCA_TOPIC_NAME") == s.name
+                        val byStr = sub.attrStr("MQCA_TOPIC_NAME").isNullOrBlank() &&
+                            topicStringsMatch(sub.subscriptionTopicStr(), s.attrStr("MQCA_TOPIC_STRING") ?: s.name)
+                        if (byName_ || byStr) link(s.name, sub.name, null)
                     }
-                // 本地队列 / 通道等：由对端（alias / remote / xmitq / listener / 订阅）连回来
+                // 订阅 → 目标队列（DEST；可为 local / remote / alias）
+                s.type == MqObjectType.SUBSCRIPTION ->
+                    link(s.name, s.subscriptionDest(), null)
+                // 本地队列 / 通道等：由对端（alias / remote / xmitq / 订阅）连回来
                 else -> {}
             }
         }
@@ -258,6 +266,32 @@ internal class IbmMQTopologyProvider(
 
     private fun MqObjectSnapshot.attrStr(key: String): String? =
         attributes[key]?.toString()?.takeIf { it.isNotBlank() }
+
+    /**
+     * Alias 目标（TARGET）：MQ 9.3+/10 的 INQUIRE_Q 响应不带 TARGQ 参数，
+     * 目标经 MQCA_BASE_OBJECT_NAME 携带（MQIA_BASE_TYPE 区分队列/主题）；
+     * 旧版键名作回落。
+     */
+    private fun MqObjectSnapshot.aliasTarget(): String? =
+        attrStr("MQCA_BASE_OBJECT_NAME")
+            ?: attrStr("MQCA_TARGQ")
+            ?: attrStr("MQCA_TARGET_Q_NAME")
+
+    /** 通道的传输队列（XMITQ）：通道族属性用 MQCACH_ 前缀，不是 MQCA_。 */
+    private fun MqObjectSnapshot.channelXmitQ(): String? =
+        attrStr("MQCACH_XMIT_Q_NAME") ?: attrStr("MQCA_XMIT_Q_NAME")
+
+    /** 订阅的目标队列（DEST；可为 local / remote / alias）。 */
+    private fun MqObjectSnapshot.subscriptionDest(): String? = attrStr("MQCACF_DESTINATION")
+
+    /** 订阅的主题串（TOPICSTR）。 */
+    private fun MqObjectSnapshot.subscriptionTopicStr(): String? = attrStr("MQCA_TOPIC_STRING")
+
+    /** 主题串宽松匹配：完全相等，或去掉尾部 '/' 后相等（通配符语义的保守近似）。 */
+    private fun topicStringsMatch(a: String?, b: String?): Boolean {
+        if (a == null || b == null) return false
+        return a.trimEnd('/') == b.trimEnd('/')
+    }
 }
 
 /** MQUS_TRANSMISSION：传输队列用途（cmqc.h，值 = 1）。 */
