@@ -12,6 +12,8 @@ kotlin {
         commonMain.dependencies {
             implementation(projects.appCore)
             implementation(projects.graphCore)
+            // Kuiver — 有向图可视化（KuiverViewer）：布局/缩放/平移/拖拽由它承担。
+            implementation(libs.kuiver)
             implementation(libs.compose.runtime)
             implementation(libs.compose.foundation)
             implementation(compose.material3)
