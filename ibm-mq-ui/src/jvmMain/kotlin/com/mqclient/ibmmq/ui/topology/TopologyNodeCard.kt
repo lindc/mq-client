@@ -42,12 +42,9 @@ fun TopologyNodeCard(
             .width(CARD_WIDTH.dp)
             .height(CARD_HEIGHT.dp),
         shape = RoundedCornerShape(12.dp),
-        color = if (isSelected) {
-            // 选中：类型色打底（大面积色块，图里一眼可辨），描边同色加强。
-            accent.copy(alpha = 0.16f)
-        } else {
-            MaterialTheme.colorScheme.surface
-        },
+        // 底色恒为主题表面（不垫类型色块）：选中只用「描边 + 投影」表达，
+        // 避免描边外圈与内部填充块两层颜色不一致的割裂感。
+        color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(
             width = when {
                 isSelected -> 2.dp
