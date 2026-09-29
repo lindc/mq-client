@@ -59,23 +59,28 @@ fun QueueListPanel(
         // 「显示系统」开关在空结果下仍需可用），故此处恒返回 false。
         emptyCheck = { false },
         content = { queues ->
-            val filtered = queues
-                .filter { q -> q.name.contains(searchText, ignoreCase = true) }
-                .filter { q -> showSystem || !isSystemOrTempQueue(q.name) }
+            // 过滤 + 卡片数据构建较重（每张卡新建 action lambda，ObjectCardData 恒不等），
+            // remember 隔离：搜索敲键 / isRefreshing 翻转之外不重建，网格不跟随全量重组。
+            val filtered = remember(queues, searchText, showSystem, warningThreshold) {
+                queues
+                    .filter { q -> q.name.contains(searchText, ignoreCase = true) }
+                    .filter { q -> showSystem || !isSystemOrTempQueue(q.name) }
+                    .map { queue ->
+                        queue.toQueueCardData(
+                            warningThreshold = warningThreshold,
+                            // 拓扑查看在最前，属性按钮恒在最后（各对象类型尾按钮一致）。
+                            actions = listOf(topologyViewAction(connectionId, queue.name)) +
+                                QueueCardActions.create(
+                                    snapshot = queue,
+                                    onOpenProperties = { onOpenProperties(queue.name) },
+                                    onOpenMessages = { onOpenMessages(queue.name) },
+                                ),
+                        )
+                    }
+            }
 
             ObjectListPanel(
-                items = filtered.map { queue ->
-                    queue.toQueueCardData(
-                        warningThreshold = warningThreshold,
-                        // 拓扑查看在最前，属性按钮恒在最后（各对象类型尾按钮一致）。
-                        actions = listOf(topologyViewAction(connectionId, queue.name)) +
-                            QueueCardActions.create(
-                                snapshot = queue,
-                                onOpenProperties = { onOpenProperties(queue.name) },
-                                onOpenMessages = { onOpenMessages(queue.name) },
-                            ),
-                    )
-                },
+                items = filtered,
                 onCardClick = { card -> onOpenProperties(card.id) },
                 onCardDoubleClick = { card -> onOpenMessages(card.id) },
                 toolbarContent = {

@@ -129,5 +129,13 @@
   "listener_operation_timeout_error": "Command sent, but status did not change within the expected time (polling error: %s). Please refresh manually",
   "listener_start_success": "Listener %s started",
   "listener_stop_success": "Listener %s stopped",
-  "topology_view": "View in topology"
+  "topology_view": "View in topology",
+  "topology_loading": "Connecting and scanning…",
+  "topology_empty": "No topology data (no displayable business objects)",
+  "topology_detail_close": "Close",
+  "topology_action_rescan": "Rescan objects",
+  "topology_action_zoom_in": "Zoom in",
+  "topology_action_zoom_out": "Zoom out",
+  "topology_action_fit": "Fit to view",
+  "topology_action_reset": "Reset"
 }

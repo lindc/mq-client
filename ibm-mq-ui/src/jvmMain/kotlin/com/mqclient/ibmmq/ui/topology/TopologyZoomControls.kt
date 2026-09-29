@@ -21,6 +21,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import com.mqclient.uicommon.i18n.stringResource
 
 /**
  * 右上角控件：重新扫描（数据强制刷新）+ 放大 / 缩小 / 适应视图 / 重置。
@@ -44,11 +45,11 @@ internal fun TopologyZoomControls(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        ZoomButton(Icons.Filled.Sync, "重新扫描对象", onRescan)
-        ZoomButton(Icons.Filled.ZoomIn, "放大", onZoomIn)
-        ZoomButton(Icons.Filled.ZoomOut, "缩小", onZoomOut)
-        ZoomButton(Icons.Filled.FitScreen, "适应视图", onFitContent)
-        ZoomButton(Icons.Filled.Refresh, "重置", onReset)
+        ZoomButton(Icons.Filled.Sync, stringResource("topology_action_rescan"), onRescan)
+        ZoomButton(Icons.Filled.ZoomIn, stringResource("topology_action_zoom_in"), onZoomIn)
+        ZoomButton(Icons.Filled.ZoomOut, stringResource("topology_action_zoom_out"), onZoomOut)
+        ZoomButton(Icons.Filled.FitScreen, stringResource("topology_action_fit"), onFitContent)
+        ZoomButton(Icons.Filled.Refresh, stringResource("topology_action_reset"), onReset)
     }
 }
 

@@ -403,9 +403,13 @@ class AiPanelState internal constructor(
  * [AiPanelState] tied to the local coroutine scope. History is NOT loaded here —
  * each connection's chat log is read from chat_history once, right before the
  * first message is sent to it (see [AiPanelState.sendUserMessage]).
+ *
+ * [initialConfig] **必须由调用方显式传入**（宿主持有的启动配置）：默认参数不允许
+ * 走 `ConfigStore.loadConfig()` —— 那是同步读盘 + 解密，落在组合期会卡 UI 线程。
+ * 无参时回落零开销的 [AiConfig] 空配置（仅测试/预览用）。
  */
 @Composable
-fun rememberAiPanelState(initialConfig: AiConfig = ConfigStore.loadConfig().ai): AiPanelState {
+fun rememberAiPanelState(initialConfig: AiConfig = AiConfig()): AiPanelState {
     val scope = rememberCoroutineScope()
     // 刻意不给 remember 带 key：带上 initialConfig 会在每次保存设置时重建 state ——
     // 正在流式的回复被遗弃在旧对象上（新 state 的 streamingMessageId 为空，界面看上去

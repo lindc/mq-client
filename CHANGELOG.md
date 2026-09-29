@@ -2,6 +2,57 @@
 
 本文件记录 MQClient 的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [Unreleased] — 2026-09-29
+
+### Added
+
+- **IBM MQ 专属拓扑面板**（ibm-mq-ui `ui.topology` 新包）：固定列序布局
+  （alias→topic→sub→remote→xmitq→channel→远程QMGR→alias→local，alias 链按
+  深度展开）、并查集数据流泳道 + 重心法排序、kuiver `EdgeShape.CURVED`
+  贝塞尔曲线边（BACK 环橙色）、0.2x–2.0x 缩放 + 右上角控件（重新扫描 /
+  放大 / 缩小 / 适应 / 重置）、节点悬停与点击选中（图内描边高亮 + 底部详情卡）。
+- **REMOTE_QMGR 虚拟节点**：优先通道 RQMNAME；实测部分 MQ 的 INQUIRE_CHANNEL
+  对空 RQMNAME 不回该参数，此时经「共享 XMITQ 的 QREMOTE 的 RQMNAME」兜底
+  推导（真机探针实测结论）。仅画 SENDER/REQUESTER 通道。
+- **节点告警着色**：local queue 消息积压（CURDEPTH/MAXDEPTH ≥ 连接阈值，与
+  队列列表页同源）→ 警告橙；SENDER/REQUESTER 通道 STOPPED/RETRYING → 主题红。
+- **选中链路高亮**：上下游有向闭包内节点原样、边加粗提亮 + 虚线沿消息方向
+  流动动画（循环递增 gapLength 等价相位位移）；闭包外节点压暗、无关边近隐。
+- **拓扑面板 i18n**：`topology_*` 键进 zh-CN / en-US 模块表，消除硬编码中文。
+- **列表卡片「在拓扑图中查看」图标前置**：挪到操作位首位，属性按钮恒在最后。
+
+### Changed
+
+- **旧通用拓扑管线整体下线**：删除 topology-ui、graph-core 模块与
+  TopologyProvider SPI / IbmMQTopologyProvider / IbmMqTopologyStyle（附带删除
+  一个在部分环境会无限挂死的 provider 单测）；拓扑渲染由 MQ 专属面板承担，
+  TopologyFocusHolder 焦点机制保留。
+- **拓扑入口走真正的 Tab**：MainWindow 焦点处理器 `onSelect` + `openTab`
+  双调，侧栏选中 / Tab 条 / 内容区同步切换。
+- **拓扑数据缓存优先**：进入面板只读慢扫缓存出图，缓存为空才隐式连接 / 扫描
+  （CONNECTED 事件后补扫）；强制刷新走右上角「重新扫描」。
+
+### Fixed
+
+- **列表页丢扫描事件**：MqObjectListState 改为先订阅后加载，消除卡 Loading
+  的事件窗口。
+- **测试连接吞取消**：testConnection 的超时包装改为只转超时 / 普通异常，
+  协程取消原样上抛（shutdown 不再被当成「测试失败」）。
+- **SSL 全局属性串台**：测试连接改写 `javax.net.ssl.*` 前先快照旧值、finally
+  恢复，并以 Mutex 串行化并发测试。
+- **连接超时句柄泄漏**：connect 超时后兜底异步 disconnect 迟到的底层连接。
+- **拓扑焦点选中复活**：focus 应用一次即清空，窗口 resize 不再复活已取消的
+  选中；焦点消费移入副作用上下文。
+- **扫描失败状态竞态**：转 Failed 加 `status == Connected` 守卫，不踩并发
+  connect() 刚建立的新连接。
+- **系统订阅漏网**：QMGR 前缀的内部订阅（`QM1 SYSTEM.BROKER…`）按空白分词
+  过滤，`$` 开头的内部命名一并挡掉。
+- **组合期开销**：AiPanelState 默认参数不再同步读盘解密配置（调用方必须显式
+  传入）；流动动画仅选中时创建；队列列表过滤 / 建卡数据 remember 缓存。
+- **secret.key 逐字段读盘**：密钥首读后进程内缓存。
+- **IbmMQConfig 默认值收口**：ccsid / 连接超时 / 扫描间隔常量化，构造器与
+  fromOptions 同源。
+
 ## [Unreleased] — 2026-09-24
 
 ### Added

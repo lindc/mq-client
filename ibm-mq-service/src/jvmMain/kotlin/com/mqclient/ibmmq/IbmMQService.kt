@@ -313,9 +313,13 @@ class IbmMQService(private val context: ServiceContext) {
             )
             // 扫描失败即这条连接大概率已断：上下文与核心状态一起转 FAILED（UI 显示
             // 「连接失败」），定时任务下个轮次由状态守卫跳过，等用户重连。
-            ctx.lastError = message
-            ctx.status = ConnectionStatus.Failed
-            ConnectionStore.reportStatus(connectionId, ConnectionStatus.Failed, context.moduleId)
+            // 守卫 Connected：与 connect() 并发时（旧扫描刚失败、新连接刚建立），
+            // 不能把刚建好的连接踩成 Failed。
+            if (ctx.status == ConnectionStatus.Connected) {
+                ctx.lastError = message
+                ctx.status = ConnectionStatus.Failed
+                ConnectionStore.reportStatus(connectionId, ConnectionStatus.Failed, context.moduleId)
+            }
         }
     }
 
@@ -380,11 +384,14 @@ class IbmMQService(private val context: ServiceContext) {
                 payload = mapOf("connectionId" to connectionId, "message" to message),
             )
             // 与消息扫描同一条连接：失败一并转 FAILED（守卫让任务空转，等重连）。
+            // 同样守卫 Connected，避免踩掉并发 connect() 刚建立的新连接。
             IbmMQModule.connectionOrNull(connectionId)?.let { ctx ->
-                ctx.lastError = message
-                ctx.status = ConnectionStatus.Failed
+                if (ctx.status == ConnectionStatus.Connected) {
+                    ctx.lastError = message
+                    ctx.status = ConnectionStatus.Failed
+                    ConnectionStore.reportStatus(connectionId, ConnectionStatus.Failed, context.moduleId)
+                }
             }
-            ConnectionStore.reportStatus(connectionId, ConnectionStatus.Failed, context.moduleId)
         }
     }
 
@@ -549,6 +556,23 @@ class IbmMQService(private val context: ServiceContext) {
      * 证书走**显式构建的 SSLContext**（JSSE 系统属性在默认上下文被缓存后设置无效，
      * 会报 2393）。基准测试见 `jvmTest` 的 `IbmMQSslDiagTest`。
      */
+    /** 串行化 SSL 测试连接：JSSE 属性是 JVM 全局的，并发测试会互相覆盖（见下）。 */
+    private val sslTestMutex = Mutex()
+
+    /**
+     * JSSE 系统属性快照：进入 SSL 测试前保存旧值，finally 里恢复——否则测试连接的
+     * keystore / 密码会滞留全局属性（后续任何 TLS 代码都能读到），两个不同 SSL 连接
+     * 先后测试还会互相覆盖。属性列表与 [sslSystemProperties] 一一对应。
+     */
+    private val sslSystemProperties = listOf(
+        "javax.net.ssl.trustStore",
+        "javax.net.ssl.trustStorePassword",
+        "javax.net.ssl.trustStoreType",
+        "javax.net.ssl.keyStore",
+        "javax.net.ssl.keyStorePassword",
+        "javax.net.ssl.keyStoreType",
+    )
+
     suspend fun testConnection(config: IbmMQConfig): Unit = withContext(Dispatchers.IO) {
         // SSL 属性（keystore / truststore / cipher 映射）见下方 sslEnabled 分支；
         // 连接属性统一走 [mqProperties]，与正式连接共用同一份组装。
@@ -556,39 +580,63 @@ class IbmMQService(private val context: ServiceContext) {
 
         // SSL 只对 CLIENT 模式有意义（BINDING 是同机 JNI，没有 TLS 通道）。
         if (config.mode == ConnectionMode.CLIENT && config.sslEnabled) {
-            System.setProperty(USE_IBM_CIPHER_MAPPINGS, "false")
-            // MQ 基础 Java 客户端**自己从 JSSE 系统属性构建 SSLContext**（不用 JVM
-            // 默认上下文 —— setDefault 对它无效），所以属性必须设全，包括 Type。
-            // 基准测试 combo3（仅系统属性、属性先于首次 SSL 使用）验证这是生效路径。
-            config.trustStorePath.takeIf { it.isNotBlank() }
-                ?.let { System.setProperty("javax.net.ssl.trustStore", it) }
-            config.trustStorePassword.takeIf { it.isNotBlank() }
-                ?.let { System.setProperty("javax.net.ssl.trustStorePassword", it) }
-            config.trustStorePath.takeIf { it.isNotBlank() }
-                ?.let { System.setProperty("javax.net.ssl.trustStoreType", "PKCS12") }
-            config.keyStorePath.takeIf { it.isNotBlank() }
-                ?.let { System.setProperty("javax.net.ssl.keyStore", it) }
-            config.keyStorePassword.takeIf { it.isNotBlank() }
-                ?.let { System.setProperty("javax.net.ssl.keyStorePassword", it) }
-            config.keyStorePath.takeIf { it.isNotBlank() }
-                ?.let { System.setProperty("javax.net.ssl.keyStoreType", "PKCS12") }
-            configureSslContext(config)
-        }
-        ibmMqLog.info(
-            "test connection: host=${config.host}:${config.port}, channel=${config.channel}, " +
-                "cipher=${config.cipherSuite.ifBlank { "(auto)" }}, ssl=${config.sslEnabled}, " +
-                "mappings=${System.getProperty(USE_IBM_CIPHER_MAPPINGS)}",
-        )
-
-        // 构造即发起连接；失败在这里直接抛 MQException。
-        val manager = MQQueueManager(config.queueManager.trim(), properties)
-        try {
-            // 连上即视为可达；不做更深的访问（列表 / 收发归正式连接的扫描链路）。
-        } finally {
-            // 用完即关：测试连接绝不留在 [resources] 里 —— 它不属于任何 connectionId。
-            manager.disconnect()
+            // 系统属性是 JVM 全局的：串行 + finally 恢复，测试完不留痕。
+            sslTestMutex.withLock {
+                val previous = sslSystemProperties.associateWith { System.getProperty(it) }
+                try {
+                    applySslSystemProperties(config)
+                    doTestConnection(config, properties)
+                } finally {
+                    previous.forEach { (key, value) ->
+                        if (value == null) System.clearProperty(key) else System.setProperty(key, value)
+                    }
+                }
+            }
+        } else {
+            doTestConnection(config, properties)
         }
     }
+
+    /** 按 [IbmMQConfig] 写入 JSSE 系统属性（原 testConnection 的 SSL 属性段，逻辑不变）。 */
+    private fun applySslSystemProperties(config: IbmMQConfig) {
+        System.setProperty(USE_IBM_CIPHER_MAPPINGS, "false")
+        // MQ 基础 Java 客户端**自己从 JSSE 系统属性构建 SSLContext**（不用 JVM
+        // 默认上下文 —— setDefault 对它无效），所以属性必须设全，包括 Type。
+        // 基准测试 combo3（仅系统属性、属性先于首次 SSL 使用）验证这是生效路径。
+        config.trustStorePath.takeIf { it.isNotBlank() }
+            ?.let { System.setProperty("javax.net.ssl.trustStore", it) }
+        config.trustStorePassword.takeIf { it.isNotBlank() }
+            ?.let { System.setProperty("javax.net.ssl.trustStorePassword", it) }
+        config.trustStorePath.takeIf { it.isNotBlank() }
+            ?.let { System.setProperty("javax.net.ssl.trustStoreType", "PKCS12") }
+        config.keyStorePath.takeIf { it.isNotBlank() }
+            ?.let { System.setProperty("javax.net.ssl.keyStore", it) }
+        config.keyStorePassword.takeIf { it.isNotBlank() }
+            ?.let { System.setProperty("javax.net.ssl.keyStorePassword", it) }
+        config.keyStorePath.takeIf { it.isNotBlank() }
+            ?.let { System.setProperty("javax.net.ssl.keyStoreType", "PKCS12") }
+        configureSslContext(config)
+    }
+
+    private suspend fun doTestConnection(
+        config: IbmMQConfig,
+        properties: java.util.Hashtable<String, Any>,
+    ) = withContext(Dispatchers.IO) {
+            ibmMqLog.info(
+                "test connection: host=${config.host}:${config.port}, channel=${config.channel}, " +
+                    "cipher=${config.cipherSuite.ifBlank { "(auto)" }}, ssl=${config.sslEnabled}, " +
+                    "mappings=${System.getProperty(USE_IBM_CIPHER_MAPPINGS)}",
+            )
+
+            // 构造即发起连接；失败在这里直接抛 MQException。
+            val manager = MQQueueManager(config.queueManager.trim(), properties)
+            try {
+                // 连上即视为可达；不做更深的访问（列表 / 收发归正式连接的扫描链路）。
+            } finally {
+                // 用完即关：测试连接绝不留在 [resources] 里 —— 它不属于任何 connectionId。
+                manager.disconnect()
+            }
+        }
 
     /**
      * 用配置里的 p12 显式构建 SSLContext 并替换 JVM 默认上下文（双保险）。

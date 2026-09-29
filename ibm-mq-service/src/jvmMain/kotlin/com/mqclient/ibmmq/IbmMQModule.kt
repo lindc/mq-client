@@ -13,7 +13,9 @@ import com.mqclient.ibmmq.command.MqscExecutor
 import com.mqclient.ibmmq.command.MqscHistoryRepository
 import com.mqclient.ibmmq.command.MqscPcfSender
 import com.mqclient.ibmmq.event.IbmMQEvents
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -225,8 +227,17 @@ object IbmMQModule {
             return
         }
         val startedAt = System.currentTimeMillis()
-        val outcome = runCatching {
-            withTimeout(TEST_TIMEOUT_MS) { service.testConnection(config) }
+        // 超时 / 连接失败 → Result.failure（保持原 runCatching 的业务语义）；
+        // 真正的协程取消（模块 shutdown 等）必须原样上抛，否则取消语义被吞：
+        // emit/log 继续跑、外层结构化并发以为任务还在。
+        val outcome = try {
+            Result.success(withTimeout(TEST_TIMEOUT_MS) { service.testConnection(config) })
+        } catch (e: TimeoutCancellationException) {
+            Result.failure(e)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Result.failure(e)
         }
         moduleContext?.emit(
             name = IbmMQEvents.TEST_COMPLETED,

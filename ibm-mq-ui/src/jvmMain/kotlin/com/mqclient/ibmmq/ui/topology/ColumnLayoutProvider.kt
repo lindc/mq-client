@@ -14,8 +14,12 @@ import com.dk.kuiver.model.layout.LayoutProvider
  *
  * kuiver 的 LayoutProvider 只看得到通用节点（无 type 字段），而固定列序 / alias 链深度
  * 都需要类型语义。与 topology-ui 通用面板的 clusteredTypeLookup 同一思路：桌面单面板
- * 场景下用模块级暂存足够；[TopologyPanel] 在每次 `updateKuiver + relayout` 前写入，
- * 时序上布局读到的必是当前图。
+ * 场景下用模块级暂存足够。
+ *
+ * **线程/时序不变量**：写入（[TopologyPanel] 的 LaunchedEffect 里 `topologyNodeTypes = …`）
+ * 与消费（紧随的 `relayout()` → provider 同步执行）必须保持**主线程相邻语句、中间无挂起点**
+ * ——Main dispatcher 单线程下其他面板的布局不可能插进这个窗口，故不会串图。若未来把
+ * 布局挪到后台或拆散这两句，必须先把本表改为随图传递（如包进 LayoutConfig）。
  */
 internal var topologyNodeTypes: Map<String, TopologyNodeType> = emptyMap()
 

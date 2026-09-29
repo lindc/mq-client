@@ -107,11 +107,11 @@ fun rememberMqObjectListState(
     }
 
     LaunchedEffect(connectionId) {
-        loadInitial()
-
+        // **先订阅后加载**：loadInitial 会挂起（min loading 400ms + 可能的慢扫），若先加载后
+        // 订阅，落在窗口内的 OBJECTS_SCANNED 会被丢掉，页面可能长时间卡 Loading。
+        val bus = CoreModule.eventBus
         // 慢扫完成 → 重读缓存翻 Success：慢扫产物一定带类型，可安全落地（「加载中」或
         // 「已加载」时都接收，覆盖「连接未就绪 → 稍后真正扫描完成」的落地）。
-        val bus = CoreModule.eventBus
         bus.on(IbmMQEvents.OBJECTS_SCANNED, this) { event ->
             if ((event.payload["connectionId"] as? String) == connectionId) {
                 val latest =
@@ -138,6 +138,8 @@ fun rememberMqObjectListState(
                 }
             }
         }
+
+        loadInitial()
     }
 
     /** 刷新（保留旧数据）：置 isRefreshing，扫完由事件驱动重载；失败仅 snackbar 提示。 */

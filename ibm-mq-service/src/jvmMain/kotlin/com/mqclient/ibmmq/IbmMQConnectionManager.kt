@@ -12,7 +12,9 @@ import com.mqclient.ibmmq.event.IbmMQEvents
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -108,6 +110,10 @@ class IbmMQConnectionManager(
 
         setStatus(ctx, ConnectionStatus.Connecting)
         ctx.lastError = null
+        // 超时兜底：withTimeout 触发时 IO 线程上的阻塞构造**不会**被中断，它最终
+        // 完成后产生的 MQQueueManager 无人持有（withTimeout 立刻向调用方抛超时）。
+        // 这里记下句柄，超时后延迟 2×连接超时兜底关闭，避免连接挂到 TCP 层超时。
+        var timedOutManager: MQQueueManager? = null
         try {
             val manager = withContext(Dispatchers.IO) {
                 try {
@@ -117,8 +123,13 @@ class IbmMQConnectionManager(
                     // 分支（否则连接状态永远停在 Connecting）。
                     withTimeout(ctx.config.connectionTimeout * 1_000L) {
                         MQQueueManager(ctx.config.queueManager.trim(), mqProperties(ctx.config))
+                            .also { timedOutManager = it }
                     }
                 } catch (e: TimeoutCancellationException) {
+                    context.coroutineScope.launch(NonCancellable) {
+                        delay(ctx.config.connectionTimeout * 1_000L * 2)
+                        timedOutManager?.let { runCatching { it.disconnect() } }
+                    }
                     throw IllegalStateException(
                         "连接超时（${ctx.config.connectionTimeout}s）——检查主机 / 端口 / 网络",
                         e,

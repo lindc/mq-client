@@ -18,7 +18,7 @@ data class IbmMQConfig(
     val host: String = "",
     val port: Int = DEFAULT_PORT,
     val channel: String = DEFAULT_CHANNEL,
-    val ccsid: Int = 1208,
+    val ccsid: Int = DEFAULT_CCSID,
     val username: String = "",
     val password: String = "",
     val sslEnabled: Boolean = false,
@@ -28,17 +28,21 @@ data class IbmMQConfig(
     val keyStorePassword: String = "",
     val cipherSuite: String = "",
     val peerName: String = "",
-    val connectionTimeout: Int = 30,
+    val connectionTimeout: Int = DEFAULT_CONNECTION_TIMEOUT_SECONDS,
     /** 消息数量扫描间隔（秒），对应 5 秒心跳任务的节奏微调。 */
-    val messageScanIntervalSeconds: Int = 10,
+    val messageScanIntervalSeconds: Int = DEFAULT_MESSAGE_SCAN_INTERVAL_SECONDS,
     /** 对象列表（队列/主题/监听器）扫描间隔（分钟）。 */
-    val objectScanIntervalMinutes: Int = 60,
+    val objectScanIntervalMinutes: Int = DEFAULT_OBJECT_SCAN_INTERVAL_MINUTES,
     /** 队列深度告警阈值（百分比，50-100）：队列使用率超过它时界面显示告警。 */
     val queueDepthWarningThreshold: Int = 85,
 ) {
     companion object {
         const val DEFAULT_PORT = 1414
         const val DEFAULT_CHANNEL = "SYSTEM.DEF.SVRCONN"
+        const val DEFAULT_CCSID = 1208
+        const val DEFAULT_CONNECTION_TIMEOUT_SECONDS = 30
+        const val DEFAULT_MESSAGE_SCAN_INTERVAL_SECONDS = 10
+        const val DEFAULT_OBJECT_SCAN_INTERVAL_MINUTES = 60
         const val DEFAULT_QUEUE_DEPTH_WARNING_THRESHOLD = 85
     }
 }
@@ -103,7 +107,7 @@ fun ibmMQConfigFromOptions(options: Map<String, String>): IbmMQConfig {
         host = options[OptionKeys.HOST].orEmpty(),
         port = int(OptionKeys.PORT, IbmMQConfig.DEFAULT_PORT),
         channel = options[OptionKeys.CHANNEL] ?: IbmMQConfig.DEFAULT_CHANNEL,
-        ccsid = int(OptionKeys.CCSID, 1208),
+        ccsid = int(OptionKeys.CCSID, IbmMQConfig.DEFAULT_CCSID),
         username = options[OptionKeys.USERNAME].orEmpty(),
         password = options[OptionKeys.PASSWORD].orEmpty(),
         sslEnabled = options[OptionKeys.SSL_ENABLED]?.toBooleanStrictOrNull() ?: false,
@@ -113,9 +117,9 @@ fun ibmMQConfigFromOptions(options: Map<String, String>): IbmMQConfig {
         keyStorePassword = options[OptionKeys.KEY_STORE_PASSWORD].orEmpty(),
         cipherSuite = options[OptionKeys.CIPHER_SUITE].orEmpty(),
         peerName = options[OptionKeys.PEER_NAME].orEmpty(),
-        connectionTimeout = int(OptionKeys.CONNECTION_TIMEOUT, 30),
-        messageScanIntervalSeconds = int(OptionKeys.MESSAGE_SCAN_INTERVAL, 10),
-        objectScanIntervalMinutes = int(OptionKeys.OBJECT_SCAN_INTERVAL, 60),
+        connectionTimeout = int(OptionKeys.CONNECTION_TIMEOUT, IbmMQConfig.DEFAULT_CONNECTION_TIMEOUT_SECONDS),
+        messageScanIntervalSeconds = int(OptionKeys.MESSAGE_SCAN_INTERVAL, IbmMQConfig.DEFAULT_MESSAGE_SCAN_INTERVAL_SECONDS),
+        objectScanIntervalMinutes = int(OptionKeys.OBJECT_SCAN_INTERVAL, IbmMQConfig.DEFAULT_OBJECT_SCAN_INTERVAL_MINUTES),
         queueDepthWarningThreshold =
             int(OptionKeys.QUEUE_DEPTH_WARNING_THRESHOLD, IbmMQConfig.DEFAULT_QUEUE_DEPTH_WARNING_THRESHOLD),
     )

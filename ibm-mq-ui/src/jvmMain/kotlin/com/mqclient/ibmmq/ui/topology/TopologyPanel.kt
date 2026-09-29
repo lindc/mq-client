@@ -45,6 +45,7 @@ import com.mqclient.ibmmq.IbmMQConfig
 import com.mqclient.ibmmq.IbmMQModule
 import com.mqclient.ibmmq.event.IbmMQEvents
 import com.mqclient.ibmmq.ibmMQConfigFromOptions
+import com.mqclient.uicommon.i18n.stringResource
 import kotlinx.coroutines.launch
 
 /**
@@ -71,17 +72,18 @@ fun TopologyPanel(
     modifier: Modifier = Modifier,
 ) {
     // 队列深度告警阈值（%）：与队列列表页同源（连接配置 queueDepthWarningThreshold，默认 85）。
-    val warningThreshold = remember(connectionId) {
-        ConnectionStore.connections.value.firstOrNull { it.id == connectionId }
-            ?.let { ibmMQConfigFromOptions(it.options).queueDepthWarningThreshold }
-            ?: IbmMQConfig.DEFAULT_QUEUE_DEPTH_WARNING_THRESHOLD
-    }
+    // 响应式读取：组合期直接读 StateFlow.value，编辑连接阈值后面板自动刷新。
+    val warningThreshold = ConnectionStore.connections.value
+        .firstOrNull { it.id == connectionId }
+        ?.let { ibmMQConfigFromOptions(it.options).queueDepthWarningThreshold }
+        ?: IbmMQConfig.DEFAULT_QUEUE_DEPTH_WARNING_THRESHOLD
 
     var data by remember(connectionId) { mutableStateOf<MqTopologyData?>(null) }
     // 至少完成过一轮慢扫：区分「还在连 / 扫」与「扫完了但确实没有业务对象」。
     var scannedOnce by remember(connectionId) { mutableStateOf(false) }
-    // 列表页带入的焦点对象名（consume 一次，防重复应用）。
-    val focusName = remember(connectionId) { TopologyFocusHolder.consume(connectionId)?.rootName }
+    // 列表页带入的焦点对象名：在 LaunchedEffect（副作用上下文）里 consume——
+    // 放在 remember 计算块的话，组合被丢弃/重试时焦点会被消费掉却没应用到图上。
+    var focusName by remember(connectionId) { mutableStateOf<String?>(null) }
 
     /** 从慢扫缓存重建；**空图不落地**——保持加载态或保留旧图（刷新保留旧数据的语义）。 */
     fun rebuild() {
@@ -99,6 +101,8 @@ fun TopologyPanel(
 
     // 订阅先于动作（防丢事件）；on(scope = this) 随 LaunchedEffect 离开自动取消。
     LaunchedEffect(connectionId) {
+        // 消费焦点也放进副作用上下文（与数据流同处，时序上早于 rebuild 即可）。
+        focusName = TopologyFocusHolder.consume(connectionId)?.rootName
         val bus = CoreModule.eventBusOrNull
         bus?.on(IbmMQEvents.OBJECTS_SCANNED, scope = this) { event ->
             if (event.payload["connectionId"] as? String == connectionId) {
@@ -131,7 +135,7 @@ fun TopologyPanel(
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 CircularProgressIndicator()
                 Text(
-                    text = "正在连接并扫描……",
+                    text = stringResource("topology_loading"),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 12.dp),
@@ -143,7 +147,7 @@ fun TopologyPanel(
     if (current == null) {
         Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(
-                text = "暂无拓扑数据（该连接下没有可展示的业务对象）",
+                text = stringResource("topology_empty"),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -153,6 +157,7 @@ fun TopologyPanel(
     MqTopologyCanvas(
         data = current,
         focusName = focusName,
+        onFocusApplied = { focusName = null },
         onRescan = ::rescan,
         modifier = modifier,
     )
@@ -167,6 +172,7 @@ fun TopologyPanel(
 private fun MqTopologyCanvas(
     data: MqTopologyData,
     focusName: String?,
+    onFocusApplied: () -> Unit,
     onRescan: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -225,13 +231,18 @@ private fun MqTopologyCanvas(
     // 高亮边的流动动画：kuiver 的 dashPathEffect 相位写死为 0（虚线锚在路径起点），
     // 但**循环递增 gapLength 会把后续虚线段整体向终点推移**——位移满一个周期
     // （dash+gap=20dp）后图案无缝归零，观感即"虚线沿消息方向持续流动"。
-    // 线性匀速 + Restart 无缝循环；仅在选中（highlight != null）时被边样式读取。
-    val flowGap by rememberInfiniteTransition(label = "edgeFlow").animateFloat(
-        initialValue = FLOW_DASH,
-        targetValue = FLOW_DASH * 3,
-        animationSpec = infiniteRepeatable(tween(FLOW_PERIOD_MS, easing = LinearEasing)),
-        label = "flowGap",
-    )
+    // 线性匀速 + Restart 无缝循环。**仅在有选中（highlight != null）时创建**——
+    // 无条件常驻会让整个面板空跑每帧动画，白耗 CPU。
+    val flowGap = if (highlight != null) {
+        rememberInfiniteTransition(label = "edgeFlow").animateFloat(
+            initialValue = FLOW_DASH,
+            targetValue = FLOW_DASH * 3,
+            animationSpec = infiniteRepeatable(tween(FLOW_PERIOD_MS, easing = LinearEasing)),
+            label = "flowGap",
+        ).value
+    } else {
+        FLOW_DASH
+    }
 
     // 布局落定且画布已测量后执行一次「适应视图」；手动缩放 / 拖拽不置位 pendingFit。
     // 焦点对象（列表页「在拓扑图中查看」）在首次出图后选中：图内高亮 + 底部详情卡。
@@ -247,6 +258,7 @@ private fun MqTopologyCanvas(
                 viewerState.layoutedKuiver.nodes.containsKey(focusName)
             ) {
                 select(focusName)
+                onFocusApplied() // 应用一次即清空：防尺寸变化时复活旧选中
             }
         }
     }
@@ -390,7 +402,7 @@ private fun NodeDetailCard(
             IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
                 Icon(
                     imageVector = Icons.Filled.Close,
-                    contentDescription = "关闭",
+                    contentDescription = stringResource("topology_detail_close"),
                     modifier = Modifier.size(16.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

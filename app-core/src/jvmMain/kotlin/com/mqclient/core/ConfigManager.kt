@@ -161,15 +161,23 @@ object ConfigManager {
      * 「不存在就生成」和「读回来」必须在同一个临界区里：拆开的话两个线程会各生成
      * 一把密钥、后写的胜出，而先写那把已经用它加密过的内容 —— 那些内容从此再也解
      * 不开（配置永久损坏，只能删掉 config.toml 重来）。
+     *
+     * 生成/首读后**缓存内存**：一次 save 里每个敏感字段都会走一遍这里，逐字段读盘
+     * 纯属浪费。代价是密钥文件被外部替换后进程内不感知 —— 密钥本就是一次性的，
+     * 运行中换文件属于损坏场景（重启即恢复一致）。
      */
+    @Volatile
+    private var cachedSecretKey: ByteArray? = null
+
     fun ensureSecretKey(): ByteArray = synchronized(LOCK) {
+        cachedSecretKey?.let { return it }
         val path = secretKeyFile()
         if (!fs.exists(path)) {
             val key = EncryptionService.generateKeyBytes()
             writeFileAtomically(path, Base64.getEncoder().encodeToString(key))
             restrictPermissions(path)
         }
-        Base64.getDecoder().decode(fs.read(path) { readUtf8() }.trim())
+        Base64.getDecoder().decode(fs.read(path) { readUtf8() }.trim()).also { cachedSecretKey = it }
     }
 
     /* -------------------------------- loading ------------------------------ */

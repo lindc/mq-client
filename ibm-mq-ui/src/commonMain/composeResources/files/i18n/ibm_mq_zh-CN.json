@@ -129,5 +129,13 @@
   "listener_operation_timeout_error": "操作已发送，但状态未在预期时间内变更（轮询出错：%s），请手动刷新",
   "listener_start_success": "监听器 %s 已启动",
   "listener_stop_success": "监听器 %s 已停止",
-  "topology_view": "在拓扑图中查看"
+  "topology_view": "在拓扑图中查看",
+  "topology_loading": "正在连接并扫描……",
+  "topology_empty": "暂无拓扑数据（该连接下没有可展示的业务对象）",
+  "topology_detail_close": "关闭",
+  "topology_action_rescan": "重新扫描对象",
+  "topology_action_zoom_in": "放大",
+  "topology_action_zoom_out": "缩小",
+  "topology_action_fit": "适应视图",
+  "topology_action_reset": "重置"
 }
