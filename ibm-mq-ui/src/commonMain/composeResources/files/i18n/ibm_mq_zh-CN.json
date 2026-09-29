@@ -138,5 +138,17 @@
   "topology_action_zoom_out": "缩小",
   "topology_action_fit": "适应视图",
   "topology_action_reset": "重置",
-  "channel_type_unknown_raw": "原始值 %1$s"
+  "channel_type_unknown_raw": "原始值 %1$s",
+  "object_type_queue": "队列",
+  "object_type_topic": "主题",
+  "object_type_subscription": "订阅",
+  "object_type_channel": "通道",
+  "object_type_listener": "监听器",
+  "object_type_service": "服务",
+  "object_type_process": "进程定义",
+  "object_type_namelist": "名称列表",
+  "object_type_auth_info": "认证信息",
+  "object_type_comm_info": "通信信息",
+  "properties_placeholder_title": "%1$s 属性",
+  "properties_placeholder_message": "属性内容正在开发中…"
 }

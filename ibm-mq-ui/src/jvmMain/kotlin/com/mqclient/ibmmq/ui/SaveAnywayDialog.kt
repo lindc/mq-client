@@ -11,6 +11,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.i18n.stringResource
 
 /**
@@ -41,10 +42,15 @@ internal fun SaveAnywayDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onSave) { Text(stringResource("common_save")) }
+            // PressableButton：与设置/连接弹窗同一按钮体系（保存=primary 默认款）。
+            PressableButton(onClick = onSave) { Text(stringResource("common_save")) }
         },
         dismissButton = {
-            TextButton(onClick = onCancel) { Text(stringResource("common_cancel")) }
+            PressableButton(
+                onClick = onCancel,
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            ) { Text(stringResource("common_cancel")) }
         },
     )
 }

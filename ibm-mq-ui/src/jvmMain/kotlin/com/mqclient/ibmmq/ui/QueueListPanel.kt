@@ -11,6 +11,8 @@ import com.mqclient.core.ConnectionStore
 import com.mqclient.ibmmq.IbmMQConfig
 import com.mqclient.ibmmq.ibmMQConfigFromOptions
 import com.mqclient.ibmmq.pcf.MqObjectType
+import com.mqclient.ibmmq.ui.properties.MqObjectPropertiesDialog
+import com.mqclient.ibmmq.ui.properties.ObjectPropertiesDialogState
 import com.mqclient.mqui.objectlist.ObjectListPanel
 import com.mqclient.mqui.state.LoadStateContent
 import com.mqclient.uicommon.i18n.stringResource
@@ -43,6 +45,12 @@ fun QueueListPanel(
             ?: IbmMQConfig.DEFAULT_QUEUE_DEPTH_WARNING_THRESHOLD
     }
 
+    // 对象属性对话框（双击卡片打开；关闭即清空状态）。
+    var propertiesDialog by remember(connectionId) { mutableStateOf<ObjectPropertiesDialogState?>(null) }
+    propertiesDialog?.let { dialogState ->
+        MqObjectPropertiesDialog(state = dialogState, onDismiss = { propertiesDialog = null })
+    }
+
     val state = rememberMqObjectListState(
         connectionId = connectionId,
         objectType = MqObjectType.QUEUE,
@@ -72,7 +80,13 @@ fun QueueListPanel(
                             actions = listOf(topologyViewAction(connectionId, queue.name)) +
                                 QueueCardActions.create(
                                     snapshot = queue,
-                                    onOpenProperties = { onOpenProperties(queue.name) },
+                                    onOpenProperties = {
+                                propertiesDialog = ObjectPropertiesDialogState(
+                                    connectionId = connectionId,
+                                    objectType = MqObjectType.QUEUE,
+                                    objectName = queue.name,
+                                )
+                            },
                                     onOpenMessages = { onOpenMessages(queue.name) },
                                 ),
                         )
@@ -82,7 +96,13 @@ fun QueueListPanel(
             ObjectListPanel(
                 items = filtered,
                 onCardClick = { card -> onOpenProperties(card.id) },
-                onCardDoubleClick = { card -> onOpenMessages(card.id) },
+                onCardDoubleClick = { card ->
+                    propertiesDialog = ObjectPropertiesDialogState(
+                        connectionId = connectionId,
+                        objectType = MqObjectType.QUEUE,
+                        objectName = card.id,
+                    )
+                },
                 toolbarContent = {
                     ObjectListToolbar(
                         searchText = searchText,

@@ -138,5 +138,17 @@
   "topology_action_zoom_out": "Zoom out",
   "topology_action_fit": "Fit to view",
   "topology_action_reset": "Reset",
-  "channel_type_unknown_raw": "raw value %1$s"
+  "channel_type_unknown_raw": "raw value %1$s",
+  "object_type_queue": "Queue",
+  "object_type_topic": "Topic",
+  "object_type_subscription": "Subscription",
+  "object_type_channel": "Channel",
+  "object_type_listener": "Listener",
+  "object_type_service": "Service",
+  "object_type_process": "Process definition",
+  "object_type_namelist": "Namelist",
+  "object_type_auth_info": "Authentication info",
+  "object_type_comm_info": "Communication info",
+  "properties_placeholder_title": "%1$s Properties",
+  "properties_placeholder_message": "Properties content is under development…"
 }

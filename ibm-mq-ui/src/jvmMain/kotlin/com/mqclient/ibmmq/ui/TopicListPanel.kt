@@ -8,6 +8,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import com.mqclient.ibmmq.pcf.MqObjectType
+import com.mqclient.ibmmq.ui.properties.MqObjectPropertiesDialog
+import com.mqclient.ibmmq.ui.properties.ObjectPropertiesDialogState
 import com.mqclient.mqui.objectlist.ObjectListPanel
 import com.mqclient.mqui.state.LoadStateContent
 import com.mqclient.uicommon.i18n.stringResource
@@ -26,6 +28,12 @@ fun TopicListPanel(
 ) {
     var searchText by remember { mutableStateOf("") }
     var showSystem by remember { mutableStateOf(false) }
+    // 对象属性对话框（双击卡片打开；关闭即清空状态）。
+    var propertiesDialog by remember(connectionId) { mutableStateOf<ObjectPropertiesDialogState?>(null) }
+    propertiesDialog?.let { dialogState ->
+        MqObjectPropertiesDialog(state = dialogState, onDismiss = { propertiesDialog = null })
+    }
+
     val state = rememberMqObjectListState(
         connectionId = connectionId,
         objectType = MqObjectType.TOPIC,
@@ -51,12 +59,24 @@ fun TopicListPanel(
                         actions = listOf(topologyViewAction(connectionId, topic.name)) +
                             TopicCardActions.create(
                                 snapshot = topic,
-                                onOpenProperties = { onOpenProperties(topic.name) },
+                                onOpenProperties = {
+                                propertiesDialog = ObjectPropertiesDialogState(
+                                    connectionId = connectionId,
+                                    objectType = MqObjectType.TOPIC,
+                                    objectName = topic.name,
+                                )
+                            },
                             ),
                     )
                 },
                 onCardClick = { card -> onOpenProperties(card.id) },
-                onCardDoubleClick = { card -> onOpenProperties(card.id) },
+                onCardDoubleClick = { card ->
+                    propertiesDialog = ObjectPropertiesDialogState(
+                        connectionId = connectionId,
+                        objectType = MqObjectType.TOPIC,
+                        objectName = card.id,
+                    )
+                },
                 toolbarContent = {
                     ObjectListToolbar(
                         searchText = searchText,

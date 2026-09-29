@@ -44,6 +44,9 @@ import com.mqclient.core.topology.TopologyFocusHolder
 import com.mqclient.ibmmq.IbmMQConfig
 import com.mqclient.ibmmq.IbmMQModule
 import com.mqclient.ibmmq.event.IbmMQEvents
+import com.mqclient.ibmmq.ui.properties.MqObjectPropertiesDialog
+import com.mqclient.ibmmq.ui.properties.ObjectPropertiesDialogState
+import com.mqclient.ibmmq.ui.properties.toMqObjectType
 import com.mqclient.ibmmq.ibmMQConfigFromOptions
 import com.mqclient.uicommon.i18n.stringResource
 import kotlinx.coroutines.launch
@@ -155,6 +158,7 @@ fun TopologyPanel(
         return
     }
     MqTopologyCanvas(
+        connectionId = connectionId,
         data = current,
         focusName = focusName,
         onFocusApplied = { focusName = null },
@@ -170,6 +174,7 @@ fun TopologyPanel(
  */
 @Composable
 private fun MqTopologyCanvas(
+    connectionId: String,
     data: MqTopologyData,
     focusName: String?,
     onFocusApplied: () -> Unit,
@@ -178,6 +183,11 @@ private fun MqTopologyCanvas(
 ) {
     val (kuiver, nodeTypes, severities) = data
     val scheme = MaterialTheme.colorScheme
+
+    // 对象属性对话框：**双击节点**打开（kuiver 0.4.2 无 onNodeDoubleClick，用
+    // 「400ms 内同节点两击」手动检测）；rqmgr: 前缀虚拟节点无真实对象，跳过。
+    var propertiesDialog by remember { mutableStateOf<ObjectPropertiesDialogState?>(null) }
+    var lastNodeClick by remember { mutableStateOf<Pair<String, Long>?>(null) }
 
     val viewerState = rememberKuiverViewerState(
         initialKuiver = Kuiver(),
@@ -282,8 +292,30 @@ private fun MqTopologyCanvas(
             ),
             callbacks = remember {
                 KuiverInteractionCallbacks(
-                    onNodeClick = { node -> select(node.id) },
-                    onCanvasClick = { select(null) },
+                    onNodeClick = { node ->
+                        val now = System.currentTimeMillis()
+                        val last = lastNodeClick
+                        if (last != null && last.first == node.id && now - last.second < DOUBLE_CLICK_WINDOW_MS) {
+                            // 双击：打开对象属性对话框（rqmgr: 虚拟节点无真实对象，跳过）
+                            lastNodeClick = null
+                            if (!node.id.startsWith(REMOTE_QMGR_PREFIX)) {
+                                nodeTypes[node.id]?.toMqObjectType()?.let { type ->
+                                    propertiesDialog = ObjectPropertiesDialogState(
+                                        connectionId = connectionId,
+                                        objectType = type,
+                                        objectName = node.id,
+                                    )
+                                }
+                            }
+                        } else {
+                            lastNodeClick = node.id to now
+                        }
+                        select(node.id)
+                    },
+                    onCanvasClick = {
+                        lastNodeClick = null
+                        select(null)
+                    },
                 )
             },
             nodeContent = { node ->
@@ -336,6 +368,13 @@ private fun MqTopologyCanvas(
                 .align(Alignment.TopEnd)
                 .padding(12.dp),
         )
+
+        propertiesDialog?.let { dialogState ->
+            MqObjectPropertiesDialog(
+                state = dialogState,
+                onDismiss = { propertiesDialog = null },
+            )
+        }
 
         selectedId?.let { id ->
             val type = nodeTypes[id] ?: return@let
@@ -413,6 +452,9 @@ private fun NodeDetailCard(
 
 /** 环（BACK 边）的固定语义色：橙色（需求指定，异常信号不随主题翻转）。 */
 private val CYCLE_EDGE_COLOR = Color(0xFFFF9800)
+
+/** 节点双击判定窗口（kuiver 0.4.2 无 onNodeDoubleClick 回调）。 */
+private const val DOUBLE_CLICK_WINDOW_MS = 400
 
 /** 选中链路高亮集：闭包节点 id + 闭包内边（fromId to id）。 */
 private data class Highlight(val nodes: Set<String>, val edges: Set<Pair<String, String>>)

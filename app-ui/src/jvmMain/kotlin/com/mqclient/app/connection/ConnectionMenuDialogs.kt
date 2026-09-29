@@ -2,12 +2,16 @@ package com.mqclient.app.connection
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -17,9 +21,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.rememberDialogState
+import dev.nucleusframework.window.windowDragArea
 import com.mqclient.core.ConnectionInfo
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.CoreModule
@@ -215,9 +224,39 @@ internal fun ConnectionPropertiesDialog(connection: ConnectionInfo, onDismiss: (
         state = rememberDialogState(size = DpSize(560.dp, 640.dp)),
         title = stringResource("qmgr_properties_title").format(connection.name),
         resizable = true,
+        // ESC 关闭（对话框无系统标题栏，键盘出口得自己接——同 SettingsDialog）。
+        onPreviewKeyEvent = { event ->
+            if (event.type == KeyEventType.KeyUp && event.key == Key.Escape) {
+                onDismiss()
+                true
+            } else {
+                false
+            }
+        },
     ) {
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
             Column(modifier = Modifier.fillMaxSize()) {
+                // 自绘标题栏（同 EditConnectionDialog）：标题文字 + ✕，整条是窗口拖拽区。
+                Row(
+                    modifier =
+                        Modifier
+                            .windowDragArea()
+                            .fillMaxWidth()
+                            .padding(start = 20.dp, end = 12.dp, top = 16.dp, bottom = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = stringResource("qmgr_properties_title").format(connection.name),
+                        style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.weight(1f),
+                    )
+                    PressableButton(
+                        onClick = onDismiss,
+                        standardMinWidth = false,
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    ) { Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                }
                 HorizontalDivider()
                 Column(modifier = Modifier.fillMaxSize().weight(1f)) {
                     if (propertiesUi != null) {
