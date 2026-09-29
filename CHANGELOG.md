@@ -27,9 +27,11 @@
   流动动画（循环递增 gapLength 等价相位位移）；闭包外节点压暗、无关边近隐。
 - **拓扑面板 i18n**：`topology_*` 键进 zh-CN / en-US 模块表，消除硬编码中文。
 - **列表卡片「在拓扑图中查看」图标前置**：挪到操作位首位，属性按钮恒在最后。
-
-### Changed
-
+- **属性对话框「常规」分组新增「访问进程」**：扫描加一条 `INQUIRE_Q_STATUS`
+  `StatusType=MQIACF_Q_HANDLE`（句柄状态，每打开句柄一条响应），取
+  `MQIACF_PROCESS_ID` 按队列名聚合成 PID 列表（合成键
+  `MQIACF_OPEN_PROCESS_IDS`）塞进快照；无人打开 → 快照无此键，该行自动隐藏。
+  真机验证：AMQ.* 队列拿到 `openPids=[110, 130]`。
 - **旧通用拓扑管线整体下线**：删除 topology-ui、graph-core 模块与
   TopologyProvider SPI / IbmMQTopologyProvider / IbmMqTopologyStyle（附带删除
   一个在部分环境会无限挂死的 provider 单测）；拓扑渲染由 MQ 专属面板承担，

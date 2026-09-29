@@ -97,13 +97,26 @@ class PcfObjectScanner {
         val statuses = inquire(agent, MQConstants.MQCMD_INQUIRE_Q_STATUS) {
             addParameter(MQConstants.MQCA_Q_NAME, "*")
         }.associateBy { it.stringValue(MQConstants.MQCA_Q_NAME) }
+        // 谁打开了这个队列：句柄状态（StatusType=MQIACF_Q_HANDLE）每个打开句柄一条
+        // 响应，取进程号（MQIACF_PROCESS_ID）按队列名聚合；无人打开 → 无该键，
+        // 属性对话框的「访问进程」行自动隐藏。
+        val openProcessIds = inquire(agent, MQConstants.MQCMD_INQUIRE_Q_STATUS) {
+            addParameter(MQConstants.MQCA_Q_NAME, "*")
+            addParameter(MQConstants.MQIACF_Q_STATUS_TYPE, MQConstants.MQIACF_Q_HANDLE)
+        }.mapNotNull { handle ->
+            val name = handle.stringValue(MQConstants.MQCA_Q_NAME) ?: return@mapNotNull null
+            val pid = handle.intValue(MQConstants.MQIACF_PROCESS_ID) ?: return@mapNotNull null
+            name to pid
+        }.groupBy({ it.first }, { it.second })
 
         return attributes.mapNotNull { response ->
             val name = response.stringValue(MQConstants.MQCA_Q_NAME)
             val status = statuses[name]
             val extended = extendedAttrs[name]?.let { extractAttributes(it) } ?: emptyMap()
             response.toQueueSnapshot(status).let { snapshot ->
-                if (extended.isEmpty()) snapshot else snapshot.copy(attributes = snapshot.attributes + extended)
+                val extras = extended +
+                    listOfNotNull(openProcessIds[name]?.let { "MQIACF_OPEN_PROCESS_IDS" to it })
+                if (extras.isEmpty()) snapshot else snapshot.copy(attributes = snapshot.attributes + extras)
             }
         }
     }

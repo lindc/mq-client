@@ -92,7 +92,8 @@ class PcfObjectScannerLiveTest {
                 queues.take(5).forEach { q ->
                     println(
                         "LIVE queue: ${q.name} depth=${q.currentDepth}/${q.maxDepth} " +
-                            "consumers=${q.consumerCount} type=${q.attributes["MQIA_Q_TYPE"]}",
+                            "consumers=${q.consumerCount} type=${q.attributes["MQIA_Q_TYPE"]} " +
+                            "openPids=${q.attributes["MQIACF_OPEN_PROCESS_IDS"]}",
                     )
                 }
                 channels.take(5).forEach { c ->

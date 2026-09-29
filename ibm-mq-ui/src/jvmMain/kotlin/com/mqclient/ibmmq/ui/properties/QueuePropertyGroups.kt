@@ -146,6 +146,15 @@ internal val queuePropertyGroups: List<QueuePropertyGroup> = listOf(
                 keys = listOf("MQCA_XMIT_Q_NAME"),
                 valuePrefix = null,
             ),
+            // 快照级动态字段（非 MQ 对象属性）：句柄状态聚合的打开进程号列表，
+            // 无人打开时快照无此键 → 该行自动隐藏。
+            QueuePropertyField(
+                nameKey = "queue_prop_name_open_processes",
+                descKey = "queue_prop_desc_open_processes",
+                labelEn = "Accessing processes",
+                keys = listOf("MQIACF_OPEN_PROCESS_IDS"),
+                valuePrefix = null,
+            ),
         ),
     ),
     QueuePropertyGroup(
