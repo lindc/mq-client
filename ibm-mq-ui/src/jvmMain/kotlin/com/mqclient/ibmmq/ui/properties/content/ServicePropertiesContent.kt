@@ -1,17 +1,42 @@
 package com.mqclient.ibmmq.ui.properties.content
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import com.mqclient.ibmmq.IbmMQModule
+import com.mqclient.ibmmq.pcf.MqObjectType
 import com.mqclient.ibmmq.ui.properties.ObjectPropertiesDialogState
-import com.mqclient.ibmmq.ui.properties.PropertiesPlaceholder
+import com.mqclient.ibmmq.ui.properties.resolveServicePropertyGroups
 import com.mqclient.uicommon.i18n.stringResource
 
 /**
- * 服务属性内容（占位）。TODO 实装：STARTCMD / STARTARG 等服务属性。
+ * 服务属性内容：数据取只读慢扫缓存，分组解析见 [resolveServicePropertyGroups]，
+ * 布局走共用的 [PropertyGroupsPane]。
  */
 @Composable
 fun ServicePropertiesContent(state: ObjectPropertiesDialogState) {
-    PropertiesPlaceholder(
-        objectName = state.objectName,
-        objectType = stringResource("object_type_service"),
-    )
+    val snapshot = remember(state.connectionId, state.objectName) {
+        IbmMQModule.serviceOrNull()
+            ?.cachedObjects(state.connectionId, MqObjectType.SERVICE)
+            ?.firstOrNull { it.name == state.objectName }
+    }
+
+    if (snapshot == null) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(
+                text = stringResource("properties_placeholder_message"),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        return
+    }
+
+    val groups = remember(snapshot) { resolveServicePropertyGroups(snapshot) }
+    PropertyGroupsPane(groups = groups, defaultSelectionKey = "service_props_group_general")
 }

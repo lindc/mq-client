@@ -312,4 +312,115 @@ class QueueAliasExtendedGroupTest {
             "MQCA_ALTERATION_TIME" to "12:39:02",
         ),
     )
+
+    @Test
+    fun `six object types resolve like mq explorer`() {
+        val zh = attrsTable("zh-CN")
+        fun valueOf(groups: List<Pair<ObjectPropertyGroup, List<ResolvedObjectProperty>>>, labelEn: String): String? {
+            val r = groups.flatMap { it.second }.firstOrNull { it.labelEn == labelEn } ?: return null
+            return listOfNotNull(r.valueKey, r.valueFallbackKey)
+                .map { k -> k to (zh[k] ?: k) }
+                .firstOrNull { (k, v) -> v != k }?.second
+                ?: r.rawValue
+        }
+
+        // 通道（真机 DEV.ADMIN.SVRCONN 形状，含 *_FIRST 别名键）。
+        val channel = resolveChannelPropertyGroups(
+            MqObjectSnapshot(
+                name = "DEV.ADMIN.SVRCONN",
+                type = MqObjectType.CHANNEL,
+                attributes = mapOf(
+                    "MQCACH_FIRST" to "DEV.ADMIN.SVRCONN",
+                    "MQIACH_CHANNEL_TYPE" to 7, // MQCHT_SVRCONN
+                    "MQIACH_FIRST" to 2, // MQXPT_TCP
+                    "MQIACH_CHANNEL_STATUS" to 3, // MQCHS_RUNNING
+                    "MQIACH_SSL_CLIENT_AUTH" to 0, // MQSCA_REQUIRED
+                    "MQIA_MONITORING_CHANNEL" to 0, // MQMON_OFF
+                    "MQIACH_CHANNEL_INSTANCE_TYPE" to 1011, // MQOT_CURRENT_CHANNEL
+                    "MQCA_ALTERATION_DATE" to "2026-09-24",
+                ),
+            ),
+        )
+        assertEquals("服务器连接", valueOf(channel, "Channel type"))
+        assertEquals("TCP", valueOf(channel, "Transmission protocol"))
+        assertEquals("正在运行", valueOf(channel, "Channel status"))
+        assertEquals("必需", valueOf(channel, "SSL client authentication"))
+        assertEquals("关闭", valueOf(channel, "Monitoring"))
+        assertEquals("当前通道", valueOf(channel, "Channel instance type"))
+        assertEquals("DEV.ADMIN.SVRCONN", valueOf(channel, "Channel name"))
+
+        // 进程（真机 ORDER.PROCESS 形状）。
+        val process = resolveProcessPropertyGroups(
+            MqObjectSnapshot(
+                name = "ORDER.PROCESS",
+                type = MqObjectType.PROCESS,
+                attributes = mapOf(
+                    "MQCA_PROCESS_NAME" to "ORDER.PROCESS",
+                    "MQIA_APPL_TYPE" to 6, // MQAT_UNIX
+                    "MQCA_APPL_ID" to "/opt/mqm/samp/bin/amqsget",
+                ),
+            ),
+        )
+        assertEquals("Unix", valueOf(process, "Application type"))
+
+        // 名称列表。
+        val namelist = resolveNamelistPropertyGroups(
+            MqObjectSnapshot(
+                name = "NL.BUSINESS",
+                type = MqObjectType.NAMELIST,
+                attributes = mapOf(
+                    "MQCA_NAMELIST_NAME" to "NL.BUSINESS",
+                    "MQIA_NAME_COUNT" to 10,
+                    "MQCA_NAMES" to "ORDER.LOCAL.Q, PAYMENT.LOCAL.Q",
+                ),
+            ),
+        )
+        assertEquals("10", valueOf(namelist, "Name count"))
+
+        // 认证信息（类型 1 = CRL LDAP；LDAP 口令不显示）。
+        val authInfo = resolveAuthInfoPropertyGroups(
+            MqObjectSnapshot(
+                name = "SYSTEM.DEFAULT.AUTHINFO.CRLLDAP",
+                type = MqObjectType.AUTH_INFO,
+                attributes = mapOf(
+                    "MQCA_AUTH_INFO_NAME" to "SYSTEM.DEFAULT.AUTHINFO.CRLLDAP",
+                    "MQIA_AUTH_INFO_TYPE" to 1, // MQAIT_CRL_LDAP
+                    "MQCA_LDAP_PASSWORD" to "secret",
+                ),
+            ),
+        )
+        assertEquals("CRL LDAP", valueOf(authInfo, "Authentication information type"))
+        // LDAP 口令属敏感信息，不进任何行。
+        assertFalse(authInfo.flatMap { it.second }.any { it.rawValue == "secret" })
+
+        // 通信信息（类型 1 = 多点广播；属性控件 -1 = 全部）。
+        val commInfo = resolveCommInfoPropertyGroups(
+            MqObjectSnapshot(
+                name = "SYSTEM.DEFAULT.COMMINFO.MULTICAST",
+                type = MqObjectType.COMM_INFO,
+                attributes = mapOf(
+                    "MQCA_COMM_INFO_NAME" to "SYSTEM.DEFAULT.COMMINFO.MULTICAST",
+                    "MQIA_COMM_INFO_TYPE" to 1, // MQCIT_MULTICAST
+                    "MQIACH_MULTICAST_PROPERTIES" to -1, // MQMCP_ALL
+                ),
+            ),
+        )
+        assertEquals("多点广播", valueOf(commInfo, "Communication information type"))
+        assertEquals("全部", valueOf(commInfo, "Multicast properties control"))
+
+        // 服务（类型 1 = 服务器；控制 0 = 队列管理器）。
+        val service = resolveServicePropertyGroups(
+            MqObjectSnapshot(
+                name = "SYSTEM.AMQP.SERVICE",
+                type = MqObjectType.SERVICE,
+                attributes = mapOf(
+                    "MQCA_SERVICE_NAME" to "SYSTEM.AMQP.SERVICE",
+                    "MQIA_SERVICE_TYPE" to 1, // MQSVC_TYPE_SERVER
+                    "MQIA_SERVICE_CONTROL" to 0, // MQSVC_CONTROL_Q_MGR
+                ),
+            ),
+        )
+        assertEquals("服务器", valueOf(service, "Service type"))
+        assertEquals("队列管理器", valueOf(service, "Service control"))
+    }
 }

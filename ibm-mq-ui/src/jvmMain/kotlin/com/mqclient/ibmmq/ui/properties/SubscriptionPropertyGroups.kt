@@ -208,66 +208,13 @@ private val SUB_BINARY_KEYS = setOf(
 
 /**
  * 订阅快照 →（分组字段表内命中 + 「全部属性」兜底）的展示行。
- * 结构与 [resolveQueuePropertyGroups] 一致；枚举归属不用 DM 表（queue 模型对
- * 订阅键会误判），一律 valuePrefix / valueConstMap 反查。
  */
 internal fun resolveSubscriptionPropertyGroups(
     snapshot: MqObjectSnapshot,
-): List<Pair<ObjectPropertyGroup, List<ResolvedObjectProperty>>> {
-    val attrs = snapshot.attributes
-    val usedKeys = mutableSetOf<String>()
-
-    fun resolve(field: ObjectPropertyField): ResolvedObjectProperty? {
-        val key = field.keys.firstOrNull { it in attrs }
-        if (key == null) {
-            if (!field.showIfMissing) return null
-            return ResolvedObjectProperty(
-                nameKey = field.nameKey,
-                descKey = field.descKey,
-                labelEn = field.labelEn,
-                valueKey = "queue_value_none",
-                valueFallbackKey = null,
-                rawValue = " ",
-                rawConstName = null,
-            )
-        }
-        usedKeys += key
-        val raw = attrs[key]
-        val rawText = raw?.toString()?.trim() ?: ""
-        val constName = if (raw is Int) {
-            field.valueConstMap[raw]
-                ?: field.valuePrefix?.let { MqAttributeNameMapper.lookupName(raw, it) }
-        } else {
-            null
-        }
-        return ResolvedObjectProperty(
-            nameKey = field.nameKey,
-            descKey = field.descKey,
-            labelEn = field.labelEn,
-            valueKey = constName?.let(::curatedValueKey),
-            valueFallbackKey = constName?.let { "$it.title" },
-            rawValue = rawText.ifBlank { " " },
-            rawConstName = constName,
-        )
-    }
-
-    val grouped = subscriptionPropertyGroups.map { group ->
-        group to group.fields.mapNotNull(::resolve)
-    }.filter { (_, rows) -> rows.isNotEmpty() }
-
-    // 「全部属性」兜底：字节 ID 类参数展示为乱码，过滤不丢内容意义上的数据
-    // （SubId 等本就是内部标识）；名字直接查 `MQXXX.title` i18n 键，枚举不猜。
-    val other = attrs.filterKeys { it !in usedKeys && it !in SUB_BINARY_KEYS }
-        .map { (k, v) ->
-            ResolvedObjectProperty(
-                nameKey = "$k.title",
-                descKey = "",
-                labelEn = k,
-                valueKey = null,
-                valueFallbackKey = null,
-                rawValue = v?.toString()?.trim()?.ifBlank { " " } ?: "",
-                rawConstName = null,
-            )
-        }
-    return if (other.isEmpty()) grouped else grouped + (ObjectPropertyGroup("sub_props_group_all", emptyList()) to other)
-}
+): List<Pair<ObjectPropertyGroup, List<ResolvedObjectProperty>>> =
+    resolveGroupedObjectProperties(
+        snapshot = snapshot,
+        groups = subscriptionPropertyGroups,
+        allGroupTitleKey = "sub_props_group_all",
+        hiddenLeftoverKeys = SUB_BINARY_KEYS,
+    )

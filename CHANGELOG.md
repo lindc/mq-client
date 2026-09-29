@@ -61,6 +61,21 @@
   `MQSUB_DURABLE` 族内 YES=ALLOWED=1 同值碰撞，Durable 用 valueConstMap 精确
   映射；到期 -1 = MQEXPIRY_NOLIMIT 走 valueConstMap + 手补 title（无限制 /
   Unlimited）。字节 ID 类参数不进「全部属性」兜底（展示即乱码）。
+- **其余 6 类对象属性对话框全部实装**（channel / process / namelist /
+  auth info / comm info / service，对照各自 properties 的 General 页）：
+  ChannelPropertyGroups（57 字段，定义 + 运行状态两大块）与
+  MiscObjectPropertyGroups（process 8 / namelist 6 / authinfo 7 / comminfo 16 /
+  service 12 字段）均走新抽的通用解析 `resolveGroupedObjectProperties`
+  （listener / topic / subscription 同步切换，消除 5 份重复 resolve）。
+  坑位：通道名（1501 字符串空间）与传输协议（1501 整型空间）Java 客户端分别
+  反查成别名键 `MQCACH_FIRST` / `MQIACH_FIRST`（正名 MQCACH_CHANNEL_NAME /
+  MQIACH_XMIT_PROTOCOL_TYPE 列在候选键首位）；`MQSCA_REQUIRED=0`、
+  `MQOT_CURRENT_CHANNEL=1011`、`MQMCP_ALL=-1`、`MQMON_OFF=0` 均反射核实；
+  `MQAT_AIX=MQAT_UNIX=6` 同值碰撞用 valueConstMap 消歧；auth info 的
+  LDAP 口令属敏感信息，与订阅字节 ID 一样不进任何行。中英 i18n 各 224 键。
+  离线回归：6 类真机快照形状（DEV.ADMIN.SVRCONN / ORDER.PROCESS /
+  NL.BUSINESS / SYSTEM.DEFAULT.AUTHINFO.CRLLDAP / SYSTEM.DEFAULT.COMMINFO /
+  SYSTEM.AMQP.SERVICE）断言枚举显示与敏感信息过滤。
 - **旧通用拓扑管线整体下线**：删除 topology-ui、graph-core 模块与
   TopologyProvider SPI / IbmMQTopologyProvider / IbmMqTopologyStyle（附带删除
   一个在部分环境会无限挂死的 provider 单测）；拓扑渲染由 MQ 专属面板承担，

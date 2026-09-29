@@ -114,67 +114,12 @@ internal val listenerPropertyGroups: List<ObjectPropertyGroup> = listOf(
 
 /**
  * 监听器快照 →（分组字段表内命中 + 「全部属性」兜底）的展示行。
- * 结构与 [resolveQueuePropertyGroups] 一致，无队列类型过滤（监听器没有分类型页面）。
  */
 internal fun resolveListenerPropertyGroups(
     snapshot: MqObjectSnapshot,
-): List<Pair<ObjectPropertyGroup, List<ResolvedObjectProperty>>> {
-    val attrs = snapshot.attributes
-    val usedKeys = mutableSetOf<String>()
-
-    fun resolve(field: ObjectPropertyField): ResolvedObjectProperty? {
-        val key = field.keys.firstOrNull { it in attrs }
-        if (key == null) {
-            if (!field.showIfMissing) return null
-            return ResolvedObjectProperty(
-                nameKey = field.nameKey,
-                descKey = field.descKey,
-                labelEn = field.labelEn,
-                valueKey = "queue_value_none",
-                valueFallbackKey = null,
-                rawValue = " ",
-                rawConstName = null,
-            )
-        }
-        usedKeys += key
-        val raw = attrs[key]
-        val rawText = raw?.toString()?.trim() ?: ""
-        // 注意不走 MqAttributeDisplay.constNameFor：DM 归属表按 Queue 模型生成，
-        // 对 listener 键会误判（实测 MQIACH_LISTENER_CONTROL=0 被归属成「命令」）。
-        val constName = if (raw is Int) {
-            field.valueConstMap[raw]
-                ?: field.valuePrefix?.let { MqAttributeNameMapper.lookupName(raw, it) }
-        } else {
-            null
-        }
-        return ResolvedObjectProperty(
-            nameKey = field.nameKey,
-            descKey = field.descKey,
-            labelEn = field.labelEn,
-            valueKey = constName?.let(::curatedValueKey),
-            valueFallbackKey = constName?.let { "$it.title" },
-            rawValue = rawText.ifBlank { " " },
-            rawConstName = constName,
-        )
-    }
-
-    val grouped = listenerPropertyGroups.map { group ->
-        group to group.fields.mapNotNull(::resolve)
-    }.filter { (_, rows) -> rows.isNotEmpty() }
-
-    // 「全部属性」兜底：名字直接查 `MQXXX.title` i18n 键（枚举归属同样不用
-    // DM 表——queue 模型对 listener 键会误判，回落原始值，不猜）。
-    val other = attrs.filterKeys { it !in usedKeys }
-        .map { (k, v) ->
-            ResolvedObjectProperty(
-                nameKey = "$k.title",
-                descKey = "",
-                labelEn = k,
-                valueKey = null,
-                valueFallbackKey = null,
-                rawValue = v?.toString()?.trim()?.ifBlank { " " } ?: "",
-                rawConstName = null,
-            )
-        }
-    return if (other.isEmpty()) grouped else grouped + (ObjectPropertyGroup("listener_props_group_all", emptyList()) to other)
-}
+): List<Pair<ObjectPropertyGroup, List<ResolvedObjectProperty>>> =
+    resolveGroupedObjectProperties(
+        snapshot = snapshot,
+        groups = listenerPropertyGroups,
+        allGroupTitleKey = "listener_props_group_all",
+    )

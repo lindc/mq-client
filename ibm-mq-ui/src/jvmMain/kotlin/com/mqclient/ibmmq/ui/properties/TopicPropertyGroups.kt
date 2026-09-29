@@ -211,66 +211,12 @@ internal val topicPropertyGroups: List<ObjectPropertyGroup> = listOf(
 
 /**
  * 主题快照 →（分组字段表内命中 + 「全部属性」兜底）的展示行。
- * 结构与 [resolveQueuePropertyGroups] 一致；枚举归属不用 DM 表（queue 模型对
- * topic 键会误判），一律 valuePrefix 前缀 / 精确常量反查。
  */
 internal fun resolveTopicPropertyGroups(
     snapshot: MqObjectSnapshot,
-): List<Pair<ObjectPropertyGroup, List<ResolvedObjectProperty>>> {
-    val attrs = snapshot.attributes
-    val usedKeys = mutableSetOf<String>()
-
-    fun resolve(field: ObjectPropertyField): ResolvedObjectProperty? {
-        val key = field.keys.firstOrNull { it in attrs }
-        if (key == null) {
-            if (!field.showIfMissing) return null
-            return ResolvedObjectProperty(
-                nameKey = field.nameKey,
-                descKey = field.descKey,
-                labelEn = field.labelEn,
-                valueKey = "queue_value_none",
-                valueFallbackKey = null,
-                rawValue = " ",
-                rawConstName = null,
-            )
-        }
-        usedKeys += key
-        val raw = attrs[key]
-        val rawText = raw?.toString()?.trim() ?: ""
-        val constName = if (raw is Int) {
-            field.valueConstMap[raw]
-                ?: field.valuePrefix?.let { MqAttributeNameMapper.lookupName(raw, it) }
-        } else {
-            null
-        }
-        return ResolvedObjectProperty(
-            nameKey = field.nameKey,
-            descKey = field.descKey,
-            labelEn = field.labelEn,
-            valueKey = constName?.let(::curatedValueKey),
-            valueFallbackKey = constName?.let { "$it.title" },
-            rawValue = rawText.ifBlank { " " },
-            rawConstName = constName,
-        )
-    }
-
-    val grouped = topicPropertyGroups.map { group ->
-        group to group.fields.mapNotNull(::resolve)
-    }.filter { (_, rows) -> rows.isNotEmpty() }
-
-    // 「全部属性」兜底：名字直接查 `MQXXX.title` i18n 键（枚举归属不用 DM 表，
-    // 回落原始值，不猜）。
-    val other = attrs.filterKeys { it !in usedKeys }
-        .map { (k, v) ->
-            ResolvedObjectProperty(
-                nameKey = "$k.title",
-                descKey = "",
-                labelEn = k,
-                valueKey = null,
-                valueFallbackKey = null,
-                rawValue = v?.toString()?.trim()?.ifBlank { " " } ?: "",
-                rawConstName = null,
-            )
-        }
-    return if (other.isEmpty()) grouped else grouped + (ObjectPropertyGroup("topic_props_group_all", emptyList()) to other)
-}
+): List<Pair<ObjectPropertyGroup, List<ResolvedObjectProperty>>> =
+    resolveGroupedObjectProperties(
+        snapshot = snapshot,
+        groups = topicPropertyGroups,
+        allGroupTitleKey = "topic_props_group_all",
+    )
