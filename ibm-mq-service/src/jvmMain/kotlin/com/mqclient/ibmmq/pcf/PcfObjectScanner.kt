@@ -79,23 +79,32 @@ class PcfObjectScanner {
         withAgent(connectionId) { scanQueuesWith(it) }
 
     internal suspend fun scanQueuesWith(agent: PCFMessageAgent): List<MqObjectSnapshot> {
+        // 不带 MQIACF_Q_ATTRS 才是全量应答；一旦带上，QMGR 只回点名的 attr，
+        // 整个属性窗口会塌缩成几行（对齐 MQ Explorer 的行为）。
         val attributes = inquire(agent, MQConstants.MQCMD_INQUIRE_Q) {
             addParameter(MQConstants.MQCA_Q_NAME, "*")
             addParameter(MQConstants.MQIA_Q_TYPE, MQConstants.MQQT_ALL)
-            // QMGR 对 alias / remote 的默认应答不含这两个 attr（属性对话框 Extended
-            // 页要用，MQ Explorer 也是显式请求的），MQIACF_Q_ATTRS 点名补齐。
+        }
+        // alias / remote 的默认应答不含这两个 attr（属性对话框 Extended 页要用，
+        // MQ Explorer 也是点名请求的）——单独一条点名查询，按队列名并进快照。
+        val extendedAttrs = inquire(agent, MQConstants.MQCMD_INQUIRE_Q) {
+            addParameter(MQConstants.MQCA_Q_NAME, "*")
             addParameter(
                 MQConstants.MQIACF_Q_ATTRS,
                 intArrayOf(MQConstants.MQIA_DEF_READ_AHEAD, MQConstants.MQIA_DEF_PUT_RESPONSE_TYPE),
             )
-        }
+        }.associateBy { it.stringValue(MQConstants.MQCA_Q_NAME) }
         val statuses = inquire(agent, MQConstants.MQCMD_INQUIRE_Q_STATUS) {
             addParameter(MQConstants.MQCA_Q_NAME, "*")
         }.associateBy { it.stringValue(MQConstants.MQCA_Q_NAME) }
 
         return attributes.mapNotNull { response ->
-            val status = statuses[response.stringValue(MQConstants.MQCA_Q_NAME)]
-            response.toQueueSnapshot(status)
+            val name = response.stringValue(MQConstants.MQCA_Q_NAME)
+            val status = statuses[name]
+            val extended = extendedAttrs[name]?.let { extractAttributes(it) } ?: emptyMap()
+            response.toQueueSnapshot(status).let { snapshot ->
+                if (extended.isEmpty()) snapshot else snapshot.copy(attributes = snapshot.attributes + extended)
+            }
         }
     }
 

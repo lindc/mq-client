@@ -109,6 +109,15 @@ class PcfObjectScannerLiveTest {
                 assertTrue(qmgr != null && qmgr.name.isNotBlank(), "QMGR 属性查询失败：见上方 LIVE FAIL 行")
                 assertTrue(queues.isNotEmpty(), "队列列表为空——检查通道 / 权限 / 通配符")
                 assertTrue(queues.all { it.name.isNotBlank() }, "存在无名队列快照")
+                // 回归守卫：INQUIRE_Q 一旦误带 MQIACF_Q_ATTRS，QMGR 只回点名 attr，
+                // 快照会塌缩成几行——本地队列必须仍有全量属性（MAX_Q_DEPTH 等）。
+                queues.filter { it.attributes["MQIA_Q_TYPE"] == MQConstants.MQQT_LOCAL }
+                    .forEach { q ->
+                        assertTrue(
+                            q.attributes.containsKey("MQIA_MAX_Q_DEPTH"),
+                            "${q.name} 快照只剩 ${q.attributes.size} 个 attr——INQUIRE_Q 误带 MQIACF_Q_ATTRS？",
+                        )
+                    }
             } finally {
                 runCatching { agent.disconnect() }
             }

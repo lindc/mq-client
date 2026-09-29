@@ -41,6 +41,11 @@
 
 ### Fixed
 
+- **队列属性窗口塌缩成几行**：INQUIRE_Q 一旦带 `MQIACF_Q_ATTRS`，QMGR 只回
+  点名的 attr（省略才是全量应答）——上一条修复把点名参数混进了全量扫描，
+  快照只剩 4 个 attr。改为全量 INQUIRE_Q 不带 `MQIACF_Q_ATTRS`，alias 缺的
+  `MQIA_DEF_READ_AHEAD` / `MQIA_DEF_PUT_RESPONSE_TYPE` 用单独一条点名查询
+  按队列名合并进快照；真机回归加守卫：本地队列快照必须仍含 `MQIA_MAX_Q_DEPTH`。
 - **alias 队列「扩展」分组对不齐 MQ Explorer**：INQUIRE_Q 显式带
   `MQIACF_Q_ATTRS` 请求 `MQIA_DEF_READ_AHEAD` / `MQIA_DEF_PUT_RESPONSE_TYPE`
   （QMGR 对 alias 的默认应答不含），补两行 i18n；值解析加 `<常量>.title`
