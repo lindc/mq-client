@@ -27,6 +27,9 @@ class MqAttributeDisplayTest {
             "MQREADA_NO",
             MqAttributeDisplay.constNameFor("MQIA_DEF_READ_AHEAD", 0),
         )
+        // 回归：MQSCO_Q_MGR=1 在 CMQCFC，而 CMQC 的 MQSCO_VERSION_1 同值——
+        // 前缀反查曾命中后者，Scope 被显示成「版本 1」。
+        assertEquals("MQSCO_Q_MGR", MqAttributeDisplay.constNameFor("MQIA_SCOPE", 1))
     }
 
     @Test

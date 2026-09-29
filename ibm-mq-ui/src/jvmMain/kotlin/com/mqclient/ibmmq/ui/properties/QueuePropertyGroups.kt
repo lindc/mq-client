@@ -470,8 +470,12 @@ internal fun resolveQueuePropertyGroups(
         val raw = attrs[key]
         val rawText = raw?.toString()?.trim() ?: ""
         // 值的 i18n：整型枚举 → 反查常量名 → queue_value_<常量去 MQ 前缀小写>。
+        // 优先走 DM 枚举归属（MqAttributeDisplay）：同值常量跨族碰撞时前缀反查会挑错
+        // ——实测 MQIA_SCOPE=1 在 CMQC 里有 MQSCO_VERSION_1（SSL 结构体版本）、在
+        // CMQCFC 里才是真枚举 MQSCO_Q_MGR，前缀反查命中前者显示成「版本 1」。
         val constName = if (raw is Int) {
-            field.valuePrefix?.let { MqAttributeNameMapper.lookupName(raw, it) }
+            MqAttributeDisplay.constNameFor(key, raw)
+                ?: field.valuePrefix?.let { MqAttributeNameMapper.lookupName(raw, it) }
         } else {
             null
         }
