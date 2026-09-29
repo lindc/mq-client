@@ -52,6 +52,9 @@ fun MqObjectSnapshot.getAliasTarget(): String? =
         ?: attrStr("MQCA_TARGQ")
         ?: attrStr("MQCA_TARGET_Q_NAME")
 
+/** 远程队列定义的目标 QMgr（RQMNAME；QREMOTE 定义自带，实测总有值）。 */
+fun MqObjectSnapshot.getRemoteQueueRqmName(): String? = attrStr("MQCA_REMOTE_Q_MGR_NAME")
+
 /** 远程队列的传输队列（XMITQ）：消息出站的下一跳。 */
 fun MqObjectSnapshot.getRemoteXmitQueue(): String? = attrStr("MQCA_XMIT_Q_NAME")
 

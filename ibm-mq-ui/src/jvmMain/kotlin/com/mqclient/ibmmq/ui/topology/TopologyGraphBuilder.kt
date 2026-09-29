@@ -97,12 +97,18 @@ fun buildKuiverFromCache(connectionId: String, warningThreshold: Int): MqTopolog
         }
         put(it.name, TopologyNodeType.CHANNEL, severity)
     }
-    // REMOTE_QMGR 虚拟节点：从通道 RQMNAME 收集；指向本地 QMgr 的不算「远程」。
-    val remoteQmgrIds = channels.mapNotNull { c ->
-        c.getChannelRqmName()
-            ?.takeIf { rq -> rq.isNotBlank() && rq != localQmgrName }
-            ?.let(::remoteQmgrNodeId)
-    }
+    // REMOTE_QMGR 虚拟节点：优先通道自身 RQMNAME；**实测部分 MQ（含 MQ 9.x 沙箱）的
+    // INQUIRE_CHANNEL 不回 RQMNAME 参数**（定义里为空），此时经「共享同一 XMITQ 的
+    // QREMOTE 所带的 RQMNAME」兜底推导——QREMOTE 定义实测恒带 RQMNAME。
+    // 指向本地 QMgr 的不算「远程」。
+    val rqmByXmitq = remoteQueues.mapNotNull { rq ->
+        rq.getRemoteQueueRqmName()?.takeIf { it.isNotBlank() }?.let { rq.getRemoteXmitQueue() to it }
+    }.toMap()
+    fun channelRqm(c: MqObjectSnapshot): String? =
+        c.getChannelRqmName() ?: rqmByXmitq[c.getChannelXmitQueue()]
+    val remoteQmgrIds = channels.mapNotNull(::channelRqm)
+        .filter { it.isNotBlank() && it != localQmgrName }
+        .map(::remoteQmgrNodeId)
     remoteQmgrIds.forEach { put(it, TopologyNodeType.REMOTE_QMGR) }
     if (nodeTypes.isEmpty()) return MqTopologyData(Kuiver(), emptyMap(), emptyMap())
 
@@ -134,8 +140,10 @@ fun buildKuiverFromCache(connectionId: String, warningThreshold: Int): MqTopolog
     }
     // 5. Subscription → Destination
     for (s in subs) link(s.name, s.getSubscriptionDestination())
-    // 6. Channel → Remote QMGR
-    for (c in channels) link(c.name, c.getChannelRqmName()?.takeIf { it != localQmgrName }?.let(::remoteQmgrNodeId))
+    // 6. Channel → Remote QMGR（RQMNAME 缺失时经共享 XMITQ 从 QREMOTE 兜底推导）
+    for (c in channels) {
+        link(c.name, channelRqm(c)?.takeIf { it != localQmgrName }?.let(::remoteQmgrNodeId))
+    }
 
     val kuiver = buildKuiver {
         nodeTypes.forEach { (id, _) -> addNode(KuiverNode(id, NodeDimensions(CARD_WIDTH.dp, CARD_HEIGHT.dp))) }
