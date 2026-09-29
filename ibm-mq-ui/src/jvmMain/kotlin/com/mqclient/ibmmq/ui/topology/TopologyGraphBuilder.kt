@@ -11,6 +11,15 @@ import com.mqclient.ibmmq.pcf.MqObjectSnapshot
 import androidx.compose.ui.unit.dp
 
 /**
+ * 一次构建的完整产物：图模型 + 类型表 + 告警级别表（节点卡片着色与列布局都靠前两者）。
+ */
+data class MqTopologyData(
+    val kuiver: Kuiver,
+    val nodeTypes: Map<String, TopologyNodeType>,
+    val severities: Map<String, NodeSeverity>,
+)
+
+/**
  * 从 [IbmMQModule] 的对象慢扫缓存（[IbmMQService.cachedObjects]）构建 Kuiver 拓扑图。
  *
  * 只读缓存、不碰 MQ：缓存未就绪时返回空图（面板侧由 OBJECTS_SCANNED 事件驱动重建）。
@@ -19,6 +28,10 @@ import androidx.compose.ui.unit.dp
  * 以及从通道 RQMNAME 读出的 REMOTE_QMGR **虚拟节点**（id 加 `rqmgr:` 前缀，避免与真实
  * 对象重名；指向本地 QMgr 自身的通道不画）。QMODEL、系统对象（SYSTEM.* / AMQ.*）不进图。
  *
+ * 告警级别（[NodeSeverity]）：
+ *  - local queue：currentDepth/maxDepth ≥ [warningThreshold]%（与队列列表页同源阈值）→ WARNING；
+ *  - sender/requester 通道：状态 STOPPED / RETRYING → ERROR。
+ *
  * 边（方向 = 消息/关系的发出方向，环交由 kuiver 的 BACK 分类标橙）：
  *  1. Alias → Target（TARGET 可指向 local / remote / topic / 另一条 alias，链式）
  *  2. Remote Queue → Transmission Queue（XMITQ）
@@ -26,11 +39,10 @@ import androidx.compose.ui.unit.dp
  *  4. Topic → Subscription（优先 MQCA_TOPIC_NAME，缺失按 TOPICSTR 宽松匹配）
  *  5. Subscription → Destination（DEST，可为 local / remote / alias）
  *  6. Channel → Remote QMGR（RQMNAME，仅 Sender/Requester）
- *
- * @return kuiver 图 + `nodeId → 类型` 映射（节点卡片着色与列布局都靠它；含虚拟节点）。
  */
-fun buildKuiverFromCache(connectionId: String): Pair<Kuiver, Map<String, TopologyNodeType>> {
-    val service = IbmMQModule.serviceOrNull() ?: return Kuiver() to emptyMap()
+fun buildKuiverFromCache(connectionId: String, warningThreshold: Int): MqTopologyData {
+    val service = IbmMQModule.serviceOrNull()
+        ?: return MqTopologyData(Kuiver(), emptyMap(), emptyMap())
 
     val queues = service.cachedObjects(connectionId, MqObjectType.QUEUE)
         .filterNotSystem()
@@ -48,23 +60,43 @@ fun buildKuiverFromCache(connectionId: String): Pair<Kuiver, Map<String, Topolog
 
     // ---- 节点 ----
     val nodeTypes = LinkedHashMap<String, TopologyNodeType>()
-    fun put(id: String, type: TopologyNodeType) {
-        if (id.isNotBlank()) nodeTypes.putIfAbsent(id, type)
+    val severities = LinkedHashMap<String, NodeSeverity>()
+    fun put(id: String, type: TopologyNodeType, severity: NodeSeverity = NodeSeverity.NORMAL) {
+        if (id.isNotBlank()) {
+            nodeTypes.putIfAbsent(id, type)
+            severities.putIfAbsent(id, severity)
+        }
     }
     queues.forEach {
-        put(
-            it.name,
-            when {
-                it.isAliasQueue() -> TopologyNodeType.ALIAS_QUEUE
-                it.isRemoteQueue() -> TopologyNodeType.REMOTE_QUEUE
-                it.isTransmission() -> TopologyNodeType.TRANSMISSION_QUEUE
-                else -> TopologyNodeType.LOCAL_QUEUE
-            },
-        )
+        val type = when {
+            it.isAliasQueue() -> TopologyNodeType.ALIAS_QUEUE
+            it.isRemoteQueue() -> TopologyNodeType.REMOTE_QUEUE
+            it.isTransmission() -> TopologyNodeType.TRANSMISSION_QUEUE
+            else -> TopologyNodeType.LOCAL_QUEUE
+        }
+        // 消息积压：currentDepth / maxDepth ≥ 阈值（与队列列表页同一判定，maxDepth 未知不算）。
+        val ratio = it.maxDepth?.takeIf { max -> max > 0 }?.let { max ->
+            (it.currentDepth ?: 0).toFloat() / max
+        } ?: 0f
+        val severity = if (type == TopologyNodeType.LOCAL_QUEUE &&
+            ratio >= warningThreshold / 100f
+        ) {
+            NodeSeverity.WARNING
+        } else {
+            NodeSeverity.NORMAL
+        }
+        put(it.name, type, severity)
     }
     topics.forEach { put(it.name, TopologyNodeType.TOPIC) }
     subs.forEach { put(it.name, TopologyNodeType.SUBSCRIPTION) }
-    channels.forEach { put(it.name, TopologyNodeType.CHANNEL) }
+    channels.forEach {
+        // 通道链路故障：状态 STOPPED / RETRYING → ERROR（对齐旧管线 isProblem 语义）。
+        val severity = when (it.channelStatus?.uppercase()) {
+            "STOPPED", "RETRYING" -> NodeSeverity.ERROR
+            else -> NodeSeverity.NORMAL
+        }
+        put(it.name, TopologyNodeType.CHANNEL, severity)
+    }
     // REMOTE_QMGR 虚拟节点：从通道 RQMNAME 收集；指向本地 QMgr 的不算「远程」。
     val remoteQmgrIds = channels.mapNotNull { c ->
         c.getChannelRqmName()
@@ -72,7 +104,7 @@ fun buildKuiverFromCache(connectionId: String): Pair<Kuiver, Map<String, Topolog
             ?.let(::remoteQmgrNodeId)
     }
     remoteQmgrIds.forEach { put(it, TopologyNodeType.REMOTE_QMGR) }
-    if (nodeTypes.isEmpty()) return Kuiver() to emptyMap()
+    if (nodeTypes.isEmpty()) return MqTopologyData(Kuiver(), emptyMap(), emptyMap())
 
     // ---- 边 ----
     val byName = (queues + topics + subs + channels).associateBy { it.name }
@@ -109,7 +141,7 @@ fun buildKuiverFromCache(connectionId: String): Pair<Kuiver, Map<String, Topolog
         nodeTypes.forEach { (id, _) -> addNode(KuiverNode(id, NodeDimensions(CARD_WIDTH.dp, CARD_HEIGHT.dp))) }
         edges.forEach { (from, to) -> addEdge(KuiverEdge(fromId = from, toId = to)) }
     }
-    return kuiver to nodeTypes
+    return MqTopologyData(kuiver, nodeTypes, severities)
 }
 
 /** REMOTE_QMGR 虚拟节点的前缀 + id（避免与真实对象名冲突）。 */

@@ -16,6 +16,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
@@ -27,7 +28,10 @@ internal const val CARD_HEIGHT = 56
  * 拓扑节点卡片：类型图标 + 对象名。
  *
  * 底色 / 文字走 MaterialTheme；**类型强调色**只用于图标着色与描边（类型级语义色，
- * 不随主题翻转）。悬停加粗描边 + 投影，选中用主题 primary 描边。
+ * 不随主题翻转）。悬停加粗描边 + 投影，选中用类型色实色描边 + 更强投影。
+ *
+ * 告警级别（[severity]）覆盖类型色：队列积压 WARNING → 警告橙，通道故障 ERROR →
+ * 红（主题 error 色，随主题适配）——描边与图标同步换色，一眼定位问题节点。
  */
 @Composable
 fun TopologyNodeCard(
@@ -35,8 +39,13 @@ fun TopologyNodeCard(
     type: TopologyNodeType,
     isHovered: Boolean = false,
     isSelected: Boolean = false,
+    severity: NodeSeverity = NodeSeverity.NORMAL,
 ) {
-    val accent = type.getColor()
+    val accent = when (severity) {
+        NodeSeverity.ERROR -> MaterialTheme.colorScheme.error
+        NodeSeverity.WARNING -> WARNING_ACCENT
+        NodeSeverity.NORMAL -> type.getColor()
+    }
     Surface(
         modifier = Modifier
             .width(CARD_WIDTH.dp)
@@ -86,3 +95,6 @@ fun TopologyNodeCard(
         }
     }
 }
+
+/** WARNING 级固定警告色（橙）：容量类告警语义，不随主题翻转（与 ERROR 的主题红区分）。 */
+private val WARNING_ACCENT = Color(0xFFED6C02)

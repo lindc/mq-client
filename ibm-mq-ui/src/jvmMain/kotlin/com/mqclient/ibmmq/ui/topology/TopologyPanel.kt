@@ -33,10 +33,13 @@ import com.dk.kuiver.renderer.KuiverInteractionCallbacks
 import com.dk.kuiver.renderer.KuiverViewer
 import com.dk.kuiver.renderer.KuiverViewerConfig
 import com.mqclient.core.ConnectionStatus
+import com.mqclient.core.ConnectionStore
 import com.mqclient.core.CoreModule
 import com.mqclient.core.topology.TopologyFocusHolder
+import com.mqclient.ibmmq.IbmMQConfig
 import com.mqclient.ibmmq.IbmMQModule
 import com.mqclient.ibmmq.event.IbmMQEvents
+import com.mqclient.ibmmq.ibmMQConfigFromOptions
 import kotlinx.coroutines.launch
 
 /**
@@ -62,9 +65,14 @@ fun TopologyPanel(
     connectionId: String,
     modifier: Modifier = Modifier,
 ) {
-    var data by remember(connectionId) {
-        mutableStateOf<Pair<Kuiver, Map<String, TopologyNodeType>>?>(null)
+    // 队列深度告警阈值（%）：与队列列表页同源（连接配置 queueDepthWarningThreshold，默认 85）。
+    val warningThreshold = remember(connectionId) {
+        ConnectionStore.connections.value.firstOrNull { it.id == connectionId }
+            ?.let { ibmMQConfigFromOptions(it.options).queueDepthWarningThreshold }
+            ?: IbmMQConfig.DEFAULT_QUEUE_DEPTH_WARNING_THRESHOLD
     }
+
+    var data by remember(connectionId) { mutableStateOf<MqTopologyData?>(null) }
     // 至少完成过一轮慢扫：区分「还在连 / 扫」与「扫完了但确实没有业务对象」。
     var scannedOnce by remember(connectionId) { mutableStateOf(false) }
     // 列表页带入的焦点对象名（consume 一次，防重复应用）。
@@ -72,8 +80,8 @@ fun TopologyPanel(
 
     /** 从慢扫缓存重建；**空图不落地**——保持加载态或保留旧图（刷新保留旧数据的语义）。 */
     fun rebuild() {
-        val next = buildKuiverFromCache(connectionId)
-        if (next.first.nodes.isNotEmpty()) data = next
+        val next = buildKuiverFromCache(connectionId, warningThreshold)
+        if (next.kuiver.nodes.isNotEmpty()) data = next
     }
 
     /** 强制刷新：显式触发一次对象慢扫（扫完经 OBJECTS_SCANNED 驱动重建）。 */
@@ -152,12 +160,12 @@ fun TopologyPanel(
  */
 @Composable
 private fun MqTopologyCanvas(
-    data: Pair<Kuiver, Map<String, TopologyNodeType>>,
+    data: MqTopologyData,
     focusName: String?,
     onRescan: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val (kuiver, nodeTypes) = data
+    val (kuiver, nodeTypes, severities) = data
     val scheme = MaterialTheme.colorScheme
 
     val viewerState = rememberKuiverViewerState(
@@ -235,6 +243,8 @@ private fun MqTopologyCanvas(
                     // 选中高亮双保险：kuiver interaction 的 isSelected（内部状态，插槽
                     // 作用域可靠失效）+ 本面板 selectedId（焦点选中的直接来源）。
                     isSelected = isSelected || node.id == selectedId,
+                    // 告警覆盖类型色：队列积压→警告橙，通道 STOPPED/RETRYING→红。
+                    severity = severities[node.id] ?: NodeSeverity.NORMAL,
                 )
             },
             // 贝塞尔曲线边（EdgeShape.CURVED，见 CurvedEdgeContent.kt 的取舍说明）：
@@ -268,7 +278,8 @@ private fun MqTopologyCanvas(
             NodeDetailCard(
                 name = id.removePrefix(REMOTE_QMGR_PREFIX),
                 type = type,
-                onDismiss = { selectedId = null },
+                severity = severities[id] ?: NodeSeverity.NORMAL,
+                onDismiss = { select(null) },
                 modifier = Modifier
                     .align(Alignment.BottomStart)
                     .padding(12.dp),
@@ -277,14 +288,20 @@ private fun MqTopologyCanvas(
     }
 }
 
-/** 选中节点的详情浮层（点击画布空白或关闭按钮消失）。 */
+/** 选中节点的详情浮层（点击画布空白或关闭按钮消失）；告警节点图标同步换警告色。 */
 @Composable
 private fun NodeDetailCard(
     name: String,
     type: TopologyNodeType,
+    severity: NodeSeverity,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val accent = when (severity) {
+        NodeSeverity.ERROR -> MaterialTheme.colorScheme.error
+        NodeSeverity.WARNING -> Color(0xFFED6C02)
+        NodeSeverity.NORMAL -> type.getColor()
+    }
     Surface(
         modifier = modifier.width(300.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHighest,
@@ -299,7 +316,7 @@ private fun NodeDetailCard(
             Icon(
                 imageVector = type.getIcon(),
                 contentDescription = type.name,
-                tint = type.getColor(),
+                tint = accent,
                 modifier = Modifier.size(20.dp),
             )
             Column(

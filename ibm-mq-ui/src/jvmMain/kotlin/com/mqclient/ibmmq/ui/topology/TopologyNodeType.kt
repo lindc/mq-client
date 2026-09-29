@@ -34,6 +34,18 @@ enum class TopologyNodeType {
     REMOTE_QMGR,
 }
 
+/**
+ * 节点告警级别（健康态之外的两种异常）：
+ *  - WARNING：local queue 消息积压（currentDepth/maxDepth ≥ 连接告警阈值）；
+ *  - ERROR：sender/requester 通道状态 STOPPED / RETRYING（链路故障）。
+ * 与对象列表页的告警语义同源（队列列表红色警告图标 / 通道状态色）。
+ */
+enum class NodeSeverity {
+    NORMAL,
+    WARNING,
+    ERROR,
+}
+
 /** 类型 → 图标。图标选择与既有 [com.mqclient.ibmmq.ui.IbmMqTopologyStyle] 保持同族语义。 */
 fun TopologyNodeType.getIcon(): ImageVector = when (this) {
     TopologyNodeType.ALIAS_QUEUE -> Icons.AutoMirrored.Filled.AltRoute
