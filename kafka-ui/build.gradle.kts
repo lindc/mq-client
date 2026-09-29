@@ -16,6 +16,8 @@ kotlin {
             implementation(compose.material3)
             // composeResources（品牌图标 drawable）需要资源 API 才能生成访问器。
             implementation(compose.components.resources)
+            // stringResource（i18n 查表）来自 ui-common 的 LanguageResources。
+            implementation(projects.uiCommon)
         }
     }
 }

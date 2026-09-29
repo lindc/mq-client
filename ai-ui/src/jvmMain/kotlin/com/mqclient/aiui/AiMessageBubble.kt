@@ -1,6 +1,7 @@
 package com.mqclient.aiui
 
 import androidx.compose.foundation.background
+import com.mqclient.uicommon.i18n.stringResource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -104,7 +105,7 @@ private fun BubbleActions(
                 modifier = Modifier.size(14.dp),
             )
             Spacer(Modifier.width(4.dp))
-            Text("复制", style = MaterialTheme.typography.labelSmall)
+            Text(stringResource("ai_message_copy"), style = MaterialTheme.typography.labelSmall)
         }
         TextButton(
             onClick = { onFeedback(if (feedback == true) null else true) },
@@ -118,7 +119,7 @@ private fun BubbleActions(
                 modifier = Modifier.size(14.dp),
             )
             Spacer(Modifier.width(4.dp))
-            Text("有用", style = MaterialTheme.typography.labelSmall)
+            Text(stringResource("ai_message_helpful"), style = MaterialTheme.typography.labelSmall)
         }
         TextButton(
             onClick = { onFeedback(if (feedback == false) null else false) },
@@ -132,7 +133,7 @@ private fun BubbleActions(
                 modifier = Modifier.size(14.dp),
             )
             Spacer(Modifier.width(4.dp))
-            Text("无用", style = MaterialTheme.typography.labelSmall)
+            Text(stringResource("ai_message_not_helpful"), style = MaterialTheme.typography.labelSmall)
         }
     }
 }

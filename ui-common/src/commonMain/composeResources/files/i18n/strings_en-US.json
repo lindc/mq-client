@@ -220,5 +220,8 @@
   "console_export_failed": "Export failed: %s",
   "console_unknown_error": "Unknown error",
   "object_list_empty": "No data",
-  "common_clear": "Clear"
+  "common_clear": "Clear",
+  "ai_message_copy": "Copy",
+  "ai_message_helpful": "Helpful",
+  "ai_message_not_helpful": "Not helpful"
 }

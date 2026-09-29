@@ -1,0 +1,8 @@
+{
+  "kafka_demo_title": "Kafka 演示",
+  "kafka_demo_seed_color_note": "主题色来自 AppTheme 的 SeedColor，所有组件都读 MaterialTheme.colorScheme。",
+  "kafka_settings_title": "连接设置",
+  "kafka_auto_commit": "启用自动提交",
+  "kafka_sasl_ssl": "使用 SASL/SSL",
+  "kafka_connect": "连接"
+}

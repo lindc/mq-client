@@ -137,5 +137,6 @@
   "topology_action_zoom_in": "Zoom in",
   "topology_action_zoom_out": "Zoom out",
   "topology_action_fit": "Fit to view",
-  "topology_action_reset": "Reset"
+  "topology_action_reset": "Reset",
+  "channel_type_unknown_raw": "raw value %1$s"
 }

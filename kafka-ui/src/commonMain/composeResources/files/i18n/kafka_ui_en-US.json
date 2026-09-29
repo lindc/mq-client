@@ -1,0 +1,8 @@
+{
+  "kafka_demo_title": "Kafka Demo",
+  "kafka_demo_seed_color_note": "Theme color comes from AppTheme's SeedColor; all components read MaterialTheme.colorScheme.",
+  "kafka_settings_title": "Connection settings",
+  "kafka_auto_commit": "Enable auto commit",
+  "kafka_sasl_ssl": "Use SASL/SSL",
+  "kafka_connect": "Connect"
+}

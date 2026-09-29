@@ -114,7 +114,7 @@ object ChannelIconResolver {
             ChannelType.MQTT -> stringResource("channel_type_mqtt")
             ChannelType.AMQP -> stringResource("channel_type_amqp")
             ChannelType.UNKNOWN ->
-                "${stringResource("channel_type_unknown")} (原始值=${snapshot.channelType ?: "null"})"
+                "${stringResource("channel_type_unknown")} ${stringResource("channel_type_unknown_raw").withArg(snapshot.channelType ?: "null")}"
         }
     }
 }

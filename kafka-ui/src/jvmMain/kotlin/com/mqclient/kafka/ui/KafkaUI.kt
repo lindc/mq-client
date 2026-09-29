@@ -23,10 +23,21 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.mqclient.core.AdapterUI
+import com.mqclient.core.ModuleI18nTable
+import mq_client.kafka_ui.generated.resources.Res
+import com.mqclient.uicommon.i18n.stringResource
 
 class KafkaUI : AdapterUI {
     override val serviceId = "kafka"
     override val title = "Kafka"
+
+    /** 模块私有 i18n 表（files/i18n/kafka_ui_<lang>.json）。 */
+    override val i18nTables: List<ModuleI18nTable> = listOf(
+        ModuleI18nTable(base = "kafka_ui") { language ->
+            Res.readBytes("files/i18n/kafka_ui_$language.json").decodeToString()
+        },
+    )
+
     override val content: @Composable () -> Unit = { KafkaDemo() }
 }
 
@@ -45,14 +56,14 @@ private fun KafkaDemo() {
     ) {
         Text("Kafka demo", style = MaterialTheme.typography.headlineSmall)
         Text(
-            "主题色来自 AppTheme 的 SeedColor，所有组件都读 MaterialTheme.colorScheme。",
+            stringResource("kafka_demo_seed_color_note"),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("连接设置", style = MaterialTheme.typography.titleMedium)
+                Text(stringResource("kafka_settings_title"), style = MaterialTheme.typography.titleMedium)
                 OutlinedTextField(
                     value = text,
                     onValueChange = { text = it },
@@ -62,17 +73,17 @@ private fun KafkaDemo() {
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Switch(checked = enabled, onCheckedChange = { enabled = it })
-                    Text("启用自动提交")
+                    Text(stringResource("kafka_auto_commit"))
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(checked = checked, onCheckedChange = { checked = it })
-                    Text("使用 SASL/SSL")
+                    Text(stringResource("kafka_sasl_ssl"))
                 }
             }
         }
 
         Button(onClick = {}, modifier = Modifier.fillMaxWidth()) {
-            Text("连接")
+            Text(stringResource("kafka_connect"))
         }
     }
 }

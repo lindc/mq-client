@@ -220,5 +220,8 @@
   "console_export_failed": "导出失败：%s",
   "console_unknown_error": "未知错误",
   "object_list_empty": "暂无数据",
-  "common_clear": "清空"
+  "common_clear": "清空",
+  "ai_message_copy": "复制",
+  "ai_message_helpful": "有用",
+  "ai_message_not_helpful": "无用"
 }
