@@ -41,6 +41,10 @@
 
 ### Fixed
 
+- **属性对话框「队列时间」显示 `[I@41cf4272`**：PCF 列表参数（如
+  `MQIACF_Q_TIME_INDICATOR`）的底层形态是 Java `int[]`，Kotlin 里不是
+  `Array<*>`，`readableValue` 没接住。补 `IntArray` / `LongArray` /
+  `ShortArray` 分支转逗号分隔列表（对齐 MQ Explorer 的 `QTIME(2, 106)` 形式）。
 - **队列属性窗口塌缩成几行**：INQUIRE_Q 一旦带 `MQIACF_Q_ATTRS`，QMGR 只回
   点名的 attr（省略才是全量应答）——上一条修复把点名参数混进了全量扫描，
   快照只剩 4 个 attr。改为全量 INQUIRE_Q 不带 `MQIACF_Q_ATTRS`，alias 缺的

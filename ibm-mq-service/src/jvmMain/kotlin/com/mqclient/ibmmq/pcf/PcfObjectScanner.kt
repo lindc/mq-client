@@ -461,6 +461,11 @@ internal fun readableValue(value: Any?): Any? = when (value) {
     null -> null
     is ByteArray -> value.decodeToString().trimEnd('\u0000').trimEnd()
     is Array<*> -> value.joinToString(", ") { readableValue(it)?.toString().orEmpty() }
+    // Java 侧的 int[] / long[] / short[]（PCF 列表参数如 MQIACF_Q_TIME_INDICATOR 的
+    // 底层形态，Kotlin 里不是 Array<*>）——不转的话 UI 只能显示 "[I@41cf4272"。
+    is IntArray -> value.joinToString(", ")
+    is LongArray -> value.joinToString(", ")
+    is ShortArray -> value.joinToString(", ")
     else -> value
 }
 
