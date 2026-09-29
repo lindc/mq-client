@@ -32,12 +32,9 @@ fun MqObjectPropertiesDialog(
             MqObjectType.NAMELIST -> NamelistPropertiesContent(state)
             MqObjectType.AUTH_INFO -> AuthInfoPropertiesContent(state)
             MqObjectType.COMM_INFO -> CommInfoPropertiesContent(state)
-            // 不在属性对话框支持范围内的类型（QMGR 走 ConnectionPropertiesUi，其余不进 UI）：
-            // 回落占位，标题栏已带对象名。
-            else -> PropertiesPlaceholder(
-                objectName = state.objectName,
-                objectType = state.objectType.name,
-            )
+            // 10 类对象已全部实装；仅剩 QUEUE_MANAGER（走 ConnectionPropertiesUi，
+            // 不会进本对话框）——此分支理论不可达，兜底空内容。
+            else -> {}
         }
     }
 }
