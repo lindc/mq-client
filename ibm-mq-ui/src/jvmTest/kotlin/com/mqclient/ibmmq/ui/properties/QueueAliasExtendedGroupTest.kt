@@ -11,7 +11,9 @@ import kotlin.test.assertTrue
 /**
  * 「扩展」分组对齐 MQ Explorer 的离线回归：用真机 alias 快照的形状
  * （QMGR 对 alias 的默认应答 + 显式请求的 DEFREADA / DEFPRESP）走
- * [resolveQueuePropertyGroups]，再拿真实生成的 `ibm_mq_attrs_*` 表
+ * [resolveQueuePropertyGroups]、[resolveListenerPropertyGroups]、
+ * [resolveTopicPropertyGroups]、[resolveSubscriptionPropertyGroups]，
+ * 再拿真实生成的 `ibm_mq_attrs_*` 表
  * （scripts/gen_mq_attr_display.py 产物）模拟 stringResource 的查表链，
  * 断言最终显示文本与 MQ Explorer 一致。
  */
@@ -204,8 +206,7 @@ class QueueAliasExtendedGroupTest {
     }
 
     /** 真机 CUSTOMER.TOPIC 快照形状（INQUIRE_TOPIC 全量应答）。 */
-    private fun topicSnapshot() = MqObjectSnapshot(
-        name = "CUSTOMER.TOPIC",
+    private fun topicSnapshot() = MqObjectSnapshot(        name = "CUSTOMER.TOPIC",
         type = MqObjectType.TOPIC,
         attributes = mapOf(
             "MQCA_TOPIC_NAME" to "CUSTOMER.TOPIC",
@@ -234,6 +235,81 @@ class QueueAliasExtendedGroupTest {
             "MQCA_CUSTOM" to "",
             "MQCA_ALTERATION_DATE" to "2026-09-25",
             "MQCA_ALTERATION_TIME" to "12.39.02",
+        ),
+    )
+
+    @Test
+    fun `subscription properties resolve like mq explorer`() {
+        // 运行时 stringResource 查模块内合并表；这里合并 attrs 生成表与手写模块表
+        // （MQEXPIRY_NOLIMIT.title 手补在 ibm_mq_zh-CN.json）。
+        val zh = attrsTable("zh-CN") + Regex("\"([^\"]+)\":\\s*\"((?:[^\"\\\\]|\\\\.)*)\"")
+            .findAll(locate("src/commonMain/composeResources/files/i18n/ibm_mq_zh-CN.json").readText())
+            .associate { it.groupValues[1] to it.groupValues[2] }
+        val groups = resolveSubscriptionPropertyGroups(subscriptionSnapshot())
+        fun valueOf(labelEn: String): String? {
+            val r = groups.flatMap { it.second }.firstOrNull { it.labelEn == labelEn } ?: return null
+            return listOfNotNull(r.valueKey, r.valueFallbackKey)
+                .map { k -> k to (zh[k] ?: k) }
+                .firstOrNull { (k, v) -> v != k }?.second
+                ?: r.rawValue
+        }
+
+        // 值与 IBM 文档 / MQ Explorer 对齐（zh 表为准）。
+        assertEquals("管理", valueOf("Type"))
+        assertEquals("SHIPPING.SUB.NOTIFY", valueOf("Subscription name"))
+        assertEquals("shipping/", valueOf("Topic string"))
+        assertEquals("已提供", valueOf("Destination class"))
+        assertEquals("是", valueOf("Durable"))
+        // 客户端无 MQEXPIRY_NOLIMIT 常量，走 valueConstMap + 手补 title。
+        assertEquals("无限制", valueOf("Expiry"))
+        assertEquals("无", valueOf("Selector type"))
+        assertEquals("作为已发布对象", valueOf("Publication priority"))
+        assertEquals("消息属性", valueOf("Properties"))
+        assertEquals("全部", valueOf("Request only"))
+        assertEquals("全部", valueOf("Scope"))
+        assertEquals("任何", valueOf("Variable user ID"))
+        assertEquals("主题级别通配符", valueOf("Wildcard use"))
+        assertEquals("mqadmin", valueOf("User"))
+
+        // 字节 ID 类参数（SUB_ID 等）不进「全部属性」兜底。
+        val allKeys = groups.lastOrNull { it.first.titleKey == "sub_props_group_all" }
+            ?.second?.map { it.labelEn }.orEmpty()
+        assertFalse(allKeys.any { it.contains("SUB_ID") || it.contains("ACCOUNTING") })
+    }
+
+    /** 真机 SHIPPING.SUB.NOTIFY 快照形状（INQUIRE_SUBSCRIPTION）。 */
+    private fun subscriptionSnapshot() = MqObjectSnapshot(
+        name = "SHIPPING.SUB.NOTIFY",
+        type = MqObjectType.SUBSCRIPTION,
+        attributes = mapOf(
+            "MQBACF_SUB_ID" to "AMQ QM1 ...",
+            "MQBACF_ACCOUNTING_TOKEN" to "?1001...",
+            "MQBACF_DESTINATION_CORREL_ID" to "AMQ QM1 ...",
+            "MQCACF_SUB_NAME" to "SHIPPING.SUB.NOTIFY",
+            "MQCA_TOPIC_STRING" to "shipping/",
+            "MQCA_TOPIC_NAME" to "SHIPPING.TOPIC",
+            "MQCACF_DESTINATION" to "ORDER.NOTIFY.Q",
+            "MQCACF_DESTINATION_Q_MGR" to "",
+            "MQCACF_SUB_SELECTOR" to "",
+            "MQIACF_SELECTOR_TYPE" to 0, // MQSELTYPE_NONE
+            "MQCACF_APPL_IDENTITY_DATA" to "",
+            "MQCACF_SUB_USER_DATA" to "",
+            "MQIACF_DESTINATION_CLASS" to 2, // MQDC_PROVIDED
+            "MQIACF_DURABLE_SUBSCRIPTION" to 1, // MQSUB_DURABLE_YES
+            "MQIACF_EXPIRY" to -1, // MQEXPIRY_NOLIMIT（客户端无此常量）
+            "MQIACF_PUBSUB_PROPERTIES" to 3, // MQPSPROP_MSGPROP
+            "MQIACF_PUB_PRIORITY" to -3, // MQPRI_PRIORITY_AS_PUBLISHED
+            "MQIACF_REQUEST_ONLY" to 2, // MQRU_PUBLISH_ALL
+            "MQIACF_SUBSCRIPTION_SCOPE" to 2, // MQTSCOPE_ALL
+            "MQIACF_SUB_LEVEL" to 1,
+            "MQIACF_SUB_TYPE" to 2, // MQSUBTYPE_ADMIN
+            "MQIACF_VARIABLE_USER_ID" to 2, // MQVU_ANY_USER
+            "MQIACF_WILDCARD_SCHEMA" to 2, // MQWS_TOPIC
+            "MQCACF_SUB_USER_ID" to "mqadmin",
+            "MQCA_CREATION_DATE" to "2026-09-24",
+            "MQCA_CREATION_TIME" to "12:42:11",
+            "MQCA_ALTERATION_DATE" to "2026-09-25",
+            "MQCA_ALTERATION_TIME" to "12:39:02",
         ),
     )
 }

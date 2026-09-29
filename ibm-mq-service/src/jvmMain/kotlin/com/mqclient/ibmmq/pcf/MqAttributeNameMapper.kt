@@ -22,7 +22,7 @@ object MqAttributeNameMapper {
      * MQIACH_（通道整型选择器，如 MQIACH_CHANNEL_TYPE=1511）曾是漏网之鱼 —— 缺了它
      * 所有通道整型属性都落成 `ATTR_<id>`，拓扑边提取等按可读键取值的逻辑全部落空。
      */
-    private val ID_PREFIXES = listOf("MQCACH_", "MQCACF_", "MQIACF_", "MQIACH_", "MQCA_", "MQIA_")
+    private val ID_PREFIXES = listOf("MQCACH_", "MQCACF_", "MQIACF_", "MQIACH_", "MQCA_", "MQIA_", "MQBACF_")
 
     private val cache = ConcurrentHashMap<Int, String>()
 

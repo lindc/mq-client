@@ -43,6 +43,12 @@ internal data class ObjectPropertyField(
      * 约束（remote / model 队列没有句柄概念，不显示）。
      */
     val showIfMissing: Boolean = false,
+    /**
+     * 整型值 → 常量名的固定映射（客户端没收录的枚举，如订阅的
+     * MQEXPIRY_NOLIMIT=-1——连常量都不存在，前缀反查无从谈起）。
+     * 优先级高于 [valuePrefix] 反查。
+     */
+    val valueConstMap: Map<Int, String> = emptyMap(),
 )
 
 internal data class ObjectPropertyGroup(
@@ -530,7 +536,8 @@ internal fun resolveQueuePropertyGroups(
         // ——实测 MQIA_SCOPE=1 在 CMQC 里有 MQSCO_VERSION_1（SSL 结构体版本）、在
         // CMQCFC 里才是真枚举 MQSCO_Q_MGR，前缀反查命中前者显示成「版本 1」。
         val constName = if (raw is Int) {
-            MqAttributeDisplay.constNameFor(key, raw)
+            field.valueConstMap[raw]
+                ?: MqAttributeDisplay.constNameFor(key, raw)
                 ?: field.valuePrefix?.let { MqAttributeNameMapper.lookupName(raw, it) }
         } else {
             null

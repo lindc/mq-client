@@ -238,7 +238,8 @@ internal fun resolveTopicPropertyGroups(
         val raw = attrs[key]
         val rawText = raw?.toString()?.trim() ?: ""
         val constName = if (raw is Int) {
-            field.valuePrefix?.let { MqAttributeNameMapper.lookupName(raw, it) }
+            field.valueConstMap[raw]
+                ?: field.valuePrefix?.let { MqAttributeNameMapper.lookupName(raw, it) }
         } else {
             null
         }

@@ -142,7 +142,8 @@ internal fun resolveListenerPropertyGroups(
         // 注意不走 MqAttributeDisplay.constNameFor：DM 归属表按 Queue 模型生成，
         // 对 listener 键会误判（实测 MQIACH_LISTENER_CONTROL=0 被归属成「命令」）。
         val constName = if (raw is Int) {
-            field.valuePrefix?.let { MqAttributeNameMapper.lookupName(raw, it) }
+            field.valueConstMap[raw]
+                ?: field.valuePrefix?.let { MqAttributeNameMapper.lookupName(raw, it) }
         } else {
             null
         }

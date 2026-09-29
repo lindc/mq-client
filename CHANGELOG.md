@@ -50,6 +50,17 @@
   属性（同值碰撞，前缀取到子族或精确常量）；通配符操作是单常量枚举
   （MQTA_PASSTHRU 无子族后缀），`MqAttributeNameMapper.lookupName` 加精确
   匹配分支。离线回归用真机 CUSTOMER.TOPIC 快照形状断言显示文本。
+- **订阅属性对话框实装**（对照 Subscription properties）：「常规」单页 +
+  「全部属性」兜底，字段按 INQUIRE_SUBSCRIPTION 响应文档（预订名称 / 类型 /
+  主题名称·字符串 / 用户 / 目标类·名称·队列管理器 / 持久 / 到期 / 选择器
+  类型·选择器 / 发布优先级 / 属性 / 仅请求 / 作用域 / 预订级别 / 可变用户 /
+  通配符用途 / 身份数据·用户数据 / 创建·变更日期时间），中英 i18n 54 键。
+  坑位：`MqAttributeNameMapper` ID 前缀族补 `MQBACF_`（SUB_ID 等字节 ID 不再
+  落成 ATTR_7016）；客户端缺 `MQSAT_/MQDUR_/MQEXPIRY_/MQSCOPE_SUBSCRIPTION`
+  枚举常量，IBM 真名是 MQSELTYPE_* / MQSUB_DURABLE_* / MQTSCOPE_* / MQRU_*；
+  `MQSUB_DURABLE` 族内 YES=ALLOWED=1 同值碰撞，Durable 用 valueConstMap 精确
+  映射；到期 -1 = MQEXPIRY_NOLIMIT 走 valueConstMap + 手补 title（无限制 /
+  Unlimited）。字节 ID 类参数不进「全部属性」兜底（展示即乱码）。
 - **旧通用拓扑管线整体下线**：删除 topology-ui、graph-core 模块与
   TopologyProvider SPI / IbmMQTopologyProvider / IbmMqTopologyStyle（附带删除
   一个在部分环境会无限挂死的 provider 单测）；拓扑渲染由 MQ 专属面板承担，
