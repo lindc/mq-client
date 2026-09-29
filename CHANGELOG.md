@@ -6,6 +6,13 @@
 
 ### Added
 
+- **属性对话框「全部属性」对齐 MQ Explorer 文案**：新增 `scripts/gen_mq_attr_display.py`，
+  从本机 MQ Explorer（`com.ibm.mq.explorer.core` 插件）提取 `MQXXX.title`
+  友好名（属性名 + 枚举常量值，en / zh-CN 各 1728 条，生成 ibm-mq-ui 模块
+  i18n 表 `ibm_mq_attrs_<lang>.json`）与 `DmQueue.xml` 枚举归属表（生成
+  ibm-mq-service `MqQueueAttrEnums.kt`）。未分组的兜底属性名/整型枚举值经
+  `MqAttributeDisplay` 归属判定后走 `<RAW>.title` 查表显示（如
+  `MQIA_DEF_PUT_RESPONSE_TYPE=1` → 「同步」），非枚举 / RANGE 型回落原始值。
 - **IBM MQ 专属拓扑面板**（ibm-mq-ui `ui.topology` 新包）：固定列序布局
   （alias→topic→sub→remote→xmitq→channel→远程QMGR→alias→local，alias 链按
   深度展开）、并查集数据流泳道 + 重心法排序、kuiver `EdgeShape.CURVED`

@@ -1,5 +1,6 @@
 package com.mqclient.ibmmq.ui.properties
 
+import com.mqclient.ibmmq.pcf.MqAttributeDisplay
 import com.mqclient.ibmmq.pcf.MqAttributeNameMapper
 import com.mqclient.ibmmq.pcf.MqObjectSnapshot
 
@@ -496,8 +497,21 @@ internal fun resolveQueuePropertyGroups(
         group to group.fields.mapNotNull(::resolve)
     }.filter { (_, rows) -> rows.isNotEmpty() }
 
+    // 「全部属性」兜底：名字 / 枚举值直接查 `MQXXX.title` i18n 键（ibm_mq_attrs 模块表，
+    // MQ Explorer 同款文案）；枚举归属由 MqAttributeDisplay 依 DmQueue 数据模型判定，
+    // 查不到键 / 非枚举回落原始名 / 原始值，不丢数据。
     val other = attrs.filterKeys { it !in usedKeys }
-        .map { (k, v) -> ResolvedQueueProperty(nameKey = k, descKey = "", labelEn = k, valueKey = null, rawValue = v?.toString()?.trim() ?: "", rawConstName = null) }
+        .map { (k, v) ->
+            val constName = (v as? Int)?.let { MqAttributeDisplay.constNameFor(k, it) }
+            ResolvedQueueProperty(
+                nameKey = "$k.title",
+                descKey = "",
+                labelEn = k,
+                valueKey = constName?.let { "$it.title" },
+                rawValue = v?.toString()?.trim()?.ifBlank { " " } ?: "",
+                rawConstName = constName,
+            )
+        }
     return if (other.isEmpty()) grouped else grouped + (QueuePropertyGroup("queue_props_group_all", emptyList()) to other)
 }
 

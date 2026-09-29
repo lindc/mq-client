@@ -57,4 +57,7 @@ object MqAttributeNameMapper {
      */
     fun lookupName(value: Int, prefix: String): String? =
         constantsByValue[value]?.firstOrNull { it.startsWith("$prefix" + "_") }
+
+    /** 常量值 → 全部同值常量名（跨前缀族）；调用方按属性自己的枚举归属筛选。 */
+    fun namesForValue(value: Int): List<String> = constantsByValue[value] ?: emptyList()
 }

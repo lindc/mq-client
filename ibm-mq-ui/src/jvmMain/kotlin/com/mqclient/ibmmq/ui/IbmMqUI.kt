@@ -28,10 +28,17 @@ class IbmMqUI : AdapterUI {
      * 本模块私有的 i18n 表（`files/i18n/ibm_mq_<lang>.json`）：导航项文案（`nav_*`）
      * 等模块字符串归自己的资源文件，加文案不需要动 ui-common 的公共表。
      * 读取必须用自己的 `Res`（compose 运行时资源按库包名隔离，见 [ModuleI18nTable]）。
+     *
+     * 第二张表 `ibm_mq_attrs_<lang>.json` 是 MQ 属性名 / 枚举值文案
+     * （键 = `MQXXX.title`，由 scripts/gen_mq_attr_display.py 从本机 MQ Explorer
+     * 提取生成），「全部属性」兜底行按原始 PCF 名直接查这张表。
      */
     override val i18nTables: List<ModuleI18nTable> = listOf(
         ModuleI18nTable(base = "ibm_mq") { language ->
             Res.readBytes("files/i18n/ibm_mq_$language.json").decodeToString()
+        },
+        ModuleI18nTable(base = "ibm_mq_attrs") { language ->
+            Res.readBytes("files/i18n/ibm_mq_attrs_$language.json").decodeToString()
         },
     )
 
