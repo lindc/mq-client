@@ -16,6 +16,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -40,6 +41,8 @@ fun TopologyNodeCard(
     isHovered: Boolean = false,
     isSelected: Boolean = false,
     severity: NodeSeverity = NodeSeverity.NORMAL,
+    /** 链路高亮模式下不在选中闭包内：整体压暗，让选中的线路凸显。 */
+    dimmed: Boolean = false,
 ) {
     val accent = when (severity) {
         NodeSeverity.ERROR -> MaterialTheme.colorScheme.error
@@ -49,7 +52,8 @@ fun TopologyNodeCard(
     Surface(
         modifier = Modifier
             .width(CARD_WIDTH.dp)
-            .height(CARD_HEIGHT.dp),
+            .height(CARD_HEIGHT.dp)
+            .alpha(if (dimmed) 0.25f else 1f),
         shape = RoundedCornerShape(12.dp),
         // 底色恒为主题表面（不垫类型色块）：选中只用「描边 + 投影」表达，
         // 避免描边外圈与内部填充块两层颜色不一致的割裂感。

@@ -1,6 +1,7 @@
 package com.mqclient.ibmmq.ui.topology
 
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.dk.kuiver.model.EdgeType
 import com.dk.kuiver.model.KuiverEdge
@@ -24,9 +25,10 @@ internal fun topologyEdgeStyle(
     edge: KuiverEdge,
     normalColor: Color,
     cycleColor: Color,
+    strokeWidth: Dp = 1.5.dp,
 ): EdgeStyle = EdgeStyle(
     color = if (edge.type == EdgeType.BACK) cycleColor else normalColor,
-    strokeWidth = 1.5.dp,
+    strokeWidth = strokeWidth,
     showArrow = true,
     shape = EdgeShape.CURVED,
 )

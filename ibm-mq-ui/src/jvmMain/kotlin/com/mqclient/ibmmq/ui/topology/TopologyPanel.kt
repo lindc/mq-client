@@ -1,5 +1,10 @@
 package com.mqclient.ibmmq.ui.topology
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -193,6 +198,41 @@ private fun MqTopologyCanvas(
         }
     }
 
+    // 选中链路高亮：沿有向边做上下游闭包（上游=流入它的，下游=它流向的，BFS 防环）。
+    // 闭包内节点原样、相关边加粗提亮；闭包外节点压暗、无关边淡化——凸显消息流向。
+    val highlight = remember(selectedId, kuiver) {
+        val root = selectedId ?: return@remember null
+        val incoming = kuiver.edges.groupBy { it.toId }
+        val outgoing = kuiver.edges.groupBy { it.fromId }
+        fun closure(step: (String) -> List<String>): Set<String> {
+            val seen = mutableSetOf(root)
+            val queue = ArrayDeque(listOf(root))
+            while (queue.isNotEmpty()) {
+                val cur = queue.removeFirst()
+                for (nb in step(cur)) if (seen.add(nb)) queue += nb
+            }
+            return seen
+        }
+        val nodes = closure { id -> outgoing[id]?.map { it.toId }.orEmpty() } +
+            closure { id -> incoming[id]?.map { it.fromId }.orEmpty() }
+        val edges = kuiver.edges
+            .filter { it.fromId in nodes && it.toId in nodes }
+            .map { it.fromId to it.toId }
+            .toSet()
+        Highlight(nodes, edges)
+    }
+
+    // 高亮边的流动动画：kuiver 的 dashPathEffect 相位写死为 0（虚线锚在路径起点），
+    // 但**循环递增 gapLength 会把后续虚线段整体向终点推移**——位移满一个周期
+    // （dash+gap=20dp）后图案无缝归零，观感即"虚线沿消息方向持续流动"。
+    // 线性匀速 + Restart 无缝循环；仅在选中（highlight != null）时被边样式读取。
+    val flowGap by rememberInfiniteTransition(label = "edgeFlow").animateFloat(
+        initialValue = FLOW_DASH,
+        targetValue = FLOW_DASH * 3,
+        animationSpec = infiniteRepeatable(tween(FLOW_PERIOD_MS, easing = LinearEasing)),
+        label = "flowGap",
+    )
+
     // 布局落定且画布已测量后执行一次「适应视图」；手动缩放 / 拖拽不置位 pendingFit。
     // 焦点对象（列表页「在拓扑图中查看」）在首次出图后选中：图内高亮 + 底部详情卡。
     LaunchedEffect(viewerState.layoutedKuiver, viewerState.canvasWidth) {
@@ -245,16 +285,28 @@ private fun MqTopologyCanvas(
                     isSelected = isSelected || node.id == selectedId,
                     // 告警覆盖类型色：队列积压→警告橙，通道 STOPPED/RETRYING→红。
                     severity = severities[node.id] ?: NodeSeverity.NORMAL,
+                    // 链路高亮模式：闭包外节点压暗，凸显选中线路。
+                    dimmed = highlight != null && node.id !in highlight.nodes,
                 )
             },
-            // 贝塞尔曲线边（EdgeShape.CURVED，见 CurvedEdgeContent.kt 的取舍说明）：
-            // 正常边主题灰，环（BACK）橙色——固定语义色，不随主题翻转。
+            // 贝塞尔曲线边（EdgeShape.CURVED，见 CurvedEdgeContent.kt 的取舍说明）。
+            // 链路高亮模式：闭包内边满透明度加粗 + 虚线流动动画（见 flowGap 注释），
+            // 闭包外边淡到近隐——看消息流向。
             edgeStyle = { edge ->
-                topologyEdgeStyle(
+                val inPath = highlight == null || (edge.fromId to edge.toId) in highlight.edges
+                val normalAlpha = if (highlight == null) 0.6f else if (inPath) 0.95f else 0.08f
+                val cycleAlpha = if (highlight == null) 0.8f else if (inPath) 1f else 0.1f
+                val base = topologyEdgeStyle(
                     edge = edge,
-                    normalColor = scheme.outlineVariant.copy(alpha = 0.6f),
-                    cycleColor = CYCLE_EDGE_COLOR.copy(alpha = 0.8f),
+                    normalColor = scheme.outlineVariant.copy(alpha = normalAlpha),
+                    cycleColor = CYCLE_EDGE_COLOR.copy(alpha = cycleAlpha),
+                    strokeWidth = if (highlight != null && inPath) 2.dp else 1.5.dp,
                 )
+                if (highlight != null && inPath) {
+                    base.copy(dashed = true, dashLength = FLOW_DASH.dp, gapLength = flowGap.dp)
+                } else {
+                    base
+                }
             },
         )
 
@@ -349,3 +401,12 @@ private fun NodeDetailCard(
 
 /** 环（BACK 边）的固定语义色：橙色（需求指定，异常信号不随主题翻转）。 */
 private val CYCLE_EDGE_COLOR = Color(0xFFFF9800)
+
+/** 选中链路高亮集：闭包节点 id + 闭包内边（fromId to id）。 */
+private data class Highlight(val nodes: Set<String>, val edges: Set<Pair<String, String>>)
+
+/** 高亮边流动动画：虚线段长（dp）；gap 从它循环递增到 3 倍即位移满一个周期（无缝）。 */
+private const val FLOW_DASH = 10f
+
+/** 流动动画一个完整位移周期的时长（ms）。 */
+private const val FLOW_PERIOD_MS = 700
