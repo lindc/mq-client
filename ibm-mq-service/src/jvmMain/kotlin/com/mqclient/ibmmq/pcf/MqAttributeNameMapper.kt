@@ -52,11 +52,13 @@ object MqAttributeNameMapper {
     }
 
     /**
-     * 常量值 → 常量名（限 [prefix] 前缀族，如 MQCHS_RUNNING 的值查 "MQCHS"）。
+     * 常量值 → 常量名（限 [prefix] 前缀族，如 MQCHS_RUNNING 的值查 "MQCHS"；
+     * 也支持**精确常量名**——单常量枚举（如 topic 通配符操作只有
+     * MQTA_PASSTHRU=2 / MQTA_BLOCK=1，没有子族后缀可依）直接传常量名）。
      * 查不到（客户端未收录，如 MQLSR_*）返回 null，由调用方给兜底文案。
      */
     fun lookupName(value: Int, prefix: String): String? =
-        constantsByValue[value]?.firstOrNull { it.startsWith("$prefix" + "_") }
+        constantsByValue[value]?.firstOrNull { it == prefix || it.startsWith("$prefix" + "_") }
 
     /** 常量值 → 全部同值常量名（跨前缀族）；调用方按属性自己的枚举归属筛选。 */
     fun namesForValue(value: Int): List<String> = constantsByValue[value] ?: emptyList()

@@ -172,4 +172,68 @@ class QueueAliasExtendedGroupTest {
             "MQCACH_LISTENER_START_TIME" to "05.59.16",
         ),
     )
+
+    @Test
+    fun `topic properties resolve like mq explorer`() {
+        val zh = attrsTable("zh-CN")
+        val groups = resolveTopicPropertyGroups(topicSnapshot())
+        fun valueOf(labelEn: String): String? {
+            val r = groups.flatMap { it.second }.firstOrNull { it.labelEn == labelEn } ?: return null
+            return listOfNotNull(r.valueKey, r.valueFallbackKey)
+                .map { k -> k to (zh[k] ?: k) }
+                .firstOrNull { (k, v) -> v != k }?.second
+                ?: r.rawValue
+        }
+
+        // 值与 MQ Explorer 的 Topic 页对齐（zh 表为准）。
+        assertEquals("本地", valueOf("Topic type"))
+        assertEquals("customer/", valueOf("Topic string"))
+        assertEquals("作为父代", valueOf("Durable subscriptions"))
+        // 单常量枚举：2 = MQTA_PASSTHRU（消歧前会被 MQTA_PUB_ALLOWED「允许」抢中）。
+        assertEquals("传递", valueOf("Wildcard operation"))
+        assertEquals("作为父代", valueOf("Publication"))
+        assertEquals("作为父代", valueOf("NPM delivery"))
+        assertEquals("作为父代", valueOf("Publication scope"))
+        assertEquals("首先使用", valueOf("Proxy subscription behavior"))
+        assertEquals("直接", valueOf("Cluster route"))
+        // MQPRT_RESPONSE_AS_PARENT=0（快照值 0 = 随父项；alias 页的 1 才是同步）。
+        assertEquals("作为父代", valueOf("Default put response type"))
+        // -1 / -2 = AS_PARENT 族常量。
+        assertEquals("作为父代", valueOf("Default persistence"))
+        assertEquals("作为父代", valueOf("Default priority"))
+    }
+
+    /** 真机 CUSTOMER.TOPIC 快照形状（INQUIRE_TOPIC 全量应答）。 */
+    private fun topicSnapshot() = MqObjectSnapshot(
+        name = "CUSTOMER.TOPIC",
+        type = MqObjectType.TOPIC,
+        attributes = mapOf(
+            "MQCA_TOPIC_NAME" to "CUSTOMER.TOPIC",
+            "MQIA_TOPIC_TYPE" to 0, // MQTOPT_LOCAL
+            "MQCA_TOPIC_STRING" to "customer/",
+            "MQCA_TOPIC_DESC" to "",
+            "MQCA_CLUSTER_NAME" to "",
+            "MQIA_CLUSTER_PUB_ROUTE" to 0, // MQCLROUTE_DIRECT
+            "MQIA_DURABLE_SUB" to 0, // MQSUB_DURABLE_AS_PARENT
+            "MQIA_INHIBIT_PUB" to 0, // MQTA_PUB_AS_PARENT
+            "MQIA_INHIBIT_SUB" to 0, // MQTA_SUB_AS_PARENT
+            "MQIA_TOPIC_DEF_PERSISTENCE" to -1, // MQPER_PERSISTENCE_AS_PARENT
+            "MQIA_DEF_PRIORITY" to -2, // MQPRI_PRIORITY_AS_PARENT
+            "MQIA_DEF_PUT_RESPONSE_TYPE" to 0, // MQPRT_SYNC_RESPONSE
+            "MQIA_PM_DELIVERY" to 0, // MQDLV_AS_PARENT
+            "MQIA_NPM_DELIVERY" to 0, // MQDLV_AS_PARENT
+            "MQIA_PUB_SCOPE" to 1, // MQSCOPE_AS_PARENT
+            "MQIA_SUB_SCOPE" to 1, // MQSCOPE_AS_PARENT
+            "MQIA_PROXY_SUB" to 2, // MQTA_PROXY_SUB_FIRSTUSE
+            "MQIA_WILDCARD_OPERATION" to 2, // MQTA_PASSTHRU
+            "MQCA_MODEL_DURABLE_Q" to "",
+            "MQCA_MODEL_NON_DURABLE_Q" to "",
+            "MQIA_MULTICAST" to 0, // MQMC_AS_PARENT
+            "MQCA_COMM_INFO_NAME" to "",
+            "MQIA_USE_DEAD_LETTER_Q" to 0, // MQUSEDLQ_AS_PARENT
+            "MQCA_CUSTOM" to "",
+            "MQCA_ALTERATION_DATE" to "2026-09-25",
+            "MQCA_ALTERATION_TIME" to "12.39.02",
+        ),
+    )
 }

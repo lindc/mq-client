@@ -42,6 +42,14 @@
   一律走 valuePrefix 前缀反查，且 MQSVC_ 族内 CONTROL / STATUS / TYPE 同值
   碰撞，前缀取到子族（MQSVC_CONTROL / MQSVC_STATUS）消歧。离线回归用真机
   SYSTEM.LISTENER.TCP.1 快照形状断言显示文本；停止的监听器隐藏运行状态行。
+- **主题属性对话框实装**（对照 Topic properties）：「常规」单页 +「全部属性」
+  兜底，字段按 DmTopic.xml（名称 / 类型 / 主题字符串 / 描述 / 持久预订 /
+  通配符操作 / NPM·PM 传送 / 发布·预订及其作用域 / 代理预订行为 / 集群名称·
+  路由 / 多点广播 / 模型队列 / 通信信息 / DLQ / 缺省持久性·优先级·PUT 响应 /
+  定制 / 变更日期时间），中英 i18n 56 键。坑位：`MQTA_*` 一族常量服务 4 个
+  属性（同值碰撞，前缀取到子族或精确常量）；通配符操作是单常量枚举
+  （MQTA_PASSTHRU 无子族后缀），`MqAttributeNameMapper.lookupName` 加精确
+  匹配分支。离线回归用真机 CUSTOMER.TOPIC 快照形状断言显示文本。
 - **旧通用拓扑管线整体下线**：删除 topology-ui、graph-core 模块与
   TopologyProvider SPI / IbmMQTopologyProvider / IbmMqTopologyStyle（附带删除
   一个在部分环境会无限挂死的 provider 单测）；拓扑渲染由 MQ 专属面板承担，
