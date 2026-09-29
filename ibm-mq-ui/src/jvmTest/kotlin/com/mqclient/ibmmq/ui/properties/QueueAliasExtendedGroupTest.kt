@@ -115,4 +115,61 @@ class QueueAliasExtendedGroupTest {
         ).flatMap { it.second }.none { it.labelEn == "Accessing processes" }
         assertTrue(remoteHidden)
     }
+
+    @Test
+    fun `listener properties resolve like mq explorer`() {
+        val zh = attrsTable("zh-CN")
+        val running = resolveListenerPropertyGroups(listenerSnapshot())
+        fun row(labelEn: String) = running.flatMap { it.second }.firstOrNull { it.labelEn == labelEn }
+
+        // 复刻 PropertyRowLocalized 的查表链断言最终显示值（zh 表）。
+        fun valueOf(labelEn: String): String? {
+            val r = row(labelEn) ?: return null
+            return listOfNotNull(r.valueKey, r.valueFallbackKey)
+                .map { k -> k to (zh[k] ?: k) }
+                .firstOrNull { (k, v) -> v != k }?.second
+                ?: r.rawValue
+        }
+
+        assertEquals("TCP", valueOf("Transmission protocol"))
+        // MQSVC_CONTROL_Q_MGR=0（消歧前 0 会被 MQSVC_TYPE_COMMAND「命令」抢中）。
+        assertEquals("队列管理器", valueOf("Control"))
+        assertEquals("正在运行", valueOf("Listener status"))
+        assertEquals("1414", valueOf("Port"))
+        assertEquals("*", valueOf("IP address"))
+        assertEquals("100", valueOf("Backlog"))
+        assertEquals("154", valueOf("Process ID"))
+        // 名称 / 描述走 listener_prop_* 键（不在 attrs 表），显示原始值。
+        assertEquals("SYSTEM.LISTENER.TCP.1", valueOf("Listener name"))
+
+        // 停止的监听器：运行状态 / 进程号 / 启动日期时间不存在 → 行隐藏。
+        val stopped = resolveListenerPropertyGroups(
+            listenerSnapshot().copy(attributes = listenerSnapshot().attributes
+                .filterKeys { it !in setOf("MQIACH_LISTENER_STATUS", "MQIACF_PROCESS_ID", "MQCACH_LISTENER_START_DATE", "MQCACH_LISTENER_START_TIME") }),
+        ).flatMap { it.second }
+        assertFalse(stopped.any { it.labelEn == "Listener status" })
+        assertFalse(stopped.any { it.labelEn == "Process ID" })
+        assertFalse(stopped.any { it.labelEn == "Start date" })
+    }
+
+    /** 真机 SYSTEM.LISTENER.TCP.1 快照形状（INQUIRE_LISTENER + STATUS 合并）。 */
+    private fun listenerSnapshot() = MqObjectSnapshot(
+        name = "SYSTEM.LISTENER.TCP.1",
+        type = MqObjectType.LISTENER,
+        attributes = mapOf(
+            "MQCACH_LISTENER_NAME" to "SYSTEM.LISTENER.TCP.1",
+            "MQCACH_LISTENER_DESC" to "",
+            "MQIACH_LISTENER_CONTROL" to 0, // MQSVC_CONTROL_MANUAL
+            "MQIACH_FIRST" to 2, // MQXPT_TCP（1501 的 Java 客户端别名键）
+            "MQIACH_PORT" to 1414,
+            "MQCACH_IP_ADDRESS" to "*",
+            "MQIACH_BACKLOG" to 100,
+            "MQCA_ALTERATION_DATE" to "2026-09-01",
+            "MQCA_ALTERATION_TIME" to "22.55.39",
+            "MQIACH_LISTENER_STATUS" to 2, // MQLSR_RUNNING
+            "MQIACF_PROCESS_ID" to 154,
+            "MQCACH_LISTENER_START_DATE" to "2026-09-24",
+            "MQCACH_LISTENER_START_TIME" to "05.59.16",
+        ),
+    )
 }

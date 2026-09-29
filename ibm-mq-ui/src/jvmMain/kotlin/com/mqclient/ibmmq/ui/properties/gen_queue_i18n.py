@@ -158,7 +158,7 @@ for g, spec in group_titles.items():
         zh[desc_key] = desc_zh
         prefix_lit = ('"%s"' % prefix) if prefix else "null"
         fields_kt.append(
-            "            QueuePropertyField(\n"
+            "            ObjectPropertyField(\n"
             '                nameKey = "%s",\n'
             '                descKey = "%s",\n'
             '                labelEn = "%s",\n'
@@ -167,7 +167,7 @@ for g, spec in group_titles.items():
             "            )," % (name_key, desc_key, label_en, pcf, prefix_lit))
 
     groups_kt.append(
-        "    QueuePropertyGroup(\n"
+        "    ObjectPropertyGroup(\n"
         '        titleKey = "%s",\n'
         "        fields = listOf(\n"
         "%s\n"

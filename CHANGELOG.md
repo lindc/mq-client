@@ -32,6 +32,16 @@
   `MQIACF_PROCESS_ID` 按队列名聚合成 PID 列表（合成键
   `MQIACF_OPEN_PROCESS_IDS`）塞进快照；无人打开显示「无」，remote / model
   队列（无句柄概念）不显示。真机验证：AMQ.* 队列拿到 `openPids=[110, 130]`。
+- **监听器属性对话框实装**（对照 Queue properties）：「常规」单页 +「全部属性」
+  兜底，字段序按 MQ Explorer DmListener.xml grpseq（名称 / 描述 / 控制 / 传输
+  协议 / 端口 / IP 地址 / 积压 / 运行状态 / 启动日期时间 / 进程号 / 变更日期时间）。
+  布局抽成共用 PropertyGroupsPane，属性类型改通用命名 ObjectPropertyField /
+  ObjectPropertyGroup / ResolvedObjectProperty。坑位记录：传输协议参数（1501）
+  Java 客户端反查成别名键 `MQIACH_FIRST`；DM 枚举归属表按 Queue 模型生成、对
+  listener 键误判（CONTROL=0 被归属成 MQSVC_TYPE_COMMAND「命令」），listener
+  一律走 valuePrefix 前缀反查，且 MQSVC_ 族内 CONTROL / STATUS / TYPE 同值
+  碰撞，前缀取到子族（MQSVC_CONTROL / MQSVC_STATUS）消歧。离线回归用真机
+  SYSTEM.LISTENER.TCP.1 快照形状断言显示文本；停止的监听器隐藏运行状态行。
 - **旧通用拓扑管线整体下线**：删除 topology-ui、graph-core 模块与
   TopologyProvider SPI / IbmMQTopologyProvider / IbmMqTopologyStyle（附带删除
   一个在部分环境会无限挂死的 provider 单测）；拓扑渲染由 MQ 专属面板承担，
