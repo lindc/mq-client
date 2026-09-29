@@ -93,9 +93,23 @@ fun topicStringsMatch(a: String?, b: String?): Boolean {
     return a.trimEnd('/') == b.trimEnd('/')
 }
 
-/** 系统对象判定：`SYSTEM.*` / `AMQ.*` 一律不进拓扑图（大小写不敏感）。 */
-fun MqObjectSnapshot.isSystemObject(): Boolean =
-    name.startsWith("SYSTEM", ignoreCase = true) || name.startsWith("AMQ", ignoreCase = true)
+/**
+ * 系统对象判定：`SYSTEM.*` / `AMQ.*` 一律不进拓扑图（大小写不敏感）。
+ *
+ * 注意订阅的坑：MQ 内部系统订阅的名字**带 QMGR 前缀**，形如
+ * `QM1 SYSTEM.BROKER.INTER.BROKER.COMMUNICATIONS.<SUBID hex>`——startsWith 抓不到，
+ * 按空白分词后任一段以 SYSTEM. / AMQ. 开头同样算系统对象；`$` 开头（$MQ…）是另一类
+ * MQ 内部订阅名，一并挡掉。
+ */
+fun MqObjectSnapshot.isSystemObject(): Boolean {
+    val n = name
+    if (n.startsWith("SYSTEM", ignoreCase = true) || n.startsWith("AMQ", ignoreCase = true)) {
+        return true
+    }
+    if (n.startsWith("$")) return true
+    return n.split(' ', '\t').asSequence().drop(1)
+        .any { it.startsWith("SYSTEM.", ignoreCase = true) || it.startsWith("AMQ.", ignoreCase = true) }
+}
 
 fun List<MqObjectSnapshot>.filterNotSystem(): List<MqObjectSnapshot> =
     filter { !it.isSystemObject() }
