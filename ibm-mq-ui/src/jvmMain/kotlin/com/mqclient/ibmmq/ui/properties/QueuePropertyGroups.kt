@@ -37,6 +37,12 @@ internal data class QueuePropertyField(
      * allclient，故直接用 MQQT_ 字面值：MQQT_ALIAS=3、MQQT_REMOTE=6。
      */
     val notForQTypes: List<Int> = emptyList(),
+    /**
+     * 快照里没有候选键时也显示该行（值走 `queue_value_none` =「无」）——给
+     * 「访问进程」这类动态字段用：无人打开也是有效信息。仍受 notForQTypes
+     * 约束（remote / model 队列没有句柄概念，不显示）。
+     */
+    val showIfMissing: Boolean = false,
 )
 
 internal data class QueuePropertyGroup(
@@ -146,14 +152,16 @@ internal val queuePropertyGroups: List<QueuePropertyGroup> = listOf(
                 keys = listOf("MQCA_XMIT_Q_NAME"),
                 valuePrefix = null,
             ),
-            // 快照级动态字段（非 MQ 对象属性）：句柄状态聚合的打开进程号列表，
-            // 无人打开时快照无此键 → 该行自动隐藏。
+            // 快照级动态字段（非 MQ 对象属性）：句柄状态聚合的打开进程号列表；
+            // 无人打开显示「无」（remote / model 队列无句柄概念，不显示）。
             QueuePropertyField(
                 nameKey = "queue_prop_name_open_processes",
                 descKey = "queue_prop_desc_open_processes",
                 labelEn = "Accessing processes",
                 keys = listOf("MQIACF_OPEN_PROCESS_IDS"),
                 valuePrefix = null,
+                notForQTypes = listOf(2, 6),
+                showIfMissing = true,
             ),
         ),
     ),
@@ -500,7 +508,20 @@ internal fun resolveQueuePropertyGroups(
 
     fun resolve(field: QueuePropertyField): ResolvedQueueProperty? {
         if (field.notForQTypes.any { it == qType }) return null
-        val key = field.keys.firstOrNull { it in attrs } ?: return null
+        val key = field.keys.firstOrNull { it in attrs }
+        if (key == null) {
+            // 候选键缺失：动态字段（showIfMissing）显示「无」，其余照旧隐藏。
+            if (!field.showIfMissing) return null
+            return ResolvedQueueProperty(
+                nameKey = field.nameKey,
+                descKey = field.descKey,
+                labelEn = field.labelEn,
+                valueKey = "queue_value_none",
+                valueFallbackKey = null,
+                rawValue = " ",
+                rawConstName = null,
+            )
+        }
         usedKeys += key
         val raw = attrs[key]
         val rawText = raw?.toString()?.trim() ?: ""

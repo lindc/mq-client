@@ -6,6 +6,7 @@ import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 /**
  * 「扩展」分组对齐 MQ Explorer 的离线回归：用真机 alias 快照的形状
@@ -92,5 +93,26 @@ class QueueAliasExtendedGroupTest {
         }
         assertEquals("队列管理器", value)
         assertFalse(row?.valueFallbackKey?.contains("VERSION") == true)
+    }
+
+    @Test
+    fun `accessing processes shows none when no handles hidden for remote`() {
+        val local = resolveQueuePropertyGroups(
+            MqObjectSnapshot(
+                name = "ORDER.AUDIT.Q",
+                type = MqObjectType.QUEUE,
+                attributes = mapOf("MQCA_Q_NAME" to "ORDER.AUDIT.Q", "MQIA_Q_TYPE" to 1),
+            ),
+        ).flatMap { it.second }.firstOrNull { it.labelEn == "Accessing processes" }
+        assertEquals("queue_value_none", local?.valueKey)
+
+        val remoteHidden = resolveQueuePropertyGroups(
+            MqObjectSnapshot(
+                name = "BATCH.TO.QM3",
+                type = MqObjectType.QUEUE,
+                attributes = mapOf("MQCA_Q_NAME" to "BATCH.TO.QM3", "MQIA_Q_TYPE" to 6),
+            ),
+        ).flatMap { it.second }.none { it.labelEn == "Accessing processes" }
+        assertTrue(remoteHidden)
     }
 }

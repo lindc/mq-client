@@ -30,8 +30,8 @@
 - **属性对话框「常规」分组新增「访问进程」**：扫描加一条 `INQUIRE_Q_STATUS`
   `StatusType=MQIACF_Q_HANDLE`（句柄状态，每打开句柄一条响应），取
   `MQIACF_PROCESS_ID` 按队列名聚合成 PID 列表（合成键
-  `MQIACF_OPEN_PROCESS_IDS`）塞进快照；无人打开 → 快照无此键，该行自动隐藏。
-  真机验证：AMQ.* 队列拿到 `openPids=[110, 130]`。
+  `MQIACF_OPEN_PROCESS_IDS`）塞进快照；无人打开显示「无」，remote / model
+  队列（无句柄概念）不显示。真机验证：AMQ.* 队列拿到 `openPids=[110, 130]`。
 - **旧通用拓扑管线整体下线**：删除 topology-ui、graph-core 模块与
   TopologyProvider SPI / IbmMQTopologyProvider / IbmMqTopologyStyle（附带删除
   一个在部分环境会无限挂死的 provider 单测）；拓扑渲染由 MQ 专属面板承担，
