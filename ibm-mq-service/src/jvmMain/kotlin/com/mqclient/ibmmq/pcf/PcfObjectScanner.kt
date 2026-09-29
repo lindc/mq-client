@@ -82,6 +82,12 @@ class PcfObjectScanner {
         val attributes = inquire(agent, MQConstants.MQCMD_INQUIRE_Q) {
             addParameter(MQConstants.MQCA_Q_NAME, "*")
             addParameter(MQConstants.MQIA_Q_TYPE, MQConstants.MQQT_ALL)
+            // QMGR 对 alias / remote 的默认应答不含这两个 attr（属性对话框 Extended
+            // 页要用，MQ Explorer 也是显式请求的），MQIACF_Q_ATTRS 点名补齐。
+            addParameter(
+                MQConstants.MQIACF_Q_ATTRS,
+                intArrayOf(MQConstants.MQIA_DEF_READ_AHEAD, MQConstants.MQIA_DEF_PUT_RESPONSE_TYPE),
+            )
         }
         val statuses = inquire(agent, MQConstants.MQCMD_INQUIRE_Q_STATUS) {
             addParameter(MQConstants.MQCA_Q_NAME, "*")

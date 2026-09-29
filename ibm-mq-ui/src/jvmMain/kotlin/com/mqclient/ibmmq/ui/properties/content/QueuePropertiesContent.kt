@@ -128,15 +128,17 @@ fun QueuePropertiesContent(state: ObjectPropertiesDialogState) {
 
 /**
  * 属性行：左 = 属性名（i18n，缺失回落英文名）+ 一句话说明（i18n，小字，最多两行）；
- * 右 = 值（i18n 键命中显示本地化说明，否则显示原始值）。
+ * 右 = 值（先查策展 queue_value_* 键，缺失查 <常量>.title 兜底键，再缺显示原始值）。
  */
 @Composable
 private fun PropertyRowLocalized(row: ResolvedQueueProperty, modifier: Modifier = Modifier) {
     val name = stringResource(row.nameKey).let { if (it == row.nameKey) row.labelEn else it }
     val desc = stringResource(row.descKey).let { if (it == row.descKey) "" else it }
-    val value = row.valueKey?.let { key ->
-        stringResource(key).let { if (it == key) row.rawValue else it }
-    } ?: row.rawValue
+    val value = listOfNotNull(row.valueKey, row.valueFallbackKey)
+        .map { key -> key to stringResource(key) }
+        .firstOrNull { (key, text) -> text != key }
+        ?.second
+        ?: row.rawValue
 
     Row(modifier = modifier, verticalAlignment = Alignment.Top) {
         Column(modifier = Modifier.weight(1f)) {

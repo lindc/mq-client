@@ -118,6 +118,60 @@ class PcfObjectScannerLiveTest {
     }
 
     /**
+     * 回归：INQUIRE_Q 显式请求 MQIACF_Q_ATTRS 后，alias 队列快照必须带
+     * MQIA_DEF_READ_AHEAD / MQIA_DEF_PUT_RESPONSE_TYPE（属性对话框 Extended 页）。
+     * QMGR 对 alias 的默认应答不含这两个 attr，漏请求时 UI 只能少行。
+     * 没有配置 / 没有网络 / 无 alias 队列时打印 SKIP 并通过。
+     */
+    @Test
+    fun aliasQueuesExposeExtendedAttrs() = runBlocking {
+        val connections = ConnectionStore.connections.value.filter { it.serviceId == "ibm-mq" }
+        if (connections.isEmpty()) {
+            println("LIVE SKIP: config.toml 里没有 IBM MQ 连接")
+            return@runBlocking
+        }
+        val info = connections.first()
+        val config: IbmMQConfig = ibmMQConfigFromOptions(info.options)
+        val manager = try {
+            kotlinx.coroutines.withTimeout(config.connectionTimeout * 1_000L) {
+                MQQueueManager(config.queueManager, mqProperties(config))
+            }
+        } catch (t: Throwable) {
+            println("LIVE SKIP: 连接失败（QMGR 不在线？）：${t.message}")
+            return@runBlocking
+        }
+        try {
+            val agent = PCFMessageAgent(manager)
+            try {
+                val aliases = PcfObjectScanner().scanQueuesWith(agent)
+                    .filter { it.attributes["MQIA_Q_TYPE"] == MQConstants.MQQT_ALIAS }
+                if (aliases.isEmpty()) {
+                    println("LIVE SKIP: 无 alias 队列")
+                    return@runBlocking
+                }
+                aliases.forEach { q ->
+                    println(
+                        "LIVE alias ${q.name}: defReadAhead=${q.attributes["MQIA_DEF_READ_AHEAD"]} " +
+                            "defPutResp=${q.attributes["MQIA_DEF_PUT_RESPONSE_TYPE"]}",
+                    )
+                    assertTrue(
+                        q.attributes.containsKey("MQIA_DEF_READ_AHEAD"),
+                        "alias ${q.name} 快照缺 MQIA_DEF_READ_AHEAD",
+                    )
+                    assertTrue(
+                        q.attributes.containsKey("MQIA_DEF_PUT_RESPONSE_TYPE"),
+                        "alias ${q.name} 快照缺 MQIA_DEF_PUT_RESPONSE_TYPE",
+                    )
+                }
+            } finally {
+                runCatching { agent.disconnect() }
+            }
+        } finally {
+            runCatching { manager.disconnect() }
+        }
+    }
+
+    /**
      * 真机验证「停止监听器」的轮询路径（复刻 UI 的 STOP LISTENER + 状态轮询）：
      * 先 START 让 LSNR.QM1 进入 RUNNING，再 STOP，随后轮询 [PcfObjectScanner.queryListenerStatusWith]，
      * 断言——停止后**不再抛 2085**（MQRC_UNKNOWN_OBJECT_NAME 已被兜底为空结果，即 NOT_RUNNING），

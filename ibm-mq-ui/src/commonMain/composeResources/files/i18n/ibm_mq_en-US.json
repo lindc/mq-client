@@ -177,6 +177,8 @@
   "queue_prop_name_max_msg_length": "Max message length",
   "queue_prop_name_shareability": "Shareable",
   "queue_prop_name_def_bind": "Default binding",
+  "queue_prop_name_def_read_ahead": "Default read ahead",
+  "queue_prop_name_def_put_response_type": "Default put response type",
   "queue_prop_name_msg_delivery_sequence": "Msg delivery sequence",
   "queue_prop_name_def_input_open_option": "Default open input option",
   "queue_prop_name_property_control": "Property control",

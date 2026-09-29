@@ -29,8 +29,14 @@ internal data class QueuePropertyField(
     val labelEn: String,
     /** PCF 快照候选键。 */
     val keys: List<String>,
-    /** 整型枚举值反查可读名的前缀族。 */
+    /** 整型枚举值反查可读名的前缀族（DM 归属判定失败时的兜底）。 */
     val valuePrefix: String? = null,
+    /**
+     * 这些队列类型（MQQT_*）不显示该字段——对齐 MQ Explorer 的分类型页面
+     * （如 alias / remote 的 Extended 页没有 Default binding）。UI 模块不依赖
+     * allclient，故直接用 MQQT_ 字面值：MQQT_ALIAS=3、MQQT_REMOTE=6。
+     */
+    val notForQTypes: List<Int> = emptyList(),
 )
 
 internal data class QueuePropertyGroup(
@@ -172,6 +178,22 @@ internal val queuePropertyGroups: List<QueuePropertyGroup> = listOf(
                 labelEn = "Default binding",
                 keys = listOf("MQIA_DEF_BIND"),
                 valuePrefix = "MQBND",
+                // MQ Explorer 的 alias / remote 页面没有 Default binding。
+                notForQTypes = listOf(3, 6),
+            ),
+            QueuePropertyField(
+                nameKey = "queue_prop_name_def_read_ahead",
+                descKey = "queue_prop_desc_def_read_ahead",
+                labelEn = "Default read ahead",
+                keys = listOf("MQIA_DEF_READ_AHEAD"),
+                valuePrefix = "MQREADA",
+            ),
+            QueuePropertyField(
+                nameKey = "queue_prop_name_def_put_response_type",
+                descKey = "queue_prop_desc_def_put_response_type",
+                labelEn = "Default put response type",
+                keys = listOf("MQIA_DEF_PUT_RESPONSE_TYPE"),
+                valuePrefix = "MQPRT",
             ),
             QueuePropertyField(
                 nameKey = "queue_prop_name_msg_delivery_sequence",
@@ -233,6 +255,7 @@ internal val queuePropertyGroups: List<QueuePropertyGroup> = listOf(
                 labelEn = "Default binding",
                 keys = listOf("MQIA_DEF_BIND"),
                 valuePrefix = "MQBND",
+                notForQTypes = listOf(3, 6),
             ),
             QueuePropertyField(
                 nameKey = "queue_prop_name_clwl_useq",
@@ -463,8 +486,11 @@ internal fun resolveQueuePropertyGroups(
 ): List<Pair<QueuePropertyGroup, List<ResolvedQueueProperty>>> {
     val attrs = snapshot.attributes
     val usedKeys = mutableSetOf<String>()
+    // 队列类型（MQIA_Q_TYPE，MQQT_*）：驱动 notForQTypes 过滤。
+    val qType = (attrs["MQIA_Q_TYPE"] as? Int)
 
     fun resolve(field: QueuePropertyField): ResolvedQueueProperty? {
+        if (field.notForQTypes.any { it == qType }) return null
         val key = field.keys.firstOrNull { it in attrs } ?: return null
         usedKeys += key
         val raw = attrs[key]
@@ -479,19 +505,12 @@ internal fun resolveQueuePropertyGroups(
         } else {
             null
         }
-        val valueKey = constName?.lowercase()
-            ?.removePrefix("mq")?.removePrefix("qa_")?.removePrefix("ia_")
-            ?.removePrefix("ca_")?.removePrefix("ot_")?.removePrefix("us_")
-            ?.removePrefix("qt_")?.removePrefix("per_")?.removePrefix("sco_")
-            ?.removePrefix("bnd_")?.removePrefix("mds_")?.removePrefix("evo_")
-            ?.removePrefix("tc_")?.removePrefix("trg_")?.removePrefix("ha_")
-            ?.removePrefix("npm_")?.removePrefix("prop_")?.removePrefix("clwluseq_")
-            ?.let { "queue_value_$it" }
         return ResolvedQueueProperty(
             nameKey = field.nameKey,
             descKey = field.descKey,
             labelEn = field.labelEn,
-            valueKey = valueKey,
+            valueKey = constName?.let(::curatedValueKey),
+            valueFallbackKey = constName?.let { "$it.title" },
             rawValue = rawText.ifBlank { " " },
             rawConstName = constName,
         )
@@ -511,7 +530,8 @@ internal fun resolveQueuePropertyGroups(
                 nameKey = "$k.title",
                 descKey = "",
                 labelEn = k,
-                valueKey = constName?.let { "$it.title" },
+                valueKey = null,
+                valueFallbackKey = constName?.let { "$it.title" },
                 rawValue = v?.toString()?.trim()?.ifBlank { " " } ?: "",
                 rawConstName = constName,
             )
@@ -519,13 +539,30 @@ internal fun resolveQueuePropertyGroups(
     return if (other.isEmpty()) grouped else grouped + (QueuePropertyGroup("queue_props_group_all", emptyList()) to other)
 }
 
+/**
+ * 常量名 → 老的 `queue_value_*` 策展键（如 MQQT_LOCAL → queue_value_local）。
+ * 策展表只覆盖老字段，缺键时由 [ResolvedQueueProperty.valueFallbackKey] 的
+ * `<常量>.title`（ibm_mq_attrs 表）兜底。
+ */
+private fun curatedValueKey(constName: String): String? =
+    constName.lowercase()
+        .removePrefix("mq")?.removePrefix("qa_")?.removePrefix("ia_")
+        ?.removePrefix("ca_")?.removePrefix("ot_")?.removePrefix("us_")
+        ?.removePrefix("qt_")?.removePrefix("per_")?.removePrefix("sco_")
+        ?.removePrefix("bnd_")?.removePrefix("mds_")?.removePrefix("evo_")
+        ?.removePrefix("tc_")?.removePrefix("trg_")?.removePrefix("ha_")
+        ?.removePrefix("npm_")?.removePrefix("prop_")?.removePrefix("clwluseq_")
+        ?.let { "queue_value_$it" }
+
 /** 渲染就绪的属性行：名称 / 说明均为 i18n 键，由组合期 stringResource 解析。 */
 internal data class ResolvedQueueProperty(
     val nameKey: String,
     val descKey: String,
     val labelEn: String,
-    /** 值的 i18n 键；null = 显示原始值。 */
+    /** 值的 i18n 键（策展 queue_value_*；null = 无策展键）。 */
     val valueKey: String?,
+    /** 值的兜底 i18n 键（`<常量>.title`，ibm_mq_attrs 表），策展键缺失时使用。 */
+    val valueFallbackKey: String? = null,
     val rawValue: String,
     val rawConstName: String?,
 )

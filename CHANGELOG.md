@@ -41,6 +41,12 @@
 
 ### Fixed
 
+- **alias 队列「扩展」分组对不齐 MQ Explorer**：INQUIRE_Q 显式带
+  `MQIACF_Q_ATTRS` 请求 `MQIA_DEF_READ_AHEAD` / `MQIA_DEF_PUT_RESPONSE_TYPE`
+  （QMGR 对 alias 的默认应答不含），补两行 i18n；值解析加 `<常量>.title`
+  兜底键（修 `属性控制` 显示原始 0——`queue_value_compatibility` 键缺失）；
+  字段表加 `notForQTypes`（alias / remote 不再显示 MQ Explorer 没有的
+  Default binding）。真机回归：alias 快照必须含这两个 attr。
 - **列表页丢扫描事件**：MqObjectListState 改为先订阅后加载，消除卡 Loading
   的事件窗口。
 - **测试连接吞取消**：testConnection 的超时包装改为只转超时 / 普通异常，
