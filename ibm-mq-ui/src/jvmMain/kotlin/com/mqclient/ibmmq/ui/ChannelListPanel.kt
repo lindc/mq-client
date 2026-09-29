@@ -166,12 +166,14 @@ fun ChannelListPanel(
             ObjectListPanel(
                 items = filtered.map { channel ->
                     channel.toChannelCardData(
-                        actions = ChannelCardActions.create(
-                            snapshot = channel,
-                            onOpenProperties = { onOpenProperties(channel.name) },
-                            onStart = { startChannel(channel.name) },
-                            onStop = { requestStopChannel(channel.name, channel.channelStatus) },
-                        ) + topologyViewAction(connectionId, channel.name),
+                        // 拓扑查看在最前，属性按钮恒在最后（各对象类型尾按钮一致）。
+                        actions = listOf(topologyViewAction(connectionId, channel.name)) +
+                            ChannelCardActions.create(
+                                snapshot = channel,
+                                onOpenProperties = { onOpenProperties(channel.name) },
+                                onStart = { startChannel(channel.name) },
+                                onStop = { requestStopChannel(channel.name, channel.channelStatus) },
+                            ),
                         executingActionIds = executingIdsFor(channel.name),
                         executingTarget = executingActions[channel.name],
                     )

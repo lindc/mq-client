@@ -139,14 +139,6 @@ fun MainWindow(
         }
     }
 
-    // 列表页「在拓扑图中查看」写入焦点后，这里把对应连接切到拓扑 Tab；
-    // 面板自身在打开时消费焦点（按连接隔离），从而以该对象为中心展开 1 跳。
-    LaunchedEffect(Unit) {
-        TopologyFocusHolder.openRequests.collect { req ->
-            onSelect(NavSelection(req.connectionId, "topology"))
-        }
-    }
-
     // Level-2 rows (queue/listener/topic) each get their own closable tab;
     // level-1 rows keep showing the connection's page directly.
     var openTabs by remember { mutableStateOf(listOf<NavSelection>()) }
@@ -185,6 +177,18 @@ fun MainWindow(
         val next = openTabs.getOrNull(index) ?: openTabs.lastOrNull()
         activeTab = next
         onSelect(next ?: NavSelection(tab.connectionId))
+    }
+
+    // 列表页「在拓扑图中查看」写入焦点后，这里打开/激活对应连接的拓扑 Tab。
+    // onSelect 与 openTab 都要调：内容区 / 侧栏选中态读 selection，Tab 条读 activeTab，
+    // 只调其一就会出现「Tab 切了内容没切」或「内容切了 Tab 没切」的脱节。
+    // 面板自身在打开时消费焦点，出图后选中该对象。
+    LaunchedEffect(Unit) {
+        TopologyFocusHolder.openRequests.collect { req ->
+            val sel = NavSelection(req.connectionId, "topology")
+            onSelect(sel)
+            openTab(sel)
+        }
     }
 
     Column(modifier = Modifier.fillMaxSize()) {

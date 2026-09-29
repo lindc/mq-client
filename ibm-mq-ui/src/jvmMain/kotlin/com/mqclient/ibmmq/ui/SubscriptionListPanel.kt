@@ -47,10 +47,12 @@ fun SubscriptionListPanel(
             ObjectListPanel(
                 items = filtered.map { subscription ->
                     subscription.toSubscriptionCardData(
-                        actions = SubscriptionCardActions.create(
-                            snapshot = subscription,
-                            onOpenProperties = { onOpenProperties(subscription.name) },
-                        ) + topologyViewAction(connectionId, subscription.name),
+                        // 拓扑查看在最前，属性按钮恒在最后（各对象类型尾按钮一致）。
+                        actions = listOf(topologyViewAction(connectionId, subscription.name)) +
+                            SubscriptionCardActions.create(
+                                snapshot = subscription,
+                                onOpenProperties = { onOpenProperties(subscription.name) },
+                            ),
                     )
                 },
                 onCardClick = { card -> onOpenProperties(card.id) },

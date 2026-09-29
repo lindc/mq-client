@@ -47,10 +47,12 @@ fun TopicListPanel(
             ObjectListPanel(
                 items = filtered.map { topic ->
                     topic.toTopicCardData(
-                        actions = TopicCardActions.create(
-                            snapshot = topic,
-                            onOpenProperties = { onOpenProperties(topic.name) },
-                        ) + topologyViewAction(connectionId, topic.name),
+                        // 拓扑查看在最前，属性按钮恒在最后（各对象类型尾按钮一致）。
+                        actions = listOf(topologyViewAction(connectionId, topic.name)) +
+                            TopicCardActions.create(
+                                snapshot = topic,
+                                onOpenProperties = { onOpenProperties(topic.name) },
+                            ),
                     )
                 },
                 onCardClick = { card -> onOpenProperties(card.id) },

@@ -13,9 +13,6 @@ import com.mqclient.ibmmq.command.MqscExecutor
 import com.mqclient.ibmmq.command.MqscHistoryRepository
 import com.mqclient.ibmmq.command.MqscPcfSender
 import com.mqclient.ibmmq.event.IbmMQEvents
-import com.mqclient.ibmmq.topology.IbmMQTopologyProvider
-import com.mqclient.ibmmq.topology.IbmMqServiceTopologySource
-import com.mqclient.core.topology.TopologyProviderRegistry
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -66,7 +63,6 @@ object IbmMQModule {
     private var manager: IbmMQConnectionManager? = null
     private var mqscExecutor: MqscExecutor? = null
     private var subscriptions: List<Job> = emptyList()
-    private var topologyProvider: IbmMQTopologyProvider? = null
 
     /**
      * 幂等：重复调用返回同一个 [IbmMQService]，不会重复注册订阅。
@@ -145,9 +141,6 @@ object IbmMQModule {
         service = created
         manager = connectionManager
         moduleContext = context
-        // 注册拓扑提供方：拓扑 UI 经 TopologyProviderRegistry[serviceId] 取得，保持中间件无关。
-        topologyProvider = IbmMQTopologyProvider(IbmMqServiceTopologySource(created))
-        TopologyProviderRegistry.register(MODULE_ID, topologyProvider!!)
         ibmMqLog.info(
             "module initialized (moduleId=${context.moduleId}, " +
                 "contexts=${connectionManager.allContexts().size}, all disconnected)",
@@ -197,9 +190,6 @@ object IbmMQModule {
         manager = null
         service = null
         mqscExecutor = null
-        topologyProvider?.dispose()
-        topologyProvider = null
-        TopologyProviderRegistry.unregister(MODULE_ID)
         try {
             // 模块销毁是同步出口（ModuleRegistry.disposeServices 不挂起）：
             // runBlocking 等全部连接断完再返回 —— 退出路径不能留下没关的句柄。

@@ -12,10 +12,6 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
-            // 拓扑通用数据模型（graph-core：点/边/图，纯数据、零业务依赖）。
-            // TopologyProvider 契约放在本模块，复用其 coroutines / serialization 能力。
-            implementation(projects.graphCore)
-
             // Only the Compose runtime is needed for the @Composable contract.
             implementation(libs.compose.runtime)
             // Painter（ModuleIcon SPI 的返回类型）在 ui-graphics 里，business 模块经

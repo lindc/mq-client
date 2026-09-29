@@ -67,11 +67,13 @@ fun QueueListPanel(
                 items = filtered.map { queue ->
                     queue.toQueueCardData(
                         warningThreshold = warningThreshold,
-                        actions = QueueCardActions.create(
-                            snapshot = queue,
-                            onOpenProperties = { onOpenProperties(queue.name) },
-                            onOpenMessages = { onOpenMessages(queue.name) },
-                        ) + topologyViewAction(connectionId, queue.name),
+                        // 拓扑查看在最前，属性按钮恒在最后（各对象类型尾按钮一致）。
+                        actions = listOf(topologyViewAction(connectionId, queue.name)) +
+                            QueueCardActions.create(
+                                snapshot = queue,
+                                onOpenProperties = { onOpenProperties(queue.name) },
+                                onOpenMessages = { onOpenMessages(queue.name) },
+                            ),
                     )
                 },
                 onCardClick = { card -> onOpenProperties(card.id) },
