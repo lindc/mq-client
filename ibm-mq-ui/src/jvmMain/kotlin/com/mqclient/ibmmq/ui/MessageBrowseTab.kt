@@ -404,7 +404,7 @@ internal fun MessageBrowseTab(
 
     detailMessage?.let { message ->
         ObjectDetailDialog(
-            title = stringResource("msg_detail_title").withArg(message.messageId.take(8)),
+            title = stringResource("msg_detail_title").withArg(message.messageId),
             onDismiss = { detailMessage = null },
         ) {
             // 内容待实装：MQMD 全字段 + 消息体预览。
