@@ -27,6 +27,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Refresh
@@ -40,6 +43,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -66,6 +70,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mqclient.ibmmq.IbmMQModule
 import com.mqclient.ibmmq.messaging.MessageBrowseSession
+import com.mqclient.ibmmq.messaging.MessageOperationResult
 import com.mqclient.ibmmq.messaging.MessageSummary
 import com.mqclient.ibmmq.messaging.browseErrorText
 import com.mqclient.mqui.common.CompactSearchField
@@ -187,6 +192,11 @@ internal fun MessageBrowseTab(
     var customEnd by remember { mutableStateOf<LocalDateTime?>(null) }
     var showCustomTimeDialog by remember { mutableStateOf(false) }
 
+    // 行操作（下载 / 删除）进行中的行：同一时刻只允许一个行操作，按钮转圈禁用。
+    var rowActionId by remember { mutableStateOf<String?>(null) }
+    // 待确认删除的消息（删除图标点击 → 确认框 → 实际执行）。
+    var pendingDelete by remember { mutableStateOf<MessageSummary?>(null) }
+
     fun showCopied(text: String) {
         clipboard.setText(AnnotatedString(text))
         scope.launch { snackbarHostState.showSnackbar(stringResource("msg_copied")) }
@@ -237,6 +247,65 @@ internal fun MessageBrowseTab(
         }
     }
 
+    /** 下载：按 MessageId 取完整消息体（独立 browse 句柄纯浏览，队列不动），弹「另存为」写盘。 */
+    fun downloadMessage(message: MessageSummary) {
+        if (rowActionId != null) return
+        scope.launch {
+            rowActionId = message.messageId
+            val result = IbmMQModule.serviceOrNull()
+                ?.downloadMessageBody(connectionId, queueName, message.messageId)
+                ?: MessageOperationResult.failure(null, "服务未初始化")
+            // showSnackbar 是挂起调用（挂到提示关闭才返回），另起协程弹提示，
+            // 不阻塞行状态复位与后续 UI 更新。
+            when {
+                result.success && result.content != null -> {
+                    val saved = saveFileBytes("msg_${message.messageId.take(8)}.bin", result.content!!)
+                    if (saved != null) {
+                        scope.launch { snackbarHostState.showSnackbar(stringResource("msg_browse_saved").withArg(saved)) }
+                    }
+                }
+                else -> scope.launch {
+                    snackbarHostState.showSnackbar(
+                        stringResource("msg_browse_op_failed").withArg(result.errorMessage ?: ""),
+                    )
+                }
+            }
+            rowActionId = null
+        }
+    }
+
+    /** 删除：按 MessageId 消费掉该条（MQGMO_MSG_UNDER_CURSOR 只动这一条）。成功后
+     * **本地直接移除该行并把 CURDEPTH 减一**——不走网络刷新，即时生效；要看最新
+     * 全量（含其他应用收发的变化）用工具栏的刷新按钮。 */
+    fun deleteMessage(message: MessageSummary) {
+        if (rowActionId != null) return
+        scope.launch {
+            rowActionId = message.messageId
+            val result = IbmMQModule.serviceOrNull()
+                ?.deleteMessage(connectionId, queueName, message.messageId)
+                ?: MessageOperationResult.failure(null, "服务未初始化")
+            if (result.success) {
+                // 先更新列表（showSnackbar 挂起会阻塞本协程，提示与刷新互不等待）。
+                (uiState as? BrowseUiState.Ready)?.let { ready ->
+                    uiState = ready.copy(
+                        messages = ready.messages.filterNot { it.messageId == message.messageId },
+                        depth = (ready.depth - 1).coerceAtLeast(0),
+                    )
+                }
+            }
+            scope.launch {
+                snackbarHostState.showSnackbar(
+                    if (result.success) {
+                        stringResource("msg_browse_delete_ok")
+                    } else {
+                        stringResource("msg_browse_op_failed").withArg(result.errorMessage ?: "")
+                    },
+                )
+            }
+            rowActionId = null
+        }
+    }
+
     val ready = uiState as? BrowseUiState.Ready
     val filtered = ready?.messages?.let {
         filterMessages(it, appliedSearch, timeRange, customStart, customEnd)
@@ -278,10 +347,16 @@ internal fun MessageBrowseTab(
                         ObjectListEmptyState(message = stringResource("msg_browse_empty"))
                     filtered.isEmpty() ->
                         ObjectListEmptyState(message = stringResource("msg_browse_filter_empty"))
-                    else -> MessageTable(filtered, onCopy = ::showCopied)
+                    else -> MessageTable(
+                        messages = filtered,
+                        onCopy = ::showCopied,
+                        actionInProgressId = rowActionId,
+                        onDownload = ::downloadMessage,
+                        onDelete = { pendingDelete = it },
+                    )
                 }
             }
-            SnackbarHost(
+            ThemedSnackbarHost(
                 snackbarHostState,
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
@@ -312,6 +387,39 @@ internal fun MessageBrowseTab(
             onDismiss = { showCustomTimeDialog = false },
         )
     }
+
+    pendingDelete?.let { message ->
+        ConfirmDeleteMessageDialog(
+            onConfirm = {
+                pendingDelete = null
+                deleteMessage(message)
+            },
+            onDismiss = { pendingDelete = null },
+        )
+    }
+}
+
+/** 删除消息确认框：破坏性操作（消费掉该条，不可恢复），先确认再执行。 */
+@Composable
+private fun ConfirmDeleteMessageDialog(
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource("msg_browse_delete")) },
+        text = { Text(stringResource("msg_browse_delete_confirm")) },
+        confirmButton = {
+            PressableButton(onClick = onConfirm, danger = true) { Text(stringResource("msg_browse_delete")) }
+        },
+        dismissButton = {
+            PressableButton(
+                onClick = onDismiss,
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            ) { Text(stringResource("common_cancel")) }
+        },
+    )
 }
 
 /* ------------------------------- 工具栏 ------------------------------- */
@@ -384,6 +492,9 @@ private fun BrowseToolbar(
 private fun MessageTable(
     messages: List<MessageSummary>,
     onCopy: (String) -> Unit,
+    actionInProgressId: String?,
+    onDownload: (MessageSummary) -> Unit,
+    onDelete: (MessageSummary) -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         // 表头：列宽与行单元格一一对应（ID 两列弹性，其余固定）。
@@ -400,12 +511,19 @@ private fun MessageTable(
             TableHeaderText(stringResource("msg_col_size"), Modifier.width(COL_SIZE))
             TableHeaderText(stringResource("msg_col_persistence"), Modifier.width(COL_PERSISTENCE))
             TableHeaderText(stringResource("msg_col_priority"), Modifier.width(COL_PRIORITY))
-            TableHeaderText(stringResource("msg_col_detail"), Modifier.width(COL_DETAIL))
+            TableHeaderText(stringResource("msg_send_col_actions"), Modifier.width(COL_DETAIL))
         }
         HorizontalDivider()
         LazyColumn(modifier = Modifier.weight(1f)) {
             items(messages, key = { it.messageId }) { message ->
-                MessageRow(message, onCopy)
+                MessageRow(
+                    message = message,
+                    onCopy = onCopy,
+                    actionInProgress = actionInProgressId == message.messageId,
+                    anyActionInProgress = actionInProgressId != null,
+                    onDownload = onDownload,
+                    onDelete = onDelete,
+                )
             }
         }
     }
@@ -426,6 +544,10 @@ internal fun TableHeaderText(text: String, modifier: Modifier = Modifier) {
 private fun MessageRow(
     message: MessageSummary,
     onCopy: (String) -> Unit,
+    actionInProgress: Boolean,
+    anyActionInProgress: Boolean,
+    onDownload: (MessageSummary) -> Unit,
+    onDelete: (MessageSummary) -> Unit,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val hovered by interactionSource.collectIsHoveredAsState()
@@ -465,15 +587,63 @@ private fun MessageRow(
             maxLines = 1,
             modifier = Modifier.width(COL_PRIORITY),
         )
-        Box(modifier = Modifier.width(COL_DETAIL)) {
-            // 本轮禁用：Message Detail 对话框下一步实装。
-            PressableButton(
-                onClick = {},
+        Row(modifier = Modifier.width(COL_DETAIL)) {
+            // 详细：Message Detail 对话框下一步实装，本轮占位禁用。
+            RowActionIcon(
+                icon = Icons.Default.Info,
+                tooltip = stringResource("msg_col_detail"),
                 enabled = false,
-                standardMinWidth = false,
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-            ) { Text(stringResource("msg_col_detail")) }
+            )
+            // 下载：取完整消息体弹「另存为」，队列消息不动。
+            RowActionIcon(
+                icon = Icons.Default.Download,
+                tooltip = stringResource("msg_browse_download"),
+                enabled = !anyActionInProgress,
+                executing = actionInProgress,
+                onClick = { onDownload(message) },
+            )
+            // 删除：按 MessageId 消费掉该条（只动这一条），成功后刷新列表。
+            RowActionIcon(
+                icon = Icons.Default.Delete,
+                tooltip = stringResource("msg_browse_delete"),
+                enabled = !anyActionInProgress,
+                executing = actionInProgress,
+                onClick = { onDelete(message) },
+            )
+        }
+    }
+}
+
+/** 表格行内的 24dp 图标操作钮（ObjectCard 的 ActionIconButton 同款尺寸与禁用降透明）。 */
+@Composable
+private fun RowActionIcon(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    tooltip: String,
+    enabled: Boolean = true,
+    executing: Boolean = false,
+    onClick: () -> Unit = {},
+) {
+    HoverTooltip(tooltip) {
+        IconButton(
+            onClick = onClick,
+            enabled = enabled && !executing,
+            modifier = Modifier.size(24.dp),
+        ) {
+            if (executing) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(16.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = tooltip,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        .copy(alpha = if (enabled) 1f else 0.38f),
+                )
+            }
         }
     }
 }
@@ -515,7 +685,7 @@ private fun PersistenceIcon(persistence: Int) {
     }
 }
 
-/** 轻量 hover 提示（项目里 ObjectCard 的 TooltipArea 同款做法）；浏览 / 发送两页共用。 */
+/** 轻量 hover 提示（同 ObjectCard 的 ActionIconButton 样式：surfaceVariant 跟主题走）；浏览 / 发送两页共用。 */
 @Composable
 internal fun HoverTooltip(
     text: String,
@@ -525,15 +695,14 @@ internal fun HoverTooltip(
     androidx.compose.foundation.TooltipArea(
         tooltip = {
             Surface(
-                shape = MaterialTheme.shapes.small,
-                color = MaterialTheme.colorScheme.inverseSurface,
-                tonalElevation = 2.dp,
+                shape = RoundedCornerShape(4.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                shadowElevation = 4.dp,
             ) {
                 Text(
                     text = text,
-                    color = MaterialTheme.colorScheme.inverseOnSurface,
                     style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(6.dp),
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                 )
             }
         },
@@ -541,6 +710,25 @@ internal fun HoverTooltip(
         modifier = modifier,
         content = content,
     )
+}
+
+/**
+ * 对话框内局部 Snackbar（对话框窗口够不到主窗口宿主）：配色对齐主窗口的定制
+ * （Main.kt）——secondaryContainer/onSecondaryContainer 跟主题走，不用 M3 默认的
+ * inverseSurface 黑底（浅色主题下黑底深字对比度差）。
+ */
+@Composable
+internal fun ThemedSnackbarHost(
+    hostState: SnackbarHostState,
+    modifier: Modifier = Modifier,
+) {
+    SnackbarHost(hostState, modifier = modifier) { data ->
+        Snackbar(
+            snackbarData = data,
+            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        )
+    }
 }
 
 /* ------------------------------- 底部 ------------------------------- */

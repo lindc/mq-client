@@ -19,3 +19,9 @@ expect suspend fun pickFile(title: String, extensions: List<String>): String?
  * 异常吞掉按取消处理）。
  */
 expect suspend fun pickFiles(title: String): List<String>
+
+/**
+ * 保存文件对话框（消息下载）：弹出系统「另存为」，[contents] 写入选定路径；
+ * 返回保存路径，取消返回 null。文件写入在本函数内完成（IO 线程由 FileKit 内部处理）。
+ */
+expect suspend fun saveFileBytes(suggestedName: String, contents: ByteArray): String?

@@ -124,18 +124,22 @@ fun ListenerListPanel(
                 timeoutMs = LISTENER_POLL_TIMEOUT_MS,
             )
             when (outcome) {
+                // showSnackbar 挂起到提示关闭才返回——另起协程弹提示，finally 里的按钮
+                // 复位不被拖住（注释承诺的「按钮立即恢复」）。
                 is PollOutcome.CommandFailed ->
-                    snackbarHostState.showSnackbar(stringResource("operation_failed").withArg(outcome.errorMessage ?: ""))
+                    scope.launch { snackbarHostState.showSnackbar(stringResource("operation_failed").withArg(outcome.errorMessage ?: "")) }
                 is PollOutcome.Reached ->
-                    snackbarHostState.showSnackbar(stringResource(successKey).withArg(name))
+                    scope.launch { snackbarHostState.showSnackbar(stringResource(successKey).withArg(name)) }
                 is PollOutcome.Timeout ->
-                    snackbarHostState.showSnackbar(
-                        if (outcome.lastError != null) {
-                            stringResource("listener_operation_timeout_error").withArg(outcome.lastError!!)
-                        } else {
-                            stringResource("listener_operation_timeout")
-                        },
-                    )
+                    scope.launch {
+                        snackbarHostState.showSnackbar(
+                            if (outcome.lastError != null) {
+                                stringResource("listener_operation_timeout_error").withArg(outcome.lastError!!)
+                            } else {
+                                stringResource("listener_operation_timeout")
+                            },
+                        )
+                    }
             }
         } finally {
             executingActions = executingActions - name

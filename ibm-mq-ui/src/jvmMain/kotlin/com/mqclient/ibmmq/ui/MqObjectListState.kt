@@ -150,7 +150,9 @@ fun rememberMqObjectListState(
             runCatching { service.scanObjects(connectionId) }
                 .onFailure { error ->
                     if (error is CancellationException) throw error
-                    snackbarHostState.showSnackbar(scanFailedText(error))
+                    // showSnackbar 挂起到提示关闭才返回——另起协程弹提示，isRefreshing
+                    // 不被拖住（失败时顶部进度条不跟着提示多挂几秒）。
+                    scope.launch { snackbarHostState.showSnackbar(scanFailedText(error)) }
                 }
             // 成功后的缓存重载由 SCAN_COMPLETED 事件驱动（上面已订阅）；保留旧数据。
             isRefreshing = false

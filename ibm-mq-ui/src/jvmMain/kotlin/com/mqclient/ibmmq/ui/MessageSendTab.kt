@@ -33,7 +33,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -335,7 +334,7 @@ internal fun MessageSendTab(
                 state.tasks.size == 1 -> SingleSendPane(state)
                 else -> MultiSendPane(state)
             }
-            SnackbarHost(snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter))
+            ThemedSnackbarHost(snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter))
         }
 
         HorizontalDivider()

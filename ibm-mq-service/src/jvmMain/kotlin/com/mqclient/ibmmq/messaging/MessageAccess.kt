@@ -1,0 +1,131 @@
+package com.mqclient.ibmmq.messaging
+
+import com.ibm.mq.MQException
+import com.ibm.mq.MQGetMessageOptions
+import com.ibm.mq.MQMessage
+import com.ibm.mq.MQQueue
+import com.ibm.mq.MQQueueManager
+import com.ibm.mq.constants.MQConstants
+import com.mqclient.ibmmq.command.MqrcTranslator
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
+/** 消息下载 / 删除的结果：成功（下载带 content）或失败（MQRC + 可读文案）。 */
+data class MessageOperationResult(
+    val success: Boolean,
+    val content: ByteArray? = null,
+    val reasonCode: Int? = null,
+    val errorMessage: String? = null,
+) {
+    companion object {
+        fun success(content: ByteArray? = null): MessageOperationResult =
+            MessageOperationResult(success = true, content = content)
+
+        fun failure(reasonCode: Int?, message: String): MessageOperationResult =
+            MessageOperationResult(success = false, reasonCode = reasonCode, errorMessage = message)
+    }
+}
+
+private const val MSG_NOT_FOUND = "未找到该消息（可能已被消费或过期）"
+
+/**
+ * 按 MessageId 下载消息体（浏览消息 Tab 的「下载」）：用**独立的 browse 句柄**
+ * 从头扫到匹配条目，取出完整字节后关句柄——纯浏览，队列消息一个不动，也不影响
+ * UI 列表正持有的 [MessageBrowseSession] 光标。
+ */
+suspend fun downloadMessageBody(
+    manager: MQQueueManager,
+    queueName: String,
+    targetHex: String,
+): MessageOperationResult = withContext(Dispatchers.IO) {
+    var queue: MQQueue? = null
+    try {
+        queue = manager.accessQueue(
+            queueName.trim(),
+            MQConstants.MQOO_BROWSE or MQConstants.MQOO_FAIL_IF_QUIESCING,
+        )
+        val gmo = MQGetMessageOptions()
+        var first = true
+        while (true) {
+            gmo.options =
+                (if (first) MQConstants.MQGMO_BROWSE_FIRST else MQConstants.MQGMO_BROWSE_NEXT) or
+                    MQConstants.MQGMO_FAIL_IF_QUIESCING
+            val message = MQMessage()
+            try {
+                queue.get(message, gmo)
+            } catch (e: MQException) {
+                if (e.reasonCode == MQConstants.MQRC_NO_MSG_AVAILABLE) {
+                    return@withContext MessageOperationResult.failure(null, MSG_NOT_FOUND)
+                }
+                throw e
+            }
+            first = false
+            if (message.messageId.toMqIdHex() == targetHex) {
+                val bytes = ByteArray(message.dataLength)
+                if (bytes.isNotEmpty()) message.readFully(bytes)
+                return@withContext MessageOperationResult.success(bytes)
+            }
+        }
+        @Suppress("UNREACHABLE_CODE")
+        MessageOperationResult.failure(null, MSG_NOT_FOUND)
+    } catch (e: MQException) {
+        MessageOperationResult.failure(e.reasonCode, "MQRC ${e.reasonCode}: ${MqrcTranslator.translate(e.reasonCode)}")
+    } catch (e: Exception) {
+        MessageOperationResult.failure(null, e.message ?: e::class.simpleName ?: "Unknown")
+    } finally {
+        runCatching { queue?.close() }
+    }
+}
+
+/**
+ * 按 MessageId 删除（消费）一条消息（浏览消息 Tab 的「删除」）：以
+ * `MQOO_BROWSE | MQOO_INPUT_AS_Q_DEF` 打开队列，browse（非破坏）定位到匹配条目后
+ * 用 `MQGMO_MSG_UNDER_CURSOR` 做破坏性 get——**只消费光标下的这一条**，前后消息
+ * 都不动。找不到（已被消费 / 过期）返回 failure，由 UI 提示。
+ */
+suspend fun deleteMessageById(
+    manager: MQQueueManager,
+    queueName: String,
+    targetHex: String,
+): MessageOperationResult = withContext(Dispatchers.IO) {
+    var queue: MQQueue? = null
+    try {
+        queue = manager.accessQueue(
+            queueName.trim(),
+            MQConstants.MQOO_BROWSE or MQConstants.MQOO_INPUT_AS_Q_DEF or MQConstants.MQOO_FAIL_IF_QUIESCING,
+        )
+        val gmo = MQGetMessageOptions()
+        var first = true
+        while (true) {
+            gmo.options =
+                (if (first) MQConstants.MQGMO_BROWSE_FIRST else MQConstants.MQGMO_BROWSE_NEXT) or
+                    MQConstants.MQGMO_FAIL_IF_QUIESCING
+            val message = MQMessage()
+            try {
+                queue.get(message, gmo)
+            } catch (e: MQException) {
+                if (e.reasonCode == MQConstants.MQRC_NO_MSG_AVAILABLE) {
+                    return@withContext MessageOperationResult.failure(null, MSG_NOT_FOUND)
+                }
+                throw e
+            }
+            first = false
+            if (message.messageId.toMqIdHex() == targetHex) {
+                // 光标已在该条上：MQGMO_MSG_UNDER_CURSOR 破坏性 get，仅消费这一条。
+                val getOptions = MQGetMessageOptions()
+                getOptions.options =
+                    MQConstants.MQGMO_MSG_UNDER_CURSOR or MQConstants.MQGMO_FAIL_IF_QUIESCING
+                queue.get(MQMessage(), getOptions)
+                return@withContext MessageOperationResult.success()
+            }
+        }
+        @Suppress("UNREACHABLE_CODE")
+        MessageOperationResult.failure(null, MSG_NOT_FOUND)
+    } catch (e: MQException) {
+        MessageOperationResult.failure(e.reasonCode, "MQRC ${e.reasonCode}: ${MqrcTranslator.translate(e.reasonCode)}")
+    } catch (e: Exception) {
+        MessageOperationResult.failure(null, e.message ?: e::class.simpleName ?: "Unknown")
+    } finally {
+        runCatching { queue?.close() }
+    }
+}

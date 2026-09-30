@@ -10,7 +10,10 @@ import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.emit
 import com.mqclient.ibmmq.event.IbmMQEvents
 import com.mqclient.ibmmq.messaging.MessageBrowseSession
+import com.mqclient.ibmmq.messaging.MessageOperationResult
 import com.mqclient.ibmmq.messaging.SendResult
+import com.mqclient.ibmmq.messaging.deleteMessageById
+import com.mqclient.ibmmq.messaging.downloadMessageBody
 import com.mqclient.ibmmq.messaging.sendMessageToQueue
 import com.mqclient.ibmmq.pcf.MqObjectSnapshot
 import com.mqclient.ibmmq.pcf.MqObjectType
@@ -258,6 +261,26 @@ class IbmMQService(private val context: ServiceContext) {
     /** 单队列实时 CURDEPTH（PCF INQUIRE_Q 只点名 MQIA_CURRENT_Q_DEPTH，不读缓存）。 */
     suspend fun getQueueDepth(connectionId: String, queueName: String): Int =
         objectScanner.queryQueueDepth(connectionId, queueName)
+
+    /**
+     * 按 MessageId 下载消息体（浏览 Tab「下载」）：独立 browse 句柄扫到匹配条目取
+     * 完整字节，纯浏览不消费、不影响 UI 会话光标。连接未建立返回 failure。
+     */
+    suspend fun downloadMessageBody(connectionId: String, queueName: String, messageIdHex: String): MessageOperationResult {
+        val manager = IbmMQModule.connectionOrNull(connectionId)?.mqConnection
+            ?: return MessageOperationResult.failure(null, "连接 $connectionId 未建立")
+        return downloadMessageBody(manager, queueName, messageIdHex)
+    }
+
+    /**
+     * 按 MessageId 删除（消费）一条消息（浏览 Tab「删除」）：browse 定位 +
+     * MQGMO_MSG_UNDER_CURSOR 破坏性 get，只消费该条；删除后由调用方刷新列表。
+     */
+    suspend fun deleteMessage(connectionId: String, queueName: String, messageIdHex: String): MessageOperationResult {
+        val manager = IbmMQModule.connectionOrNull(connectionId)?.mqConnection
+            ?: return MessageOperationResult.failure(null, "连接 $connectionId 未建立")
+        return deleteMessageById(manager, queueName, messageIdHex)
+    }
 
     /**
      * 发送一条消息（消息处理对话框「发送消息」Tab）：在该连接的 [MQQueueManager]

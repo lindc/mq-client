@@ -6,6 +6,7 @@ import io.github.vinceglb.filekit.dialogs.FileKitDialogSettings
 import io.github.vinceglb.filekit.dialogs.FileKitDialogParent
 import io.github.vinceglb.filekit.dialogs.FileKitMode
 import io.github.vinceglb.filekit.dialogs.FileKitType
+import io.github.vinceglb.filekit.dialogs.openFileSaver
 import io.github.vinceglb.filekit.dialogs.openFilePicker
 import io.github.vinceglb.filekit.path
 import java.awt.GraphicsEnvironment
@@ -61,5 +62,22 @@ actual suspend fun pickFiles(title: String): List<String> {
     } catch (t: Throwable) {
         Log.error(LOG_TAG, "multi file picker failed: $t")
         emptyList()
+    }
+}
+
+actual suspend fun saveFileBytes(suggestedName: String, contents: ByteArray): String? {
+    val settings = dialogSettingsOrNull(suggestedName) ?: return null
+    return try {
+        // openFileSaver 只返回目标路径，写盘自己做；defaultExtension 是默认扩展名提示（非过滤）。
+        val destination = FileKit.openFileSaver(
+            suggestedName = suggestedName,
+            defaultExtension = "bin",
+            dialogSettings = settings,
+        ) ?: return null
+        java.io.File(destination.path).writeBytes(contents)
+        destination.path
+    } catch (t: Throwable) {
+        Log.error(LOG_TAG, "save file failed: $t")
+        null
     }
 }
