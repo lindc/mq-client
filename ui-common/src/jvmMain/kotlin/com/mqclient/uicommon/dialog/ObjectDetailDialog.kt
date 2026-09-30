@@ -56,6 +56,7 @@ import dev.nucleusframework.window.windowDragArea
 fun ObjectDetailDialog(
     title: String,
     onDismiss: () -> Unit,
+    onCloseRequest: (() -> Unit)? = null,
     initialWidth: Dp? = null, // null → 屏幕宽的 2/3
     initialHeight: Dp? = null, // null → 屏幕高的 2/3
     minWidth: Dp = 400.dp,
@@ -64,16 +65,19 @@ fun ObjectDetailDialog(
     maxHeight: Dp = Dp.Infinity,
     content: @Composable () -> Unit,
 ) {
+    // 关闭出口统一走 requestClose：调用方要拦截（如发送中确认）时传 onCloseRequest，
+    // 由它自行决定何时真正调 onDismiss；不传则 ✕ / ESC 直接关。
+    val requestClose = onCloseRequest ?: onDismiss
     // 初始尺寸与 min/max 求交集：调用方配置失配时不至于开局越界。
     val twoThirdsScreen = rememberTwoThirdsScreenSize()
     val startWidth = (initialWidth ?: twoThirdsScreen.width).coerceIn(minWidth, maxWidth)
     val startHeight = (initialHeight ?: twoThirdsScreen.height).coerceIn(minHeight, maxHeight)
 
     DecoratedDialog(
-        onCloseRequest = onDismiss,
+        onCloseRequest = requestClose,
         onPreviewKeyEvent = { event ->
             if (event.type == KeyEventType.KeyUp && event.key == Key.Escape) {
-                onDismiss()
+                requestClose()
                 true
             } else {
                 false

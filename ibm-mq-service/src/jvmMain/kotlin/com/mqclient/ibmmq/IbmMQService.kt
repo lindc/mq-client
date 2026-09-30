@@ -10,6 +10,8 @@ import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.emit
 import com.mqclient.ibmmq.event.IbmMQEvents
 import com.mqclient.ibmmq.messaging.MessageBrowseSession
+import com.mqclient.ibmmq.messaging.SendResult
+import com.mqclient.ibmmq.messaging.sendMessageToQueue
 import com.mqclient.ibmmq.pcf.MqObjectSnapshot
 import com.mqclient.ibmmq.pcf.MqObjectType
 import com.mqclient.ibmmq.pcf.PcfObjectScanner
@@ -256,6 +258,36 @@ class IbmMQService(private val context: ServiceContext) {
     /** 单队列实时 CURDEPTH（PCF INQUIRE_Q 只点名 MQIA_CURRENT_Q_DEPTH，不读缓存）。 */
     suspend fun getQueueDepth(connectionId: String, queueName: String): Int =
         objectScanner.queryQueueDepth(connectionId, queueName)
+
+    /**
+     * 发送一条消息（消息处理对话框「发送消息」Tab）：在该连接的 [MQQueueManager]
+     * 上以 `MQOO_OUTPUT` put。连接未建立直接返回 failure（不抛，调用方按结果更新
+     * 任务状态）；expiryTenths 是 MQMD 的十分之一秒单位，[MQConstants.MQEI_UNLIMITED]
+     * 表示不过期（秒 → 十分之一秒的换算在 UI 层做）。
+     */
+    suspend fun sendMessage(
+        connectionId: String,
+        queueName: String,
+        content: ByteArray,
+        correlationId: String? = null,
+        replyToQueue: String? = null,
+        persistence: Int = MQConstants.MQPER_PERSISTENT,
+        priority: Int = 4,
+        expiryTenths: Int = MQConstants.MQEI_UNLIMITED,
+    ): SendResult {
+        val manager = IbmMQModule.connectionOrNull(connectionId)?.mqConnection
+            ?: return SendResult.failure(null, "连接 $connectionId 未建立，无法发送消息")
+        return sendMessageToQueue(
+            manager = manager,
+            queueName = queueName,
+            content = content,
+            correlationId = correlationId,
+            replyToQueue = replyToQueue,
+            persistence = persistence,
+            priority = priority,
+            expiryTenths = expiryTenths,
+        )
+    }
 
     /**
      * 定时任务入口（`ibm-mq.<connectionId>.scan.messages`，间隔来自连接配置）：扫一次

@@ -95,8 +95,8 @@ private fun MQMessage.toSummary(): MessageSummary {
     // 这里反推回模型的原始格式（HHMMSSss 的 ss 是百分秒）。
     val (rawDate, rawTime) = putDateTime.toRawPutDateParts()
     return MessageSummary(
-        messageId = messageId.toHex(),
-        correlationId = correlationId.toHex(),
+        messageId = messageId.toMqIdHex(),
+        correlationId = correlationId.toMqIdHex(),
         putDate = rawDate,
         putTime = rawTime,
         dataLength = dataLength,
@@ -105,9 +105,6 @@ private fun MQMessage.toSummary(): MessageSummary {
         msgType = messageType,
     )
 }
-
-/** 24 字节二进制 → 48 字符大写十六进制（MQ Explorer 同款显示）。 */
-private fun ByteArray.toHex(): String = joinToString("") { "%02X".format(it) }
 
 /** GMT Calendar → (YYYYMMDD, HHMMSSss) 原始串；putDateTime 缺失（罕见）返回空串。 */
 private fun java.util.Calendar?.toRawPutDateParts(): Pair<String, String> {

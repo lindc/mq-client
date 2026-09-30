@@ -12,3 +12,10 @@ package com.mqclient.ibmmq.ui
  * 可响应；调用方（UI 点击）直接在协程里 await 即可。
  */
 expect suspend fun pickFile(title: String, extensions: List<String>): String?
+
+/**
+ * 本地文件**多选**（消息处理对话框「发送消息」Tab）：返回全部选中文件的绝对路径；
+ * 用户取消返回空清单。与 [pickFile] 同一套实现约定（suspend、不阻塞 UI 线程、
+ * 异常吞掉按取消处理）。
+ */
+expect suspend fun pickFiles(title: String): List<String>

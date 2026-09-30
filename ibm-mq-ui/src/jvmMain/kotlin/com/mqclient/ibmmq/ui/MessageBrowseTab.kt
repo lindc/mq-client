@@ -92,7 +92,7 @@ private val COL_SIZE = 80.dp
 private val COL_PERSISTENCE = 70.dp
 private val COL_PRIORITY = 60.dp
 private val COL_DETAIL = 80.dp
-private val ROW_HPADDING = 16.dp
+internal val ROW_HPADDING = 16.dp
 
 /** 表格时间列的展示格式（MQMD PutDate+PutTime 截掉百分秒）。 */
 private val TIME_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
@@ -412,7 +412,7 @@ private fun MessageTable(
 }
 
 @Composable
-private fun TableHeaderText(text: String, modifier: Modifier = Modifier) {
+internal fun TableHeaderText(text: String, modifier: Modifier = Modifier) {
     Text(
         text = text,
         style = MaterialTheme.typography.labelLarge,
@@ -451,7 +451,7 @@ private fun MessageRow(
             modifier = Modifier.width(COL_TIME),
         )
         Text(
-            text = formatSize(message.dataLength),
+            text = formatSize(message.dataLength.toLong()),
             style = MaterialTheme.typography.bodySmall,
             maxLines = 1,
             modifier = Modifier.width(COL_SIZE),
@@ -515,9 +515,9 @@ private fun PersistenceIcon(persistence: Int) {
     }
 }
 
-/** 轻量 hover 提示（项目里 ObjectCard 的 TooltipArea 同款做法）。 */
+/** 轻量 hover 提示（项目里 ObjectCard 的 TooltipArea 同款做法）；浏览 / 发送两页共用。 */
 @Composable
-private fun HoverTooltip(
+internal fun HoverTooltip(
     text: String,
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
@@ -833,14 +833,14 @@ private fun filterMessages(
     }
 }
 
-/** 大小列：< 1KB 显示字节，否则 KB（1 位小数）。 */
-private fun formatSize(bytes: Int): String = when {
+/** 大小列：< 1KB 显示字节，否则 KB（1 位小数）；浏览 / 发送两页共用。 */
+internal fun formatSize(bytes: Long): String = when {
     bytes < 1024 -> "$bytes B"
     else -> String.format(Locale.ROOT, "%.1f KB", bytes / 1024.0)
 }
 
-/** 多占位文案：依次替换 %s（i18n 串里占位符按出现顺序取参）。 */
-private fun String.withArgs(vararg args: Any): String {
+/** 多占位文案：依次替换 %s（i18n 串里占位符按出现顺序取参）；浏览 / 发送两页共用。 */
+internal fun String.withArgs(vararg args: Any): String {
     var result = this
     args.forEach { arg -> result = result.replaceFirst("%s", arg.toString()) }
     return result
