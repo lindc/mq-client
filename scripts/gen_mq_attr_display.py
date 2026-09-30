@@ -119,9 +119,9 @@ def extract_titles(core_jar: Path, nl1_jar: Path) -> tuple[dict, dict]:
     return en, zh
 
 
-def extract_queue_enums(core_jar: Path) -> dict[str, list[str]]:
+def extract_queue_enums(core_jar: Path, dm_xml: str = "xml/DmQueue.xml") -> dict[str, list[str]]:
     with zipfile.ZipFile(core_jar) as zf:
-        xml = zf.read("xml/DmQueue.xml").decode("utf-8")
+        xml = zf.read(dm_xml).decode("utf-8")
     root = ElementTree.fromstring(xml)
     enums: dict[str, list[str]] = {}
     for attr in root.iter("attribute"):
@@ -148,20 +148,26 @@ def write_json(data: dict, path: Path) -> None:
     print(f"wrote {path} ({len(data)} keys)")
 
 
-def write_enum_kt(enums: dict[str, list[str]], path: Path) -> None:
+def write_enum_kt(
+    enums: dict[str, list[str]],
+    path: Path,
+    object_name: str,
+    source_xml: str,
+    subject: str,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = [
         "package com.mqclient.ibmmq.pcf",
         "",
         "/**",
-        " * 队列属性 -> 合法枚举常量名（生成文件，勿手改）。",
-        " * 来源：MQ Explorer `com.ibm.mq.explorer.core` 的 `xml/DmQueue.xml`，",
+        f" * {subject} -> 合法枚举常量名（生成文件，勿手改）。",
+        f" * 来源：MQ Explorer `com.ibm.mq.explorer.core` 的 `{source_xml}`，",
         " * 由 `scripts/gen_mq_attr_display.py` 生成；键为 PCF 属性符号名",
-        " * （如 `MQIA_Q_TYPE`），值为该属性 `type=\"ENUM\"` 收录的全部 MQ 常量名。",
+        f" * （如 `MQIA_Q_TYPE`），值为该属性 `type=\"ENUM\"` 收录的全部 MQ 常量名。",
         " * 用途：整型属性值反查出的同值常量名与本表求交，确定唯一显示常量",
         " * （见 [MqAttributeDisplay.constNameFor]）。",
         " */",
-        "internal object MqQueueAttrEnums {",
+        f"internal object {object_name} {{",
         "    val byAttr: Map<String, List<String>> = mapOf(",
     ]
     for attr in sorted(enums):
@@ -177,8 +183,8 @@ def main() -> None:
     ap.add_argument("--plugins", default="/opt/software/IDE/eclipse/plugins")
     args = ap.parse_args()
     plugins = Path(args.plugins)
-    core_jar = sorted(plugins.glob("com.ibm.mq.explorer.core_10*.jar"))[0]
-    nl1_jar = sorted(plugins.glob("com.ibm.mq.explorer.core.nl1_10*.jar"))[0]
+    core_jar = sorted(plugins.glob("com.ibm.mq.explorer.core_*.jar"))[0]
+    nl1_jar = sorted(plugins.glob("com.ibm.mq.explorer.core.nl1_*.jar"))[0]
 
     en, zh = extract_titles(core_jar, nl1_jar)
     res = REPO / "ibm-mq-ui/src/commonMain/composeResources/files/i18n"
@@ -189,6 +195,18 @@ def main() -> None:
     write_enum_kt(
         enums,
         REPO / "ibm-mq-service/src/jvmMain/kotlin/com/mqclient/ibmmq/pcf/MqQueueAttrEnums.kt",
+        "MqQueueAttrEnums",
+        "xml/DmQueue.xml",
+        "队列属性",
+    )
+
+    qmgr_enums = extract_queue_enums(core_jar, "xml/DmQueueManager.xml")
+    write_enum_kt(
+        qmgr_enums,
+        REPO / "ibm-mq-service/src/jvmMain/kotlin/com/mqclient/ibmmq/pcf/MqQMgrAttrEnums.kt",
+        "MqQMgrAttrEnums",
+        "xml/DmQueueManager.xml",
+        "队列管理器属性",
     )
 
 

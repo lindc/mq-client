@@ -68,7 +68,16 @@ class PcfObjectScanner {
         val response = inquire(agent, MQConstants.MQCMD_INQUIRE_Q_MGR) {
             // 无参数
         }.firstOrNull() ?: return null
-        return response.toSnapshot(MqObjectType.QUEUE_MANAGER, MQConstants.MQCA_Q_MGR_NAME)
+        val snapshot = response.toSnapshot(MqObjectType.QUEUE_MANAGER, MQConstants.MQCA_Q_MGR_NAME)
+        // 并入运行状态（属性对话框 General 页的「队列管理器状态」）：部分平台 /
+        // 权限受限平台可能查不动状态，失败只记日志，不让它拖垮整轮扫描。
+        val status = runCatching {
+            inquire(agent, MQConstants.MQCMD_INQUIRE_Q_MGR_STATUS) {
+                // 无参数
+            }.firstOrNull()?.intValue(MQConstants.MQIACF_Q_MGR_STATUS)
+        }.getOrNull()
+        return if (status == null) snapshot
+        else snapshot.copy(attributes = snapshot.attributes + ("MQIACF_Q_MGR_STATUS" to status))
     }
 
     /**

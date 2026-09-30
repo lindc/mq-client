@@ -19,7 +19,20 @@ object MqAttributeDisplay {
      * 属性不是枚举 / 值不在其枚举集内 → null，调用方回落显示原始值。
      */
     fun constNameFor(attrName: String, value: Int): String? {
-        val members = MqQueueAttrEnums.byAttr[attrName] ?: return null
+        val members = attrEnums[attrName] ?: return null
         return MqAttributeNameMapper.namesForValue(value).firstOrNull { it in members }
+    }
+
+    /**
+     * DmQueue / DmQueueManager 两表合并（同名属性成员列表拼接）：个别属性在两个
+     * 模型里的枚举集不同宽（如 MQIA_STATISTICS_Q 队列侧无 MQMON_NONE、队列管理器
+     * 侧有），并集才能让两侧取值都命中唯一常量。
+     */
+    private val attrEnums: Map<String, List<String>> by lazy {
+        val merged = HashMap<String, List<String>>()
+        for (table in listOf(MqQueueAttrEnums.byAttr, MqQMgrAttrEnums.byAttr)) {
+            for ((attr, members) in table) merged.merge(attr, members) { a, b -> a + b }
+        }
+        merged
     }
 }

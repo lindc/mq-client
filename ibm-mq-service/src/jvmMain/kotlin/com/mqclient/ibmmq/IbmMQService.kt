@@ -2,8 +2,6 @@ package com.mqclient.ibmmq
 
 import com.ibm.mq.MQQueueManager
 import com.ibm.mq.constants.MQConstants
-import com.ibm.mq.pcf.PCFMessage
-import com.ibm.mq.pcf.PCFMessageAgent
 import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.cache.CacheManager
@@ -59,34 +57,6 @@ internal fun mqProperties(config: IbmMQConfig): java.util.Hashtable<String, Any>
     }
     return properties
 }
-
-/** 队列管理器的运行状态（`MQCMD_INQUIRE_Q_MGR_STATUS` 的 MQIASY_STATUS 值的符号化）。 */
-enum class QmgrStatus { STARTING, RUNNING, QUIESCING, STANDBY }
-
-/**
- * 队列管理器自身的属性快照（PCF `MQCMD_INQUIRE_Q_MGR` + `MQCMD_INQUIRE_Q_MGR_STATUS`）。
- *
- * 刻意只有 QMGR 单条命令能拿到的属性；队列 / 通道 / 监听器的**数量**不在这里 ——
- * 那要靠逐类对象的列表查询拼出来，开销与权限要求都高，等对象列表链路接真 PCF 时
- * 顺带补，不单独为属性框发查询。
- */
-data class QmgrProperties(
-    val name: String,
-    val version: String,
-    /** 平台（MQPL_* 的符号化名称，如 `Windows` / `z/OS`）。 */
-    val platform: String,
-    /** 命令级别（如 940 = v9.4），界面原样展示。 */
-    val commandLevel: Int,
-    /** 运行状态；Q_MGR_STATUS 查询失败（权限不足等）时为 null，界面显示 —。 */
-    val status: QmgrStatus?,
-    /** 启动时间（QMGR 本地时区的原始字符串）。 */
-    val startTime: String?,
-    val ccsid: Int,
-    /** CCSID 的可读名称（如 `UTF-8`）；未知编码显示编码号本身。 */
-    val ccsidName: String,
-    val maxMsgLength: Int,
-    val deadLetterQueue: String,
-)
 
 /**
  * IBM MQ 模块的业务逻辑：干活 + 发事件。
@@ -672,96 +642,23 @@ class IbmMQService(private val context: ServiceContext) {
     }
 
     /**
-     * 查询一条**已连接**连接的队列管理器属性（PCF：`MQCMD_INQUIRE_Q_MGR` 拿配置
-     * 属性，`MQCMD_INQUIRE_Q_MGR_STATUS` 拿运行状态；后者失败（部分平台 / 权限
-     * 受限）不拖垮整体，status / startTime 为 null）。
+     * 查询一条**已连接**连接的队列管理器**全属性快照**（PCF：`MQCMD_INQUIRE_Q_MGR`
+     * 全量应答，运行状态由 [PcfObjectScanner] 经 `MQCMD_INQUIRE_Q_MGR_STATUS` 并入
+     * 同一快照；后者失败不拖垮整体）。
+     *
+     * 属性面板（ConnectionPropertiesUi）经它拿数据，分组渲染见 ibm-mq-ui 的
+     * QmgrPropertyGroups —— 与队列属性对话框同一套「快照 + 分组表」模式。
      *
      * 未连接时抛 IllegalStateException —— 调用方（属性面板）只会在连接建立后进来；
      * 查询走 [PCFMessageAgent]，它复用 [MQQueueManager] 的既有连接，不另建 TCP。
      */
-    suspend fun queryQmgrProperties(connectionId: String): QmgrProperties = withContext(Dispatchers.IO) {
-        val manager = IbmMQModule.connectionOrNull(connectionId)?.mqConnection
-            ?: throw IllegalStateException("连接 $connectionId 未建立，无法查询队列管理器属性")
-        val agent = PCFMessageAgent(manager)
-        try {
-            val qmgr = agent.send(PCFMessage(MQConstants.MQCMD_INQUIRE_Q_MGR)).firstOrNull()
-                ?: throw IllegalStateException("MQCMD_INQUIRE_Q_MGR 未返回任何数据")
-            val statusResponse = runCatching {
-                agent.send(PCFMessage(MQConstants.MQCMD_INQUIRE_Q_MGR_STATUS)).firstOrNull()
-            }.getOrNull()
-
-            val ccsid = qmgr.int(MQConstants.MQIA_CODED_CHAR_SET_ID) ?: 0
-            QmgrProperties(
-                name = qmgr.str(MQConstants.MQCA_Q_MGR_NAME).orEmpty().trim(),
-                version = qmgr.str(MQConstants.MQCA_VERSION).orEmpty(),
-                platform = platformName(qmgr.int(MQConstants.MQIA_PLATFORM)),
-                commandLevel = qmgr.int(MQConstants.MQIA_COMMAND_LEVEL) ?: 0,
-                status = statusResponse?.int(MQConstants.MQIACF_Q_MGR_STATUS)?.let(::qmgrStatus),
-                startTime = statusResponse?.str(MQConstants.MQCACF_Q_MGR_START_TIME),
-                ccsid = ccsid,
-                ccsidName = ccsidName(ccsid),
-                maxMsgLength = qmgr.int(MQConstants.MQIA_MAX_MSG_LENGTH) ?: 0,
-                deadLetterQueue = qmgr.str(MQConstants.MQCA_DEAD_LETTER_Q_NAME).orEmpty().trim(),
-            )
-        } finally {
-            runCatching { agent.disconnect() }
+    suspend fun queryQmgrSnapshot(connectionId: String): MqObjectSnapshot? {
+        if (IbmMQModule.connectionOrNull(connectionId) == null) {
+            throw IllegalStateException("连接 $connectionId 未建立，无法查询队列管理器属性")
         }
+        return objectScanner.scanQueueManager(connectionId)
     }
 }
 
 /* ------------------------------ PCF 取值与符号化助手 ------------------------------ */
 
-/** PCF 字符串参数：正常是 String，个别实现返回 ByteArray，都兜住。 */
-private fun PCFMessage.str(selector: Int): String? = when (val value = getParameterValue(selector)) {
-    null -> null
-    is String -> value
-    is ByteArray -> value.decodeToString().trimEnd('\u0000')
-    else -> value.toString()
-}
-
-/** PCF 整型参数；缺失 / 不可解析返回 null（调用方自行决定默认值）。 */
-private fun PCFMessage.int(selector: Int): Int? = when (val value = getParameterValue(selector)) {
-    null -> null
-    is Number -> value.toInt()
-    is String -> value.trim().toIntOrNull()
-    else -> null
-}
-
-/** MQPL_* 平台常量到可读名称的映射；未知值原样显示编码号。 */
-private fun platformName(platform: Int?): String = when (platform) {
-    MQConstants.MQPL_MVS -> "z/OS"
-    MQConstants.MQPL_UNIX -> "UNIX"
-    MQConstants.MQPL_OS400 -> "IBM i"
-    MQConstants.MQPL_WINDOWS_NT -> "Windows"
-    else -> platform?.toString() ?: ""
-}
-
-/**
- * QMGR 运行状态值（PCF 参考手册 `MQIACF_Q_MGR_STATUS` 的取值，cmqxfc.h 里的
- * MQIASY_STATUS_*；allclient 的常量类没收录这些符号，只能按文档数值本地定义）。
- */
-private const val QMGR_STATUS_STARTING = 1
-private const val QMGR_STATUS_RUNNING = 2
-private const val QMGR_STATUS_QUIESCING = 3
-private const val QMGR_STATUS_STANDBY = 5
-
-/** MQIASY_STATUS_* 到 [QmgrStatus] 的映射；未知值返回 null（界面显示 —）。 */
-private fun qmgrStatus(status: Int): QmgrStatus? = when (status) {
-    QMGR_STATUS_STARTING -> QmgrStatus.STARTING
-    QMGR_STATUS_RUNNING -> QmgrStatus.RUNNING
-    QMGR_STATUS_QUIESCING -> QmgrStatus.QUIESCING
-    QMGR_STATUS_STANDBY -> QmgrStatus.STANDBY
-    else -> null
-}
-
-/** 常见 CCSID 的可读名称；这里的名字是编码事实（charset 名），不参与翻译。 */
-private fun ccsidName(ccsid: Int): String = when (ccsid) {
-    1208 -> "UTF-8"
-    1200 -> "UCS-2"
-    1381 -> "GBK"
-    5488 -> "GB18030"
-    819 -> "Windows-1252"
-    37 -> "IBM037 (EBCDIC)"
-    500 -> "IBM500 (EBCDIC)"
-    else -> "CCSID $ccsid"
-}
