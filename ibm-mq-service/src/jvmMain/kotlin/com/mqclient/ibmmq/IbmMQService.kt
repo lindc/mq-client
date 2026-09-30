@@ -9,6 +9,7 @@ import com.mqclient.core.event.EventNames
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.emit
 import com.mqclient.ibmmq.event.IbmMQEvents
+import com.mqclient.ibmmq.messaging.MessageBrowseSession
 import com.mqclient.ibmmq.pcf.MqObjectSnapshot
 import com.mqclient.ibmmq.pcf.MqObjectType
 import com.mqclient.ibmmq.pcf.PcfObjectScanner
@@ -240,6 +241,21 @@ class IbmMQService(private val context: ServiceContext) {
         )
         return resolved
     }
+
+    /**
+     * 打开队列消息浏览会话（消息处理对话框用）：在该连接的 [MQQueueManager] 上以
+     * `MQOO_BROWSE` 打开队列，光标跨调用保持，浏览不消费消息。连接未建立直接抛
+     * [IllegalStateException]，由 UI 转「加载失败」。
+     */
+    suspend fun openBrowseSession(connectionId: String, queueName: String): MessageBrowseSession {
+        val manager = IbmMQModule.connectionOrNull(connectionId)?.mqConnection
+            ?: throw IllegalStateException("连接 $connectionId 未建立，无法浏览队列消息")
+        return MessageBrowseSession.open(manager, queueName)
+    }
+
+    /** 单队列实时 CURDEPTH（PCF INQUIRE_Q 只点名 MQIA_CURRENT_Q_DEPTH，不读缓存）。 */
+    suspend fun getQueueDepth(connectionId: String, queueName: String): Int =
+        objectScanner.queryQueueDepth(connectionId, queueName)
 
     /**
      * 定时任务入口（`ibm-mq.<connectionId>.scan.messages`，间隔来自连接配置）：扫一次

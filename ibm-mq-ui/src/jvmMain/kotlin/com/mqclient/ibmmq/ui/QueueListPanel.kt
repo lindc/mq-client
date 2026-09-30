@@ -31,7 +31,6 @@ import com.mqclient.uicommon.i18n.stringResource
 fun QueueListPanel(
     connectionId: String,
     onOpenProperties: (String) -> Unit = {},
-    onOpenMessages: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var searchText by remember { mutableStateOf("") }
@@ -49,6 +48,16 @@ fun QueueListPanel(
     var propertiesDialog by remember(connectionId) { mutableStateOf<ObjectPropertiesDialogState?>(null) }
     propertiesDialog?.let { dialogState ->
         MqObjectPropertiesDialog(state = dialogState, onDismiss = { propertiesDialog = null })
+    }
+
+    // 消息处理对话框（本地队列卡片 ✉ 按钮打开；浏览页已实装，发送页待实装）。
+    var messagesDialogQueue by remember(connectionId) { mutableStateOf<String?>(null) }
+    messagesDialogQueue?.let { queueName ->
+        QueueMessagesDialog(
+            connectionId = connectionId,
+            queueName = queueName,
+            onDismiss = { messagesDialogQueue = null },
+        )
     }
 
     val state = rememberMqObjectListState(
@@ -87,7 +96,7 @@ fun QueueListPanel(
                                     objectName = queue.name,
                                 )
                             },
-                                    onOpenMessages = { onOpenMessages(queue.name) },
+                                    onOpenMessages = { messagesDialogQueue = queue.name },
                                 ),
                         )
                     }

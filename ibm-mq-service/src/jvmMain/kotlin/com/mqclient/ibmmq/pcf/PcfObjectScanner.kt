@@ -185,6 +185,20 @@ class PcfObjectScanner {
         }
     }
 
+    /**
+     * 单队列当前深度（消息处理对话框「共 N 条」用）：INQUIRE_Q 只点名
+     * MQIA_CURRENT_Q_DEPTH，比心跳的全量 Q_STATUS 轻得多。队列不存在（应答为空）
+     * 返回 0 —— 不抛，交给调用方按空队列展示。
+     */
+    suspend fun queryQueueDepth(connectionId: String, name: String): Int =
+        withAgent(connectionId) { agent ->
+            val responses = inquire(agent, MQConstants.MQCMD_INQUIRE_Q) {
+                addParameter(MQConstants.MQCA_Q_NAME, name.trim())
+                addParameter(MQConstants.MQIACF_Q_ATTRS, intArrayOf(MQConstants.MQIA_CURRENT_Q_DEPTH))
+            }
+            responses.firstNotNullOfOrNull { it.intValue(MQConstants.MQIA_CURRENT_Q_DEPTH) } ?: 0
+        }
+
     /** 所有通道：INQUIRE_CHANNEL + INQUIRE_CHANNEL_STATUS（运行状态）合并。 */
     suspend fun scanChannels(connectionId: String): List<MqObjectSnapshot> =
         withAgent(connectionId) { scanChannelsWith(it) }
