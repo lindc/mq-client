@@ -231,11 +231,28 @@ private fun AppRoot(bootConfig: Config, onExit: () -> Unit) {
                             TitleBarPanel(
                                 breadcrumb =
                                     selection?.let { sel ->
-                                        val name =
+                                        val conn =
                                             connections
                                                 .firstOrNull { it.id == sel.connectionId }
-                                                ?.name ?: sel.connectionId
-                                        listOfNotNull(name, sel.objectType)
+                                        val name = conn?.name ?: sel.connectionId
+                                        // objectType 是导航项原始 id（如 "queues"）；
+                                        // 与侧栏同源，经 NavigationItem.titleKey 解析
+                                        // 成当前语言文案，解析不到再退回原始 id。
+                                        val typeLabel =
+                                            sel.objectType?.let { type ->
+                                                conn
+                                                    ?.let { c ->
+                                                        ModuleRegistry.services
+                                                            .firstOrNull { it.id == c.serviceId }
+                                                            ?.navigationItems(c)
+                                                            ?.firstOrNull { it.id == type }
+                                                            ?.takeIf { it.titleKey.isNotEmpty() }
+                                                            ?.titleKey
+                                                    }
+                                                    ?.let { stringResource(it) }
+                                                    ?: type
+                                            }
+                                        listOfNotNull(name, typeLabel)
                                     } ?: emptyList(),
                                 onToggleNavigation = { navigationVisible = !navigationVisible },
                                 onShowNewConnection = { showNewConnection = true },
