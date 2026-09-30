@@ -43,6 +43,9 @@ import dev.nucleusframework.window.windowDragArea
  * 的 `setMinimumSize` 落地；max 仅钳制**初始**尺寸（框架无 setMaximumSize，
  * 与 SettingsDialog 只设 min 的行为一致）。
  *
+ * 默认初始尺寸为屏幕的 2/3（宽高各 2/3，[rememberTwoThirdsScreenSize]）；
+ * 调用方可用 [initialWidth] / [initialHeight] 显式覆盖。
+ *
  * 必须用 nucleus 的 `DecoratedDialog` 而非 compose 的 `DialogWindow`：
  * 项目的窗口管线是 nucleus/Tao 自绘框架（主线程非 AWT EDT），compose 的
  * DialogWindow 会在非 EDT 上创建 SkiaLayer 而抛
@@ -53,17 +56,18 @@ import dev.nucleusframework.window.windowDragArea
 fun ObjectDetailDialog(
     title: String,
     onDismiss: () -> Unit,
-    initialWidth: Dp = 720.dp,
-    initialHeight: Dp = 500.dp,
+    initialWidth: Dp? = null, // null → 屏幕宽的 2/3
+    initialHeight: Dp? = null, // null → 屏幕高的 2/3
     minWidth: Dp = 400.dp,
     minHeight: Dp = 300.dp,
-    maxWidth: Dp = 1400.dp,
-    maxHeight: Dp = 1000.dp,
+    maxWidth: Dp = Dp.Infinity,
+    maxHeight: Dp = Dp.Infinity,
     content: @Composable () -> Unit,
 ) {
     // 初始尺寸与 min/max 求交集：调用方配置失配时不至于开局越界。
-    val startWidth = initialWidth.coerceIn(minWidth, maxWidth)
-    val startHeight = initialHeight.coerceIn(minHeight, maxHeight)
+    val twoThirdsScreen = rememberTwoThirdsScreenSize()
+    val startWidth = (initialWidth ?: twoThirdsScreen.width).coerceIn(minWidth, maxWidth)
+    val startHeight = (initialHeight ?: twoThirdsScreen.height).coerceIn(minHeight, maxHeight)
 
     DecoratedDialog(
         onCloseRequest = onDismiss,

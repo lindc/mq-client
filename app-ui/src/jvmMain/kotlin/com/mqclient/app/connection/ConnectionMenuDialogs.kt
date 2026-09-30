@@ -25,7 +25,6 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.rememberDialogState
 import dev.nucleusframework.window.windowDragArea
@@ -34,6 +33,7 @@ import com.mqclient.core.ConnectionStore
 import com.mqclient.core.CoreModule
 import com.mqclient.core.ModuleRegistry
 import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.dialog.rememberTwoThirdsScreenSize
 import com.mqclient.uicommon.i18n.stringResource
 import dev.nucleusframework.application.DecoratedDialog
 import kotlinx.coroutines.launch
@@ -221,7 +221,8 @@ internal fun ConnectionPropertiesDialog(connection: ConnectionInfo, onDismiss: (
     }
     DecoratedDialog(
         onCloseRequest = onDismiss,
-        state = rememberDialogState(size = DpSize(560.dp, 640.dp)),
+        // 初始尺寸：屏幕的 2/3（宽高各 2/3），同 MQ 对象属性对话框。
+        state = rememberDialogState(size = rememberTwoThirdsScreenSize()),
         title = stringResource("qmgr_properties_title").format(connection.name),
         resizable = true,
         // ESC 关闭（对话框无系统标题栏，键盘出口得自己接——同 SettingsDialog）。
