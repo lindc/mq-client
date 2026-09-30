@@ -181,15 +181,21 @@ def write_enum_kt(
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--plugins", default="/opt/software/IDE/eclipse/plugins")
+    ap.add_argument(
+        "--enums-only",
+        action="store_true",
+        help="只重生成枚举表（跳过 attrs json）——本机 MQ Explorer 版本较旧时避免丢键",
+    )
     args = ap.parse_args()
     plugins = Path(args.plugins)
     core_jar = sorted(plugins.glob("com.ibm.mq.explorer.core_*.jar"))[0]
     nl1_jar = sorted(plugins.glob("com.ibm.mq.explorer.core.nl1_*.jar"))[0]
 
-    en, zh = extract_titles(core_jar, nl1_jar)
     res = REPO / "ibm-mq-ui/src/commonMain/composeResources/files/i18n"
-    write_json(en, res / "ibm_mq_attrs_en-US.json")
-    write_json(zh, res / "ibm_mq_attrs_zh-CN.json")
+    if not args.enums_only:
+        en, zh = extract_titles(core_jar, nl1_jar)
+        write_json(en, res / "ibm_mq_attrs_en-US.json")
+        write_json(zh, res / "ibm_mq_attrs_zh-CN.json")
 
     enums = extract_queue_enums(core_jar)
     write_enum_kt(

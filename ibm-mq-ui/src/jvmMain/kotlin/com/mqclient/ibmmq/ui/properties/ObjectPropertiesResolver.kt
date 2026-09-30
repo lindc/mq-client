@@ -1,5 +1,6 @@
 package com.mqclient.ibmmq.ui.properties
 
+import com.mqclient.ibmmq.pcf.MqAttributeDisplay
 import com.mqclient.ibmmq.pcf.MqAttributeNameMapper
 import com.mqclient.ibmmq.pcf.MqObjectSnapshot
 
@@ -60,17 +61,21 @@ internal fun resolveGroupedObjectProperties(
         group to group.fields.mapNotNull(::resolve)
     }.filter { (_, rows) -> rows.isNotEmpty() }
 
-    // 「全部属性」兜底：名字直接查 `MQXXX.title` i18n 键；枚举值不猜（回落原始值）。
+    // 「全部属性」兜底：名字直接查 `MQXXX.title` i18n 键；整型值仍走 DM 枚举反查
+    // （与 queue 的兜底分支同款）——快照里未分组的属性（z/OS 专属、遥测能力等）
+    // 大多在 DmQueueManager 里有枚举定义，不反查就会漏出原始数字。查不到归属 /
+    // 常量名的（真数值字段）回落原始值，不丢数据。
     val other = attrs.filterKeys { it !in usedKeys && it !in hiddenLeftoverKeys }
         .map { (k, v) ->
+            val constName = (v as? Int)?.let { MqAttributeDisplay.constNameFor(k, it) }
             ResolvedObjectProperty(
                 nameKey = "$k.title",
                 descKey = "",
                 labelEn = k,
                 valueKey = null,
-                valueFallbackKey = null,
+                valueFallbackKey = constName?.let { "$it.title" },
                 rawValue = v?.toString()?.trim()?.ifBlank { " " } ?: "",
-                rawConstName = null,
+                rawConstName = constName,
             )
         }
     return if (other.isEmpty()) grouped else grouped + (ObjectPropertyGroup(allGroupTitleKey, emptyList()) to other)
