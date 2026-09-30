@@ -106,6 +106,7 @@
   "msg_browse_delete_confirm": "Delete this message? It will be consumed and cannot be recovered.",
   "msg_browse_saved": "Saved to %s",
   "msg_browse_op_failed": "Operation failed: %s",
+  "msg_detail_title": "Message Detail - %s",
   "queue_status_warning": "Nearly full",
   "channel_loading": "Loading channels…",
   "channel_load_failed": "Failed to load channels: %s",

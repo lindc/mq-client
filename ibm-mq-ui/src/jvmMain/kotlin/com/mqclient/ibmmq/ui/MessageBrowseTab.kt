@@ -76,6 +76,7 @@ import com.mqclient.ibmmq.messaging.browseErrorText
 import com.mqclient.mqui.common.CompactSearchField
 import com.mqclient.mqui.objectlist.ObjectListEmptyState
 import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.i18n.LanguageResources
 import com.mqclient.uicommon.i18n.stringResource
 import kotlinx.coroutines.CancellationException
@@ -196,6 +197,8 @@ internal fun MessageBrowseTab(
     var rowActionId by remember { mutableStateOf<String?>(null) }
     // 待确认删除的消息（删除图标点击 → 确认框 → 实际执行）。
     var pendingDelete by remember { mutableStateOf<MessageSummary?>(null) }
+    // 消息详情对话框（详细图标打开；内容待实装，先空着）。
+    var detailMessage by remember { mutableStateOf<MessageSummary?>(null) }
 
     fun showCopied(text: String) {
         clipboard.setText(AnnotatedString(text))
@@ -353,6 +356,7 @@ internal fun MessageBrowseTab(
                         actionInProgressId = rowActionId,
                         onDownload = ::downloadMessage,
                         onDelete = { pendingDelete = it },
+                        onDetail = { detailMessage = it },
                     )
                 }
             }
@@ -396,6 +400,15 @@ internal fun MessageBrowseTab(
             },
             onDismiss = { pendingDelete = null },
         )
+    }
+
+    detailMessage?.let { message ->
+        ObjectDetailDialog(
+            title = stringResource("msg_detail_title").withArg(message.messageId.take(8)),
+            onDismiss = { detailMessage = null },
+        ) {
+            // 内容待实装：MQMD 全字段 + 消息体预览。
+        }
     }
 }
 
@@ -495,6 +508,7 @@ private fun MessageTable(
     actionInProgressId: String?,
     onDownload: (MessageSummary) -> Unit,
     onDelete: (MessageSummary) -> Unit,
+    onDetail: (MessageSummary) -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         // 表头：列宽与行单元格一一对应（ID 两列弹性，其余固定）。
@@ -523,6 +537,7 @@ private fun MessageTable(
                     anyActionInProgress = actionInProgressId != null,
                     onDownload = onDownload,
                     onDelete = onDelete,
+                    onDetail = onDetail,
                 )
             }
         }
@@ -548,6 +563,7 @@ private fun MessageRow(
     anyActionInProgress: Boolean,
     onDownload: (MessageSummary) -> Unit,
     onDelete: (MessageSummary) -> Unit,
+    onDetail: (MessageSummary) -> Unit,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val hovered by interactionSource.collectIsHoveredAsState()
@@ -588,11 +604,12 @@ private fun MessageRow(
             modifier = Modifier.width(COL_PRIORITY),
         )
         Row(modifier = Modifier.width(COL_DETAIL)) {
-            // 详细：Message Detail 对话框下一步实装，本轮占位禁用。
+            // 详细：弹出详情对话框（内容待实装，先空壳）。
             RowActionIcon(
                 icon = Icons.Default.Info,
                 tooltip = stringResource("msg_col_detail"),
-                enabled = false,
+                enabled = !anyActionInProgress,
+                onClick = { onDetail(message) },
             )
             // 下载：取完整消息体弹「另存为」，队列消息不动。
             RowActionIcon(
