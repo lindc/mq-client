@@ -85,6 +85,16 @@
 - **拓扑数据缓存优先**：进入面板只读慢扫缓存出图，缓存为空才隐式连接 / 扫描
   （CONNECTED 事件后补扫）；强制刷新走右上角「重新扫描」。
 
+### Changed
+
+- **属性窗口默认尺寸改为屏幕的 2/3**（宽高各 2/3）：新增 ui-common
+  `rememberTwoThirdsScreenSize()`（`Toolkit.screenSize` 物理像素经
+  `LocalDensity` 换算成 dp），`ObjectDetailDialog`（队列/通道/主题等 10 类
+  对象属性窗口的通用外壳）`initialWidth/Height` 默认走它，`maxWidth/Height`
+  默认改 `Dp.Infinity`（原 1400×1000 钳制在大屏上会截掉 2/3；调用方仍可显式
+  覆盖）；队列管理器属性窗口 `ConnectionPropertiesDialog` 初始尺寸从固定
+  560×640dp 同步改为屏幕 2/3。
+
 ### Fixed
 
 - **属性对话框「队列时间」显示 `[I@41cf4272`**：PCF 列表参数（如
