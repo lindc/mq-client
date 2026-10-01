@@ -408,18 +408,6 @@ internal fun MessageBrowseTab(
             connectionId = connectionId,
             queueName = queueName,
             summary = message,
-            // 删除成功：关详情 + 本地移除该行并减 CURDEPTH（与行内删除同款即时生效，
-            // 不走网络刷新；全量变化用工具栏刷新）。
-            onDeleted = { deleted ->
-                detailMessage = null
-                (uiState as? BrowseUiState.Ready)?.let { ready ->
-                    uiState = ready.copy(
-                        messages = ready.messages.filterNot { it.messageId == deleted.messageId },
-                        depth = (ready.depth - 1).coerceAtLeast(0),
-                    )
-                }
-                scope.launch { snackbarHostState.showSnackbar(stringResource("msg_browse_delete_ok")) }
-            },
             onDismiss = { detailMessage = null },
         )
     }

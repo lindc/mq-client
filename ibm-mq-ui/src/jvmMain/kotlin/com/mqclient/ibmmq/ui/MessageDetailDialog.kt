@@ -22,7 +22,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -82,18 +81,17 @@ private data class RenderedText(val text: String, val parseError: String? = null
 
 /**
  * 消息详情对话框（浏览消息表格「详细」按钮打开）：左右分栏 3:2 —— 左侧正文 /
- * Header 两个 Tab，右侧解释器选择 + 参数 + 辅助操作；底部「下载 | 删除 | 关闭」。
+ * Header 两个 Tab，右侧解释器选择 + 参数 + 辅助操作；底部「下载 | 关闭」。
+ * 删除消息不走详情对话框，入口在消息列表的行操作。
  *
  * 数据经 service 的 getMessageDetail 按 MessageId 现查（独立 browse 句柄，纯浏览
- * 不消费）；删除复用 service 的 deleteMessage（破坏性 get 单条消费），成功后经
- * [onDeleted] 通知列表本地移除该行、关提示并关闭本对话框（对话框不再自管关闭）。
+ * 不消费）。
  */
 @Composable
 internal fun MessageDetailDialog(
     connectionId: String,
     queueName: String,
     summary: MessageSummary,
-    onDeleted: (MessageSummary) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -103,8 +101,6 @@ internal fun MessageDetailDialog(
     var uiState by remember(summary.messageId) { mutableStateOf<DetailUiState>(DetailUiState.Loading) }
     var retryKey by remember(summary.messageId) { mutableStateOf(0) }
     var selectedTab by remember { mutableStateOf(0) }
-    var showDeleteConfirm by remember { mutableStateOf(false) }
-    var deleting by remember { mutableStateOf(false) }
 
     LaunchedEffect(summary.messageId, retryKey) {
         uiState = DetailUiState.Loading
@@ -132,24 +128,6 @@ internal fun MessageDetailDialog(
         }
     }
 
-    /** 删除（确认后）：复用行内删除的服务链路；成功回调父级（关详情 + 本地移除），失败原地提示。 */
-    fun deleteDetail() {
-        scope.launch {
-            deleting = true
-            val result = IbmMQModule.serviceOrNull()
-                ?.deleteMessage(connectionId, queueName, summary.messageId)
-                ?: MessageOperationResult.failure(null, "服务未初始化")
-            deleting = false
-            if (result.success) {
-                onDeleted(summary)
-            } else {
-                snackbarHostState.showSnackbar(
-                    stringResource("msg_browse_op_failed").withArg(result.errorMessage ?: ""),
-                )
-            }
-        }
-    }
-
     ObjectDetailDialog(
         title = stringResource("msg_detail_title").withArg(summary.messageId),
         onDismiss = onDismiss,
@@ -160,11 +138,6 @@ internal fun MessageDetailDialog(
             FooterAction(stringResource("msg_detail_download"), enabled = ready != null) {
                 downloadDetail(ready!!.detail)
             }
-            FooterAction(
-                stringResource("msg_detail_delete"),
-                enabled = ready != null && !deleting,
-                danger = true,
-            ) { showDeleteConfirm = true }
             Spacer(Modifier.weight(1f))
             FooterAction(stringResource("common_close")) { onDismiss() }
         },
@@ -221,80 +194,20 @@ internal fun MessageDetailDialog(
             )
         }
     }
-
-    // ---- 删除二次确认：完整 MessageId + 大小，明确「不可恢复」，不写原因 ----
-    if (showDeleteConfirm) {
-        val ready = uiState as? DetailUiState.Ready
-        AlertDialog(
-            onDismissRequest = { if (!deleting) showDeleteConfirm = false },
-            title = { Text(stringResource("msg_detail_delete_title")) },
-            text = {
-                Column {
-                    Text(stringResource("msg_detail_delete_confirm"))
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = summary.messageId,
-                        style = MaterialTheme.typography.bodySmall,
-                        fontFamily = FontFamily.Monospace,
-                    )
-                    if (ready != null) {
-                        Text(
-                            text = stringResource("msg_detail_delete_size")
-                                .withArg(formatSize(ready.detail.dataLength.toLong())),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = stringResource("msg_detail_delete_warning"),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
-            },
-            confirmButton = {
-                PressableButton(
-                    onClick = {
-                        showDeleteConfirm = false
-                        deleteDetail()
-                    },
-                    enabled = !deleting,
-                    danger = true,
-                ) { Text(stringResource("msg_detail_delete")) }
-            },
-            dismissButton = {
-                PressableButton(
-                    onClick = { showDeleteConfirm = false },
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                ) { Text(stringResource("common_cancel")) }
-            },
-        )
-    }
 }
 
-/** 底部操作栏的文本按钮（footerActions 用；danger 走错误色）。 */
+/** 底部操作栏的文本按钮（footerActions 用），尺寸走 PressableButton 的全项目约定。 */
 @Composable
 private fun RowScope.FooterAction(
     label: String,
     enabled: Boolean = true,
-    danger: Boolean = false,
     onClick: () -> Unit,
 ) {
     PressableButton(
         onClick = onClick,
         enabled = enabled,
-        containerColor = if (danger) {
-            MaterialTheme.colorScheme.errorContainer
-        } else {
-            MaterialTheme.colorScheme.surfaceVariant
-        },
-        contentColor = if (danger) {
-            MaterialTheme.colorScheme.error
-        } else {
-            MaterialTheme.colorScheme.onSurfaceVariant
-        },
+        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
     ) { Text(label) }
 }
 
@@ -624,29 +537,13 @@ private fun InterpreterPane(
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             for (item in interpreters) {
-                val recommended = detail.content.isNotEmpty() &&
-                    item.canInterpret(detail.content, detail.encoding, detail.codedCharSetId)
                 FilterChip(
                     selected = item.id == selectedId,
                     onClick = { onSelect(item.id) },
-                    label = {
-                        Text(stringResource(item.displayName) + if (recommended) " ✓" else "")
-                    },
+                    label = { Text(stringResource(item.displayName)) },
                 )
             }
         }
-        val detected = interpreters
-            .firstOrNull { it.id != "text" && it.canInterpret(detail.content, detail.encoding, detail.codedCharSetId) }
-        Text(
-            text = if (detected != null) {
-                stringResource("msg_detail_autodetect").withArg(stringResource(detected.displayName))
-            } else {
-                stringResource("msg_detail_autodetect_none")
-            },
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 4.dp),
-        )
 
         Spacer(Modifier.height(16.dp))
         HorizontalDivider()
