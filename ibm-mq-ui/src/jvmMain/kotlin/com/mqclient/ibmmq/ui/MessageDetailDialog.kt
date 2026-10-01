@@ -54,7 +54,7 @@ import com.mqclient.ibmmq.IbmMQModule
 import com.mqclient.ibmmq.messaging.MessageDetail
 import com.mqclient.ibmmq.messaging.MessageOperationResult
 import com.mqclient.ibmmq.messaging.MessageSummary
-import com.mqclient.ibmmq.ui.message.MessageInterpreters
+import com.mqclient.message.interpreter.MessageInterpreters
 import com.mqclient.message.interpreter.InterpreterResult
 import com.mqclient.message.interpreter.MessageCharsets
 import com.mqclient.message.interpreter.MessageInterpreter

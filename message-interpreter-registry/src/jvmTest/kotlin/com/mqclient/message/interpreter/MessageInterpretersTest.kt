@@ -1,14 +1,16 @@
-package com.mqclient.ibmmq.ui.message
+package com.mqclient.message.interpreter
 
-import com.mqclient.message.interpreter.DecodingInterpreter
+import com.mqclient.message.interpreter.base64.Base64Interpreter
+import com.mqclient.message.interpreter.idoc.IdocInterpreter
+import com.mqclient.message.interpreter.json.JsonInterpreter
+import com.mqclient.message.interpreter.text.TextInterpreter
+import com.mqclient.message.interpreter.xml.XmlInterpreter
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertTrue
 
 /**
- * 解释器模块化机制的验证（SPI 拆分后）：ServiceLoader 必须能从 ibm-mq-ui +
- * 独立解释器模块（json / base64）的 classpath 上发现全部内置实现，排序稳定，
- * 且回落语义正确。
+ * 解释器模块化机制的验证：ServiceLoader 必须能从 registry 的 classpath 上发现
+ * 全部内置实现（各解释器独立模块经聚合依赖进入），排序稳定，回落语义正确。
  */
 class MessageInterpretersTest {
 
