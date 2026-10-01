@@ -904,5 +904,9 @@
   "queue_value_suiteb_none": "None",
   "queue_value_suiteb_128_bit": "128-bit",
   "queue_value_suiteb_192_bit": "192-bit",
-  "queue_value_suiteb_128_192_bit": "128-bit and 192-bit"
+  "queue_value_suiteb_128_192_bit": "128-bit and 192-bit",
+  "msg_interp_param_version": "Version",
+  "msg_interp_param_version_auto": "auto (auto-detect)",
+  "msg_interp_param_show_raw": "Show raw segments",
+  "msg_interp_param_expand": "Expand nested structure"
 }

@@ -79,6 +79,17 @@ data class ParamDef(
     /** 显示名（同 displayName 约定：i18n key 或明文）。 */
     val label: String,
     val kind: ParamKind,
+    /**
+     * [ParamKind.SELECT] 的固定选项（value 进 params，label 经 stringResource
+     * 查表 / 明文）；其他 kind 忽略此字段。默认空。
+     */
+    val options: List<SelectOption> = emptyList(),
+)
+
+/** [ParamKind.SELECT] 的单个选项：[value] 是写进 params 的实际值，[label] 是显示名。 */
+data class SelectOption(
+    val value: String,
+    val label: String,
 )
 
 /** 参数输入控件类型。 */
@@ -91,6 +102,9 @@ enum class ParamKind {
 
     /** 开关（"true" / "false"）。 */
     BOOLEAN,
+
+    /** 下拉框：固定选项集（[ParamDef.options] 必须给出）。 */
+    SELECT,
 }
 
 /** [MessageInterpreter.interpret] 的结果。 */

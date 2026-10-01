@@ -4,6 +4,7 @@ import com.mqclient.message.interpreter.InterpreterResult
 import com.mqclient.message.interpreter.MessageInterpreter
 import com.mqclient.message.interpreter.ParamDef
 import com.mqclient.message.interpreter.ParamKind
+import com.mqclient.message.interpreter.SelectOption
 import java.nio.charset.Charset
 
 /**
@@ -34,7 +35,19 @@ class IdocInterpreter : MessageInterpreter {
     )
     override val paramDefs = listOf(
         ParamDef(PARAM_CHARSET, "msg_interp_param_charset", ParamKind.TEXT),
-        ParamDef(PARAM_VERSION, "msg_interp_param_version", ParamKind.TEXT),
+        ParamDef(
+            PARAM_VERSION,
+            "msg_interp_param_version",
+            ParamKind.SELECT,
+            options = listOf(
+                SelectOption("auto", "msg_interp_param_version_auto"),
+                SelectOption("2.0", "2.0"),
+                SelectOption("3.0", "3.0"),
+                SelectOption("3.1", "3.1"),
+                SelectOption("3.2", "3.2"),
+                SelectOption("4.0", "4.0"),
+            ),
+        ),
         ParamDef(PARAM_SHOW_RAW, "msg_interp_param_show_raw", ParamKind.BOOLEAN),
         ParamDef(PARAM_EXPAND, "msg_interp_param_expand", ParamKind.BOOLEAN),
     )

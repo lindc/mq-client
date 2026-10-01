@@ -20,9 +20,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -572,6 +575,54 @@ private fun InterpreterPane(
                                     onParamsChange(params + (def.id to checked.toString()))
                                 },
                             )
+                        }
+                    }
+                    ParamKind.SELECT -> {
+                        // 标签在下拉框上方；readOnly 文本框展示当前选中项，透明点击层
+                        // 负责开菜单（readOnly 文本框自己会抢焦点）。
+                        var menuExpanded by remember(def.id) { mutableStateOf(false) }
+                        val selectedValue = params[def.id] ?: ""
+                        val selectedLabel = def.options
+                            .firstOrNull { it.value == selectedValue }
+                            ?.let { stringResource(it.label) }
+                            ?: selectedValue
+                        Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                            Text(
+                                text = stringResource(def.label),
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Box {
+                                OutlinedTextField(
+                                    value = selectedLabel,
+                                    onValueChange = {},
+                                    readOnly = true,
+                                    singleLine = true,
+                                    trailingIcon = {
+                                        Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .matchParentSize()
+                                        .clickable { menuExpanded = true },
+                                )
+                                DropdownMenu(
+                                    expanded = menuExpanded,
+                                    onDismissRequest = { menuExpanded = false },
+                                ) {
+                                    for (option in def.options) {
+                                        DropdownMenuItem(
+                                            text = { Text(stringResource(option.label)) },
+                                            onClick = {
+                                                onParamsChange(params + (def.id to option.value))
+                                                menuExpanded = false
+                                            },
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                     else -> {

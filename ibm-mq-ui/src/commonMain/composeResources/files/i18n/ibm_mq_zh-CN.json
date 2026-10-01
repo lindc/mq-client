@@ -1046,5 +1046,9 @@
   "queue_value_suiteb_none": "无",
   "queue_value_suiteb_128_bit": "128 位",
   "queue_value_suiteb_192_bit": "192 位",
-  "queue_value_suiteb_128_192_bit": "128 位和 192 位"
+  "queue_value_suiteb_128_192_bit": "128 位和 192 位",
+  "msg_interp_param_version": "版本",
+  "msg_interp_param_version_auto": "auto（自动判断）",
+  "msg_interp_param_show_raw": "显示原始 segment",
+  "msg_interp_param_expand": "展开嵌套结构"
 }
