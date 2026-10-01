@@ -55,10 +55,10 @@ import com.mqclient.ibmmq.messaging.MessageDetail
 import com.mqclient.ibmmq.messaging.MessageOperationResult
 import com.mqclient.ibmmq.messaging.MessageSummary
 import com.mqclient.ibmmq.ui.message.MessageInterpreters
-import com.mqclient.ibmmq.ui.message.decodeBody
-import com.mqclient.mq.base.InterpreterResult
-import com.mqclient.mq.base.MessageInterpreter
-import com.mqclient.mq.base.ParamKind
+import com.mqclient.message.interpreter.InterpreterResult
+import com.mqclient.message.interpreter.MessageCharsets
+import com.mqclient.message.interpreter.MessageInterpreter
+import com.mqclient.message.interpreter.ParamKind
 import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.i18n.stringResource
@@ -395,7 +395,7 @@ private fun ContentTab(
             when (val result = interpreter.interpret(detail.content, detail.encoding, detail.codedCharSetId, params)) {
                 is InterpreterResult.Success -> RenderedText(result.formatted)
                 is InterpreterResult.Failure ->
-                    RenderedText(decodeBody(detail.content, detail.codedCharSetId), result.message)
+                    RenderedText(MessageCharsets.decode(detail.content, detail.codedCharSetId), result.message)
             }
         }
     }
@@ -601,12 +601,12 @@ private fun InterpreterPane(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable {
-                        clipboard.setText(AnnotatedString(decodeBody(detail.content, detail.codedCharSetId)))
+                        clipboard.setText(AnnotatedString(MessageCharsets.decode(detail.content, detail.codedCharSetId)))
                         onCopy()
                     }
                     .padding(vertical = 6.dp),
             )
-            if (decodeBody(detail.content, detail.codedCharSetId).length > MAX_PREVIEW_CHARS) {
+            if (MessageCharsets.decode(detail.content, detail.codedCharSetId).length > MAX_PREVIEW_CHARS) {
                 Text(
                     text = if (expanded) stringResource("msg_detail_collapse") else stringResource("msg_detail_expand"),
                     style = MaterialTheme.typography.bodySmall,

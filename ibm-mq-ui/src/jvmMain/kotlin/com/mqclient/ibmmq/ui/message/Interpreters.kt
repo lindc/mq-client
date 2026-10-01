@@ -1,138 +1,85 @@
 package com.mqclient.ibmmq.ui.message
 
-import com.mqclient.mq.base.InterpreterResult
-import com.mqclient.mq.base.MessageInterpreter
-import com.mqclient.mq.base.ParamDef
-import com.mqclient.mq.base.ParamKind
+import com.mqclient.core.log.Log
+import com.mqclient.message.interpreter.InterpreterResult
+import com.mqclient.message.interpreter.MessageCharsets
+import com.mqclient.message.interpreter.MessageInterpreter
+import com.mqclient.message.interpreter.ParamDef
+import com.mqclient.message.interpreter.ParamKind
 import java.nio.charset.Charset
-import java.util.Base64
 import java.util.ServiceLoader
 
-/* ------------------------------ 字符集 ------------------------------ */
-
-/** CCSID → Java Charset（文本渲染 / 解码层用；常用子集，查不到回退 UTF-8）。 */
-internal fun ccsidToCharsetOrNull(ccsid: Int): Charset? = when (ccsid) {
-    1208 -> Charsets.UTF_8
-    819 -> Charsets.ISO_8859_1
-    1252 -> Charset.forName("windows-1252")
-    1200, 13488 -> Charsets.UTF_16BE
-    936, 1381 -> Charset.forName("GBK")
-    1386, 5488 -> Charset.forName("GB18030")
-    37 -> Charset.forName("IBM037")
-    500 -> Charset.forName("IBM500")
-    1047 -> Charset.forName("IBM1047")
-    437 -> Charset.forName("IBM437")
-    850 -> Charset.forName("IBM850")
-    else -> null
-}
-
-/** 消息体 → 展示文本的默认解码：按 CCSID，未知回退 UTF-8（非法序列用替换符不抛）。 */
-internal fun decodeBody(content: ByteArray, codedCharSetId: Int): String {
-    if (content.isEmpty()) return ""
-    val charset = ccsidToCharsetOrNull(codedCharSetId) ?: Charsets.UTF_8
-    return String(content, charset)
-}
-
-/* --------------------------- SPI 装载 --------------------------- */
+/** 探测用 UTF-8 解码（canInterpret 只看首字符 / ASCII 段名，字符集不影响结论）。 */
+private fun decodeAsUtf8(content: ByteArray): String = String(content, Charsets.UTF_8)
 
 /**
- * 解释器注册表：ServiceLoader 装载。装载对单个坏实现容错（构造 / 遍历失败跳过
- * 该实现，不拖垮整批 —— ModuleRegistry 同款约定）。
+ * IBM MQ 内置解释器的驻留部分（Phase 1）：Text / Xml / Idoc 三类尚未拆成独立
+ * 模块，暂留 ibm-mq-ui（与 JSON / Base64 独立模块同一条 ServiceLoader 注册路径，
+ * 见本模块 resources/META-INF/services）。Phase 2 按 JSON / Base64 的 pattern 迁出。
+ */
+/* --------------------------- SPI 装载 --------------------------- */
+
+private const val LOG_TAG = "ibm-mq-ui"
+
+/**
+ * 解释器注册表：ServiceLoader 装载 + 排序。
  *
- * 注意：实现类必须是 **public class 且带 public 无参构造**（ServiceLoader 反射
- * 实例化；Kotlin `object` 的构造器是 private，注册不了）。无状态实现，实例随意
- * 创建，等价单例。
+ *  - 装载逐 provider 容错：单个实现缺失 / 构造失败只跳过并记日志，不拖垮整批
+ *    （ModuleRegistry 同款约定）；枚举器本身坏掉（配置损坏）时**停**而不是继续
+ *    —— 同一坏迭代器会反复抛同一个错，继续循环等于死循环；
+ *  - 按 [MessageInterpreter.sortOrder] 升序稳定排序（同序保持加载顺序），
+ *    跨 JAR 的 ServiceLoader 注册顺序不可依赖。
  */
 object MessageInterpreters {
 
-    /** ServiceLoader 装载到的全部实现（内置与第三方同一条路），按注册顺序。 */
-    fun loadAll(): List<MessageInterpreter> = runCatching {
-        ServiceLoader.load(MessageInterpreter::class.java).iterator().asSequence().toList()
-    }.getOrElse { emptyList() }
+    /** ServiceLoader 装载到的全部实现（内置与第三方同一条路）。 */
+    fun loadAll(): List<MessageInterpreter> {
+        val out = mutableListOf<MessageInterpreter>()
+        val iterator = ServiceLoader.load(MessageInterpreter::class.java).iterator()
+        while (true) {
+            val provider = try {
+                if (!iterator.hasNext()) break
+                iterator.next()
+            } catch (t: Throwable) {
+                // hasNext / next 都可能抛 ServiceConfigurationError（Error，不是 Exception）。
+                Log.error(LOG_TAG, "failed to load a message interpreter provider, stopping enumeration: $t")
+                break
+            }
+            runCatching { out += provider }.onFailure {
+                Log.error(LOG_TAG, "failed to instantiate a message interpreter, skipping: $it")
+            }
+        }
+        return out.sortedBy { it.sortOrder }
+    }
 
     /** 按 id 查找（恢复选中项用；找不到回落文本解释器）。 */
     fun byId(id: String): MessageInterpreter =
         loadAll().firstOrNull { it.id == id } ?: TextInterpreter()
 }
 
-/** 内容解码为 UTF-8 文本：JSON / XML / Base64 探测的公共入口。 */
-private fun decodeAsUtf8(content: ByteArray): String =
-    String(content, Charsets.UTF_8)
-
-/** 文本：按 MQMD CodedCharSetId 解码原始字节，原样展示。默认解释器（首位注册）。 */
+/** 文本：按 MQMD CodedCharSetId 解码原始字节，原样展示。默认解释器（首位）。 */
 class TextInterpreter : MessageInterpreter {
     override val id = "text"
     override val displayName = "msg_interp_text"
+    override val sortOrder = 10
     override val defaultParams: Map<String, String> = emptyMap()
     override val paramDefs: List<ParamDef> = emptyList()
 
     override fun canInterpret(content: ByteArray, encoding: Int, codedCharSetId: Int): Boolean = false
 
-    override fun interpret(content: ByteArray, encoding: Int, codedCharSetId: Int, params: Map<String, String>): InterpreterResult =
-        InterpreterResult.Success(decodeBody(content, codedCharSetId))
-}
-
-/** JSON：解析 + 按缩进重排；解析失败如实报错。 */
-class JsonInterpreter : MessageInterpreter {
-    override val id = "json"
-    override val displayName = "msg_interp_json"
-    override val defaultParams = mapOf(PARAM_INDENT to "2")
-    override val paramDefs = listOf(ParamDef(PARAM_INDENT, "msg_interp_param_indent", ParamKind.NUMBER))
-
-    private companion object {
-        const val PARAM_INDENT = "indent"
-    }
-
-    override fun canInterpret(content: ByteArray, encoding: Int, codedCharSetId: Int): Boolean {
-        val first = decodeAsUtf8(content).trimStart().firstOrNull() ?: return false
-        return first == '{' || first == '['
-    }
-
-    override fun interpret(content: ByteArray, encoding: Int, codedCharSetId: Int, params: Map<String, String>): InterpreterResult {
-        val text = decodeBody(content, codedCharSetId)
-        return try {
-            val indent = params[PARAM_INDENT]?.toIntOrNull()?.coerceIn(0, 8) ?: 2
-            InterpreterResult.Success(prettyPrintJson(text, indent))
-        } catch (e: Exception) {
-            InterpreterResult.Failure(e.message ?: "JSON parse failed")
-        }
-    }
-
-    /** 轻量 JSON 重排（不引入第三方依赖）：逐 token 换行 + 缩进；字符串字面量整体跳过。 */
-    private fun prettyPrintJson(text: String, indent: Int): String {
-        val pad = " ".repeat(indent)
-        val sb = StringBuilder()
-        var depth = 0
-        var inString = false
-        var escaped = false
-        for (ch in text) {
-            when {
-                inString -> {
-                    sb.append(ch)
-                    when {
-                        escaped -> escaped = false
-                        ch == '\\' -> escaped = true
-                        ch == '"' -> inString = false
-                    }
-                }
-                ch == '"' -> {
-                    sb.append(ch); inString = true
-                }
-                ch == '{' || ch == '[' -> sb.append(ch).append('\n').append(pad.repeat(++depth))
-                ch == '}' || ch == ']' -> sb.append('\n').append(pad.repeat(--depth)).append(ch)
-                ch == ',' -> sb.append(ch).append('\n').append(pad.repeat(depth))
-                ch == ':' -> sb.append(": ")
-                !ch.isWhitespace() -> sb.append(ch)
-            }
-        }
-        return sb.toString()
-    }
+    override fun interpret(
+        content: ByteArray,
+        encoding: Int,
+        codedCharSetId: Int,
+        params: Map<String, String>,
+    ): InterpreterResult = InterpreterResult.Success(MessageCharsets.decode(content, codedCharSetId))
 }
 
 /** XML：标签级缩进重排（可选）。 */
 class XmlInterpreter : MessageInterpreter {
     override val id = "xml"
     override val displayName = "msg_interp_xml"
+    override val sortOrder = 30
     override val defaultParams = mapOf(PARAM_PRETTY to "true")
     override val paramDefs = listOf(ParamDef(PARAM_PRETTY, "msg_interp_param_pretty", ParamKind.BOOLEAN))
 
@@ -143,8 +90,13 @@ class XmlInterpreter : MessageInterpreter {
     override fun canInterpret(content: ByteArray, encoding: Int, codedCharSetId: Int): Boolean =
         decodeAsUtf8(content).trimStart().startsWith("<")
 
-    override fun interpret(content: ByteArray, encoding: Int, codedCharSetId: Int, params: Map<String, String>): InterpreterResult {
-        val text = decodeBody(content, codedCharSetId).trim()
+    override fun interpret(
+        content: ByteArray,
+        encoding: Int,
+        codedCharSetId: Int,
+        params: Map<String, String>,
+    ): InterpreterResult {
+        val text = MessageCharsets.decode(content, codedCharSetId).trim()
         if (!text.startsWith("<")) return InterpreterResult.Failure("not XML")
         if (params[PARAM_PRETTY] == "false") return InterpreterResult.Success(text)
         return try {
@@ -185,44 +137,6 @@ class XmlInterpreter : MessageInterpreter {
     }
 }
 
-/** Base64：解码层 —— 解码字节后再交给内容解释器链（JSON → XML → 文本）。 */
-class Base64Interpreter : MessageInterpreter {
-    override val id = "base64"
-    override val displayName = "msg_interp_base64"
-    override val defaultParams: Map<String, String> = emptyMap()
-    override val paramDefs: List<ParamDef> = emptyList()
-
-    override fun canInterpret(content: ByteArray, encoding: Int, codedCharSetId: Int): Boolean {
-        val text = decodeAsUtf8(content).trim()
-        if (text.isEmpty() || text.length % 4 != 0) return false
-        return text.all { it.isLetterOrDigit() || it == '+' || it == '/' || it == '=' }
-    }
-
-    override fun interpret(content: ByteArray, encoding: Int, codedCharSetId: Int, params: Map<String, String>): InterpreterResult {
-        val text = decodeAsUtf8(content).trim()
-        val decoded = try {
-            Base64.getMimeDecoder().decode(text)
-        } catch (e: IllegalArgumentException) {
-            return InterpreterResult.Failure("Base64 decode failed: ${e.message}")
-        }
-        // 解码后的字节先探测 JSON / XML，都命中不了按文本展示（解码层不做强制判定）。
-        val json = JsonInterpreter()
-        val xml = XmlInterpreter()
-        val chained = listOfNotNull(
-            json.takeIf { it.canInterpret(decoded, encoding, 1208) },
-            xml.takeIf { it.canInterpret(decoded, encoding, 1208) },
-        ).firstOrNull()
-        return if (chained != null) {
-            when (val inner = chained.interpret(decoded, encoding, 1208, chained.defaultParams)) {
-                is InterpreterResult.Success -> InterpreterResult.Success("Base64 → ${inner.formatted}")
-                is InterpreterResult.Failure -> InterpreterResult.Failure(inner.message)
-            }
-        } else {
-            InterpreterResult.Success(decodeBody(decoded, 1208))
-        }
-    }
-}
-
 /**
  * SAP IDoc：按行切分 + 段名标注展示（轻量示例实现，验证 SPI 机制；完整 IDoc
  * 解析不在范围）。参数：字符集名（默认 UTF-8）。
@@ -230,6 +144,7 @@ class Base64Interpreter : MessageInterpreter {
 class IdocInterpreter : MessageInterpreter {
     override val id = "idoc"
     override val displayName = "msg_interp_idoc"
+    override val sortOrder = 50
     override val defaultParams = mapOf(PARAM_CHARSET to "UTF-8")
     override val paramDefs = listOf(ParamDef(PARAM_CHARSET, "msg_interp_param_charset", ParamKind.TEXT))
 
@@ -243,7 +158,12 @@ class IdocInterpreter : MessageInterpreter {
         return head.startsWith("EDI_DC") || head.startsWith("E2ED") || head.contains("EDI_DC40")
     }
 
-    override fun interpret(content: ByteArray, encoding: Int, codedCharSetId: Int, params: Map<String, String>): InterpreterResult {
+    override fun interpret(
+        content: ByteArray,
+        encoding: Int,
+        codedCharSetId: Int,
+        params: Map<String, String>,
+    ): InterpreterResult {
         val charset = try {
             Charset.forName(params[PARAM_CHARSET] ?: "UTF-8")
         } catch (e: Exception) {

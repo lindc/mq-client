@@ -27,6 +27,10 @@ kotlin {
             implementation(compose.materialIconsExtended)
             // 表单字段组件（LabeledField / PressableButton / SettingsDropdownRow）与 i18n。
             implementation(projects.uiCommon)
+            // 消息解释器 SPI（api）+ 独立解释器模块：进运行时 classpath 供 ServiceLoader 发现。
+            implementation(projects.messageInterpreterApi)
+            implementation(projects.messageInterpreterJson)
+            implementation(projects.messageInterpreterBase64)
         }
         jvmMain.dependencies {
             // FileKit 文件选择器（证书路径的「浏览…」按钮）。选择器 API 在 dialogs 模块。

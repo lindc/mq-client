@@ -1,5 +1,3 @@
 com.mqclient.ibmmq.ui.message.TextInterpreter
-com.mqclient.ibmmq.ui.message.JsonInterpreter
 com.mqclient.ibmmq.ui.message.XmlInterpreter
-com.mqclient.ibmmq.ui.message.Base64Interpreter
 com.mqclient.ibmmq.ui.message.IdocInterpreter
