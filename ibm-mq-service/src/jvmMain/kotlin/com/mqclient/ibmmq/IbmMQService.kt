@@ -268,9 +268,33 @@ class IbmMQService(private val context: ServiceContext) {
      * 集群关系（集群关系 Tab）：本地 QMgr 的集群角色（完整仓库 / 部分仓库 /
      * 不属于集群）+ 成员实时列表（DISPLAY CLUSQMGR，不经慢扫缓存）。
      * 查询失败原样抛（MQException 由 UI 经 browseErrorText 转 MQRC 可读文案）。
+     *
+     * 成员的通道状态：CLUSQMGR 响应在本 QM 版本上不带运行状态（实测），补一条
+     * INQUIRE_CHANNEL_STATUS（全量）按通道名合并；成员通道名缺失时经慢扫缓存的
+     * 通道 RQMNAME 反查（集群发送通道指向该成员即为其通道）。状态查询失败不拖垮
+     * 主体（状态列显示 -）。
      */
-    suspend fun getClusterRelations(connectionId: String): ClusterRelations =
-        objectScanner.queryClusterRelations(connectionId)
+    suspend fun getClusterRelations(connectionId: String): ClusterRelations {
+        val relations = objectScanner.queryClusterRelations(connectionId)
+        val statusByName = runCatching { objectScanner.scanChannelStatuses(connectionId) }
+            .onFailure { ibmMqLog.warn("cluster channel status query failed: ${it.message}") }
+            .getOrDefault(emptyList())
+            .toMap()
+        val channelByRqm = cachedObjects(connectionId, MqObjectType.CHANNEL)
+            .mapNotNull { channel ->
+                channel.attributes["MQCA_REMOTE_Q_MGR_NAME"]?.toString()?.trim()
+                    ?.takeIf { it.isNotBlank() }?.let { rqm -> rqm to channel.name }
+            }
+            .toMap()
+        val members = relations.members.map { member ->
+            val channelName = member.channelName.ifBlank { channelByRqm[member.qmgrName].orEmpty() }
+            val status = channelName.takeIf { it.isNotEmpty() }
+                ?.let { statusByName[it] }?.let { channelStatusName(it) }
+                ?: member.status
+            member.copy(channelName = channelName, status = status)
+        }
+        return relations.copy(members = members)
+    }
 
     /**
      * 按 MessageId 下载消息体（浏览 Tab「下载」）：独立 browse 句柄扫到匹配条目取

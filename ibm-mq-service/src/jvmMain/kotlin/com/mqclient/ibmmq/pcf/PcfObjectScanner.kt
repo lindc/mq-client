@@ -386,12 +386,21 @@ class PcfObjectScanner {
             ClusterMember(
                 qmgrName = qmgrName,
                 clusterName = attrs["MQCA_CLUSTER_NAME"]?.toString()?.trim().orEmpty(),
-                channelName = attrs["MQCACH_CHANNEL_NAME"]?.toString()?.trim().orEmpty(),
-                qmType = clusterQmTypeName(attrs["MQIA_CLUSTER_Q_TYPE"]),
-                defType = attrs.entries
-                    .firstOrNull { it.key.contains("DEFTYPE") }?.value?.toString().orEmpty(),
+                // 通道名：10.0.0.5 客户端 MQCACH_CHANNEL_NAME 与 MQCACH_FIRST 同值
+                // （3501，经典 CHANNEL_NAME 应为 3510，见 ClusterConstantsDiagTest），
+                // mapper 把该参数命名成 MQCACH_FIRST（实测 dump：TO.QMx）。常规键在前，
+                // 客户端修正后自动切换。
+                channelName = (attrs["MQCACH_CHANNEL_NAME"] ?: attrs["MQCACH_FIRST"])
+                    ?.toString()?.trim().orEmpty(),
+                // QMTYPE：响应参数是 MQIACF_Q_MGR_TYPE（MQQMT_* 值族，实测 1=完整仓库
+                // 0=部分仓库）；MQIA_CLUSTER_Q_TYPE（59）在 CLUSQMGR 响应中不存在。
+                qmType = clusterQmTypeName(attrs["MQIACF_Q_MGR_TYPE"]),
+                defType = clusterDefTypeName(attrs["MQIACF_Q_MGR_DEFINITION_TYPE"]),
                 conName = attrs["MQCACH_CONNECTION_NAME"]?.toString()?.trim(),
-                status = attrs["MQIACH_CHANNEL_STATUS"]?.toString()?.trim(),
+                // 状态：远端成员带 MQIACH_CHANNEL_STATUS（MQCHS_* 值族，0=INACTIVE）；
+                // 本地 QMgr 自身行无此参数 → null（UI 显示 "-" + tooltip）。
+                status = (attrs["MQIACH_CHANNEL_STATUS"] as? Number)
+                    ?.let { channelStatusName(it.toInt()) },
             )
         }
     }
@@ -614,14 +623,30 @@ internal fun channelStatusName(value: Int?): String? =
     value?.let { MqAttributeNameMapper.lookupName(it, "MQCHS") }?.substringAfter("MQCHS_") ?: value?.let { "STATE_$it" }
 
 /**
- * CLUSQMGR 的仓库角色（MQIA_CLUSTER_Q_TYPE，值族 MQQMT_*）→ REPOS / NORMAL 可读名
- * （MQ Explorer 同款措辞）；查不到（客户端常量缺失 / 未知值）返回数字本身，不猜。
+ * CLUSQMGR 的仓库角色（响应参数 MQIACF_Q_MGR_TYPE，值族 MQQMT_*）→ REPOS / NORMAL
+ * 可读名（MQ Explorer 同款措辞）；查不到（客户端常量缺失 / 未知值）返回数字本身，不猜。
  */
 internal fun clusterQmTypeName(value: Any?): String {
     val intValue = (value as? Number)?.toInt() ?: return value?.toString().orEmpty()
     return when (MqAttributeNameMapper.lookupName(intValue, "MQQMT")) {
         "MQQMT_REPOSITORY" -> "REPOS"
         "MQQMT_NORMAL" -> "NORMAL"
+        else -> intValue.toString()
+    }
+}
+
+/**
+ * CLUSQMGR 的通道定义类型（响应参数 MQIACF_Q_MGR_DEFINITION_TYPE，值族 MQQMDT_*，
+ * 常量已实证存在且值正确）→ MQSC 风格 CLUSSDR / CLUSSDRA / CLUSRCVR。实测 dump：
+ * 本地 QMgr 自身行 = 3（CLUSTER_RECEIVER，自己的 CLUSRCVR）、远端成员 = 2
+ * （AUTO_CLUSTER_SENDER，自动定义的集群发送方）。
+ */
+internal fun clusterDefTypeName(value: Any?): String {
+    val intValue = (value as? Number)?.toInt() ?: return value?.toString().orEmpty()
+    return when (MqAttributeNameMapper.lookupName(intValue, "MQQMDT")) {
+        "MQQMDT_EXPLICIT_CLUSTER_SENDER" -> "CLUSSDR"
+        "MQQMDT_AUTO_CLUSTER_SENDER" -> "CLUSSDRA"
+        "MQQMDT_CLUSTER_RECEIVER" -> "CLUSRCVR"
         else -> intValue.toString()
     }
 }

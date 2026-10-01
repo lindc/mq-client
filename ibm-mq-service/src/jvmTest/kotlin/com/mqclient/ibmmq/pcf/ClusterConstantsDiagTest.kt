@@ -19,10 +19,25 @@ class ClusterConstantsDiagTest {
                 println("DIAG ${field.name} = $value")
             }
         // 两个命令常量单独确认
+        println("DIAG MQCMD_INQUIRE_CLUSTER_Q_MGR = ${MQConstants.MQCMD_INQUIRE_Q_MGR}")
         println("DIAG MQCMD_INQUIRE_CLUSTER_Q_MGR = ${MQConstants.MQCMD_INQUIRE_CLUSTER_Q_MGR}")
-        println("DIAG MQCMD_INQUIRE_Q_MGR = ${MQConstants.MQCMD_INQUIRE_Q_MGR}")
+        println("DIAG MQCMD_INQUIRE_CHANNEL_STATUS = ${MQConstants.MQCMD_INQUIRE_CHANNEL_STATUS}")
         println("DIAG MQCA_CLUSTER_NAME = ${MQConstants.MQCA_CLUSTER_NAME}")
         println("DIAG MQCA_Q_MGR_NAME = ${MQConstants.MQCA_Q_MGR_NAME}")
         println("DIAG MQCA_REPOSITORY_NAME = ${MQConstants.MQCA_REPOSITORY_NAME}")
+        // CLUSQMGR 成员解析相关：QMTYPE / DEFTYPE 值族 + 通道名参数
+        MQConstants::class.java.fields
+            .filter {
+                it.name.startsWith("MQQMT_") || it.name.startsWith("MQQMQD_") ||
+                    it.name in setOf(
+                        "MQCACH_FIRST", "MQCACH_CHANNEL_NAME", "MQIACF_Q_MGR_TYPE",
+                        "MQIACF_Q_MGR_DEFINITION_TYPE", "MQIACH_CHANNEL_STATUS", "MQCHS_INACTIVE",
+                    )
+            }
+            .sortedBy { it.name }
+            .forEach { field ->
+                val value = runCatching { field.get(null) }.getOrNull()
+                println("DIAG ${field.name} = $value")
+            }
     }
 }

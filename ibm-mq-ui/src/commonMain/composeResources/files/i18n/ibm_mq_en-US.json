@@ -924,5 +924,18 @@
   "cluster_relations_col_channel": "Channel",
   "cluster_relations_col_deftype": "Def. type",
   "cluster_relations_col_qmtype": "Repository",
-  "cluster_relations_col_status": "Status"
+  "cluster_relations_col_status": "Status",
+  "cluster_enum_qmtype_repos": "Full repository",
+  "cluster_enum_qmtype_normal": "Partial repository",
+  "cluster_enum_deftype_clussdr": "Cluster sender (manual)",
+  "cluster_enum_deftype_clussdra": "Cluster sender (auto-defined)",
+  "cluster_enum_deftype_clusrcvr": "Cluster receiver",
+  "cluster_enum_status_running": "Running",
+  "cluster_enum_status_retrying": "Retrying",
+  "cluster_enum_status_stopped": "Stopped",
+  "cluster_enum_status_starting": "Starting",
+  "cluster_enum_status_stopping": "Stopping",
+  "cluster_enum_status_paused": "Paused",
+  "cluster_enum_unknown": "Unknown",
+  "cluster_enum_status_inactive": "Inactive"
 }

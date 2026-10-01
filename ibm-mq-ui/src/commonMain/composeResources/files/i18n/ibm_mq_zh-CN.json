@@ -1066,5 +1066,18 @@
   "cluster_relations_col_channel": "通道名",
   "cluster_relations_col_deftype": "通道类型",
   "cluster_relations_col_qmtype": "仓库类型",
-  "cluster_relations_col_status": "状态"
+  "cluster_relations_col_status": "状态",
+  "cluster_enum_qmtype_repos": "完整仓库",
+  "cluster_enum_qmtype_normal": "部分仓库",
+  "cluster_enum_deftype_clussdr": "集群发送方（手动）",
+  "cluster_enum_deftype_clussdra": "集群发送方（自动）",
+  "cluster_enum_deftype_clusrcvr": "集群接收方",
+  "cluster_enum_status_running": "运行中",
+  "cluster_enum_status_retrying": "重试中",
+  "cluster_enum_status_stopped": "已停止",
+  "cluster_enum_status_starting": "启动中",
+  "cluster_enum_status_stopping": "停止中",
+  "cluster_enum_status_paused": "已暂停",
+  "cluster_enum_unknown": "未知",
+  "cluster_enum_status_inactive": "未活动"
 }

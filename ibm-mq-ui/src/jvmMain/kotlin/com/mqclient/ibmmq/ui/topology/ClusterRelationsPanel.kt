@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+
 package com.mqclient.ibmmq.ui.topology
 
 import androidx.compose.foundation.background
@@ -215,11 +217,13 @@ private fun ClusterCanvas(
     val scheme = MaterialTheme.colorScheme
     val graph = remember(relations) { buildClusterGraph(relations) }
     val (kuiver, nodeTypes, severities) = graph
-    // 成员 → 边信息：按 defType 实/虚线、status 着色。
+    // 成员 → 边信息：按 defType 实/虚线、status 着色（本地自身行不产生边）。
     val edgeInfo = remember(relations) {
-        relations.members.associate { member ->
-            (relations.localQmgrName to member.qmgrName) to member
-        }
+        relations.members
+            .filter { it.qmgrName != relations.localQmgrName }
+            .associate { member ->
+                (relations.localQmgrName to member.qmgrName) to member
+            }
     }
 
     val viewerState = rememberKuiverViewerState(
@@ -270,7 +274,8 @@ private fun ClusterCanvas(
             nodeContent = { node ->
                 val type = nodeTypes[node.id] ?: TopologyNodeType.QMGR_PARTIAL
                 TopologyNodeCard(
-                    name = node.id,
+                    // 本地节点 id 带 "local:" 前缀（与成员节点区分），显示时剥掉。
+                    name = node.id.removePrefix(CLUSTER_LOCAL_PREFIX),
                     type = type,
                     isHovered = isHovered,
                     isSelected = isSelected || node.id == selectedId,
@@ -369,17 +374,13 @@ private fun MemberTable(
                 ) {
                     MemberCell(member.qmgrName, COL_QMGR)
                     MemberCell(member.clusterName, COL_CLUSTER)
-                    MemberCell(member.channelName, COL_CHANNEL)
-                    MemberCell(member.defType.ifBlank { "-" }, COL_DEFTYPE)
-                    MemberCell(member.qmType, COL_QMTYPE)
+                    MemberCell(member.channelName.ifBlank { "-" }, COL_CHANNEL)
+                    MemberCell(clusterDefTypeLabel(member.defType), COL_DEFTYPE)
+                    MemberCell(clusterQmTypeLabel(member.qmType), COL_QMTYPE)
                     MemberCell(
-                        member.status ?: "-",
+                        clusterStatusLabel(member.status),
                         COL_STATUS,
-                        color = when (member.status?.uppercase()) {
-                            "RETRYING" -> Color(0xFFED6C02)
-                            "STOPPED" -> MaterialTheme.colorScheme.error
-                            else -> MaterialTheme.colorScheme.onSurface
-                        },
+                        color = clusterStatusColor(member.status),
                     )
                 }
                 HorizontalDivider(thickness = 0.5.dp)
@@ -483,7 +484,10 @@ internal fun buildClusterGraph(relations: ClusterRelations): MqTopologyData {
 
     val nodeTypes = linkedMapOf(localId to localType)
     val severities = linkedMapOf<String, NodeSeverity>(localId to NodeSeverity.NORMAL)
-    relations.members.forEach { member ->
+    // CLUSQMGR 结果含本地 QMgr 自身（其行描述自己的 CLUSRCVR）：图里已有本地节点，
+    // 跳过，避免重复节点 + 自环边；成员表仍保留该行。
+    val remoteMembers = relations.members.filter { it.qmgrName != relations.localQmgrName }
+    remoteMembers.forEach { member ->
         val type = if (member.qmType == "REPOS") TopologyNodeType.QMGR_FULL else TopologyNodeType.QMGR_PARTIAL
         nodeTypes.putIfAbsent(member.qmgrName, type)
         severities.putIfAbsent(member.qmgrName, NodeSeverity.NORMAL)
@@ -493,7 +497,7 @@ internal fun buildClusterGraph(relations: ClusterRelations): MqTopologyData {
         nodeTypes.keys.forEach { id ->
             addNode(KuiverNode(id, NodeDimensions(CARD_WIDTH.dp, CARD_HEIGHT.dp)))
         }
-        relations.members.forEach { member ->
+        remoteMembers.forEach { member ->
             addEdge(
                 KuiverEdge(
                     fromId = localId,
