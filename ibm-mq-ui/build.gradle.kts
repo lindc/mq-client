@@ -31,6 +31,9 @@ kotlin {
             implementation(projects.messageInterpreterApi)
             implementation(projects.messageInterpreterJson)
             implementation(projects.messageInterpreterBase64)
+            implementation(projects.messageInterpreterText)
+            implementation(projects.messageInterpreterXml)
+            implementation(projects.messageInterpreterIdoc)
         }
         jvmMain.dependencies {
             // FileKit 文件选择器（证书路径的「浏览…」按钮）。选择器 API 在 dialogs 模块。

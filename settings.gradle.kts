@@ -46,8 +46,11 @@ include(
     ":artemis-service", ":artemis-ui",
     ":rabbitmq-service", ":rabbitmq-ui",
     ":rocketmq-service", ":rocketmq-ui",
-    // 消息解释器 SPI：接口模块 + 每个解释器一个模块（逐步从 ibm-mq-ui 迁出）。
+    // 消息解释器 SPI：接口模块 + 每个解释器一个模块。
     ":message-interpreter-api",
     ":message-interpreter-json",
     ":message-interpreter-base64",
+    ":message-interpreter-text",
+    ":message-interpreter-xml",
+    ":message-interpreter-idoc",
 )

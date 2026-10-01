@@ -1,3 +1,0 @@
-com.mqclient.ibmmq.ui.message.TextInterpreter
-com.mqclient.ibmmq.ui.message.XmlInterpreter
-com.mqclient.ibmmq.ui.message.IdocInterpreter
