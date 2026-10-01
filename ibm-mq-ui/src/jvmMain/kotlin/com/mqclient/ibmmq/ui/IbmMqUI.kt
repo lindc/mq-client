@@ -98,8 +98,9 @@ class IbmMqUI : AdapterUI {
             "topics" -> {
                 if (IbmMQModule.serviceOrNull() == null) return null
                 {
-                    TopicListPanel(
+                    SimpleMqObjectListPanel(
                         connectionId = connectionId,
+                        spec = TopicSpec,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
@@ -107,8 +108,9 @@ class IbmMqUI : AdapterUI {
             "subscriptions" -> {
                 if (IbmMQModule.serviceOrNull() == null) return null
                 {
-                    SubscriptionListPanel(
+                    SimpleMqObjectListPanel(
                         connectionId = connectionId,
+                        spec = SubscriptionSpec,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
@@ -125,8 +127,9 @@ class IbmMqUI : AdapterUI {
             "services" -> {
                 if (IbmMQModule.serviceOrNull() == null) return null
                 {
-                    ServiceListPanel(
+                    SimpleMqObjectListPanel(
                         connectionId = connectionId,
+                        spec = ServiceSpec,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
@@ -134,8 +137,9 @@ class IbmMqUI : AdapterUI {
             "processDefinitions" -> {
                 if (IbmMQModule.serviceOrNull() == null) return null
                 {
-                    ProcessListPanel(
+                    SimpleMqObjectListPanel(
                         connectionId = connectionId,
+                        spec = ProcessSpec,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
@@ -143,8 +147,9 @@ class IbmMqUI : AdapterUI {
             "namelists" -> {
                 if (IbmMQModule.serviceOrNull() == null) return null
                 {
-                    NamelistListPanel(
+                    SimpleMqObjectListPanel(
                         connectionId = connectionId,
+                        spec = NamelistSpec,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
@@ -152,8 +157,9 @@ class IbmMqUI : AdapterUI {
             "authInfo" -> {
                 if (IbmMQModule.serviceOrNull() == null) return null
                 {
-                    AuthInfoListPanel(
+                    SimpleMqObjectListPanel(
                         connectionId = connectionId,
+                        spec = AuthInfoSpec,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
@@ -161,8 +167,9 @@ class IbmMqUI : AdapterUI {
             "commInfo" -> {
                 if (IbmMQModule.serviceOrNull() == null) return null
                 {
-                    CommInfoListPanel(
+                    SimpleMqObjectListPanel(
                         connectionId = connectionId,
+                        spec = CommInfoSpec,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
