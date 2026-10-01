@@ -373,8 +373,11 @@ class PcfObjectScanner {
 
     /** 成员列表（DISPLAY CLUSQMGR 逐条响应 → [ClusterMember]）。 */
     private suspend fun queryClusterMembersWith(agent: PCFMessageAgent): List<ClusterMember> {
+        // 注意：本命令的合法筛选参数是 MQCA_CLUSTER_Q_MGR_NAME（按成员 QMgr 名，通配
+        // "*" = 全部）——DISPLAY CLUSQMGR(*) 括号里匹配的是 QMgr 名。发 MQCA_CLUSTER_NAME
+        // 会被 QM 回 3015 MQRCCF_CFST_PARM_ID_ERROR（参数 ID 对本命令无效，实测）。
         val responses = inquire(agent, MQConstants.MQCMD_INQUIRE_CLUSTER_Q_MGR) {
-            addParameter(MQConstants.MQCA_CLUSTER_NAME, "*")
+            addParameter(MQConstants.MQCA_CLUSTER_Q_MGR_NAME, "*")
         }
         return responses.mapNotNull { response ->
             val attrs = extractAttributes(response)
