@@ -11,6 +11,7 @@ import com.mqclient.core.AdapterUI
 import com.mqclient.core.ModuleI18nTable
 import com.mqclient.ibmmq.IbmMQModule
 import com.mqclient.ibmmq.ui.command.IbmMqCommandConsolePanel
+import com.mqclient.ibmmq.ui.topology.ClusterRelationsPanel
 import com.mqclient.ibmmq.ui.topology.TopologyPanel
 import com.mqclient.uicommon.i18n.stringResource
 import mq_client.ibm_mq_ui.generated.resources.Res
@@ -63,6 +64,15 @@ class IbmMqUI : AdapterUI {
                 if (IbmMQModule.serviceOrNull() == null) return null
                 {
                     TopologyPanel(
+                        connectionId = connectionId,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+            }
+            "clusterRelations" -> {
+                if (IbmMQModule.serviceOrNull() == null) return null
+                {
+                    ClusterRelationsPanel(
                         connectionId = connectionId,
                         modifier = Modifier.fillMaxSize(),
                     )

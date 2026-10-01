@@ -1050,5 +1050,21 @@
   "msg_interp_param_version": "版本",
   "msg_interp_param_version_auto": "auto（自动判断）",
   "msg_interp_param_show_raw": "显示原始 segment",
-  "msg_interp_param_expand": "展开嵌套结构"
+  "msg_interp_param_expand": "展开嵌套结构",
+  "nav_cluster_relations": "集群关系",
+  "cluster_relations_title": "%s / 集群关系",
+  "cluster_relations_loading": "正在加载集群信息…",
+  "cluster_relations_failed": "加载失败：%s",
+  "cluster_relations_retry": "重试",
+  "cluster_relations_role_full": "当前为完整仓库，集群信息完整",
+  "cluster_relations_role_partial": "当前为部分仓库，集群视图可能不完整",
+  "cluster_relations_none": "当前队列管理器不属于任何集群",
+  "cluster_relations_empty": "集群中没有其他成员",
+  "cluster_relations_members": "集群成员",
+  "cluster_relations_col_qmgr": "队列管理器",
+  "cluster_relations_col_cluster": "所属集群",
+  "cluster_relations_col_channel": "通道名",
+  "cluster_relations_col_deftype": "通道类型",
+  "cluster_relations_col_qmtype": "仓库类型",
+  "cluster_relations_col_status": "状态"
 }

@@ -908,5 +908,21 @@
   "msg_interp_param_version": "Version",
   "msg_interp_param_version_auto": "auto (auto-detect)",
   "msg_interp_param_show_raw": "Show raw segments",
-  "msg_interp_param_expand": "Expand nested structure"
+  "msg_interp_param_expand": "Expand nested structure",
+  "nav_cluster_relations": "Cluster relations",
+  "cluster_relations_title": "%s / Cluster relations",
+  "cluster_relations_loading": "Loading cluster information…",
+  "cluster_relations_failed": "Failed to load: %s",
+  "cluster_relations_retry": "Retry",
+  "cluster_relations_role_full": "Full repository: cluster information is complete",
+  "cluster_relations_role_partial": "Partial repository: cluster view may be incomplete",
+  "cluster_relations_none": "This queue manager does not belong to any cluster",
+  "cluster_relations_empty": "No other members in the cluster",
+  "cluster_relations_members": "Cluster members",
+  "cluster_relations_col_qmgr": "Queue manager",
+  "cluster_relations_col_cluster": "Cluster",
+  "cluster_relations_col_channel": "Channel",
+  "cluster_relations_col_deftype": "Def. type",
+  "cluster_relations_col_qmtype": "Repository",
+  "cluster_relations_col_status": "Status"
 }

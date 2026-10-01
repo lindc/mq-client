@@ -22,6 +22,7 @@ class IbmMqServiceAdapter : MQServiceAdapter() {
     override fun navigationItems(connection: ConnectionInfo): List<NavigationItem> = listOf(
         // ===== 工具类 =====
         NavigationItem(id = "topology", titleKey = "nav_topology", iconId = "topology", isTool = true),
+        NavigationItem(id = "clusterRelations", titleKey = "nav_cluster_relations", iconId = "clusterRelations", isTool = true),
         NavigationItem(id = "command", titleKey = "nav_command", iconId = "command", isTool = true),
         NavigationItem.separator("tools.objects"),
         // ===== 对象类型 =====

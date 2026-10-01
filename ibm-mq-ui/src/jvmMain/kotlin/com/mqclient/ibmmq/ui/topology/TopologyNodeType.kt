@@ -9,6 +9,7 @@ import androidx.compose.material.icons.filled.Inbox
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material.icons.filled.MarkEmailUnread
+import androidx.compose.material.icons.filled.Storage
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 
@@ -32,6 +33,10 @@ enum class TopologyNodeType {
     SUBSCRIPTION,
     CHANNEL,
     REMOTE_QMGR,
+    /** 集群关系图专用：完整仓库 QMgr。 */
+    QMGR_FULL,
+    /** 集群关系图专用：部分仓库 QMgr。 */
+    QMGR_PARTIAL,
 }
 
 /**
@@ -57,6 +62,9 @@ fun TopologyNodeType.getIcon(): ImageVector = when (this) {
     TopologyNodeType.SUBSCRIPTION -> Icons.Filled.MarkEmailUnread
     TopologyNodeType.CHANNEL -> Icons.Filled.Link
     TopologyNodeType.REMOTE_QMGR -> Icons.Filled.Dns
+    // 集群关系图：完整仓库用「仓库」语义图标，部分仓库沿用 QMGR 的服务器图标。
+    TopologyNodeType.QMGR_FULL -> Icons.Filled.Storage
+    TopologyNodeType.QMGR_PARTIAL -> Icons.Filled.Dns
 }
 
 /**
@@ -75,4 +83,7 @@ fun TopologyNodeType.getColor(): Color = when (this) {
     TopologyNodeType.SUBSCRIPTION -> Color(0xFFEC4899)
     TopologyNodeType.CHANNEL -> Color(0xFFEF4444)
     TopologyNodeType.REMOTE_QMGR -> Color(0xFF6B7280)
+    // 集群关系图：完整仓库紫（权威仓库），部分仓库灰（同 QMGR 系）。
+    TopologyNodeType.QMGR_FULL -> Color(0xFF7C3AED)
+    TopologyNodeType.QMGR_PARTIAL -> Color(0xFF6B7280)
 }

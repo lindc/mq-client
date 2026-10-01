@@ -5,6 +5,7 @@ import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Hearing
+import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Inbox
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.List
@@ -29,6 +30,7 @@ internal fun navigationIcon(iconId: String): ImageVector =
     when (iconId) {
         // ===== IBM MQ 工具类 =====
         "topology" -> Icons.Filled.Map
+        "clusterRelations" -> Icons.Filled.Hub
         "command" -> Icons.Filled.Terminal
         // ===== IBM MQ 对象类型 =====
         "queues" -> Icons.Filled.Inbox

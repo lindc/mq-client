@@ -147,6 +147,9 @@ val columnLayoutProvider: LayoutProvider = labeled@{ kuiver, config ->
             TopologyNodeType.TRANSMISSION_QUEUE -> 5 + maxAliasDepth
             TopologyNodeType.CHANNEL -> 6 + maxAliasDepth
             TopologyNodeType.REMOTE_QMGR -> 7 + maxAliasDepth
+            // 集群关系面板专用节点（消息流拓扑里不出现）；归 REMOTE_QMGR 同列兜底。
+            TopologyNodeType.QMGR_FULL -> 7 + maxAliasDepth
+            TopologyNodeType.QMGR_PARTIAL -> 7 + maxAliasDepth
             TopologyNodeType.LOCAL_QUEUE -> 9 + maxAliasDepth
         }
     }

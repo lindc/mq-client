@@ -16,6 +16,7 @@ import com.mqclient.ibmmq.messaging.deleteMessageById
 import com.mqclient.ibmmq.messaging.downloadMessageBody
 import com.mqclient.ibmmq.messaging.getMessageDetail
 import com.mqclient.ibmmq.messaging.sendMessageToQueue
+import com.mqclient.ibmmq.pcf.ClusterRelations
 import com.mqclient.ibmmq.pcf.MqObjectSnapshot
 import com.mqclient.ibmmq.pcf.MqObjectType
 import com.mqclient.ibmmq.pcf.PcfObjectScanner
@@ -262,6 +263,14 @@ class IbmMQService(private val context: ServiceContext) {
     /** 单队列实时 CURDEPTH（PCF INQUIRE_Q 只点名 MQIA_CURRENT_Q_DEPTH，不读缓存）。 */
     suspend fun getQueueDepth(connectionId: String, queueName: String): Int =
         objectScanner.queryQueueDepth(connectionId, queueName)
+
+    /**
+     * 集群关系（集群关系 Tab）：本地 QMgr 的集群角色（完整仓库 / 部分仓库 /
+     * 不属于集群）+ 成员实时列表（DISPLAY CLUSQMGR，不经慢扫缓存）。
+     * 查询失败原样抛（MQException 由 UI 经 browseErrorText 转 MQRC 可读文案）。
+     */
+    suspend fun getClusterRelations(connectionId: String): ClusterRelations =
+        objectScanner.queryClusterRelations(connectionId)
 
     /**
      * 按 MessageId 下载消息体（浏览 Tab「下载」）：独立 browse 句柄扫到匹配条目取

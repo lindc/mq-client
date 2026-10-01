@@ -72,4 +72,7 @@ internal fun com.mqclient.ibmmq.ui.topology.TopologyNodeType.toMqObjectType(): M
     com.mqclient.ibmmq.ui.topology.TopologyNodeType.SUBSCRIPTION -> MqObjectType.SUBSCRIPTION
     com.mqclient.ibmmq.ui.topology.TopologyNodeType.CHANNEL -> MqObjectType.CHANNEL
     com.mqclient.ibmmq.ui.topology.TopologyNodeType.REMOTE_QMGR -> null
+    // 集群关系图节点是 QMGR 角色视图，无对应的单对象属性页（QMGR 走连接属性面板）。
+    com.mqclient.ibmmq.ui.topology.TopologyNodeType.QMGR_FULL -> null
+    com.mqclient.ibmmq.ui.topology.TopologyNodeType.QMGR_PARTIAL -> null
 }

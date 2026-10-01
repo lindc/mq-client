@@ -345,6 +345,54 @@ class PcfObjectScanner {
         return responses.mapNotNull { it.toSnapshotOrNull(MqObjectType.COMM_INFO, MQConstants.MQCA_COMM_INFO_NAME) }
     }
 
+    /**
+     * 集群关系（集群关系 Tab）：本地 QMGR 的角色（REPOS 字段非空 = 完整仓库）+
+     * 视角内全部成员（DISPLAY CLUSQMGR 实时查询，不经慢扫缓存）。
+     */
+    suspend fun queryClusterRelations(connectionId: String): ClusterRelations =
+        withAgent(connectionId) { queryClusterRelationsWith(it) }
+
+    internal suspend fun queryClusterRelationsWith(agent: PCFMessageAgent): ClusterRelations {
+        // ① 本地 QMGR：QMNAME（节点名）+ REPOS（完整仓库集群名，非空 = 完整仓库）。
+        //    INQUIRE_Q_MGR 的 QMgrName 不允许通配符（带 "*" 回 3097）—— 无参数即本连接。
+        val qmgrResponse = inquire(agent, MQConstants.MQCMD_INQUIRE_Q_MGR) {
+        }.firstOrNull()
+        val localQmgrName = qmgrResponse?.stringValue(MQConstants.MQCA_Q_MGR_NAME)?.trim().orEmpty()
+        val reposClusterName = qmgrResponse?.stringValue(MQConstants.MQCA_REPOSITORY_NAME)
+            ?.trim()?.takeIf { it.isNotEmpty() }
+        // ② 成员：PCF 命令常量是 MQCMD_INQUIRE_CLUSTER_Q_MGR（Q_MGR 带下划线，已核实
+        //    allclient 10.0.0.5 jar），与 MQSC 的 DISPLAY CLUSQMGR 同义。
+        val members = queryClusterMembersWith(agent)
+        val role = when {
+            reposClusterName != null -> QmgrClusterRole.FULL
+            members.isNotEmpty() -> QmgrClusterRole.PARTIAL
+            else -> QmgrClusterRole.NONE
+        }
+        return ClusterRelations(role, reposClusterName, localQmgrName, members)
+    }
+
+    /** 成员列表（DISPLAY CLUSQMGR 逐条响应 → [ClusterMember]）。 */
+    private suspend fun queryClusterMembersWith(agent: PCFMessageAgent): List<ClusterMember> {
+        val responses = inquire(agent, MQConstants.MQCMD_INQUIRE_CLUSTER_Q_MGR) {
+            addParameter(MQConstants.MQCA_CLUSTER_NAME, "*")
+        }
+        return responses.mapNotNull { response ->
+            val attrs = extractAttributes(response)
+            val qmgrName = (attrs["MQCA_CLUSTER_Q_MGR_NAME"]
+                ?: attrs["MQCA_Q_MGR_NAME"])?.toString()?.trim() ?: return@mapNotNull null
+            ClusterMember(
+                qmgrName = qmgrName,
+                clusterName = attrs["MQCA_CLUSTER_NAME"]?.toString()?.trim().orEmpty(),
+                channelName = attrs["MQCACH_CHANNEL_NAME"]?.toString()?.trim().orEmpty(),
+                qmType = clusterQmTypeName(attrs["MQIA_CLUSTER_Q_TYPE"]),
+                defType = attrs.entries
+                    .firstOrNull { it.key.contains("DEFTYPE") }?.value?.toString().orEmpty(),
+                conName = attrs["MQCACH_CONNECTION_NAME"]?.toString()?.trim(),
+                status = attrs["MQIACH_CHANNEL_STATUS"]?.toString()?.trim(),
+            )
+        }
+    }
+
     /* --------------------------- 对外：全量扫描（逐类兜底） --------------------------- */
 
     /**
@@ -561,6 +609,19 @@ internal fun PCFMessage.toQueueSnapshot(status: PCFMessage?): MqObjectSnapshot {
  */
 internal fun channelStatusName(value: Int?): String? =
     value?.let { MqAttributeNameMapper.lookupName(it, "MQCHS") }?.substringAfter("MQCHS_") ?: value?.let { "STATE_$it" }
+
+/**
+ * CLUSQMGR 的仓库角色（MQIA_CLUSTER_Q_TYPE，值族 MQQMT_*）→ REPOS / NORMAL 可读名
+ * （MQ Explorer 同款措辞）；查不到（客户端常量缺失 / 未知值）返回数字本身，不猜。
+ */
+internal fun clusterQmTypeName(value: Any?): String {
+    val intValue = (value as? Number)?.toInt() ?: return value?.toString().orEmpty()
+    return when (MqAttributeNameMapper.lookupName(intValue, "MQQMT")) {
+        "MQQMT_REPOSITORY" -> "REPOS"
+        "MQQMT_NORMAL" -> "NORMAL"
+        else -> intValue.toString()
+    }
+}
 
 internal fun channelTypeName(value: Int?): String? =
     value?.let { MqAttributeNameMapper.lookupName(it, "MQCHT") }?.substringAfter("MQCHT_") ?: value?.let { "TYPE_$it" }
