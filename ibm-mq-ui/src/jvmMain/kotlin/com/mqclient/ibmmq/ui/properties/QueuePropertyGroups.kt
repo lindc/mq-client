@@ -502,7 +502,7 @@ internal val queuePropertyGroups: List<ObjectPropertyGroup> = listOf(
 
 /**
  * 快照属性 →（分组字段表内命中 + 「全部属性」兜底）的展示行。
- * 名称 / 值在渲染期经 i18n 查表（见 [QueuePropertiesContent]）。
+ * 名称 / 值在渲染期经 i18n 查表（见 [com.mqclient.ibmmq.ui.properties.content.MqObjectPropertiesContent]）。
  */
 internal fun resolveQueuePropertyGroups(
     snapshot: MqObjectSnapshot,

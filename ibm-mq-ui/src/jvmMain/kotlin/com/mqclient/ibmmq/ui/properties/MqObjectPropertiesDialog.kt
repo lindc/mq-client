@@ -2,7 +2,7 @@ package com.mqclient.ibmmq.ui.properties
 
 import androidx.compose.runtime.Composable
 import com.mqclient.ibmmq.pcf.MqObjectType
-import com.mqclient.ibmmq.ui.properties.content.*
+import com.mqclient.ibmmq.ui.properties.content.MqObjectPropertiesContent
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.i18n.stringResource
 
@@ -22,16 +22,16 @@ fun MqObjectPropertiesDialog(
         onDismiss = onDismiss,
     ) {
         when (state.objectType) {
-            MqObjectType.QUEUE -> QueuePropertiesContent(state)
-            MqObjectType.TOPIC -> TopicPropertiesContent(state)
-            MqObjectType.SUBSCRIPTION -> SubscriptionPropertiesContent(state)
-            MqObjectType.CHANNEL -> ChannelPropertiesContent(state)
-            MqObjectType.LISTENER -> ListenerPropertiesContent(state)
-            MqObjectType.SERVICE -> ServicePropertiesContent(state)
-            MqObjectType.PROCESS -> ProcessPropertiesContent(state)
-            MqObjectType.NAMELIST -> NamelistPropertiesContent(state)
-            MqObjectType.AUTH_INFO -> AuthInfoPropertiesContent(state)
-            MqObjectType.COMM_INFO -> CommInfoPropertiesContent(state)
+            MqObjectType.QUEUE -> MqObjectPropertiesContent(state, "queue_props_group_general") { resolveQueuePropertyGroups(it) }
+            MqObjectType.TOPIC -> MqObjectPropertiesContent(state, "topic_props_group_general") { resolveTopicPropertyGroups(it) }
+            MqObjectType.SUBSCRIPTION -> MqObjectPropertiesContent(state, "sub_props_group_general") { resolveSubscriptionPropertyGroups(it) }
+            MqObjectType.CHANNEL -> MqObjectPropertiesContent(state, "channel_props_group_general") { resolveChannelPropertyGroups(it) }
+            MqObjectType.LISTENER -> MqObjectPropertiesContent(state, "listener_props_group_general") { resolveListenerPropertyGroups(it) }
+            MqObjectType.SERVICE -> MqObjectPropertiesContent(state, "service_props_group_general") { resolveServicePropertyGroups(it) }
+            MqObjectType.PROCESS -> MqObjectPropertiesContent(state, "process_props_group_general") { resolveProcessPropertyGroups(it) }
+            MqObjectType.NAMELIST -> MqObjectPropertiesContent(state, "namelist_props_group_general") { resolveNamelistPropertyGroups(it) }
+            MqObjectType.AUTH_INFO -> MqObjectPropertiesContent(state, "authinfo_props_group_general") { resolveAuthInfoPropertyGroups(it) }
+            MqObjectType.COMM_INFO -> MqObjectPropertiesContent(state, "comminfo_props_group_general") { resolveCommInfoPropertyGroups(it) }
             // 10 类对象已全部实装；仅剩 QUEUE_MANAGER（走 ConnectionPropertiesUi，
             // 不会进本对话框）——此分支理论不可达，兜底空内容。
             else -> {}
