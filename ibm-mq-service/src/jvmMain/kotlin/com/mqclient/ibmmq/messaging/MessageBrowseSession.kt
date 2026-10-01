@@ -107,7 +107,7 @@ private fun MQMessage.toSummary(): MessageSummary {
 }
 
 /** GMT Calendar → (YYYYMMDD, HHMMSSss) 原始串；putDateTime 缺失（罕见）返回空串。 */
-private fun java.util.Calendar?.toRawPutDateParts(): Pair<String, String> {
+internal fun java.util.Calendar?.toRawPutDateParts(): Pair<String, String> {
     if (this == null) return "" to ""
     val date = "%04d%02d%02d".format(
         get(java.util.Calendar.YEAR),

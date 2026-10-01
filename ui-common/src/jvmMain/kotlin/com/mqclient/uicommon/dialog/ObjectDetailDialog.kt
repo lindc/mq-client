@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -63,6 +64,12 @@ fun ObjectDetailDialog(
     minHeight: Dp = 300.dp,
     maxWidth: Dp = Dp.Infinity,
     maxHeight: Dp = Dp.Infinity,
+    /**
+     * 底部操作区内容；null（默认）保留单一「关闭」按钮，由调用方（如消息详情的
+     * 「下载 | 删除 | 关闭」）提供时原样渲染、布局间隔自理。放在 [RowScope] 里，
+     * 调用方可用 weight(1f) 做弹性占位。
+     */
+    footerActions: (@Composable RowScope.() -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
     // 关闭出口统一走 requestClose：调用方要拦截（如发送中确认）时传 onCloseRequest，
@@ -124,7 +131,7 @@ fun ObjectDetailDialog(
                     content()
                 }
 
-                // 3. 底部关闭按钮（样式同 SettingsDialog.FooterActions）
+                // 3. 底部操作区：调用方定制（footerActions）或默认单一「关闭」
                 HorizontalDivider()
                 Row(
                     modifier = Modifier
@@ -133,11 +140,15 @@ fun ObjectDetailDialog(
                     horizontalArrangement = Arrangement.End,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    PressableButton(
-                        onClick = onDismiss,
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    ) { Text(stringResource("common_close")) }
+                    if (footerActions != null) {
+                        footerActions()
+                    } else {
+                        PressableButton(
+                            onClick = onDismiss,
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        ) { Text(stringResource("common_close")) }
+                    }
                 }
             }
         }

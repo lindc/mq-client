@@ -14,6 +14,7 @@ import com.mqclient.ibmmq.messaging.MessageOperationResult
 import com.mqclient.ibmmq.messaging.SendResult
 import com.mqclient.ibmmq.messaging.deleteMessageById
 import com.mqclient.ibmmq.messaging.downloadMessageBody
+import com.mqclient.ibmmq.messaging.getMessageDetail
 import com.mqclient.ibmmq.messaging.sendMessageToQueue
 import com.mqclient.ibmmq.pcf.MqObjectSnapshot
 import com.mqclient.ibmmq.pcf.MqObjectType
@@ -270,6 +271,16 @@ class IbmMQService(private val context: ServiceContext) {
         val manager = IbmMQModule.connectionOrNull(connectionId)?.mqConnection
             ?: return MessageOperationResult.failure(null, "连接 $connectionId 未建立")
         return downloadMessageBody(manager, queueName, messageIdHex)
+    }
+
+    /**
+     * 按 MessageId 取消息详情（详情对话框）：独立 browse 句柄扫到匹配条目，
+     * 读完整 MQMD + 消息体组装 [MessageDetail]。纯浏览不消费；连接未建立返回 failure。
+     */
+    suspend fun getMessageDetail(connectionId: String, queueName: String, messageIdHex: String): MessageOperationResult {
+        val manager = IbmMQModule.connectionOrNull(connectionId)?.mqConnection
+            ?: return MessageOperationResult.failure(null, "连接 $connectionId 未建立")
+        return getMessageDetail(manager, queueName, messageIdHex)
     }
 
     /**

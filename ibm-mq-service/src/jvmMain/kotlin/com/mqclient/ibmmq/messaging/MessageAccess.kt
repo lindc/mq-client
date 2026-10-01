@@ -10,16 +10,20 @@ import com.mqclient.ibmmq.command.MqrcTranslator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/** 消息下载 / 删除的结果：成功（下载带 content）或失败（MQRC + 可读文案）。 */
+/** 消息下载 / 删除的结果：成功（下载带 content / 详情带 detail）或失败（MQRC + 可读文案）。 */
 data class MessageOperationResult(
     val success: Boolean,
     val content: ByteArray? = null,
+    val detail: MessageDetail? = null,
     val reasonCode: Int? = null,
     val errorMessage: String? = null,
 ) {
     companion object {
         fun success(content: ByteArray? = null): MessageOperationResult =
             MessageOperationResult(success = true, content = content)
+
+        fun successDetail(detail: MessageDetail): MessageOperationResult =
+            MessageOperationResult(success = true, content = detail.content, detail = detail)
 
         fun failure(reasonCode: Int?, message: String): MessageOperationResult =
             MessageOperationResult(success = false, reasonCode = reasonCode, errorMessage = message)
@@ -64,6 +68,53 @@ suspend fun downloadMessageBody(
                 val bytes = ByteArray(message.dataLength)
                 if (bytes.isNotEmpty()) message.readFully(bytes)
                 return@withContext MessageOperationResult.success(bytes)
+            }
+        }
+        @Suppress("UNREACHABLE_CODE")
+        MessageOperationResult.failure(null, MSG_NOT_FOUND)
+    } catch (e: MQException) {
+        MessageOperationResult.failure(e.reasonCode, "MQRC ${e.reasonCode}: ${MqrcTranslator.translate(e.reasonCode)}")
+    } catch (e: Exception) {
+        MessageOperationResult.failure(null, e.message ?: e::class.simpleName ?: "Unknown")
+    } finally {
+        runCatching { queue?.close() }
+    }
+}
+
+/**
+ * 按 MessageId 取消息详情（详情对话框）：独立 browse 句柄扫到匹配条目后读完整
+ * MQMD + 消息体，组装 [MessageDetail]——纯浏览，队列消息一个不动，也不影响 UI
+ * 列表正持有的 [MessageBrowseSession] 光标。
+ */
+suspend fun getMessageDetail(
+    manager: MQQueueManager,
+    queueName: String,
+    targetHex: String,
+): MessageOperationResult = withContext(Dispatchers.IO) {
+    var queue: MQQueue? = null
+    try {
+        queue = manager.accessQueue(
+            queueName.trim(),
+            MQConstants.MQOO_BROWSE or MQConstants.MQOO_FAIL_IF_QUIESCING,
+        )
+        val gmo = MQGetMessageOptions()
+        var first = true
+        while (true) {
+            gmo.options =
+                (if (first) MQConstants.MQGMO_BROWSE_FIRST else MQConstants.MQGMO_BROWSE_NEXT) or
+                    MQConstants.MQGMO_FAIL_IF_QUIESCING
+            val message = MQMessage()
+            try {
+                queue.get(message, gmo)
+            } catch (e: MQException) {
+                if (e.reasonCode == MQConstants.MQRC_NO_MSG_AVAILABLE) {
+                    return@withContext MessageOperationResult.failure(null, MSG_NOT_FOUND)
+                }
+                throw e
+            }
+            first = false
+            if (message.messageId.toMqIdHex() == targetHex) {
+                return@withContext MessageOperationResult.successDetail(message.toMessageDetail(queueName))
             }
         }
         @Suppress("UNREACHABLE_CODE")
