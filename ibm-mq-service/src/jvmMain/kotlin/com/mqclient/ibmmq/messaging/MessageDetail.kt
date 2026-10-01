@@ -99,7 +99,10 @@ private fun persistenceDisplay(persistence: Int): String = when (persistence) {
  */
 internal fun MQMessage.toMessageDetail(queueName: String): MessageDetail {
     val (rawDate, rawTime) = putDateTime.toRawPutDateParts()
-    val bytes = ByteArray(dataLength).also { if (it.isNotEmpty()) readFully(it) }
+    // MQMessage.dataLength 是「剩余未读字节数」：readFully 消费后归零（下载链路
+    // 先读后读的同款语义），必须先捕获总长再读消息体，否则字段恒为 0。
+    val length = dataLength
+    val bytes = ByteArray(length).also { if (it.isNotEmpty()) readFully(it) }
     val formattedPutTime = putDateTime?.let {
         "%04d-%02d-%02d %02d:%02d:%02d".format(
             it.get(java.util.Calendar.YEAR),
@@ -120,7 +123,7 @@ internal fun MQMessage.toMessageDetail(queueName: String): MessageDetail {
         messageId = messageId.toMqIdHex(),
         correlationId = correlationId.toMqIdHex(),
         content = bytes,
-        dataLength = dataLength,
+        dataLength = length,
         encoding = encoding,
         codedCharSetId = characterSet,
         msgType = messageType,
@@ -139,7 +142,7 @@ internal fun MQMessage.toMessageDetail(queueName: String): MessageDetail {
             h("msg_detail_h_format", format.ifBlank { "-" }),
             h("msg_detail_h_ccsid", codedCharSetIdDisplay(characterSet)),
             h("msg_detail_h_encoding", encodingDisplay(encoding)),
-            h("msg_detail_h_datalength", dataLength.toString()),
+            h("msg_detail_h_datalength", length.toString()),
             h("msg_detail_h_replyto", replyTo.ifBlank { "-" }),
             h("msg_detail_h_putapp", putApplicationName.ifBlank { "-" }),
             h("msg_detail_h_userid", userId.ifBlank { "-" }),
