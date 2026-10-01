@@ -14,6 +14,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import com.mqclient.core.log.Log
 import com.mqclient.ibmmq.pcf.MqObjectSnapshot
 import com.mqclient.uicommon.i18n.stringResource
+import com.mqclient.uicommon.i18n.withArg
 
 /**
  * 通道的展示类型（决定第一行 typeIcon 的图标 + 悬停文案）。

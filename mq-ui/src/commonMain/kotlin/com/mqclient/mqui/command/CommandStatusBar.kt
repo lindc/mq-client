@@ -12,12 +12,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.mqclient.uicommon.i18n.stringResource
+import com.mqclient.uicommon.i18n.withArg
 
 private val SuccessGreen = Color(0xFF4CAF50)
 private val FailedRed = Color(0xFFF44336)
-
-/** 模板里的 %d 换成实际值（stringResource 无格式化参数，全项目用这一手约定）。 */
-private fun String.withArg(arg: Any): String = replace("%d", arg.toString()).replace("%s", arg.toString())
 
 /**
  * 状态栏：就绪提示 / 命令数 / 成功失败计数 / 总耗时。计数为零的段不显示。

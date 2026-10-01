@@ -36,12 +36,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mqclient.mqui.command.model.CommandResult
 import com.mqclient.uicommon.i18n.stringResource
+import com.mqclient.uicommon.i18n.withArg
 
 private val SuccessGreen = Color(0xFF4CAF50)
 private val FailedRed = Color(0xFFF44336)
-
-/** 模板里的 %d / %s 换成实际值（stringResource 无格式化参数，全项目用这一手约定）。 */
-private fun String.withArg(arg: Any): String = replace("%d", arg.toString()).replace("%s", arg.toString())
 
 /**
  * 输出区的单条结果卡片：标题行（状态图标 + 命令 + 耗时 + 折叠钮）+ 可折叠的

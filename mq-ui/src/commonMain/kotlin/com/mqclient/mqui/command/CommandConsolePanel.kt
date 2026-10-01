@@ -18,6 +18,7 @@ import com.mqclient.mqui.command.file.writeResultText
 import com.mqclient.mqui.command.model.CommandResult
 import com.mqclient.uicommon.LocalSnackbarHostState
 import com.mqclient.uicommon.i18n.stringResource
+import com.mqclient.uicommon.i18n.withArg
 import io.github.vinceglb.filekit.PlatformFile
 import io.github.vinceglb.filekit.dialogs.FileKitDialogSettings
 import io.github.vinceglb.filekit.dialogs.FileKitType
@@ -140,8 +141,8 @@ private fun onOpenFileResult(
         }.onFailure { e ->
             val msg = when (e) {
                 is CharacterCodingException -> stringResource("console_file_not_utf8")
-                is IllegalArgumentException -> stringResource("console_file_too_large").withArgs(e.message ?: "")
-                else -> stringResource("console_file_read_failed").withArgs(e.message ?: e::class.simpleName ?: "")
+                is IllegalArgumentException -> stringResource("console_file_too_large").withArg(e.message ?: "")
+                else -> stringResource("console_file_read_failed").withArg(e.message ?: e::class.simpleName ?: "")
             }
             snackbarHostState.showSnackbar(msg)
         }
@@ -163,10 +164,10 @@ private fun onExportResult(
         runCatching {
             file.writeResultText(formatOutput(state.results))
         }.onSuccess {
-            snackbarHostState.showSnackbar(stringResource("console_exported").withArgs(file.name))
+            snackbarHostState.showSnackbar(stringResource("console_exported").withArg(file.name))
         }.onFailure { e ->
             snackbarHostState.showSnackbar(
-                stringResource("console_export_failed").withArgs(e.message ?: e::class.simpleName ?: ""),
+                stringResource("console_export_failed").withArg(e.message ?: e::class.simpleName ?: ""),
             )
         }
     }
@@ -188,16 +189,4 @@ private fun formatOutput(results: List<CommandResult>): String {
             }
         }
     }
-}
-
-/** stringResource 无格式化参数；占位符 %1$s / %s 都在这里替换（全项目约定）。 */
-private fun String.withArgs(vararg args: Any): String {
-    var result = this
-    args.forEachIndexed { index, arg ->
-        result = result.replace("%${index + 1}\$s", arg.toString())
-            .replace("%${index + 1}\$d", arg.toString())
-            .replace("%s", arg.toString())
-            .replace("%d", arg.toString())
-    }
-    return result
 }

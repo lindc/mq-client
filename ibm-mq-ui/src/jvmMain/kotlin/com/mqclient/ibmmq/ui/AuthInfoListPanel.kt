@@ -13,6 +13,7 @@ import com.mqclient.ibmmq.ui.properties.ObjectPropertiesDialogState
 import com.mqclient.mqui.objectlist.ObjectListPanel
 import com.mqclient.mqui.state.LoadStateContent
 import com.mqclient.uicommon.i18n.stringResource
+import com.mqclient.uicommon.i18n.withArg
 
 /**
  * 认证信息列表（导航 `authInfo` Tab）：复用 [rememberMqObjectListState] 统一加载状态机 +

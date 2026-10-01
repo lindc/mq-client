@@ -79,6 +79,7 @@ import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.i18n.LanguageResources
 import com.mqclient.uicommon.i18n.stringResource
+import com.mqclient.uicommon.i18n.withArg
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -328,7 +329,7 @@ internal fun MessageBrowseTab(
                 ready == null -> ""
                 ready.messages.size >= ready.depth -> stringResource("msg_browse_total").withArg(ready.depth)
                 else -> stringResource("msg_browse_total_loaded")
-                    .withArgs(ready.depth, ready.messages.size)
+                    .withArg(ready.depth, ready.messages.size)
             },
             refreshing = ready?.refreshing == true,
             onRefresh = ::refresh,
@@ -766,7 +767,7 @@ private fun BrowseBottomBar(
         val progressText = if (exhausted || loadedCount >= depth) {
             stringResource("msg_browse_loaded_all").withArg(loadedCount)
         } else {
-            stringResource("msg_browse_loaded_of").withArgs(loadedCount, depth)
+            stringResource("msg_browse_loaded_of").withArg(loadedCount, depth)
         }
         Text(
             text = progressText,
@@ -1042,11 +1043,4 @@ private fun filterMessages(
 internal fun formatSize(bytes: Long): String = when {
     bytes < 1024 -> "$bytes B"
     else -> String.format(Locale.ROOT, "%.1f KB", bytes / 1024.0)
-}
-
-/** 多占位文案：依次替换 %s（i18n 串里占位符按出现顺序取参）；浏览 / 发送两页共用。 */
-internal fun String.withArgs(vararg args: Any): String {
-    var result = this
-    args.forEach { arg -> result = result.replaceFirst("%s", arg.toString()) }
-    return result
 }

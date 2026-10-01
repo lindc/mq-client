@@ -55,6 +55,7 @@ import com.mqclient.ibmmq.messaging.SendResult
 import com.mqclient.mqui.objectlist.ObjectListEmptyState
 import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.i18n.stringResource
+import com.mqclient.uicommon.i18n.withArg
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -694,7 +695,7 @@ private fun SendBottomBar(
         state.batchSummary?.let { summary ->
             Text(
                 text = stringResource("msg_send_summary")
-                    .withArgs(summary.total, summary.success, summary.failed),
+                    .withArg(summary.total, summary.success, summary.failed),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(bottom = 6.dp),
@@ -716,7 +717,7 @@ private fun SendBottomBar(
                 Text(
                     text = when {
                         state.busy && !single ->
-                            stringResource("msg_send_sending_progress").withArgs(state.processedCount, state.batchTotal)
+                            stringResource("msg_send_sending_progress").withArg(state.processedCount, state.batchTotal)
                         state.busy -> stringResource("msg_send_sending")
                         single -> stringResource("msg_send_send")
                         else -> stringResource("msg_send_send_all")

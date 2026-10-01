@@ -167,10 +167,6 @@ fun rememberMqObjectListState(
     )
 }
 
-/** stringResource 无格式化参数；%s / %1$s 占位替换（全项目约定，仅此一份实现）。 */
-internal fun String.withArg(arg: Any): String =
-    replace("%1\$s", arg.toString()).replace("%s", arg.toString())
-
 /**
  * 列表快照是否已带「子类型」字段（图标解析依赖）：通道看 [MqObjectSnapshot.channelType]，
  * 队列看 `attributes["MQIA_Q_TYPE"]`。这两类字段**只**由慢扫（MQCMD_INQUIRE_CHANNEL /
