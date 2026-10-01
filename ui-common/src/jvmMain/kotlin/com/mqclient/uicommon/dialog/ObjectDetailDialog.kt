@@ -137,7 +137,8 @@ fun ObjectDetailDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 20.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.End,
+                    // 按钮间 12dp 间距（内容区段落级间距同款）；单按钮时无可见影响。
+                    horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     if (footerActions != null) {

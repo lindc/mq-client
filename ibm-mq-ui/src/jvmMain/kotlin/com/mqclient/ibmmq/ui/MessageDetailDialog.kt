@@ -285,7 +285,6 @@ private fun RowScope.FooterAction(
     PressableButton(
         onClick = onClick,
         enabled = enabled,
-        standardMinWidth = false,
         containerColor = if (danger) {
             MaterialTheme.colorScheme.errorContainer
         } else {
@@ -367,7 +366,7 @@ private fun DetailReadyPane(
     }
 }
 
-/** Tab 1：消息正文（解释器渲染 + 预览截断 + 解析失败提示）。 */
+/** Tab 1：消息正文（解释器渲染 + 预览截断 + 解析失败回落原始文本 + 二进制 hex 预览）。 */
 @Composable
 private fun ContentTab(
     detail: MessageDetail,
@@ -378,6 +377,7 @@ private fun ContentTab(
     modifier: Modifier = Modifier,
 ) {
     if (detail.dataLength == 0 || detail.content.isEmpty()) {
+        // 「消息体为空」只看字节数，与解析失败是两个状态。
         Box(modifier = modifier, contentAlignment = Alignment.Center) {
             Text(
                 text = stringResource("msg_detail_empty_body"),
@@ -388,68 +388,170 @@ private fun ContentTab(
         return
     }
 
-    // 解析在 Default 线程（消息体可能很大，不卡组合）；解释器 / 参数切换即重算。
-    var rendered by remember(detail, interpreter) { mutableStateOf<RenderedText?>(null) }
-    LaunchedEffect(detail, interpreter, params) {
+    // 预览基线（Default 线程算，避免大消息卡组合）：二进制判定 + 原始文本 / hex。
+    var preview by remember(detail) { mutableStateOf<ContentPreview?>(null) }
+    // 解释器渲染结果只按 detail 记忆：切换解释器 / 参数时保留旧内容继续显示
+    // （不清空、不丢滚动位置），新结果算完替换；仅首帧为 null 显示转圈。
+    var rendered by remember(detail) { mutableStateOf<RenderedText?>(null) }
+    var rendering by remember(detail) { mutableStateOf(false) }
+
+    LaunchedEffect(detail) {
+        preview = withContext(Dispatchers.Default) {
+            val binary = isProbablyBinary(detail.content, detail.codedCharSetId)
+            ContentPreview(
+                isBinary = binary,
+                rawText = if (binary) "" else MessageCharsets.decode(detail.content, detail.codedCharSetId),
+                hex = if (binary) hexPreview(detail.content) else "",
+            )
+        }
+    }
+    LaunchedEffect(detail, interpreter, params, preview) {
+        val base = preview ?: return@LaunchedEffect
+        if (base.isBinary) return@LaunchedEffect // 二进制不走解释器（对字节流无意义）
+        rendering = true
         rendered = withContext(Dispatchers.Default) {
             when (val result = interpreter.interpret(detail.content, detail.encoding, detail.codedCharSetId, params)) {
                 is InterpreterResult.Success -> RenderedText(result.formatted)
-                is InterpreterResult.Failure ->
-                    RenderedText(MessageCharsets.decode(detail.content, detail.codedCharSetId), result.message)
+                is InterpreterResult.Failure -> RenderedText(base.rawText, result.message)
             }
         }
+        rendering = false
     }
 
     Box(modifier = modifier) {
         val scroll = rememberScrollState()
+        val base = preview
         Column(modifier = Modifier.fillMaxSize().verticalScroll(scroll).padding(12.dp)) {
             when {
-                // 渲染中（首帧 rendered == null）：小圈提示。
-                rendered == null -> CircularProgressIndicator(
+                // 首帧：基线还没算完。
+                base == null -> CircularProgressIndicator(
                     modifier = Modifier.align(Alignment.CenterHorizontally).padding(24.dp),
                 )
-                else -> {
-                    val renderedValue = rendered!!
-                    // 解析失败：保留原始内容 + 错误提示条。
-                    renderedValue.parseError?.let { err ->
-                        Text(
-                            text = stringResource("msg_detail_parse_failed").withArg(err),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f))
-                                .padding(8.dp),
-                        )
-                        Spacer(Modifier.height(8.dp))
-                    }
-                    // 大内容预览截断：展开/折叠与右侧辅助操作联动（同一 expanded 状态）。
-                    val display = if (expanded || renderedValue.text.length <= MAX_PREVIEW_CHARS) {
-                        renderedValue.text
-                    } else {
-                        renderedValue.text.take(MAX_PREVIEW_CHARS) + "\n…"
-                    }
+                // 二进制：提示行 + hex 预览（不渲染乱码）。
+                base.isBinary -> {
                     Text(
-                        text = display,
+                        text = stringResource("msg_detail_binary_notice"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                            .padding(8.dp),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = base.hex,
                         style = MaterialTheme.typography.bodySmall,
                         fontFamily = FontFamily.Monospace,
                     )
-                    if (renderedValue.text.length > MAX_PREVIEW_CHARS) {
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            text = if (expanded) stringResource("msg_detail_collapse") else stringResource("msg_detail_expand"),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier
-                                .clickable { onExpandedChange(!expanded) }
-                                .padding(vertical = 4.dp),
+                }
+                else -> {
+                    val renderedValue = rendered
+                    if (renderedValue == null) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.align(Alignment.CenterHorizontally).padding(24.dp),
                         )
+                    } else {
+                        // 解析失败：保留原始内容 + 错误提示条。
+                        renderedValue.parseError?.let { err ->
+                            Text(
+                                text = stringResource("msg_detail_parse_failed").withArg(err),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f))
+                                    .padding(8.dp),
+                            )
+                            Spacer(Modifier.height(8.dp))
+                        }
+                        // 大内容预览截断：展开/折叠与右侧辅助操作联动（同一 expanded 状态）。
+                        val display = if (expanded || renderedValue.text.length <= MAX_PREVIEW_CHARS) {
+                            renderedValue.text
+                        } else {
+                            renderedValue.text.take(MAX_PREVIEW_CHARS) + "\n…"
+                        }
+                        Text(
+                            text = display,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
+                        )
+                        if (renderedValue.text.length > MAX_PREVIEW_CHARS) {
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                text = if (expanded) stringResource("msg_detail_collapse") else stringResource("msg_detail_expand"),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier
+                                    .clickable { onExpandedChange(!expanded) }
+                                    .padding(vertical = 4.dp),
+                            )
+                        }
                     }
                 }
             }
         }
+        // 重渲染中（切换解释器 / 参数）的小指示器：不遮内容、不清空。
+        if (rendering && base != null && !base.isBinary && rendered != null) {
+            CircularProgressIndicator(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(12.dp)
+                    .height(16.dp)
+                    .width(16.dp),
+            )
+        }
     }
+}
+
+/** 正文基线：二进制判定结果 + 原始文本（非二进制）或 hex 预览（二进制）。 */
+private data class ContentPreview(
+    val isBinary: Boolean,
+    val rawText: String,
+    val hex: String,
+)
+
+/**
+ * 二进制内容判定：前 8KB 内含 NUL 字节，或按 CCSID 解码后替换符（�）占比 > 5%
+ * —— 任一命中即判为二进制，正文显示 hex 预览而非解码乱码。
+ */
+private fun isProbablyBinary(content: ByteArray, codedCharSetId: Int): Boolean {
+    val scanEnd = minOf(content.size, 8192)
+    for (i in 0 until scanEnd) {
+        if (content[i] == 0.toByte()) return true
+    }
+    if (content.isEmpty()) return false
+    val text = MessageCharsets.decode(content, codedCharSetId)
+    if (text.isEmpty()) return false
+    val replacements = text.count { it == '�' }
+    return replacements.toFloat() / text.length > 0.05f
+}
+
+/**
+ * 十六进制预览：`偏移  hex×16  |ASCII|` 行格式（不可见字节显示 ·），只取前
+ * [maxBytes] 字节，超出以 … 收尾。二进制内容的兜底展示，用户至少能看到
+ * 字节层面的事实（魔数、结构）。
+ */
+private fun hexPreview(content: ByteArray, maxBytes: Int = 1024): String {
+    val end = minOf(content.size, maxBytes)
+    val sb = StringBuilder()
+    for (offset in 0 until end step 16) {
+        val rowEnd = minOf(offset + 16, end)
+        sb.append("%08X  ".format(offset))
+        for (i in offset until rowEnd) {
+            sb.append("%02X ".format(content[i]))
+        }
+        repeat(16 - (rowEnd - offset)) { sb.append("   ") }
+        sb.append(" |")
+        for (i in offset until rowEnd) {
+            val b = content[i].toInt() and 0xFF
+            sb.append(if (b in 0x20..0x7E) b.toChar() else '·')
+        }
+        sb.append('|').append('\n')
+    }
+    if (content.size > end) sb.append("…")
+    return sb.toString()
 }
 
 /** Tab 2：消息 Header（两列 Key / Value；每行 Value 右侧复制按钮）。 */
