@@ -46,6 +46,9 @@ include(
     ":artemis-service", ":artemis-ui",
     ":rabbitmq-service", ":rabbitmq-ui",
     ":rocketmq-service", ":rocketmq-ui",
+    // 拓扑图通用件：graph-core 纯模型（统一节点词汇），topology-ui 通用渲染。
+    ":graph-core",
+    ":topology-ui",
     // 消息解释器 SPI：接口模块 + 每个解释器一个模块 + 聚合注册表。
     ":message-interpreter-api",
     ":message-interpreter-json",

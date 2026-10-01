@@ -30,6 +30,9 @@ kotlin {
             // 消息解释器：聚合注册表一个依赖带上契约 + 全部解释器实现（运行时
             // classpath 供 ServiceLoader 发现），新增解释器宿主零改动。
             implementation(projects.messageInterpreterRegistry)
+            // 拓扑图通用件：模型契约（graph-core）+ 通用渲染（topology-ui）。
+            implementation(projects.graphCore)
+            implementation(projects.topologyUi)
         }
         jvmMain.dependencies {
             // FileKit 文件选择器（证书路径的「浏览…」按钮）。选择器 API 在 dialogs 模块。

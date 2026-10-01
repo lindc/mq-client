@@ -44,6 +44,14 @@ import com.dk.kuiver.rememberKuiverViewerState
 import com.dk.kuiver.renderer.KuiverInteractionCallbacks
 import com.dk.kuiver.renderer.KuiverViewer
 import com.dk.kuiver.renderer.KuiverViewerConfig
+import com.mqclient.topology.topologyEdgeStyle
+import com.mqclient.topology.TopologyZoomControls
+import com.mqclient.topology.TopologyNodeCard
+import com.mqclient.topology.CARD_WIDTH
+import com.mqclient.topology.CARD_HEIGHT
+import com.mqclient.graph.TopologyNodeType
+import com.mqclient.graph.TopologyData
+import com.mqclient.graph.NodeSeverity
 import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.CoreModule
 import com.mqclient.ibmmq.IbmMQModule
@@ -474,7 +482,7 @@ private val CLUSTER_COLUMN_SPACING = 320.dp
 private val CLUSTER_ROW_SPACING = 40.dp
 
 /** 集群图构建：本地 QMGR + 每个成员一个节点（REPOS / NORMAL 不同类型色）+ 本地→成员边。 */
-internal fun buildClusterGraph(relations: ClusterRelations): MqTopologyData {
+internal fun buildClusterGraph(relations: ClusterRelations): TopologyData {
     val localType = if (relations.role == QmgrClusterRole.FULL) {
         TopologyNodeType.QMGR_FULL
     } else {
@@ -506,5 +514,5 @@ internal fun buildClusterGraph(relations: ClusterRelations): MqTopologyData {
             )
         }
     }
-    return MqTopologyData(kuiver, nodeTypes, severities)
+    return TopologyData(kuiver, nodeTypes, severities)
 }

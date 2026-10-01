@@ -1,4 +1,4 @@
-package com.mqclient.ibmmq.ui.topology
+package com.mqclient.topology
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.AltRoute
@@ -12,46 +12,9 @@ import androidx.compose.material.icons.filled.MarkEmailUnread
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import com.mqclient.graph.TopologyNodeType
 
-/**
- * IBM MQ 拓扑图的节点类型。
- *
- * 与 [com.mqclient.ibmmq.pcf.MqObjectType]（PCF 对象大类）不同：这里是**业务链路角色**
- * —— alias / remote / xmitq 在 MQ 里不是独立对象类型，而是 QUEUE + Q_TYPE / USAGE 的
- * 组合（见 [MqAttributeExtensions]），这里把它们提升成一等节点角色；REMOTE_QMGR 是
- * 从 Channel 的 RQMNAME 读出的**虚拟节点**（MQ 里没有这个对象）。
- *
- * 只画业务链路的 8 类：QMGR（本地）、Listener、Service、Process、Namelist、AuthInfo、
- * CommInfo、QMODEL 一律不进图（属性在对象面板单独看）。
- */
-enum class TopologyNodeType {
-    ALIAS_QUEUE,
-    LOCAL_QUEUE,
-    REMOTE_QUEUE,
-    TRANSMISSION_QUEUE,
-    TOPIC,
-    SUBSCRIPTION,
-    CHANNEL,
-    REMOTE_QMGR,
-    /** 集群关系图专用：完整仓库 QMgr。 */
-    QMGR_FULL,
-    /** 集群关系图专用：部分仓库 QMgr。 */
-    QMGR_PARTIAL,
-}
-
-/**
- * 节点告警级别（健康态之外的两种异常）：
- *  - WARNING：local queue 消息积压（currentDepth/maxDepth ≥ 连接告警阈值）；
- *  - ERROR：sender/requester 通道状态 STOPPED / RETRYING（链路故障）。
- * 与对象列表页的告警语义同源（队列列表红色警告图标 / 通道状态色）。
- */
-enum class NodeSeverity {
-    NORMAL,
-    WARNING,
-    ERROR,
-}
-
-/** 类型 → 图标。图标选择与既有 [com.mqclient.ibmmq.ui.IbmMqTopologyStyle] 保持同族语义。 */
+/** 类型 → 图标。图标选择与 IBM MQ 拓扑样式注册同族语义。 */
 fun TopologyNodeType.getIcon(): ImageVector = when (this) {
     TopologyNodeType.ALIAS_QUEUE -> Icons.AutoMirrored.Filled.AltRoute
     TopologyNodeType.LOCAL_QUEUE -> Icons.Filled.Inbox

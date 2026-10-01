@@ -1,4 +1,4 @@
-package com.mqclient.ibmmq.ui.topology
+package com.mqclient.topology
 
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
@@ -21,7 +21,7 @@ import com.dk.kuiver.ui.EdgeStyle
  * 颜色由面板传入：正常边用主题色（outlineVariant），环用固定语义橙（异常信号，
  * 不随主题翻转），满足「不硬编码界面铬色」。
  */
-internal fun topologyEdgeStyle(
+fun topologyEdgeStyle(
     edge: KuiverEdge,
     normalColor: Color,
     cycleColor: Color,

@@ -37,6 +37,14 @@ import com.dk.kuiver.rememberKuiverViewerState
 import com.dk.kuiver.renderer.KuiverInteractionCallbacks
 import com.dk.kuiver.renderer.KuiverViewer
 import com.dk.kuiver.renderer.KuiverViewerConfig
+import com.mqclient.topology.topologyEdgeStyle
+import com.mqclient.topology.getColor
+import com.mqclient.topology.getIcon
+import com.mqclient.topology.TopologyZoomControls
+import com.mqclient.topology.TopologyNodeCard
+import com.mqclient.graph.TopologyNodeType
+import com.mqclient.graph.TopologyData
+import com.mqclient.graph.NodeSeverity
 import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.CoreModule
@@ -81,7 +89,7 @@ fun TopologyPanel(
         ?.let { ibmMQConfigFromOptions(it.options).queueDepthWarningThreshold }
         ?: IbmMQConfig.DEFAULT_QUEUE_DEPTH_WARNING_THRESHOLD
 
-    var data by remember(connectionId) { mutableStateOf<MqTopologyData?>(null) }
+    var data by remember(connectionId) { mutableStateOf<TopologyData?>(null) }
     // 至少完成过一轮慢扫：区分「还在连 / 扫」与「扫完了但确实没有业务对象」。
     var scannedOnce by remember(connectionId) { mutableStateOf(false) }
     // 列表页带入的焦点对象名：在 LaunchedEffect（副作用上下文）里 consume——
@@ -175,7 +183,7 @@ fun TopologyPanel(
 @Composable
 private fun MqTopologyCanvas(
     connectionId: String,
-    data: MqTopologyData,
+    data: TopologyData,
     focusName: String?,
     onFocusApplied: () -> Unit,
     onRescan: () -> Unit,

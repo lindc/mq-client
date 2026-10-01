@@ -207,5 +207,10 @@
   "common_clear": "清空",
   "ai_message_copy": "复制",
   "ai_message_helpful": "有用",
-  "ai_message_not_helpful": "无用"
+  "ai_message_not_helpful": "无用",
+  "topology_action_rescan": "重新扫描对象",
+  "topology_action_zoom_in": "放大",
+  "topology_action_zoom_out": "缩小",
+  "topology_action_fit": "适应视图",
+  "topology_action_reset": "重置"
 }

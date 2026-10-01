@@ -207,5 +207,10 @@
   "common_clear": "Clear",
   "ai_message_copy": "Copy",
   "ai_message_helpful": "Helpful",
-  "ai_message_not_helpful": "Not helpful"
+  "ai_message_not_helpful": "Not helpful",
+  "topology_action_rescan": "Rescan objects",
+  "topology_action_zoom_in": "Zoom in",
+  "topology_action_zoom_out": "Zoom out",
+  "topology_action_fit": "Fit to view",
+  "topology_action_reset": "Reset"
 }

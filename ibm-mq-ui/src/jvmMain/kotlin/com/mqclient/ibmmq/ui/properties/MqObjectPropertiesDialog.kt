@@ -63,16 +63,16 @@ internal fun MqObjectType.displayName(): String = stringResource(displayNameKey(
  * alias / local / transmission / remote 四种队列角色都落在 QUEUE；
  * REMOTE_QMGR 是虚拟节点（无真实 MQ 对象），返回 null —— 调用方跳过打开对话框。
  */
-internal fun com.mqclient.ibmmq.ui.topology.TopologyNodeType.toMqObjectType(): MqObjectType? = when (this) {
-    com.mqclient.ibmmq.ui.topology.TopologyNodeType.ALIAS_QUEUE -> MqObjectType.QUEUE
-    com.mqclient.ibmmq.ui.topology.TopologyNodeType.LOCAL_QUEUE -> MqObjectType.QUEUE
-    com.mqclient.ibmmq.ui.topology.TopologyNodeType.REMOTE_QUEUE -> MqObjectType.QUEUE
-    com.mqclient.ibmmq.ui.topology.TopologyNodeType.TRANSMISSION_QUEUE -> MqObjectType.QUEUE
-    com.mqclient.ibmmq.ui.topology.TopologyNodeType.TOPIC -> MqObjectType.TOPIC
-    com.mqclient.ibmmq.ui.topology.TopologyNodeType.SUBSCRIPTION -> MqObjectType.SUBSCRIPTION
-    com.mqclient.ibmmq.ui.topology.TopologyNodeType.CHANNEL -> MqObjectType.CHANNEL
-    com.mqclient.ibmmq.ui.topology.TopologyNodeType.REMOTE_QMGR -> null
+internal fun com.mqclient.graph.TopologyNodeType.toMqObjectType(): MqObjectType? = when (this) {
+    com.mqclient.graph.TopologyNodeType.ALIAS_QUEUE -> MqObjectType.QUEUE
+    com.mqclient.graph.TopologyNodeType.LOCAL_QUEUE -> MqObjectType.QUEUE
+    com.mqclient.graph.TopologyNodeType.REMOTE_QUEUE -> MqObjectType.QUEUE
+    com.mqclient.graph.TopologyNodeType.TRANSMISSION_QUEUE -> MqObjectType.QUEUE
+    com.mqclient.graph.TopologyNodeType.TOPIC -> MqObjectType.TOPIC
+    com.mqclient.graph.TopologyNodeType.SUBSCRIPTION -> MqObjectType.SUBSCRIPTION
+    com.mqclient.graph.TopologyNodeType.CHANNEL -> MqObjectType.CHANNEL
+    com.mqclient.graph.TopologyNodeType.REMOTE_QMGR -> null
     // 集群关系图节点是 QMGR 角色视图，无对应的单对象属性页（QMGR 走连接属性面板）。
-    com.mqclient.ibmmq.ui.topology.TopologyNodeType.QMGR_FULL -> null
-    com.mqclient.ibmmq.ui.topology.TopologyNodeType.QMGR_PARTIAL -> null
+    com.mqclient.graph.TopologyNodeType.QMGR_FULL -> null
+    com.mqclient.graph.TopologyNodeType.QMGR_PARTIAL -> null
 }

@@ -5,19 +5,15 @@ import com.dk.kuiver.model.KuiverEdge
 import com.dk.kuiver.model.KuiverNode
 import com.dk.kuiver.model.NodeDimensions
 import com.dk.kuiver.model.buildKuiver
+import com.mqclient.topology.CARD_WIDTH
+import com.mqclient.topology.CARD_HEIGHT
+import com.mqclient.graph.TopologyNodeType
+import com.mqclient.graph.TopologyData
+import com.mqclient.graph.NodeSeverity
 import com.mqclient.ibmmq.IbmMQModule
 import com.mqclient.ibmmq.pcf.MqObjectType
 import com.mqclient.ibmmq.pcf.MqObjectSnapshot
 import androidx.compose.ui.unit.dp
-
-/**
- * 一次构建的完整产物：图模型 + 类型表 + 告警级别表（节点卡片着色与列布局都靠前两者）。
- */
-data class MqTopologyData(
-    val kuiver: Kuiver,
-    val nodeTypes: Map<String, TopologyNodeType>,
-    val severities: Map<String, NodeSeverity>,
-)
 
 /**
  * 从 [IbmMQModule] 的对象慢扫缓存（[IbmMQService.cachedObjects]）构建 Kuiver 拓扑图。
@@ -40,9 +36,9 @@ data class MqTopologyData(
  *  5. Subscription → Destination（DEST，可为 local / remote / alias）
  *  6. Channel → Remote QMGR（RQMNAME，仅 Sender/Requester）
  */
-fun buildKuiverFromCache(connectionId: String, warningThreshold: Int): MqTopologyData {
+fun buildKuiverFromCache(connectionId: String, warningThreshold: Int): TopologyData {
     val service = IbmMQModule.serviceOrNull()
-        ?: return MqTopologyData(Kuiver(), emptyMap(), emptyMap())
+        ?: return TopologyData(Kuiver(), emptyMap(), emptyMap())
 
     val queues = service.cachedObjects(connectionId, MqObjectType.QUEUE)
         .filterNotSystem()
@@ -110,7 +106,7 @@ fun buildKuiverFromCache(connectionId: String, warningThreshold: Int): MqTopolog
         .filter { it.isNotBlank() && it != localQmgrName }
         .map(::remoteQmgrNodeId)
     remoteQmgrIds.forEach { put(it, TopologyNodeType.REMOTE_QMGR) }
-    if (nodeTypes.isEmpty()) return MqTopologyData(Kuiver(), emptyMap(), emptyMap())
+    if (nodeTypes.isEmpty()) return TopologyData(Kuiver(), emptyMap(), emptyMap())
 
     // ---- 边 ----
     val byName = (queues + topics + subs + channels).associateBy { it.name }
@@ -149,7 +145,7 @@ fun buildKuiverFromCache(connectionId: String, warningThreshold: Int): MqTopolog
         nodeTypes.forEach { (id, _) -> addNode(KuiverNode(id, NodeDimensions(CARD_WIDTH.dp, CARD_HEIGHT.dp))) }
         edges.forEach { (from, to) -> addEdge(KuiverEdge(fromId = from, toId = to)) }
     }
-    return MqTopologyData(kuiver, nodeTypes, severities)
+    return TopologyData(kuiver, nodeTypes, severities)
 }
 
 /** REMOTE_QMGR 虚拟节点的前缀 + id（避免与真实对象名冲突）。 */

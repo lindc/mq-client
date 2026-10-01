@@ -1,4 +1,4 @@
-package com.mqclient.ibmmq.ui.topology
+package com.mqclient.topology
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
@@ -27,13 +27,16 @@ import com.mqclient.uicommon.i18n.stringResource
  * 右上角控件：重新扫描（数据强制刷新）+ 放大 / 缩小 / 适应视图 / 重置。
  *
  * 动作接线（kuiver 0.4.2 真实 API，`KuiverViewerState` 没有 fitToContent/resetZoom）：
- *  - 重新扫描 → 面板触一次 `scanObjects`（扫完经 OBJECTS_SCANNED 重建）；
+ *  - 重新扫描 → 面板触一次数据重取（扫完经各自事件重建）；
  *  - 放大 / 缩小 → `zoomIn()` / `zoomOut()`（步长走 config.zoomStep）；
  *  - 适应视图 → `centerGraph(animated = true)`（按当前图内容居中适配）；
  *  - 重置 → `clearManualPositions()` + `centerGraph()`（回到布局初始态）。
+ *
+ * 文案走 ui-common 公共 i18n 表（`topology_action_*`）：本模块是纯渲染库，不注册
+ * 模块私有表（AdapterUI 是业务模块的 SPI），公共词汇进公共表。
  */
 @Composable
-internal fun TopologyZoomControls(
+fun TopologyZoomControls(
     onRescan: () -> Unit,
     onZoomIn: () -> Unit,
     onZoomOut: () -> Unit,

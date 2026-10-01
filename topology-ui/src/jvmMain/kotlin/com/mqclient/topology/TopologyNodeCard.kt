@@ -1,4 +1,4 @@
-package com.mqclient.ibmmq.ui.topology
+package com.mqclient.topology
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
@@ -20,10 +20,12 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.mqclient.graph.NodeSeverity
+import com.mqclient.graph.TopologyNodeType
 
-/** 节点卡片统一尺寸：kuiver 的 NodeDimensions（布局）与此处卡片必须对齐。 */
-internal const val CARD_WIDTH = 180
-internal const val CARD_HEIGHT = 56
+/** 节点卡片统一尺寸：kuiver 的 NodeDimensions（布局）与此处卡片必须对齐（公开：各面板建图时要用）。 */
+const val CARD_WIDTH = 180
+const val CARD_HEIGHT = 56
 
 /**
  * 拓扑节点卡片：类型图标 + 对象名。

@@ -8,6 +8,8 @@ import com.dk.kuiver.model.KuiverNode
 import com.dk.kuiver.model.buildKuiverWithClassifiedEdges
 import com.dk.kuiver.model.layout.LayoutConfig
 import com.dk.kuiver.model.layout.LayoutProvider
+import com.mqclient.graph.TopologyNodeType
+import com.mqclient.topology.CARD_HEIGHT
 
 /**
  * 当前图的 `nodeId → 类型` 查找表，供 [columnLayoutProvider] 在布局阶段读取。
