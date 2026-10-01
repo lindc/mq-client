@@ -11,6 +11,7 @@ import com.mqclient.core.ConnectionStore
 import com.mqclient.ibmmq.IbmMQConfig
 import com.mqclient.ibmmq.ibmMQConfigFromOptions
 import com.mqclient.ibmmq.pcf.MqObjectType
+import com.mqclient.ibmmq.pcf.isSystemOrTempQueue
 import com.mqclient.ibmmq.ui.properties.MqObjectPropertiesDialog
 import com.mqclient.ibmmq.ui.properties.ObjectPropertiesDialogState
 import com.mqclient.mqui.objectlist.ObjectListPanel
@@ -131,10 +132,4 @@ fun QueueListPanel(
             )
         },
     )
-}
-
-/** 系统队列 / 临时队列判定：`SYSTEM.` 或 `AMQ.` 开头（大小写不敏感），默认隐藏。 */
-internal fun isSystemOrTempQueue(queueName: String): Boolean {
-    val name = queueName.uppercase()
-    return isSystemObject(queueName) || name.startsWith("AMQ.")
 }

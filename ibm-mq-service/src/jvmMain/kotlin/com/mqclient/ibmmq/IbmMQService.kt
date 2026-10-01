@@ -21,6 +21,8 @@ import com.mqclient.ibmmq.pcf.MqObjectSnapshot
 import com.mqclient.ibmmq.pcf.MqObjectType
 import com.mqclient.ibmmq.pcf.PcfObjectScanner
 import com.mqclient.ibmmq.pcf.channelStatusName
+import com.mqclient.ibmmq.pcf.isSystemObject
+import com.mqclient.ibmmq.pcf.isSystemOrTempQueue
 import com.mqclient.ibmmq.pcf.listenerStatusName
 import java.io.FileInputStream
 import java.security.KeyStore
@@ -450,6 +452,24 @@ class IbmMQService(private val context: ServiceContext) {
                     "namelistCount" to result.namelists.size,
                     "authInfoCount" to result.authInfos.size,
                     "commInfoCount" to result.commInfos.size,
+                ),
+            )
+            // 导航树二级菜单的数量徽章：与缓存同语义（全量替换该连接的计数）。
+            // 口径 = 列表页**默认视图**（隐藏系统对象；队列页还隐藏 AMQ.* 临时队列），
+            // 保证「徽章数字 = 点进去看到的行数」。
+            IbmMQModule.updateObjectCounts(
+                connectionId,
+                mapOf(
+                    MqObjectType.QUEUE to result.queues.count { !isSystemOrTempQueue(it.name) },
+                    MqObjectType.TOPIC to result.topics.count { !isSystemObject(it.name) },
+                    MqObjectType.SUBSCRIPTION to result.subscriptions.count { !isSystemObject(it.name) },
+                    MqObjectType.CHANNEL to result.channels.count { !isSystemObject(it.name) },
+                    MqObjectType.LISTENER to result.listeners.count { !isSystemObject(it.name) },
+                    MqObjectType.SERVICE to result.services.count { !isSystemObject(it.name) },
+                    MqObjectType.PROCESS to result.processes.count { !isSystemObject(it.name) },
+                    MqObjectType.NAMELIST to result.namelists.count { !isSystemObject(it.name) },
+                    MqObjectType.AUTH_INFO to result.authInfos.count { !isSystemObject(it.name) },
+                    MqObjectType.COMM_INFO to result.commInfos.count { !isSystemObject(it.name) },
                 ),
             )
             ibmMqLog.info(

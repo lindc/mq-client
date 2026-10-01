@@ -81,13 +81,6 @@ fun ObjectListToolbar(
 }
 
 /**
- * 系统对象判定：IBM MQ 默认系统对象以 `SYSTEM.` 开头（大小写不敏感）。
- * 队列的 `AMQ.*` 临时队列在 [isSystemOrTempQueue] 里额外判断。
- */
-fun isSystemObject(name: String): Boolean =
-    name.trim().uppercase().startsWith("SYSTEM.")
-
-/**
  * 系统对象显隐切换按钮：所有对象列表页共用，文案统一取 i18n key。
  * 状态由页面持有，默认隐藏系统对象，点击后显示。
  */

@@ -28,6 +28,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -135,6 +136,13 @@ fun ModuleTree(
                 // 纯数据，宿主统一渲染；按连接 id 缓存，不随状态点跳变重算。
                 val navItems =
                     remember(connection.id) { adapter?.navigationItems(connection) }.orEmpty()
+                // 数量徽章：模块全面扫描后经 badgeCounts 发布（冷流，源自模块内部
+                // StateFlow），订阅即响应式；未扫描 / 该类键缺位 → badge = null，
+                // 右侧留空，数量为 0 照常显示。
+                val badgeFlow =
+                    remember(connection.id) { adapter?.badgeCounts(connection.id) }
+                val badgeCounts =
+                    badgeFlow?.collectAsState(initial = emptyMap())?.value ?: emptyMap()
                 navItems.forEachIndexed { index, item ->
                     val isLast = index == navItems.lastIndex
                     if (item.isSeparator) {
@@ -144,7 +152,7 @@ fun ModuleTree(
                         )
                     } else {
                         NavigationItemRow(
-                            item = item,
+                            item = item.copy(badge = badgeCounts[item.id]),
                             enabled = connection.status != ConnectionStatus.Connecting,
                             selected = selection == NavSelection(connection.id, item.id),
                             hasSiblingBelow = !isLast,

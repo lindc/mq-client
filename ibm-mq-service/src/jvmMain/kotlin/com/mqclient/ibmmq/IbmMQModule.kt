@@ -13,9 +13,13 @@ import com.mqclient.ibmmq.command.MqscExecutor
 import com.mqclient.ibmmq.command.MqscHistoryRepository
 import com.mqclient.ibmmq.command.MqscPcfSender
 import com.mqclient.ibmmq.event.IbmMQEvents
+import com.mqclient.ibmmq.pcf.MqObjectType
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -67,6 +71,26 @@ object IbmMQModule {
     private var subscriptions: List<Job> = emptyList()
 
     /**
+     * 各连接的对象数量（慢扫产物）：connectionId → (对象类型 → 数量)。导航树二级
+     * 菜单的数量徽章数据源 —— [IbmMqServiceAdapter.badgeCounts] 从它派生（翻译成
+     * 导航项 id）。[IbmMQService.scanObjects] 成功后**全量替换**该连接的条目（与
+     * 缓存同语义），连接删除时摘除。
+     */
+    private val objectCounts = MutableStateFlow<Map<String, Map<MqObjectType, Int>>>(emptyMap())
+
+    /** 徽章数据源的只读视图：adapter 按连接派生（map + 翻译键），不经快照。 */
+    val objectCountsFlow: StateFlow<Map<String, Map<MqObjectType, Int>>> = objectCounts
+
+    internal fun updateObjectCounts(connectionId: String, counts: Map<MqObjectType, Int>) {
+        objectCounts.update { current -> current + (connectionId to counts) }
+    }
+
+    internal fun clearObjectCounts(connectionId: String) {
+        objectCounts.update { current -> current - connectionId }
+    }
+
+
+    /**
      * 幂等：重复调用返回同一个 [IbmMQService]，不会重复注册订阅。
      */
     @Synchronized
@@ -113,9 +137,10 @@ object IbmMQModule {
             context.onEvent(EventNames.CONNECTION_DELETED) { event ->
                 val connectionId = event.getString("connectionId") ?: return@onEvent
                 if (!isOwnConnection(event, context)) return@onEvent
-                // 断开（含任务与 cache 清理）+ 摘除上下文 + 清模块内记账。
+                // 断开（含任务与 cache 清理）+ 摘除上下文 + 清模块内记账（含徽章数量）。
                 connectionManager.remove(connectionId)
                 handler.cleanConnectionData(connectionId)
+                clearObjectCounts(connectionId)
             },
             // ---- 显式动作请求（宿主 app-ui 的右键菜单，事件约定见 ConnectionActions）----
             // 连接的 handler 挂起执行到 connect 完成：emit 是异步投递，但 handler

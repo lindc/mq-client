@@ -60,3 +60,18 @@ data class MqObjectSnapshot(
     /** 监听端口。 */
     val port: Int? = null,
 )
+
+/**
+ * 系统对象判定：IBM MQ 默认系统对象以 `SYSTEM.` 开头（大小写不敏感）。
+ * 队列的 `AMQ.*` 临时队列在 [isSystemOrTempQueue] 里额外判断。
+ *
+ * 全项目的**唯一定义处**：慢扫计数（导航徽章口径）与各对象列表页的默认过滤
+ * 共用，避免「同一语义两套实现」漂移。拓扑图的分词版判定
+ * （`MqAttributeExtensions.isSystemObject`）语义不同，刻意不合并。
+ */
+fun isSystemObject(name: String): Boolean =
+    name.trim().uppercase().startsWith("SYSTEM.")
+
+/** 系统队列 / 临时队列判定：`SYSTEM.` 或 `AMQ.` 开头（大小写不敏感）。 */
+fun isSystemOrTempQueue(queueName: String): Boolean =
+    isSystemObject(queueName) || queueName.trim().uppercase().startsWith("AMQ.")

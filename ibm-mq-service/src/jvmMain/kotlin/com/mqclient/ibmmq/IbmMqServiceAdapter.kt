@@ -3,7 +3,10 @@ package com.mqclient.ibmmq
 import com.mqclient.core.ConnectionInfo
 import com.mqclient.core.NavigationItem
 import com.mqclient.core.spi.ServiceContext
+import com.mqclient.ibmmq.pcf.MqObjectType
 import com.mqclient.mq.base.MQServiceAdapter
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 
 class IbmMqServiceAdapter : MQServiceAdapter() {
     override val id = MODULE_ID // 模块名唯一定义处：IbmMQModule.kt 顶层 const
@@ -44,6 +47,35 @@ class IbmMqServiceAdapter : MQServiceAdapter() {
      */
     override fun initialize(context: ServiceContext) {
         IbmMQModule.initialize(context)
+    }
+
+    /**
+     * 二级菜单的数量徽章（全面扫描后填充）：从 [IbmMQModule.objectCountsFlow] 派生，
+     * 把对象类型键翻译成上面 [navigationItems] 的导航项 id（单一来源在这里 —— 两种
+     * 拼写体系的不规则处如 `processDefinitions` / `authInfo` 只此一份）。扫描前键
+     * 缺位 → badge = null 不显示；QMGR 类型无对应导航项，翻译时丢弃。
+     */
+    override fun badgeCounts(connectionId: String): Flow<Map<String, Int>> =
+        IbmMQModule.objectCountsFlow.map { byConnection ->
+            val counts = byConnection[connectionId].orEmpty()
+            counts.entries
+                .mapNotNull { (type, count) -> type.navItemId()?.let { it to count } }
+                .toMap()
+        }
+
+    /** 对象类型 → 导航项 id；null = 无对应导航项（QMGR）。与 [navigationItems] 同步维护。 */
+    private fun MqObjectType.navItemId(): String? = when (this) {
+        MqObjectType.QUEUE -> "queues"
+        MqObjectType.TOPIC -> "topics"
+        MqObjectType.SUBSCRIPTION -> "subscriptions"
+        MqObjectType.CHANNEL -> "channels"
+        MqObjectType.LISTENER -> "listeners"
+        MqObjectType.SERVICE -> "services"
+        MqObjectType.PROCESS -> "processDefinitions"
+        MqObjectType.NAMELIST -> "namelists"
+        MqObjectType.AUTH_INFO -> "authInfo"
+        MqObjectType.COMM_INFO -> "commInfo"
+        MqObjectType.QUEUE_MANAGER -> null
     }
 
     /**

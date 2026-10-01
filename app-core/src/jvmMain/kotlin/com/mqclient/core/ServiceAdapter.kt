@@ -1,6 +1,8 @@
 package com.mqclient.core
 
 import com.mqclient.core.spi.ServiceContext
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 
 /**
  * Pure (non-UI) descriptor of a business module, discovered automatically via
@@ -69,6 +71,21 @@ interface ServiceAdapter {
      * 静态菜单直接忽略它。宿主会缓存返回值（按连接 id），不要在这里做昂贵计算。
      */
     fun navigationItems(connection: ConnectionInfo): List<NavigationItem> = emptyList()
+
+    /**
+     * 一条连接的**二级菜单数量徽章**（导航项 id → 对象数量）：全面扫描完成后由模块
+     * 写入并发布，宿主 `collectAsState(initial = emptyMap())` 消费，经
+     * `NavigationItem.copy(badge = …)` 填充渲染。默认空流 —— 不支持徽章的模块什么都不
+     * 用写，宿主侧徽章区自然留空。
+     *
+     * 数量口径 = 对象列表页**默认视图可见的用户对象数**（IBM MQ 模块排除 `SYSTEM.*`
+     * 系统对象、队列另排除 `AMQ.*` 临时队列），保证「徽章数字 = 点进去看到的行数」。
+     *
+     * 冷流即可（实现方通常从模块内部 StateFlow 派生），键是 [navigationItems] 里的
+     * [NavigationItem.id]；扫描前 / 该类未扫到时键缺位（badge = null 不显示），
+     * 数量为 0 也照常显示（与对象列表的空语义一致）。
+     */
+    fun badgeCounts(connectionId: String): Flow<Map<String, Int>> = emptyFlow()
 
     /**
      * 模块销毁钩子：由 [ModuleRegistry.disposeServices] 在应用退出时**按初始化逆序**调用，

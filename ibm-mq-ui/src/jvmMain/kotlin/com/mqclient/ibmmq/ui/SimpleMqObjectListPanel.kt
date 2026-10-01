@@ -19,6 +19,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import com.mqclient.ibmmq.pcf.MqObjectSnapshot
 import com.mqclient.ibmmq.pcf.MqObjectType
+import com.mqclient.ibmmq.pcf.isSystemObject
 import com.mqclient.ibmmq.ui.properties.MqObjectPropertiesDialog
 import com.mqclient.ibmmq.ui.properties.ObjectPropertiesDialogState
 import com.mqclient.mqui.objectlist.CardAction
