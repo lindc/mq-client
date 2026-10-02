@@ -65,19 +65,19 @@ actual suspend fun pickFiles(title: String): List<String> {
     }
 }
 
-actual suspend fun saveFileBytes(suggestedName: String, contents: ByteArray): String? {
+actual suspend fun saveFileBytes(
+    suggestedName: String,
+    defaultExtension: String,
+    contents: ByteArray,
+): String? {
     val settings = dialogSettingsOrNull(suggestedName) ?: return null
-    return try {
-        // openFileSaver 只返回目标路径，写盘自己做；defaultExtension 是默认扩展名提示（非过滤）。
-        val destination = FileKit.openFileSaver(
-            suggestedName = suggestedName,
-            defaultExtension = "bin",
-            dialogSettings = settings,
-        ) ?: return null
-        java.io.File(destination.path).writeBytes(contents)
-        destination.path
-    } catch (t: Throwable) {
-        Log.error(LOG_TAG, "save file failed: $t")
-        null
-    }
+    // openFileSaver 只返回目标路径，写盘自己做；defaultExtension 是默认扩展名提示（非过滤）。
+    // 取消（null）与写盘失败（异常）区分：写盘错误向上抛，由调用方提示原因。
+    val destination = FileKit.openFileSaver(
+        suggestedName = suggestedName,
+        defaultExtension = defaultExtension,
+        dialogSettings = settings,
+    ) ?: return null
+    java.io.File(destination.path).writeBytes(contents)
+    return destination.path
 }

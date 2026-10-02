@@ -29,6 +29,31 @@ data class MessageDetail(
     val putTime: String,
     val priority: Int,
     val persistence: Int,
+
+    // ---- dmpmqmsg 导出所需的其余 MQMD 原始字段 ----
+    val report: Int,
+    val feedback: Int,
+    val expiry: Int,
+    /** MQMD.Format（char(8)，保留 QM 返回的 padding）。 */
+    val format: String,
+    val replyToQueue: String,
+    val replyToQMgr: String,
+    val userIdentifier: String,
+    /** AccountingToken（32 字节 → 64 hex）。 */
+    val accountingTokenHex: String,
+    /** ApplIdentityData（char(32) 按字节转储 → 64 hex）。 */
+    val applIdentityDataHex: String,
+    val putApplType: Int,
+    val putApplicationName: String,
+    /** ApplOriginData（char(4) 按字节转储 → 8 hex）。 */
+    val applOriginDataHex: String,
+    /** GroupId（24 字节 → 48 hex）。 */
+    val groupIdHex: String,
+    val msgSeqNumber: Int,
+    val offset: Int,
+    val msgFlags: Int,
+    val originalLength: Int,
+    val backoutCount: Int,
 ) {
     /** content 按内容相等比较（ByteArray 引用相等的坑）。 */
     override fun equals(other: Any?): Boolean = other is MessageDetail && other.messageId == messageId
@@ -131,6 +156,25 @@ internal fun MQMessage.toMessageDetail(queueName: String): MessageDetail {
         putTime = rawTime,
         priority = priority,
         persistence = persistence,
+        report = report,
+        feedback = feedback,
+        expiry = expiry,
+        format = format,
+        replyToQueue = replyToQueueName,
+        replyToQMgr = replyToQueueManagerName,
+        userIdentifier = userId,
+        accountingTokenHex = accountingToken.toMqIdHex(),
+        // char 域按字节转储（dmpmqmsg 同款）：ISO-8859-1 保字节值，不足位补空格
+        applIdentityDataHex = applicationIdData.padEnd(32).toByteArray(Charsets.ISO_8859_1).toMqIdHex(),
+        putApplType = putApplicationType,
+        putApplicationName = putApplicationName,
+        applOriginDataHex = applicationOriginData.padEnd(4).toByteArray(Charsets.ISO_8859_1).toMqIdHex(),
+        groupIdHex = groupId.toMqIdHex(),
+        msgSeqNumber = messageSequenceNumber,
+        offset = offset,
+        msgFlags = messageFlags,
+        originalLength = originalLength,
+        backoutCount = backoutCount,
         headers = listOf(
             h("msg_detail_h_queue", queueName),
             h("msg_detail_h_msgid", messageId.toMqIdHex()),

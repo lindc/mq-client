@@ -263,9 +263,15 @@ internal fun MessageBrowseTab(
             // 不阻塞行状态复位与后续 UI 更新。
             when {
                 result.success && result.content != null -> {
-                    val saved = saveFileBytes("msg_${message.messageId.take(8)}.bin", result.content!!)
-                    if (saved != null) {
-                        scope.launch { snackbarHostState.showSnackbar(stringResource("msg_browse_saved").withArg(saved)) }
+                    try {
+                        val saved = saveFileBytes("msg_${message.messageId.take(8)}.bin", "bin", result.content!!)
+                        if (saved != null) {
+                            scope.launch { snackbarHostState.showSnackbar(stringResource("msg_browse_saved").withArg(saved)) }
+                        }
+                    } catch (e: Exception) {
+                        scope.launch {
+                            snackbarHostState.showSnackbar(stringResource("msg_save_failed").withArg(e.message ?: ""))
+                        }
                     }
                 }
                 else -> scope.launch {
@@ -409,6 +415,8 @@ internal fun MessageBrowseTab(
             queueName = queueName,
             summary = message,
             onDismiss = { detailMessage = null },
+            // dmpmqmsg 导入成功后刷新列表（新 MessageId，原列表里没有）
+            onImported = { refresh() },
         )
     }
 }

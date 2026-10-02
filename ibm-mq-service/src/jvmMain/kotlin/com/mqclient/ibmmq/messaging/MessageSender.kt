@@ -46,6 +46,10 @@ suspend fun sendMessageToQueue(
     persistence: Int = MQConstants.MQPER_PERSISTENT,
     priority: Int = 4,
     expiryTenths: Int = MQConstants.MQEI_UNLIMITED,
+    correlationIdBytes: ByteArray? = null,
+    characterSet: Int? = null,
+    format: String? = null,
+    replyToQMgrName: String? = null,
 ): SendResult = withContext(Dispatchers.IO) {
     var queue: MQQueue? = null
     try {
@@ -62,6 +66,11 @@ suspend fun sendMessageToQueue(
             this.persistence = persistence
             this.priority = priority
             expiry = expiryTenths
+            // dmpmqmsg 导入链路的还原参数：24 字节 CorrelId（hex 解码产物）优先于字符串形态
+            correlationIdBytes?.let { this.correlationId = it }
+            characterSet?.let { this.characterSet = it }
+            format?.trim()?.takeIf { it.isNotEmpty() }?.let { this.format = it }
+            replyToQMgrName?.trim()?.takeIf { it.isNotEmpty() }?.let { this.replyToQueueManagerName = it }
             write(content)
         }
         queue.put(message)

@@ -21,7 +21,15 @@ expect suspend fun pickFile(title: String, extensions: List<String>): String?
 expect suspend fun pickFiles(title: String): List<String>
 
 /**
- * 保存文件对话框（消息下载）：弹出系统「另存为」，[contents] 写入选定路径；
- * 返回保存路径，取消返回 null。文件写入在本函数内完成（IO 线程由 FileKit 内部处理）。
+ * 保存文件对话框（消息下载 / dmpmqmsg 导出）：弹出系统「另存为」，[contents]
+ * 写入选定路径；返回保存路径，取消返回 null。
+ *
+ * 写盘失败以异常抛出（与「取消」区分，调用方据此给用户错误原因）；对话框自身
+ * 打不开（headless 等）仍按取消返回 null。文件写入在本函数内完成（IO 线程由
+ * FileKit 内部处理）。
  */
-expect suspend fun saveFileBytes(suggestedName: String, contents: ByteArray): String?
+expect suspend fun saveFileBytes(
+    suggestedName: String,
+    defaultExtension: String,
+    contents: ByteArray,
+): String?

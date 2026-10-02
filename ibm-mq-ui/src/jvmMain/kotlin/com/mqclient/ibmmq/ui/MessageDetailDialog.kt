@@ -53,9 +53,14 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.mqclient.ibmmq.IbmMQModule
+import com.mqclient.ibmmq.messaging.DmpmqmsgFormat
+import com.mqclient.ibmmq.messaging.DmpmqmsgMessage
 import com.mqclient.ibmmq.messaging.MessageDetail
 import com.mqclient.ibmmq.messaging.MessageOperationResult
 import com.mqclient.ibmmq.messaging.MessageSummary
+import com.mqclient.ibmmq.messaging.sendExpiryTenths
+import com.mqclient.ibmmq.messaging.sendPersistence
+import com.mqclient.ibmmq.messaging.sendPriority
 import com.mqclient.message.interpreter.MessageInterpreters
 import com.mqclient.message.interpreter.InterpreterResult
 import com.mqclient.message.interpreter.MessageCharsets
@@ -65,6 +70,7 @@ import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -96,6 +102,7 @@ internal fun MessageDetailDialog(
     queueName: String,
     summary: MessageSummary,
     onDismiss: () -> Unit,
+    onImported: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -124,9 +131,110 @@ internal fun MessageDetailDialog(
     /** 下载：消息体已在详情里（Ready 时才可见），直接写盘，不再回查队列。 */
     fun downloadDetail(detail: MessageDetail) {
         scope.launch {
-            val saved = saveFileBytes("msg_${detail.messageId.take(8)}.bin", detail.content)
-            if (saved != null) {
-                snackbarHostState.showSnackbar(stringResource("msg_browse_saved").withArg(saved))
+            try {
+                val saved = saveFileBytes("msg_${detail.messageId.take(8)}.bin", "bin", detail.content)
+                if (saved != null) {
+                    snackbarHostState.showSnackbar(stringResource("msg_browse_saved").withArg(saved))
+                }
+            } catch (e: Exception) {
+                snackbarHostState.showSnackbar(stringResource("msg_save_failed").withArg(e.message ?: ""))
+            }
+        }
+    }
+
+    /** 导出 dmpmqmsg：IO/Default 线程生成文本，FileKit 另存为。 */
+    fun exportDmpmqmsg(detail: MessageDetail) {
+        scope.launch {
+            try {
+                val text = withContext(Dispatchers.Default) {
+                    val qmgr = IbmMQModule.serviceOrNull()?.cachedQueueManager(connectionId)
+                    DmpmqmsgFormat.export(
+                        detail = detail,
+                        queueName = queueName,
+                        qmgrName = qmgr?.name,
+                        qmgrVersion = qmgr?.attributes?.get("MQCA_VERSION")?.toString(),
+                    )
+                }
+                val saved = saveFileBytes(
+                    "msg_${detail.messageId.take(8)}_dmpmqmsg.txt",
+                    "txt",
+                    text.toByteArray(Charsets.UTF_8),
+                )
+                if (saved != null) {
+                    snackbarHostState.showSnackbar(stringResource("msg_export_success").withArg(saved))
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                snackbarHostState.showSnackbar(stringResource("msg_save_failed").withArg(e.message ?: ""))
+            }
+        }
+    }
+
+    // ---- 导入 dmpmqmsg：选文件 → 解析 → 预览确认 / fallback → 发送 ----
+    var importPreview by remember { mutableStateOf<Pair<String, List<DmpmqmsgMessage>>?>(null) }
+    var importFallback by remember { mutableStateOf<Pair<String, ByteArray>?>(null) }
+    var selectedImportIndex by remember { mutableStateOf(0) }
+    var importing by remember { mutableStateOf(false) }
+    var importError by remember { mutableStateOf<String?>(null) }
+
+    fun startImport() {
+        scope.launch {
+            val path = pickFile(stringResource("msg_import_pick_title"), emptyList()) ?: return@launch
+            val bytes = try {
+                withContext(Dispatchers.IO) { java.io.File(path).readBytes() }
+            } catch (e: Exception) {
+                snackbarHostState.showSnackbar(stringResource("msg_import_read_failed").withArg(e.message ?: ""))
+                return@launch
+            }
+            val parsed = withContext(Dispatchers.Default) { DmpmqmsgFormat.parse(String(bytes, Charsets.UTF_8)) }
+            importError = null
+            if (parsed.messages.isNotEmpty()) {
+                selectedImportIndex = 0
+                importPreview = java.io.File(path).name to parsed.messages
+            } else {
+                // fallback：不是 dmpmqmsg 格式，可取消或按普通文件发送
+                importFallback = java.io.File(path).name to bytes
+            }
+        }
+    }
+
+    /** 执行导入：[message] 为 null（fallback 路径）时全部走 MQ 默认属性。 */
+    fun performImport(message: DmpmqmsgMessage) {
+        scope.launch {
+            importing = true
+            importError = null
+            try {
+                val service = IbmMQModule.serviceOrNull() ?: error(stringResource("msg_service_not_ready"))
+                val result = service.sendMessage(
+                    connectionId = connectionId,
+                    queueName = queueName,
+                    content = message.body,
+                    replyToQueue = message.replyToQueue.takeIf { it.isNotBlank() },
+                    persistence = message.sendPersistence(),
+                    priority = message.sendPriority(),
+                    expiryTenths = message.sendExpiryTenths(),
+                    correlationIdBytes = message.correlIdBytes,
+                    characterSet = message.ccsid,
+                    format = message.format.takeIf { it.isNotBlank() },
+                    replyToQMgrName = message.replyToQMgr.takeIf { it.isNotBlank() },
+                )
+                if (result.success) {
+                    importPreview = null
+                    importFallback = null
+                    snackbarHostState.showSnackbar(
+                        stringResource("msg_import_success").withArg(result.messageId ?: ""),
+                    )
+                    onImported()
+                } else {
+                    importError = result.errorMessage ?: "MQRC ${result.reasonCode ?: "?"}"
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                importError = e.message ?: e::class.simpleName ?: "unknown"
+            } finally {
+                importing = false
             }
         }
     }
@@ -141,6 +249,10 @@ internal fun MessageDetailDialog(
             FooterAction(stringResource("msg_detail_download"), enabled = ready != null) {
                 downloadDetail(ready!!.detail)
             }
+            FooterAction(stringResource("msg_detail_export_dmpmqmsg"), enabled = ready != null) {
+                exportDmpmqmsg(ready!!.detail)
+            }
+            FooterAction(stringResource("msg_detail_import_dmpmqmsg")) { startImport() }
             Spacer(Modifier.weight(1f))
             FooterAction(stringResource("common_close")) { onDismiss() }
         },
@@ -196,6 +308,29 @@ internal fun MessageDetailDialog(
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
         }
+    }
+
+    // dmpmqmsg 导入：预览确认 / fallback（文件不是 dmpmqmsg 格式）
+    importPreview?.let { (fileName, messages) ->
+        DmpmqmsgImportDialog(
+            fileName = fileName,
+            messages = messages,
+            selectedIndex = selectedImportIndex,
+            onSelectMessage = { selectedImportIndex = it },
+            executing = importing,
+            errorText = importError,
+            onImport = { performImport(messages[selectedImportIndex.coerceIn(0, messages.lastIndex)]) },
+            onDismiss = { if (!importing) importPreview = null },
+        )
+    }
+    importFallback?.let { (fileName, body) ->
+        DmpmqmsgFallbackDialog(
+            fileName = fileName,
+            executing = importing,
+            errorText = importError,
+            onSendPlain = { performImport(DmpmqmsgMessage(attrs = emptyMap(), body = body)) },
+            onDismiss = { if (!importing) importFallback = null },
+        )
     }
 }
 

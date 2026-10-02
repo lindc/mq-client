@@ -356,6 +356,10 @@ class IbmMQService(private val context: ServiceContext) {
         persistence: Int = MQConstants.MQPER_PERSISTENT,
         priority: Int = 4,
         expiryTenths: Int = MQConstants.MQEI_UNLIMITED,
+        correlationIdBytes: ByteArray? = null,
+        characterSet: Int? = null,
+        format: String? = null,
+        replyToQMgrName: String? = null,
     ): SendResult {
         val manager = IbmMQModule.connectionOrNull(connectionId)?.mqConnection
             ?: return SendResult.failure(null, "连接 $connectionId 未建立，无法发送消息")
@@ -368,6 +372,10 @@ class IbmMQService(private val context: ServiceContext) {
             persistence = persistence,
             priority = priority,
             expiryTenths = expiryTenths,
+            correlationIdBytes = correlationIdBytes,
+            characterSet = characterSet,
+            format = format,
+            replyToQMgrName = replyToQMgrName,
         )
     }
 
