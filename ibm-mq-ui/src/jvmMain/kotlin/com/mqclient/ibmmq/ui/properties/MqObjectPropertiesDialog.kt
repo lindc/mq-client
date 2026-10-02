@@ -2,6 +2,7 @@ package com.mqclient.ibmmq.ui.properties
 
 import androidx.compose.runtime.Composable
 import com.mqclient.ibmmq.pcf.MqObjectType
+import com.mqclient.ibmmq.ui.properties.content.ChannelPropertiesContent
 import com.mqclient.ibmmq.ui.properties.content.MqObjectPropertiesContent
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.i18n.stringResource
@@ -25,7 +26,7 @@ fun MqObjectPropertiesDialog(
             MqObjectType.QUEUE -> MqObjectPropertiesContent(state, "queue_props_group_general") { resolveQueuePropertyGroups(it) }
             MqObjectType.TOPIC -> MqObjectPropertiesContent(state, "topic_props_group_general") { resolveTopicPropertyGroups(it) }
             MqObjectType.SUBSCRIPTION -> MqObjectPropertiesContent(state, "sub_props_group_general") { resolveSubscriptionPropertyGroups(it) }
-            MqObjectType.CHANNEL -> MqObjectPropertiesContent(state, "channel_props_group_general") { resolveChannelPropertyGroups(it) }
+            MqObjectType.CHANNEL -> ChannelPropertiesContent(state)
             MqObjectType.LISTENER -> MqObjectPropertiesContent(state, "listener_props_group_general") { resolveListenerPropertyGroups(it) }
             MqObjectType.SERVICE -> MqObjectPropertiesContent(state, "service_props_group_general") { resolveServicePropertyGroups(it) }
             MqObjectType.PROCESS -> MqObjectPropertiesContent(state, "process_props_group_general") { resolveProcessPropertyGroups(it) }

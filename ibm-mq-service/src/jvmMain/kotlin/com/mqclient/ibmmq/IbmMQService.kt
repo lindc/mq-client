@@ -16,6 +16,7 @@ import com.mqclient.ibmmq.messaging.deleteMessageById
 import com.mqclient.ibmmq.messaging.downloadMessageBody
 import com.mqclient.ibmmq.messaging.getMessageDetail
 import com.mqclient.ibmmq.messaging.sendMessageToQueue
+import com.mqclient.ibmmq.pcf.ChannelStatusDetail
 import com.mqclient.ibmmq.pcf.ClusterRelations
 import com.mqclient.ibmmq.pcf.MqObjectSnapshot
 import com.mqclient.ibmmq.pcf.MqObjectType
@@ -250,6 +251,18 @@ class IbmMQService(private val context: ServiceContext) {
         )
         return resolved
     }
+
+    /**
+     * 单通道运行状态明细（属性对话框「运行状态」分组用）：实时查询
+     * INQUIRE_CHANNEL_STATUS 全量应答（序列号 / in-doubt / 消息数 / 字节 /
+     * 最后消息时间），**不写缓存、不发事件** —— 与 [pollChannelStatus] 的
+     * 「写缓存 + 列表刷新」语义区分：这里只服务单对象的即时展示。
+     *
+     * 通道已完全停止返回 null（UI 显示「通道未运行」）；连接未建立 / 查询失败
+     * 抛异常，由 UI 转「加载失败」。
+     */
+    suspend fun getChannelStatus(connectionId: String, name: String): ChannelStatusDetail? =
+        objectScanner.queryChannelStatusDetail(connectionId, name)
 
     /**
      * 打开队列消息浏览会话（消息处理对话框用）：在该连接的 [MQQueueManager] 上以

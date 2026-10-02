@@ -34,15 +34,24 @@ import com.mqclient.uicommon.i18n.stringResource
  * 属性分组面板（queue / listener 属性对话框共用）：布局对齐 MQ Explorer 的
  * properties 对话框——左侧分组列表，右侧属性行：属性名（i18n）+ 一句话说明 +
  * 值（MQ 常量转本地化说明）。
+ *
+ * [customPanes]：额外的**自渲染**分组（键 = 分组标题 i18n 键，值 = 面板内容），
+ * 排在静态分组之后出现在左侧列表里，选中时右侧渲染面板本身而不是属性行。
+ * 通道属性对话框用它挂「运行状态」分组（实时数据 + 操作按钮，静态属性行装不下）；
+ * 其余对象类型不传，行为与原来完全一致。
  */
 @Composable
 internal fun PropertyGroupsPane(
     groups: List<Pair<ObjectPropertyGroup, List<ResolvedObjectProperty>>>,
     defaultSelectionKey: String,
+    customPanes: Map<String, @Composable () -> Unit> = emptyMap(),
 ) {
     var selected by remember(groups) {
         mutableStateOf(groups.firstOrNull()?.first?.titleKey ?: defaultSelectionKey)
     }
+
+    // 自定义分组里不属于静态分组的（正常情况全部如此），追加在左侧列表末尾。
+    val customEntries = customPanes.filterKeys { key -> groups.none { it.first.titleKey == key } }
 
     Row(modifier = Modifier.fillMaxSize()) {
         // 左：分组列表（SettingsDialog.SideNav 风格）
@@ -54,25 +63,14 @@ internal fun PropertyGroupsPane(
                 .padding(vertical = 8.dp),
         ) {
             groups.forEach { (group, _) ->
-                val isSelected = group.titleKey == selected
-                Text(
-                    text = stringResource(group.titleKey),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(
-                            if (isSelected) MaterialTheme.colorScheme.primaryContainer
-                            else MaterialTheme.colorScheme.surfaceVariant,
-                        )
-                        .clickable { selected = group.titleKey }
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                )
+                GroupEntry(titleKey = group.titleKey, selected = group.titleKey == selected) { selected = group.titleKey }
+            }
+            customEntries.keys.forEach { titleKey ->
+                GroupEntry(titleKey = titleKey, selected = titleKey == selected) { selected = titleKey }
             }
         }
 
-        // 右：所选分组的属性行（滚动）
+        // 右：所选分组的内容（滚动）——自定义面板优先，否则渲染属性行。
         Column(
             modifier = Modifier
                 .weight(1f)
@@ -80,6 +78,11 @@ internal fun PropertyGroupsPane(
                 .verticalScroll(rememberScrollState())
                 .padding(20.dp),
         ) {
+            val customPane = customEntries[selected] ?: customPanes[selected]
+            if (customPane != null) {
+                customPane()
+                return@Column
+            }
             val rows = groups
                 .firstOrNull { it.first.titleKey == selected }
                 ?.second
@@ -102,6 +105,25 @@ internal fun PropertyGroupsPane(
             }
         }
     }
+}
+
+/** 左侧列表的分组条目（选中态高亮 + 点击切换）。 */
+@Composable
+private fun GroupEntry(titleKey: String, selected: Boolean, onClick: () -> Unit) {
+    Text(
+        text = stringResource(titleKey),
+        style = MaterialTheme.typography.bodyMedium,
+        color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
+        else MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                if (selected) MaterialTheme.colorScheme.primaryContainer
+                else MaterialTheme.colorScheme.surfaceVariant,
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+    )
 }
 
 /**

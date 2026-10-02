@@ -1,5 +1,7 @@
 package com.mqclient.ibmmq.command
 
+import com.ibm.mq.pcf.PCFException
+
 /**
  * MQRC（2000 段）/ MQRCCF（3000 段）原因码 → 可读说明。服务端模块（无 Compose），
  * 文案不经 stringResource —— 这是数据层的翻译表，不是界面拷贝。
@@ -42,8 +44,20 @@ object MqrcTranslator {
         3019 -> "参数个数太少（escape 请求缺 EscapeType 等必需参数）(MQRCCF_PARM_COUNT_TOO_SMALL)"
         3020 -> "参数个数太多 (MQRCCF_PARM_COUNT_TOO_BIG)"
         3023 -> "消息描述符格式错误 (MQRCCF_MD_FORMAT_ERROR)"
+        // 按名查 CHSTATUS / LISTENER_STATUS 时「对象无状态实例」会以此码失败（不是空结果）
+        3065 -> "通道无状态记录（未运行或从未启动）(MQRCCF_CHL_STATUS_NOT_FOUND)"
         3247 -> "浮点参数 ID 无效 (MQRCCF_CFSF_PARM_ID_ERROR)"
 
         else -> "未知原因码: $reasonCode"
+    }
+
+    /**
+     * MQ 查询/命令异常 → 可读文案：PCFException 走原因码翻译表，其余取 message。
+     * 放在服务模块的理由：PCFException 是 allclient 类型（implementation 依赖），
+     * UI 模块引用不到 —— 调用方只拿 String，不暴露底层类型。
+     */
+    fun describe(error: Throwable): String = when (error) {
+        is PCFException -> translate(error.reasonCode)
+        else -> error.message ?: error::class.simpleName ?: "unknown"
     }
 }

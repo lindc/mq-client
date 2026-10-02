@@ -68,7 +68,6 @@ class PcfObjectScanner {
         val response = inquire(agent, MQConstants.MQCMD_INQUIRE_Q_MGR) {
             // 无参数
         }.firstOrNull() ?: return null
-        val snapshot = response.toSnapshot(MqObjectType.QUEUE_MANAGER, MQConstants.MQCA_Q_MGR_NAME)
         // 并入运行状态（属性对话框 General 页的「队列管理器状态」）：部分平台 /
         // 权限受限平台可能查不动状态，失败只记日志，不让它拖垮整轮扫描。
         val status = runCatching {
@@ -76,8 +75,7 @@ class PcfObjectScanner {
                 // 无参数
             }.firstOrNull()?.intValue(MQConstants.MQIACF_Q_MGR_STATUS)
         }.getOrNull()
-        return if (status == null) snapshot
-        else snapshot.copy(attributes = snapshot.attributes + ("MQIACF_Q_MGR_STATUS" to status))
+        return queueManagerSnapshotFrom(response, status)
     }
 
     /**
@@ -112,21 +110,16 @@ class PcfObjectScanner {
         val openProcessIds = inquire(agent, MQConstants.MQCMD_INQUIRE_Q_STATUS) {
             addParameter(MQConstants.MQCA_Q_NAME, "*")
             addParameter(MQConstants.MQIACF_Q_STATUS_TYPE, MQConstants.MQIACF_Q_HANDLE)
-        }.mapNotNull { handle ->
-            val name = handle.stringValue(MQConstants.MQCA_Q_NAME) ?: return@mapNotNull null
-            val pid = handle.intValue(MQConstants.MQIACF_PROCESS_ID) ?: return@mapNotNull null
-            name to pid
-        }.groupBy({ it.first }, { it.second })
+        }.mapNotNull(::openProcessIdPairFrom).groupBy({ it.first }, { it.second })
 
         return attributes.mapNotNull { response ->
             val name = response.stringValue(MQConstants.MQCA_Q_NAME)
-            val status = statuses[name]
-            val extended = extendedAttrs[name]?.let { extractAttributes(it) } ?: emptyMap()
-            response.toQueueSnapshot(status).let { snapshot ->
-                val extras = extended +
-                    listOfNotNull(openProcessIds[name]?.let { "MQIACF_OPEN_PROCESS_IDS" to it })
-                if (extras.isEmpty()) snapshot else snapshot.copy(attributes = snapshot.attributes + extras)
-            }
+            queueSnapshotFrom(
+                response = response,
+                status = statuses[name],
+                extendedAttrs = extendedAttrs[name]?.let { extractAttributes(it) } ?: emptyMap(),
+                openProcessIds = openProcessIds[name],
+            )
         }
     }
 
@@ -137,16 +130,10 @@ class PcfObjectScanner {
     suspend fun scanQueueStatuses(connectionId: String): List<Pair<String, Int>> =
         withAgent(connectionId) { scanQueueStatusesWith(it) }
 
-    internal suspend fun scanQueueStatusesWith(agent: PCFMessageAgent): List<Pair<String, Int>> {
-        val responses = inquire(agent, MQConstants.MQCMD_INQUIRE_Q_STATUS) {
+    internal suspend fun scanQueueStatusesWith(agent: PCFMessageAgent): List<Pair<String, Int>> =
+        inquire(agent, MQConstants.MQCMD_INQUIRE_Q_STATUS) {
             addParameter(MQConstants.MQCA_Q_NAME, "*")
-        }
-        return responses.mapNotNull { response ->
-            val name = response.stringValue(MQConstants.MQCA_Q_NAME) ?: return@mapNotNull null
-            val depth = response.intValue(MQConstants.MQIA_CURRENT_Q_DEPTH) ?: return@mapNotNull null
-            name to depth
-        }
-    }
+        }.mapNotNull(::queueDepthPairFrom)
 
     /**
      * 通道状态快扫（心跳用）：只发 INQUIRE_CHANNEL_STATUS 一条，取名字 + 运行状态
@@ -155,16 +142,10 @@ class PcfObjectScanner {
     suspend fun scanChannelStatuses(connectionId: String): List<Pair<String, Int>> =
         withAgent(connectionId) { scanChannelStatusesWith(it) }
 
-    internal suspend fun scanChannelStatusesWith(agent: PCFMessageAgent): List<Pair<String, Int>> {
-        val responses = inquire(agent, MQConstants.MQCMD_INQUIRE_CHANNEL_STATUS) {
+    internal suspend fun scanChannelStatusesWith(agent: PCFMessageAgent): List<Pair<String, Int>> =
+        inquire(agent, MQConstants.MQCMD_INQUIRE_CHANNEL_STATUS) {
             addParameter(MQConstants.MQCACH_CHANNEL_NAME, "*")
-        }
-        return responses.mapNotNull { response ->
-            val name = response.stringValue(MQConstants.MQCACH_CHANNEL_NAME) ?: return@mapNotNull null
-            val status = response.intValue(MQConstants.MQIACH_CHANNEL_STATUS) ?: return@mapNotNull null
-            name to status
-        }
-    }
+        }.mapNotNull(::channelStatusPairFrom)
 
     /**
      * 单通道状态查询（通道启停后轮询用）：INQUIRE_CHANNEL_STATUS 只查指定通道名，
@@ -175,14 +156,57 @@ class PcfObjectScanner {
         withAgent(connectionId) { queryChannelStatusWith(it, name) }
 
     internal suspend fun queryChannelStatusWith(agent: PCFMessageAgent, name: String): List<Pair<String, Int>> {
-        val responses = inquire(agent, MQConstants.MQCMD_INQUIRE_CHANNEL_STATUS) {
-            addParameter(MQConstants.MQCACH_CHANNEL_NAME, name)
+        // 注意：INQUIRE_CHANNEL_STATUS 对**已停 / 从未启动**的通道（按名字查询）不返回
+        // 空结果，而是回 MQCC_FAILED + 3065 MQRCCF_CHL_STATUS_NOT_FOUND —— 这正是
+        // 「未运行」的信号，必须转成空列表（与监听器查询的 2085 → 空列表同款坑），
+        // 否则启停轮询会把已停通道当成查询失败。
+        val responses = try {
+            inquire(agent, MQConstants.MQCMD_INQUIRE_CHANNEL_STATUS) {
+                addParameter(MQConstants.MQCACH_CHANNEL_NAME, name)
+            }
+        } catch (e: PCFException) {
+            if (e.reasonCode == MQConstants.MQRCCF_CHL_STATUS_NOT_FOUND) return emptyList()
+            throw e
         }
-        return responses.mapNotNull { response ->
-            val n = response.stringValue(MQConstants.MQCACH_CHANNEL_NAME) ?: return@mapNotNull null
-            val status = response.intValue(MQConstants.MQIACH_CHANNEL_STATUS) ?: return@mapNotNull null
-            n to status
+        return responses.mapNotNull(::channelStatusPairFrom)
+    }
+
+    /**
+     * 单通道运行状态明细（属性对话框「运行状态」分组用）：INQUIRE_CHANNEL_STATUS
+     * 只查指定通道名，取**全量应答**的第一个实例行（SVRCONN 多活动连接时多行，
+     * 运行指标取第一个实例；一个通道定义的其他实例按同口径处理语义差异不大）。
+     *
+     * 通道已完全停止（无状态行）返回 null —— 与 [queryChannelStatus] 的空列表同义，
+     * UI 显示「通道未运行」而不是拿 0 冒充指标。
+     *
+     * 取值走 [extractAttributes]（mapper 反查的可读键），与属性对话框「全部属性」
+     * 兜底视图同一套键名 —— 同一字段两处显示永远一致。序列号 / in-doubt 的常量
+     * 名在 10.0.0.5 客户端有别名同值（1529/1532 各有两个名字、1516/1528 两个
+     * in-doubt 族 ID），读取时做别名兼容，不依赖 mapper 反查的第一个名字。
+     */
+    suspend fun queryChannelStatusDetail(connectionId: String, name: String): ChannelStatusDetail? =
+        withAgent(connectionId) { queryChannelStatusDetailWith(it, name) }
+
+    internal suspend fun queryChannelStatusDetailWith(agent: PCFMessageAgent, name: String): ChannelStatusDetail? {
+        // 3065 MQRCCF_CHL_STATUS_NOT_FOUND = 通道无状态实例（已停 / 从未启动）——
+        // 与 [queryChannelStatusWith] 同款坑，转成 null 让 UI 显示「通道未运行」。
+        fun statusRow(instanceType: Int): PCFMessage? = try {
+            inquire(agent, MQConstants.MQCMD_INQUIRE_CHANNEL_STATUS) {
+                addParameter(MQConstants.MQCACH_CHANNEL_NAME, name)
+                addParameter(MQConstants.MQIACH_CHANNEL_INSTANCE_TYPE, instanceType)
+            }.firstOrNull()
+        } catch (e: PCFException) {
+            if (e.reasonCode == MQConstants.MQRCCF_CHL_STATUS_NOT_FOUND) return null
+            throw e
         }
+
+        val current = statusRow(MQConstants.MQOT_CURRENT_CHANNEL) ?: return null
+        val detail = channelStatusDetailFrom(name, current) ?: return null
+        // 序列号回落：部分 QM（实测 9.2.4 容器）CURRENT 行的序列号恒为 0（流量计数
+        // 不更新），真实序列号在 SAVED 行（上次实例的最终值）。0 / 缺失时回落 SAVED，
+        // 避免把 0 当成真实值显示。
+        val saved = statusRow(MQConstants.MQOT_SAVED_CHANNEL)
+        return mergeSavedSeqNumbers(detail, saved?.let(::extractAttributes))
     }
 
     /**
@@ -212,11 +236,7 @@ class PcfObjectScanner {
         }.associateBy { it.stringValue(MQConstants.MQCACH_CHANNEL_NAME) }
 
         return attributes.mapNotNull { response ->
-            val status = statuses[response.stringValue(MQConstants.MQCACH_CHANNEL_NAME)]
-            response.toSnapshot(MqObjectType.CHANNEL, MQConstants.MQCACH_CHANNEL_NAME, status).copy(
-                channelStatus = status?.let { channelStatusName(it.intValue(MQConstants.MQIACH_CHANNEL_STATUS)) },
-                channelType = channelTypeName(response.intValue(MQConstants.MQIACH_CHANNEL_TYPE)),
-            )
+            channelSnapshotFrom(response, statuses[response.stringValue(MQConstants.MQCACH_CHANNEL_NAME)])
         }
     }
 
@@ -255,12 +275,7 @@ class PcfObjectScanner {
         }.associateBy { it.stringValue(MQConstants.MQCACH_LISTENER_NAME) }
 
         return attributes.mapNotNull { response ->
-            val status = statuses[response.stringValue(MQConstants.MQCACH_LISTENER_NAME)]
-            response.toSnapshot(MqObjectType.LISTENER, MQConstants.MQCACH_LISTENER_NAME, status).copy(
-                listenerStatus = status?.let { listenerStatusName(it.intValue(MQConstants.MQIACH_LISTENER_STATUS)) },
-                port = status?.intValue(MQConstants.MQIACH_PORT)
-                    ?: response.intValue(MQConstants.MQIACH_PORT),
-            )
+            listenerSnapshotFrom(response, statuses[response.stringValue(MQConstants.MQCACH_LISTENER_NAME)])
         }
     }
 
@@ -283,11 +298,7 @@ class PcfObjectScanner {
             if (e.reasonCode == MQConstants.MQRC_UNKNOWN_OBJECT_NAME) return emptyList()
             throw e
         }
-        return responses.mapNotNull { response ->
-            val n = response.stringValue(MQConstants.MQCACH_LISTENER_NAME) ?: return@mapNotNull null
-            val status = response.intValue(MQConstants.MQIACH_LISTENER_STATUS) ?: return@mapNotNull null
-            n to status
-        }
+        return responses.mapNotNull(::listenerStatusPairFrom)
     }
 
     /** 所有服务定义。 */
@@ -379,30 +390,7 @@ class PcfObjectScanner {
         val responses = inquire(agent, MQConstants.MQCMD_INQUIRE_CLUSTER_Q_MGR) {
             addParameter(MQConstants.MQCA_CLUSTER_Q_MGR_NAME, "*")
         }
-        return responses.mapNotNull { response ->
-            val attrs = extractAttributes(response)
-            val qmgrName = (attrs["MQCA_CLUSTER_Q_MGR_NAME"]
-                ?: attrs["MQCA_Q_MGR_NAME"])?.toString()?.trim() ?: return@mapNotNull null
-            ClusterMember(
-                qmgrName = qmgrName,
-                clusterName = attrs["MQCA_CLUSTER_NAME"]?.toString()?.trim().orEmpty(),
-                // 通道名：10.0.0.5 客户端 MQCACH_CHANNEL_NAME 与 MQCACH_FIRST 同值
-                // （3501，经典 CHANNEL_NAME 应为 3510，见 ClusterConstantsDiagTest），
-                // mapper 把该参数命名成 MQCACH_FIRST（实测 dump：TO.QMx）。常规键在前，
-                // 客户端修正后自动切换。
-                channelName = (attrs["MQCACH_CHANNEL_NAME"] ?: attrs["MQCACH_FIRST"])
-                    ?.toString()?.trim().orEmpty(),
-                // QMTYPE：响应参数是 MQIACF_Q_MGR_TYPE（MQQMT_* 值族，实测 1=完整仓库
-                // 0=部分仓库）；MQIA_CLUSTER_Q_TYPE（59）在 CLUSQMGR 响应中不存在。
-                qmType = clusterQmTypeName(attrs["MQIACF_Q_MGR_TYPE"]),
-                defType = clusterDefTypeName(attrs["MQIACF_Q_MGR_DEFINITION_TYPE"]),
-                conName = attrs["MQCACH_CONNECTION_NAME"]?.toString()?.trim(),
-                // 状态：远端成员带 MQIACH_CHANNEL_STATUS（MQCHS_* 值族，0=INACTIVE）；
-                // 本地 QMgr 自身行无此参数 → null（UI 显示 "-" + tooltip）。
-                status = (attrs["MQIACH_CHANNEL_STATUS"] as? Number)
-                    ?.let { channelStatusName(it.toInt()) },
-            )
-        }
+        return responses.mapNotNull(::clusterMemberFrom)
     }
 
     /* --------------------------- 对外：全量扫描（逐类兜底） --------------------------- */
@@ -578,6 +566,21 @@ internal fun PCFMessage.stringValue(selector: Int): String? = when (val value = 
 /** 取整型参数（非 Int 一律 null，调用方用 null 语义兜底）。 */
 internal fun PCFMessage.intValue(selector: Int): Int? = getParameterValue(selector) as? Int
 
+/** 属性 map 里按候选键取整数值（别名同值常量做兼容，见 [queryChannelStatusDetailWith]）。 */
+internal fun Map<String, Any?>.longOf(vararg keys: String): Long? =
+    keys.firstNotNullOfOrNull { key -> (this[key] as? Number)?.toLong() }
+
+/** 属性 map 里按候选键取字符串值（空白视为缺失）。 */
+internal fun Map<String, Any?>.strOf(vararg keys: String): String? =
+    keys.firstNotNullOfOrNull { key -> (this[key] as? String)?.trim()?.takeIf { it.isNotEmpty() } }
+
+/**
+ * 属性 map 里按候选键取布尔值：in-doubt 族在响应里是 0/1 整型
+ * （MQCHID_NO=0 / MQCHID_YES=1 语义）；任一候选键非 0 即 true。
+ */
+internal fun Map<String, Any?>.boolOf(vararg keys: String): Boolean? =
+    keys.firstNotNullOfOrNull { key -> (this[key] as? Number)?.toInt() }?.let { it != 0 }
+
 /** 通用快照：全量属性 + 名字 + 描述；状态响应的参数覆盖同名属性键。 */
 internal fun PCFMessage.toSnapshot(
     type: MqObjectType,
@@ -621,6 +624,145 @@ internal fun PCFMessage.toQueueSnapshot(status: PCFMessage?): MqObjectSnapshot {
  */
 internal fun channelStatusName(value: Int?): String? =
     value?.let { MqAttributeNameMapper.lookupName(it, "MQCHS") }?.substringAfter("MQCHS_") ?: value?.let { "STATE_$it" }
+
+/**
+ * CHSTATUS 应答 → 运行状态明细（纯转换，internal 供单测）：[response] 为 null
+ * （通道已停，无状态行）返回 null。字段映射与别名兼容策略见
+ * [queryChannelStatusDetail] 的 KDoc —— 键名走 mapper 反查的可读键，序列号 /
+ * in-doubt 按别名候选集兜底。
+ */
+internal fun channelStatusDetailFrom(name: String, response: PCFMessage?): ChannelStatusDetail? {
+    if (response == null) return null
+    val attrs = extractAttributes(response)
+    return ChannelStatusDetail(
+        channelName = name.trim(),
+        channelType = (attrs["MQIACH_CHANNEL_TYPE"] as? Number)?.let { channelTypeName(it.toInt()) },
+        status = (attrs["MQIACH_CHANNEL_STATUS"] as? Number)?.let { channelStatusName(it.toInt()) },
+        currentSeqNo = attrs.longOf("MQIACH_CURRENT_SEQ_NUMBER", "MQIACH_CURRENT_SEQUENCE_NUMBER"),
+        lastSeqNum = attrs.longOf("MQIACH_LAST_SEQ_NUMBER", "MQIACH_LAST_SEQUENCE_NUMBER"),
+        inDoubt = attrs.boolOf("MQIACH_IN_DOUBT", "MQIACH_INDOUBT_STATUS"),
+        messages = attrs.longOf("MQIACH_MSGS"),
+        bytesSent = attrs.longOf("MQIACH_BYTES_SENT"),
+        bytesReceived = attrs.longOf("MQIACH_BYTES_RCVD"),
+        lastMsgDate = attrs.strOf("MQCACH_LAST_MSG_DATE"),
+        lastMsgTime = attrs.strOf("MQCACH_LAST_MSG_TIME"),
+    )
+}
+
+/**
+ * 序列号的 SAVED 行回落（纯转换，internal 供单测）：CURRENT 行的序列号为 0 / 缺失
+ * （部分 QM 的当前实例行不上报序列号，实测 9.2.4 容器）时，取 SAVED 行（上次实例的
+ * 最终值）兜底；CURRENT 行有真实值（> 0）时不覆盖 —— SAVED 在长连接下是旧的。
+ * [savedAttrs] 为 null（无 SAVED 行，如从未运行过）原样返回。
+ */
+internal fun mergeSavedSeqNumbers(detail: ChannelStatusDetail, savedAttrs: Map<String, Any?>?): ChannelStatusDetail {
+    if (savedAttrs == null) return detail
+    val needCur = detail.currentSeqNo == null || detail.currentSeqNo == 0L
+    val needLast = detail.lastSeqNum == null || detail.lastSeqNum == 0L
+    if (!needCur && !needLast) return detail
+    return detail.copy(
+        currentSeqNo = if (needCur) savedAttrs.longOf("MQIACH_CURRENT_SEQ_NUMBER", "MQIACH_CURRENT_SEQUENCE_NUMBER") ?: detail.currentSeqNo else detail.currentSeqNo,
+        lastSeqNum = if (needLast) savedAttrs.longOf("MQIACH_LAST_SEQ_NUMBER", "MQIACH_LAST_SEQUENCE_NUMBER") ?: detail.lastSeqNum else detail.lastSeqNum,
+    )
+}
+
+/** 单条 Q_STATUS 应答 → 名字 + 当前深度（心跳快扫用）；名字 / 深度缺一即丢弃。 */
+internal fun queueDepthPairFrom(response: PCFMessage): Pair<String, Int>? {
+    val name = response.stringValue(MQConstants.MQCA_Q_NAME) ?: return null
+    val depth = response.intValue(MQConstants.MQIA_CURRENT_Q_DEPTH) ?: return null
+    return name to depth
+}
+
+/** 单条 CHSTATUS 应答 → 名字 + 运行状态原始值（快扫与单查共用，名字 / 状态缺一即丢弃）。 */
+internal fun channelStatusPairFrom(response: PCFMessage): Pair<String, Int>? {
+    val name = response.stringValue(MQConstants.MQCACH_CHANNEL_NAME) ?: return null
+    val status = response.intValue(MQConstants.MQIACH_CHANNEL_STATUS) ?: return null
+    return name to status
+}
+
+/** 单条 LISTENER_STATUS 应答 → 名字 + 运行状态原始值；名字 / 状态缺一即丢弃。 */
+internal fun listenerStatusPairFrom(response: PCFMessage): Pair<String, Int>? {
+    val name = response.stringValue(MQConstants.MQCACH_LISTENER_NAME) ?: return null
+    val status = response.intValue(MQConstants.MQIACH_LISTENER_STATUS) ?: return null
+    return name to status
+}
+
+/** 单条句柄状态应答 → 名字 + 打开者进程号；名字 / 进程号缺一即丢弃。 */
+internal fun openProcessIdPairFrom(response: PCFMessage): Pair<String, Int>? {
+    val name = response.stringValue(MQConstants.MQCA_Q_NAME) ?: return null
+    val pid = response.intValue(MQConstants.MQIACF_PROCESS_ID) ?: return null
+    return name to pid
+}
+
+/**
+ * QMGR 属性应答 → 快照，并入 QMGR 运行状态（[qmgrStatus] 为 null = 状态查询没拿到，
+ * 不加 `MQIACF_Q_MGR_STATUS` 键）。
+ */
+internal fun queueManagerSnapshotFrom(response: PCFMessage, qmgrStatus: Int?): MqObjectSnapshot {
+    val snapshot = response.toSnapshot(MqObjectType.QUEUE_MANAGER, MQConstants.MQCA_Q_MGR_NAME)
+    return if (qmgrStatus == null) snapshot
+    else snapshot.copy(attributes = snapshot.attributes + ("MQIACF_Q_MGR_STATUS" to qmgrStatus))
+}
+
+/**
+ * 队列属性应答 → 快照，叠加扩展属性（alias / remote 点名查询的产物）与打开者
+ * 进程号列表（null = 无人打开，不加 `MQIACF_OPEN_PROCESS_IDS` 键）。
+ */
+internal fun queueSnapshotFrom(
+    response: PCFMessage,
+    status: PCFMessage?,
+    extendedAttrs: Map<String, Any?> = emptyMap(),
+    openProcessIds: List<Int>? = null,
+): MqObjectSnapshot =
+    response.toQueueSnapshot(status).let { snapshot ->
+        val extras = extendedAttrs +
+            listOfNotNull(openProcessIds?.let { "MQIACF_OPEN_PROCESS_IDS" to it })
+        if (extras.isEmpty()) snapshot else snapshot.copy(attributes = snapshot.attributes + extras)
+    }
+
+/** 通道属性应答 + 状态应答 → 快照（channelStatus / channelType 提升为可读名强类型字段）。 */
+internal fun channelSnapshotFrom(response: PCFMessage, status: PCFMessage?): MqObjectSnapshot =
+    response.toSnapshot(MqObjectType.CHANNEL, MQConstants.MQCACH_CHANNEL_NAME, status).copy(
+        channelStatus = status?.let { channelStatusName(it.intValue(MQConstants.MQIACH_CHANNEL_STATUS)) },
+        channelType = channelTypeName(response.intValue(MQConstants.MQIACH_CHANNEL_TYPE)),
+    )
+
+/** 监听器属性应答 + 状态应答 → 快照（port 优先取状态行，缺状态回落定义属性）。 */
+internal fun listenerSnapshotFrom(response: PCFMessage, status: PCFMessage?): MqObjectSnapshot =
+    response.toSnapshot(MqObjectType.LISTENER, MQConstants.MQCACH_LISTENER_NAME, status).copy(
+        listenerStatus = status?.let { listenerStatusName(it.intValue(MQConstants.MQIACH_LISTENER_STATUS)) },
+        port = status?.intValue(MQConstants.MQIACH_PORT)
+            ?: response.intValue(MQConstants.MQIACH_PORT),
+    )
+
+/**
+ * 单条 CLUSQMGR 应答 → [ClusterMember]（QMgr 名缺失丢弃该条）。字段映射的常量坑
+ * 注释随逻辑一起搬到这里 —— 纯转换，离线可测。
+ */
+internal fun clusterMemberFrom(response: PCFMessage): ClusterMember? {
+    val attrs = extractAttributes(response)
+    val qmgrName = (attrs["MQCA_CLUSTER_Q_MGR_NAME"]
+        ?: attrs["MQCA_Q_MGR_NAME"])?.toString()?.trim() ?: return null
+    return ClusterMember(
+        qmgrName = qmgrName,
+        clusterName = attrs["MQCA_CLUSTER_NAME"]?.toString()?.trim().orEmpty(),
+        // 通道名：10.0.0.5 客户端 MQCACH_CHANNEL_NAME 与 MQCACH_FIRST 同值
+        // （3501，经典 CHANNEL_NAME 应为 3510，见 ClusterConstantsDiagTest），
+        // mapper 把该参数命名成 MQCACH_FIRST（实测 dump：TO.QMx）。常规键在前，
+        // 客户端修正后自动切换。
+        channelName = (attrs["MQCACH_CHANNEL_NAME"] ?: attrs["MQCACH_FIRST"])
+            ?.toString()?.trim().orEmpty(),
+        // QMTYPE：响应参数是 MQIACF_Q_MGR_TYPE（MQQMT_* 值族，实测 1=完整仓库
+        // 0=部分仓库）；MQIA_CLUSTER_Q_TYPE（59）在 CLUSQMGR 响应中不存在。
+        qmType = clusterQmTypeName(attrs["MQIACF_Q_MGR_TYPE"]),
+        defType = clusterDefTypeName(attrs["MQIACF_Q_MGR_DEFINITION_TYPE"]),
+        conName = attrs["MQCACH_CONNECTION_NAME"]?.toString()?.trim(),
+        // 状态：远端成员带 MQIACH_CHANNEL_STATUS（MQCHS_* 值族，0=INACTIVE）；
+        // 本地 QMgr 自身行无此参数 → null（UI 显示 "-" + tooltip）。
+        status = (attrs["MQIACH_CHANNEL_STATUS"] as? Number)
+            ?.let { channelStatusName(it.toInt()) },
+    )
+}
 
 /**
  * CLUSQMGR 的仓库角色（响应参数 MQIACF_Q_MGR_TYPE，值族 MQQMT_*）→ REPOS / NORMAL
