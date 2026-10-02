@@ -6,6 +6,32 @@
 
 ### Added
 
+- **通道属性对话框新增「运行状态」分组 + 序列号重置**（commit 6186970）：
+  第三分组（常规 / 全部属性之间）实时 INQUIRE_CHANNEL_STATUS，展示序列号 /
+  in-doubt / 消息数 / 收发字节 / 最后消息时间，与 DISPLAY CHANNEL 缓存严格分层；
+  PropertyGroupsPane 加 `customPanes` 扩展点（其余 9 类对象行为不变）。序列号
+  重置走二次确认对话框（当前值 + 新值输入）经 MqscExecutor 发
+  `RESET CHANNEL … SEQNUM(n)`。坑位（反编译 allclient 10.0.0.5 + 真机实测）：
+  序列号 wire 名是 `MQIACH_CURRENT/LAST_SEQ_NUMBER`（经典 `*_SEQ_NO` 常量在
+  该 jar 不存在）；按名查已停通道回 3065 MQRCCF_CHL_STATUS_NOT_FOUND（非空
+  结果，与监听器 2085 同款坑）；9.2.4 容器 QM 的 CURRENT 状态行流量计数恒 0，
+  真实序列号在 SAVED 行（1012 实例类型），读取做 SAVED 回落。
+- **消息详情对话框新增 dmpmqmsg 导出/导入**（commit 3de8a16）：底部按钮栏改
+  「下载消息体 | 导出 dmpmqmsg | 导入 dmpmqmsg | 关闭」。`DmpmqmsgFormat` 按
+  真实 dmpmqmsg 9.2.4.0 导出样例逐行校准（`A` 属性行 / `X` hex 数据行
+  25 字节每行 / 空行分隔消息 / 字符域带 MQMD padding 输出、字节域转 hex，
+  经典 `*_SEQ_NO` 常量名陷阱均已实证）；宽松行解析兼容 `-dH` 无文件头产物，
+  解析出 0 条消息即判定非 dmpmqmsg 格式走 fallback（取消 / 按普通文件发送）。
+  导入预览对话框支持多消息选择，属性还原策略：MessageId 不还原（MQ 重新
+  生成），CorrelId（hex→24 字节）/ Persistence / Priority / Expiry / ReplyTo /
+  Format / CCSID 还原；MessageDetail 扩展 18 个导出所需 MQMD 原始字段，
+  `sendMessageToQueue` 加可选参数（向后兼容）。**官方工具回灌验收通过**
+  （www.chillbear.top 容器 ibmmq / QM1 9.2.4.0 实测）：mq-client 导出文件经
+  官方 `dmpmqmsg -m QM1 -o <队列> -f` 成功回灌，`Read 1 message 43 bytes →
+  Written 43 bytes`、`CURDEPTH(1)`，且回灌消息与原文件 **MQMD 全字段逐字段
+  一致（含 MessageId / AccountingToken / ApplIdentityData / GroupId）**、消息体
+  43 字节逐字节一致；官方 `dmpmqmsg -i` 导出与 `DmpmqmsgFormat.export` 输出
+  逐行一致。单测 6 例（fixture = 真实导出样例）。
 - **属性对话框「全部属性」对齐 MQ Explorer 文案**：新增 `scripts/gen_mq_attr_display.py`，
   从本机 MQ Explorer（`com.ibm.mq.explorer.core` 插件）提取 `MQXXX.title`
   友好名（属性名 + 枚举常量值，en / zh-CN 各 1728 条，生成 ibm-mq-ui 模块
