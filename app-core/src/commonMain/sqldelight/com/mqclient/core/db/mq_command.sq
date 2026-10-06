@@ -1,0 +1,23 @@
+-- MQ 写操作命令历史表（审计）：只有 INSERT，没有 UPDATE / DELETE。
+-- 记录「发给队列管理器的写操作命令」——DISPLAY 等只读命令不进这张表（判定在发出方
+-- 咽喉点 MqscExecutor.executeSingle，见 MqCommandHistoryEmitter）。
+-- 写入走事件（`core.mq.command.executed`，app-core 的 MqCommandHistoryHandler 落库）；
+-- 本次只做写入，不做查询 UI（查询方法后续按需补）。
+CREATE TABLE IF NOT EXISTS mq_command (
+    id            TEXT PRIMARY KEY NOT NULL,  -- 记录自身 UUIDv7（与连接 id 无关）
+    connection_id TEXT NOT NULL,              -- 连接 UUIDv7（= ConnectionInfo.id，快照表 mq_connection.id 同源）
+    command       TEXT NOT NULL,              -- 展开后发给 QMGR 的命令原文，不截断
+    response      TEXT,                       -- 完整输出（成功 = PCF 回显；失败 = 错误翻译说明）
+    status        TEXT NOT NULL,              -- SUCCESS / FAILED / CANCELLED（预留，见下）
+    reason_code   TEXT,                       -- PCF/MQRC 原因码数字串；成功为 NULL
+    request_time  INTEGER NOT NULL,           -- 命令发起时刻（Unix 毫秒）
+    response_time INTEGER,                    -- 命令返回时刻（Unix 毫秒）
+    duration_ms   INTEGER                     -- response_time - request_time
+);
+
+CREATE INDEX IF NOT EXISTS idx_mq_command_conn_time ON mq_command(connection_id, request_time DESC);
+CREATE INDEX IF NOT EXISTS idx_mq_command_status ON mq_command(status);
+
+insertCommand:
+INSERT INTO mq_command(id, connection_id, command, response, status, reason_code, request_time, response_time, duration_ms)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);

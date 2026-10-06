@@ -86,6 +86,17 @@ object EventNames {
      */
     const val MQ_CONNECTION_SNAPSHOT_CREATED = "core.mq.connection.snapshot.created"
 
+    /**
+     * 写操作命令已执行；订阅方（app-core 的 MqCommandHistoryHandler）把它写进
+     * mq_command 表（写操作审计，只追加）。发出方是各 MQ 模块的命令执行咽喉点
+     * （IBM MQ = MqscExecutor.executeSingle 经 MqCommandHistoryEmitter）——只记写操作，
+     * DISPLAY 等只读命令不发本事件。payload 自包含，订阅者不需要再查任何数据：
+     * `commandId`(记录 UUIDv7) / `connectionId` / `command`(展开后原文) / `response` /
+     * `status`(SUCCESS|FAILED|CANCELLED) / `reasonCode` / `requestTime` /
+     * `responseTime` / `durationMs`。
+     */
+    const val MQ_COMMAND_EXECUTED = "core.mq.command.executed"
+
     // AI 事件（`ai.*`）不在这里：契约常量跟着发出方走，现在在 ai-service 的
     // `AiEvents`（事件名）与 `AiPayloadKeys`（payload key）里 —— core 不再持有任何 AI 名字。
 }

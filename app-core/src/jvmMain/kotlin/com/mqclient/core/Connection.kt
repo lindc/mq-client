@@ -11,13 +11,19 @@ import kotlinx.coroutines.flow.asStateFlow
 private const val LOG_TAG = "core.connection"
 
 /**
+ * 通用 UUIDv7 生成（时间有序）。连接 id 之外需要时间有序 id 的场景（命令历史记录等）
+ * 也用它 —— 本项目所有落库主键统一 v7，不要写 `UUID.randomUUID()`。
+ */
+fun newUuidV7(): String = UuidCreator.getTimeOrderedEpoch().toString()
+
+/**
  * 连接 id 的唯一生成入口：UUIDv7（时间有序，`com.github.f4b6a3:uuid-creator`）。
  *
  * 为什么 v7 而不是 v4：id 直接当 mq_connection 快照表的主键，时间有序意味着按 id
  * 排序 ≈ 按创建时间排序，B-tree 插入也落在索引右侧（随机 v4 会打散整棵索引）。
- * 所有连接身份——MQ 连接与 AI 连接——都从这里领 id，不要再写 `UUID.randomUUID()`。
+ * 所有连接身份——MQ 连接与 AI 连接——都从这里领 id。
  */
-fun newConnectionId(): String = UuidCreator.getTimeOrderedEpoch().toString()
+fun newConnectionId(): String = newUuidV7()
 
 /**
  * 连接列表：**所有模块共同依赖的唯一入口**，背后是单文件配置 `~/.mqclient/config.toml`

@@ -1,6 +1,8 @@
 package com.mqclient.core
 
 import com.mqclient.core.cache.CacheManager
+import com.mqclient.core.db.MqCommandHistoryHandler
+import com.mqclient.core.db.MqCommandHistoryRepository
 import com.mqclient.core.db.MqConnectionSnapshotHandler
 import com.mqclient.core.db.MqConnectionSnapshotRepository
 import com.mqclient.core.event.EventBus
@@ -51,6 +53,13 @@ object CoreModule {
      * DatabaseManager 的初始化顺序；库没起来时报错走错误通道，不影响连接保存本身。
      */
     private val snapshotHandler = MqConnectionSnapshotHandler(MqConnectionSnapshotRepository)
+
+    /**
+     * 写操作命令历史落库的处理器（mq_command 表）：命令执行咽喉点（IBM MQ =
+     * MqscExecutor.executeSingle）广播 `core.mq.command.executed`，这里统一写库。
+     * 订阅与摸库时机同 [snapshotHandler]。
+     */
+    private val commandHistoryHandler = MqCommandHistoryHandler(MqCommandHistoryRepository)
 
     /** 应用级事件总线。在 [initialize] 之前访问会抛 [IllegalStateException]。 */
     val eventBus: EventBus
@@ -144,6 +153,7 @@ object CoreModule {
         scheduler = JobScheduler(scope, created)
         // 连接快照落库（mq_connection 表）—— 订阅生命周期跟总线一致，见 snapshotHandler 的注释。
         created.on(EventNames.MQ_CONNECTION_SNAPSHOT_CREATED) { event -> snapshotHandler.handle(event) }
+        created.on(EventNames.MQ_COMMAND_EXECUTED) { event -> commandHistoryHandler.handle(event) }
         return created
     }
 

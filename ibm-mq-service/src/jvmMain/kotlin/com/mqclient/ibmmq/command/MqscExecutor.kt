@@ -54,9 +54,14 @@ class MqscExecutor(
      * 适配层（MqscCommandExecutor）共用这一个出口，保证格式化 / 错误翻译 / 历史
      * 记录行为一致。
      *
+     * 历史两路出口都在这里：内存历史（[MqscHistoryRepository]，含 DISPLAY，供控制台
+     * 回看）与写操作审计事件（[MqCommandHistoryEmitter]，DISPLAY 不记，落 mq_command
+     * 表）。两路都 runCatching 包裹 —— 记录失败绝不影响命令本身的结果。
+     *
      * @param command 已展开的命令文本（调用方负责缩写展开）。
      */
     suspend fun executeSingle(connectionId: String, command: String, lineNumber: Int): MqscResult {
+        val requestTime = System.currentTimeMillis()
         val result = executeOne(connectionId, MqscCommand(lineNumber = lineNumber, text = command))
         runCatching {
             historyRepository.add(
@@ -68,6 +73,9 @@ class MqscExecutor(
                     createdTime = System.currentTimeMillis(),
                 ),
             )
+        }
+        runCatching {
+            MqCommandHistoryEmitter.onExecuted(connectionId, command, result, requestTime)
         }
         return result
     }
