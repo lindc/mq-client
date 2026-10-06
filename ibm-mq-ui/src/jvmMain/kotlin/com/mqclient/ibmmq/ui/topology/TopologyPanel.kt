@@ -18,6 +18,8 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -25,6 +27,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,8 +55,8 @@ import com.mqclient.core.topology.TopologyFocusHolder
 import com.mqclient.ibmmq.IbmMQConfig
 import com.mqclient.ibmmq.IbmMQModule
 import com.mqclient.ibmmq.event.IbmMQEvents
-import com.mqclient.ibmmq.ui.properties.MqObjectPropertiesDialog
-import com.mqclient.ibmmq.ui.properties.ObjectPropertiesDialogState
+import com.mqclient.ibmmq.ui.properties.ObjectPropertiesDialogHost
+import com.mqclient.ibmmq.ui.properties.rememberObjectPropertiesDialogController
 import com.mqclient.ibmmq.ui.properties.toMqObjectType
 import com.mqclient.ibmmq.ibmMQConfigFromOptions
 import com.mqclient.uicommon.i18n.stringResource
@@ -192,10 +195,28 @@ private fun MqTopologyCanvas(
     val (kuiver, nodeTypes, severities) = data
     val scheme = MaterialTheme.colorScheme
 
-    // 对象属性对话框：**双击节点**打开（kuiver 0.4.2 无 onNodeDoubleClick，用
-    // 「400ms 内同节点两击」手动检测）；rqmgr: 前缀虚拟节点无真实对象，跳过。
-    var propertiesDialog by remember { mutableStateOf<ObjectPropertiesDialogState?>(null) }
-    var lastNodeClick by remember { mutableStateOf<Pair<String, Long>?>(null) }
+    // 对象属性对话框：**双击节点**打开（[NodeDoubleClick] 手动检测，kuiver 0.4.2
+    // 无 onNodeDoubleClick）。打开走统一的 [rememberObjectPropertiesDialogController]；
+    // 无属性可看的节点（rqmgr: 虚拟节点等）弹 Snackbar 提示而非静默无反应。
+    //
+    // 双击检测器是 remember 的稳定实例，回调里读类型必须经 rememberUpdatedState 的
+    // **最新** nodeTypes——此前直接捕获首帧 map，OBJECTS_SCANNED 重建图后新增的节点
+    // （通道 / 主题 / 订阅…）双击静默失效，只有首帧就在图里的队列能打开对话框。
+    val propertiesController = rememberObjectPropertiesDialogController(connectionId)
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val virtualNodeHint = stringResource("topology_no_properties")
+    val currentTypes by rememberUpdatedState(nodeTypes)
+    val nodeDoubleClicked = remember {
+        NodeDoubleClick { nodeId ->
+            val type = currentTypes[nodeId]?.toMqObjectType()
+            if (type != null) {
+                propertiesController.open(type, nodeId)
+            } else {
+                scope.launch { snackbarHostState.showSnackbar(virtualNodeHint) }
+            }
+        }
+    }
 
     val viewerState = rememberKuiverViewerState(
         initialKuiver = Kuiver(),
@@ -301,27 +322,11 @@ private fun MqTopologyCanvas(
             callbacks = remember {
                 KuiverInteractionCallbacks(
                     onNodeClick = { node ->
-                        val now = System.currentTimeMillis()
-                        val last = lastNodeClick
-                        if (last != null && last.first == node.id && now - last.second < DOUBLE_CLICK_WINDOW_MS) {
-                            // 双击：打开对象属性对话框（rqmgr: 虚拟节点无真实对象，跳过）
-                            lastNodeClick = null
-                            if (!node.id.startsWith(REMOTE_QMGR_PREFIX)) {
-                                nodeTypes[node.id]?.toMqObjectType()?.let { type ->
-                                    propertiesDialog = ObjectPropertiesDialogState(
-                                        connectionId = connectionId,
-                                        objectType = type,
-                                        objectName = node.id,
-                                    )
-                                }
-                            }
-                        } else {
-                            lastNodeClick = node.id to now
-                        }
+                        nodeDoubleClicked.onClick(node.id)
                         select(node.id)
                     },
                     onCanvasClick = {
-                        lastNodeClick = null
+                        nodeDoubleClicked.reset()
                         select(null)
                     },
                 )
@@ -377,12 +382,12 @@ private fun MqTopologyCanvas(
                 .padding(12.dp),
         )
 
-        propertiesDialog?.let { dialogState ->
-            MqObjectPropertiesDialog(
-                state = dialogState,
-                onDismiss = { propertiesDialog = null },
-            )
-        }
+        ObjectPropertiesDialogHost(propertiesController)
+
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
 
         selectedId?.let { id ->
             val type = nodeTypes[id] ?: return@let
@@ -460,9 +465,6 @@ private fun NodeDetailCard(
 
 /** 环（BACK 边）的固定语义色：橙色（需求指定，异常信号不随主题翻转）。 */
 private val CYCLE_EDGE_COLOR = Color(0xFFFF9800)
-
-/** 节点双击判定窗口（kuiver 0.4.2 无 onNodeDoubleClick 回调）。 */
-private const val DOUBLE_CLICK_WINDOW_MS = 400
 
 /** 选中链路高亮集：闭包节点 id + 闭包内边（fromId to id）。 */
 private data class Highlight(val nodes: Set<String>, val edges: Set<Pair<String, String>>)

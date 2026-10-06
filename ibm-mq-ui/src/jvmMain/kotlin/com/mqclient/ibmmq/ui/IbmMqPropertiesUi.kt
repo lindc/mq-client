@@ -50,7 +50,7 @@ class IbmMqPropertiesUi : ConnectionPropertiesUi {
 }
 
 @Composable
-private fun QmgrPropertiesPanel(connectionId: String) {
+internal fun QmgrPropertiesPanel(connectionId: String) {
     var snapshot by remember { mutableStateOf<MqObjectSnapshot?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(true) }

@@ -12,8 +12,8 @@ import com.mqclient.ibmmq.IbmMQConfig
 import com.mqclient.ibmmq.ibmMQConfigFromOptions
 import com.mqclient.ibmmq.pcf.MqObjectType
 import com.mqclient.ibmmq.pcf.isSystemOrTempQueue
-import com.mqclient.ibmmq.ui.properties.MqObjectPropertiesDialog
-import com.mqclient.ibmmq.ui.properties.ObjectPropertiesDialogState
+import com.mqclient.ibmmq.ui.properties.ObjectPropertiesDialogHost
+import com.mqclient.ibmmq.ui.properties.rememberObjectPropertiesDialogController
 import com.mqclient.mqui.objectlist.ObjectListPanel
 import com.mqclient.mqui.state.LoadStateContent
 import com.mqclient.uicommon.i18n.stringResource
@@ -46,11 +46,9 @@ fun QueueListPanel(
             ?: IbmMQConfig.DEFAULT_QUEUE_DEPTH_WARNING_THRESHOLD
     }
 
-    // 对象属性对话框（双击卡片打开；关闭即清空状态）。
-    var propertiesDialog by remember(connectionId) { mutableStateOf<ObjectPropertiesDialogState?>(null) }
-    propertiesDialog?.let { dialogState ->
-        MqObjectPropertiesDialog(state = dialogState, onDismiss = { propertiesDialog = null })
-    }
+    // 对象属性对话框（双击卡片 / 属性按钮打开；统一入口持有状态与渲染）。
+    val propertiesController = rememberObjectPropertiesDialogController(connectionId)
+    ObjectPropertiesDialogHost(propertiesController)
 
     // 消息处理对话框（本地队列卡片 ✉ 按钮打开；浏览页已实装，发送页待实装）。
     var messagesDialogQueue by remember(connectionId) { mutableStateOf<String?>(null) }
@@ -92,11 +90,7 @@ fun QueueListPanel(
                                 QueueCardActions.create(
                                     snapshot = queue,
                                     onOpenProperties = {
-                                propertiesDialog = ObjectPropertiesDialogState(
-                                    connectionId = connectionId,
-                                    objectType = MqObjectType.QUEUE,
-                                    objectName = queue.name,
-                                )
+                                propertiesController.open(MqObjectType.QUEUE, queue.name)
                             },
                                     onOpenMessages = { messagesDialogQueue = queue.name },
                                 ),
@@ -108,11 +102,7 @@ fun QueueListPanel(
                 items = filtered,
                 onCardClick = { card -> onOpenProperties(card.id) },
                 onCardDoubleClick = { card ->
-                    propertiesDialog = ObjectPropertiesDialogState(
-                        connectionId = connectionId,
-                        objectType = MqObjectType.QUEUE,
-                        objectName = card.id,
-                    )
+                    propertiesController.open(MqObjectType.QUEUE, card.id)
                 },
                 toolbarContent = {
                     ObjectListToolbar(

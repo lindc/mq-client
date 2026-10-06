@@ -12,8 +12,8 @@ import androidx.compose.ui.Modifier
 import com.mqclient.ibmmq.IbmMQModule
 import com.mqclient.ibmmq.pcf.MqObjectType
 import com.mqclient.ibmmq.pcf.isSystemObject
-import com.mqclient.ibmmq.ui.properties.MqObjectPropertiesDialog
-import com.mqclient.ibmmq.ui.properties.ObjectPropertiesDialogState
+import com.mqclient.ibmmq.ui.properties.ObjectPropertiesDialogHost
+import com.mqclient.ibmmq.ui.properties.rememberObjectPropertiesDialogController
 import com.mqclient.mqui.command.DangerousCommandDialog
 import com.mqclient.mqui.objectlist.ObjectListPanel
 import com.mqclient.mqui.state.LoadStateContent
@@ -59,11 +59,9 @@ fun ChannelListPanel(
 ) {
     var searchText by remember { mutableStateOf("") }
     var showSystem by remember { mutableStateOf(false) }
-    // 对象属性对话框（双击卡片打开；关闭即清空状态）。
-    var propertiesDialog by remember(connectionId) { mutableStateOf<ObjectPropertiesDialogState?>(null) }
-    propertiesDialog?.let { dialogState ->
-        MqObjectPropertiesDialog(state = dialogState, onDismiss = { propertiesDialog = null })
-    }
+    // 对象属性对话框（双击卡片 / 属性按钮打开；统一入口持有状态与渲染）。
+    val propertiesController = rememberObjectPropertiesDialogController(connectionId)
+    ObjectPropertiesDialogHost(propertiesController)
 
     val state = rememberMqObjectListState(
         connectionId = connectionId,
@@ -185,11 +183,7 @@ fun ChannelListPanel(
                             ChannelCardActions.create(
                                 snapshot = channel,
                                 onOpenProperties = {
-                                propertiesDialog = ObjectPropertiesDialogState(
-                                    connectionId = connectionId,
-                                    objectType = MqObjectType.CHANNEL,
-                                    objectName = channel.name,
-                                )
+                                propertiesController.open(MqObjectType.CHANNEL, channel.name)
                             },
                                 onStart = { startChannel(channel.name) },
                                 onStop = { requestStopChannel(channel.name, channel.channelStatus) },
@@ -200,11 +194,7 @@ fun ChannelListPanel(
                 },
                 onCardClick = { card -> onOpenProperties(card.id) },
                 onCardDoubleClick = { card ->
-                    propertiesDialog = ObjectPropertiesDialogState(
-                        connectionId = connectionId,
-                        objectType = MqObjectType.CHANNEL,
-                        objectName = card.id,
-                    )
+                    propertiesController.open(MqObjectType.CHANNEL, card.id)
                 },
                 toolbarContent = {
                     ObjectListToolbar(

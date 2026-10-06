@@ -2,16 +2,19 @@ package com.mqclient.ibmmq.ui.properties
 
 import androidx.compose.runtime.Composable
 import com.mqclient.ibmmq.pcf.MqObjectType
+import com.mqclient.ibmmq.ui.QmgrPropertiesPanel
 import com.mqclient.ibmmq.ui.properties.content.ChannelPropertiesContent
 import com.mqclient.ibmmq.ui.properties.content.MqObjectPropertiesContent
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.i18n.stringResource
 
 /**
- * MQ 对象属性对话框：通用外壳（[ObjectDetailDialog]，undecorated 可拖动 / 可调大小）
- * + 按 [state.objectType] 分发到对应的内容组件（当前均为占位，逐步实装）。
+ * MQ 对象属性对话框：通用外壳（[ObjectDetailDialog]，自绘标题栏 / ESC）+ 按
+ * [state.objectType] 分发到对应的内容组件。状态经
+ * [ObjectPropertiesDialogController] 持有（对象列表页与拓扑图双击共用）。
  *
- * 状态由调用方持有（`var propertiesDialog by remember`），关闭时清空。
+ * QUEUE_MANAGER 分支复用连接属性面板 [QmgrPropertiesPanel]（实时 INQUIRE Q_MGR，
+ * 与 SPI 面板同数据源）——拓扑图 / 集群画布双击 QMgr 节点走这里。
  */
 @Composable
 fun MqObjectPropertiesDialog(
@@ -33,9 +36,8 @@ fun MqObjectPropertiesDialog(
             MqObjectType.NAMELIST -> MqObjectPropertiesContent(state, "namelist_props_group_general") { resolveNamelistPropertyGroups(it) }
             MqObjectType.AUTH_INFO -> MqObjectPropertiesContent(state, "authinfo_props_group_general") { resolveAuthInfoPropertyGroups(it) }
             MqObjectType.COMM_INFO -> MqObjectPropertiesContent(state, "comminfo_props_group_general") { resolveCommInfoPropertyGroups(it) }
-            // 10 类对象已全部实装；仅剩 QUEUE_MANAGER（走 ConnectionPropertiesUi，
-            // 不会进本对话框）——此分支理论不可达，兜底空内容。
-            else -> {}
+            // QMgr：连接属性面板同一实现（实时查询），集群画布 / 拓扑双击复用。
+            MqObjectType.QUEUE_MANAGER -> QmgrPropertiesPanel(state.connectionId)
         }
     }
 }

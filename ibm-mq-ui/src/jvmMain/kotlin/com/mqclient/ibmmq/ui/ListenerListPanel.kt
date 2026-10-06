@@ -12,8 +12,8 @@ import androidx.compose.ui.Modifier
 import com.mqclient.ibmmq.IbmMQModule
 import com.mqclient.ibmmq.pcf.MqObjectType
 import com.mqclient.ibmmq.pcf.isSystemObject
-import com.mqclient.ibmmq.ui.properties.MqObjectPropertiesDialog
-import com.mqclient.ibmmq.ui.properties.ObjectPropertiesDialogState
+import com.mqclient.ibmmq.ui.properties.ObjectPropertiesDialogHost
+import com.mqclient.ibmmq.ui.properties.rememberObjectPropertiesDialogController
 import com.mqclient.mqui.command.DangerousCommandDialog
 import com.mqclient.mqui.objectlist.ObjectListPanel
 import com.mqclient.mqui.state.LoadStateContent
@@ -58,11 +58,9 @@ fun ListenerListPanel(
 ) {
     var searchText by remember { mutableStateOf("") }
     var showSystem by remember { mutableStateOf(false) }
-    // 对象属性对话框（双击卡片打开；关闭即清空状态）。
-    var propertiesDialog by remember(connectionId) { mutableStateOf<ObjectPropertiesDialogState?>(null) }
-    propertiesDialog?.let { dialogState ->
-        MqObjectPropertiesDialog(state = dialogState, onDismiss = { propertiesDialog = null })
-    }
+    // 对象属性对话框（双击卡片 / 属性按钮打开；统一入口持有状态与渲染）。
+    val propertiesController = rememberObjectPropertiesDialogController(connectionId)
+    ObjectPropertiesDialogHost(propertiesController)
 
     val state = rememberMqObjectListState(
         connectionId = connectionId,
@@ -180,11 +178,7 @@ fun ListenerListPanel(
                         actions = ListenerCardActions.create(
                             snapshot = listener,
                             onOpenProperties = {
-                                propertiesDialog = ObjectPropertiesDialogState(
-                                    connectionId = connectionId,
-                                    objectType = MqObjectType.LISTENER,
-                                    objectName = listener.name,
-                                )
+                                propertiesController.open(MqObjectType.LISTENER, listener.name)
                             },
                             onStart = { startListener(listener.name) },
                             onStop = { requestStopListener(listener.name) },
@@ -195,11 +189,7 @@ fun ListenerListPanel(
                 },
                 onCardClick = { card -> onOpenProperties(card.id) },
                 onCardDoubleClick = { card ->
-                    propertiesDialog = ObjectPropertiesDialogState(
-                        connectionId = connectionId,
-                        objectType = MqObjectType.LISTENER,
-                        objectName = card.id,
-                    )
+                    propertiesController.open(MqObjectType.LISTENER, card.id)
                 },
                 toolbarContent = {
                     ObjectListToolbar(

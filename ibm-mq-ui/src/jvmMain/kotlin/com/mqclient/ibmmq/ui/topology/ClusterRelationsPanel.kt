@@ -18,6 +18,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -59,7 +61,11 @@ import com.mqclient.ibmmq.event.IbmMQEvents
 import com.mqclient.ibmmq.messaging.browseErrorText
 import com.mqclient.ibmmq.pcf.ClusterMember
 import com.mqclient.ibmmq.pcf.ClusterRelations
+import com.mqclient.ibmmq.pcf.MqObjectType
 import com.mqclient.ibmmq.pcf.QmgrClusterRole
+import com.mqclient.ibmmq.ui.properties.ObjectPropertiesDialogController
+import com.mqclient.ibmmq.ui.properties.ObjectPropertiesDialogHost
+import com.mqclient.ibmmq.ui.properties.rememberObjectPropertiesDialogController
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 import kotlinx.coroutines.launch
@@ -91,6 +97,8 @@ fun ClusterRelationsPanel(
     var retryKey by remember(connectionId) { mutableStateOf(0) }
     var selectedId by remember(connectionId) { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    // QMgr 属性对话框（与拓扑图 / 列表页同一统一入口）：画布**双击**打开。
+    val propertiesController = rememberObjectPropertiesDialogController(connectionId)
 
     fun load() {
         scope.launch {
@@ -134,10 +142,12 @@ fun ClusterRelationsPanel(
                 selectedId = selectedId,
                 onSelect = { selectedId = it },
                 onRescan = { retryKey++ },
+                propertiesController = propertiesController,
                 modifier = Modifier.weight(1f),
             )
         }
     }
+    ObjectPropertiesDialogHost(propertiesController)
 }
 
 /** 就绪态：角色提示条 + 拓扑画布（weight 2）+ 成员列表（weight 1）。 */
@@ -147,6 +157,7 @@ private fun ClusterReadyPane(
     selectedId: String?,
     onSelect: (String?) -> Unit,
     onRescan: () -> Unit,
+    propertiesController: ObjectPropertiesDialogController,
     modifier: Modifier = Modifier,
 ) {
     val roleText = when (relations.role) {
@@ -197,6 +208,7 @@ private fun ClusterReadyPane(
                         selectedId = selectedId,
                         onSelect = onSelect,
                         onRescan = onRescan,
+                        propertiesController = propertiesController,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
@@ -220,11 +232,32 @@ private fun ClusterCanvas(
     selectedId: String?,
     onSelect: (String?) -> Unit,
     onRescan: () -> Unit,
+    propertiesController: ObjectPropertiesDialogController,
     modifier: Modifier = Modifier,
 ) {
     val scheme = MaterialTheme.colorScheme
     val graph = remember(relations) { buildClusterGraph(relations) }
     val (kuiver, nodeTypes, severities) = graph
+
+    // **双击节点**打开 QMgr 属性（[NodeDoubleClick] 手动检测，与拓扑图同一套）：
+    // 只有本地 QMgr（`local:` 前缀）有真实属性可看（INQUIRE Q_MGR 只及本机）；
+    // 集群成员是远程管理器，属性查不到 → Snackbar 提示而非静默无反应。
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    val remoteQmgrHint = stringResource("cluster_qmgr_properties_unavailable")
+    val nodeDoubleClicked = remember {
+        NodeDoubleClick { nodeId ->
+            if (nodeId.startsWith(CLUSTER_LOCAL_PREFIX)) {
+                propertiesController.open(
+                    MqObjectType.QUEUE_MANAGER,
+                    nodeId.removePrefix(CLUSTER_LOCAL_PREFIX),
+                )
+            } else {
+                scope.launch { snackbarHostState.showSnackbar(remoteQmgrHint) }
+            }
+        }
+    }
+
     // 成员 → 边信息：按 defType 实/虚线、status 着色（本地自身行不产生边）。
     val edgeInfo = remember(relations) {
         relations.members
@@ -275,8 +308,14 @@ private fun ClusterCanvas(
             ),
             callbacks = remember {
                 KuiverInteractionCallbacks(
-                    onNodeClick = { node -> onSelect(node.id) },
-                    onCanvasClick = { onSelect(null) },
+                    onNodeClick = { node ->
+                        nodeDoubleClicked.onClick(node.id)
+                        onSelect(node.id)
+                    },
+                    onCanvasClick = {
+                        nodeDoubleClicked.reset()
+                        onSelect(null)
+                    },
                 )
             },
             nodeContent = { node ->
@@ -325,6 +364,11 @@ private fun ClusterCanvas(
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .padding(12.dp),
+        )
+
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter),
         )
     }
 }
