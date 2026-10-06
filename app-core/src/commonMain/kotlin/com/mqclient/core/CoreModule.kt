@@ -4,6 +4,8 @@ import com.mqclient.core.cache.CacheManager
 import com.mqclient.core.db.MqCommandHistoryHandler
 import com.mqclient.core.db.MqCommandHistoryRepository
 import com.mqclient.core.db.MqConnectionSnapshotHandler
+import com.mqclient.core.db.MqStatusHistoryHandler
+import com.mqclient.core.db.MqStatusHistoryRepository
 import com.mqclient.core.db.MqConnectionSnapshotRepository
 import com.mqclient.core.event.EventBus
 import com.mqclient.core.event.EventBusErrorReporter
@@ -60,6 +62,12 @@ object CoreModule {
      * 订阅与摸库时机同 [snapshotHandler]。
      */
     private val commandHistoryHandler = MqCommandHistoryHandler(MqCommandHistoryRepository)
+
+    /**
+     * 状态采集落库的处理器（mq_status 表）：扫描任务广播 `core.mq.status.snapshot.created`
+     * （一批一个事件），这里整批一个事务写库。订阅与摸库时机同 [snapshotHandler]。
+     */
+    private val statusHistoryHandler = MqStatusHistoryHandler(MqStatusHistoryRepository)
 
     /** 应用级事件总线。在 [initialize] 之前访问会抛 [IllegalStateException]。 */
     val eventBus: EventBus
@@ -154,6 +162,7 @@ object CoreModule {
         // 连接快照落库（mq_connection 表）—— 订阅生命周期跟总线一致，见 snapshotHandler 的注释。
         created.on(EventNames.MQ_CONNECTION_SNAPSHOT_CREATED) { event -> snapshotHandler.handle(event) }
         created.on(EventNames.MQ_COMMAND_EXECUTED) { event -> commandHistoryHandler.handle(event) }
+        created.on(EventNames.MQ_STATUS_SNAPSHOT_CREATED) { event -> statusHistoryHandler.handle(event) }
         return created
     }
 

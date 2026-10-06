@@ -29,6 +29,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.dp
 import com.mqclient.aiservice.AiChatPersistence
+import com.mqclient.core.db.MqStatusPruner
 import com.mqclient.aiservice.AiConnectionRepository
 import com.mqclient.aiui.AiContext
 import com.mqclient.aiui.rememberAiPanelState
@@ -62,6 +63,7 @@ import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 
@@ -409,6 +411,20 @@ private fun bootstrapEvents() {
             )
         }
     ModuleRegistry.initializeServices(CoreModule.eventBus, scope, CoreModule.jobScheduler)
+    // mq_status 状态数据清理：启动后延迟 1 分钟执行一次（保留天数 = 设置 → 通用，
+    // 读取侧已 clamp）。延迟确保 DatabaseManager.initialize 已完成；失败只上报，
+    // 不影响应用启动。
+    scope.launch {
+        delay(MqStatusPruner.DELAY_MS)
+        runCatching { MqStatusPruner.pruneOnce() }
+            .onFailure { error ->
+                CoreModule.reportError(
+                    message = "状态数据清理失败：${error.message ?: error::class.simpleName}",
+                    source = "core.db",
+                    error = error,
+                )
+            }
+    }
     scope.launch {
         // AI 落库：建表 + 按保留天数清理 + 订阅快照/对话两个事件。DB 初始化失败时
         // register 会上报并整块缺席（对话照常，只是不落库）。

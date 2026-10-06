@@ -1,0 +1,35 @@
+-- MQ 状态采集表（时序数据，追加式）：扫描任务（IBM MQ = 消息心跳 + 对象慢扫）把
+-- 逐对象采集结果打包成 `core.mq.status.snapshot.created` 事件，app-core 的
+-- MqStatusHistoryHandler 批量落库。只有 INSERT 和 DELETE（清理），没有 UPDATE。
+-- 数值类属性（深度 / 消息数）填 numeric_value（property_value 存其字符串形式）；
+-- 状态类属性（RUNNING / STOPPED …）填 property_value（numeric_value 为 NULL）。
+-- 本次只做采集与写入，查询方法随查询 UI 再补。
+CREATE TABLE IF NOT EXISTS mq_status (
+    id             TEXT PRIMARY KEY NOT NULL,  -- 记录 UUIDv7
+    connection_id  TEXT NOT NULL,              -- 连接 UUIDv7（= mq_connection.id / ConnectionInfo.id）
+    object_type    TEXT NOT NULL,              -- QUEUE / CHANNEL / LISTENER / TOPIC / SUBSCRIPTION
+    object_name    TEXT NOT NULL,              -- 对象名，如 ORDER.LOCAL.Q、QM1.TO.QM2
+    property_name  TEXT NOT NULL,              -- 属性名，如 depth、status
+    property_value TEXT,                       -- 文本值（状态类属性；数值类存字符串形式）
+    numeric_value  REAL,                       -- 数值值（数值类属性；状态类为 NULL）
+    create_time    INTEGER NOT NULL            -- 采集时刻（Unix 毫秒）
+);
+
+CREATE INDEX IF NOT EXISTS idx_mq_status_obj_time
+    ON mq_status(connection_id, object_type, object_name, property_name, create_time DESC);
+CREATE INDEX IF NOT EXISTS idx_mq_status_time ON mq_status(create_time DESC);
+CREATE INDEX IF NOT EXISTS idx_mq_status_prop ON mq_status(property_name, create_time DESC);
+
+insertStatus:
+INSERT INTO mq_status(id, connection_id, object_type, object_name, property_name, property_value, numeric_value, create_time)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+
+-- 分批删除（每批上限 1 万行）：单事务别吞整表，循环调用直到删完（见
+-- MqStatusHistoryRepository.deleteOlderThan）。保留天数读设置项（general.historyRetentionDays）。
+deleteOlderThanBatch:
+DELETE FROM mq_status
+WHERE id IN (
+    SELECT id FROM mq_status
+    WHERE create_time < ?
+    LIMIT 10000
+);
