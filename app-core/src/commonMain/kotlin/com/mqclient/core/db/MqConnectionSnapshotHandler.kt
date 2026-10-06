@@ -14,33 +14,35 @@ import com.mqclient.core.event.getInt
  * 任何失败都走错误通道上报，绝不上抛（EventBus 会就地吃掉 handler 异常，但显式
  * report 能让用户看见）。
  *
- * 同一 connection_id 每次事件都插新行（表就是历史链），不做去重 —— 「保存了但什么
- * 都没改」在发出方已由 ConnectionStore 的差异广播挡掉（内容没变不发 updated）。
+ * 表是追加式的：快照 id = 事件里的连接 UUIDv7（编辑连接时 ConnectionStore 换发新
+ * id，新增事件天然带新 id），一个 id 只对应一份记录，旧 id 的记录原样保留 —— 没有
+ * 更新 / 删除路径。
  */
 class MqConnectionSnapshotHandler(private val repository: MqConnectionSnapshotRepository) {
 
     suspend fun handle(event: AppEvent) {
         if (event.name != EventNames.MQ_CONNECTION_SNAPSHOT_CREATED) return
 
-        val connectionId = event.getString("connectionId") ?: return
+        val id = event.getString("connectionId") ?: return
         val type = event.getString("type") ?: return
 
         val snapshot = MqConnectionSnapshot(
-            id = 0,
-            connectionId = connectionId,
+            id = id,
             type = type,
-            name = event.getString("name"),
-            host = event.getString("host"),
-            port = event.getInt("port"),
+            // name / host / port 发出方恒给值（见 buildSnapshotPayload），防御性兜底
+            // 只为满足 NOT NULL 列，不构成独立语义。
+            name = event.getString("name").orEmpty(),
+            host = event.getString("host").orEmpty(),
+            port = event.getInt("port") ?: 0,
             target = event.getString("target"),
             userName = event.getString("userName"),
-            createdTime = repository.now(),
+            createdAt = repository.now(),
         )
 
         runCatching { repository.save(snapshot) }
             .onFailure { error ->
                 CoreModule.reportError(
-                    message = "连接快照写入失败（connectionId=$connectionId）",
+                    message = "连接快照写入失败（connectionId=$id）",
                     source = "core.db",
                     error = error,
                 )

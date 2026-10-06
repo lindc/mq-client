@@ -13,7 +13,7 @@ import com.mqclient.ibmmq.IbmMQModule
 import com.mqclient.ibmmq.ibmMQConfigFromOptions
 import com.mqclient.ibmmq.toOptions
 import com.mqclient.uicommon.i18n.stringResource
-import java.util.UUID
+import com.mqclient.core.newConnectionId
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.TimeoutCancellationException
@@ -411,7 +411,7 @@ class IbmMqConnectionFormState(
      */
     private fun doSave(config: IbmMQConfig) {
         val info = ConnectionInfo(
-            id = editingId ?: UUID.randomUUID().toString(),
+            id = editingId ?: newConnectionId(),
             name = name.ifBlank { defaultName },
             serviceId = "ibm-mq",
             // 队列管理器就是 IBM MQ 端点的名字，侧边栏副标题 / endpoint 用得上。

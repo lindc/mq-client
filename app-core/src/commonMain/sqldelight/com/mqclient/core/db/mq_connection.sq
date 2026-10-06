@@ -1,49 +1,38 @@
 -- MQ 连接历史快照表：config.toml 是权威数据源，这张表只做追加式历史快照，
--- 供 operation_history 按 connection_id 关联查询。只插入，不更新，不做版本链。
--- connection_id 与行一一对应：每次保存连接（新建或修改）都换发新 UUID 并插一行
--- （编辑 = 旧 id 废弃 + 新 id 接任，见 ConnectionStore.update），所以按 connection_id
--- 关联操作历史不会产生重复行。不需要跨 id 追溯版本链；将来要追溯再加 prev_id。
+-- 供 operation_history 关联查询。只有 INSERT 和 SELECT，没有 UPDATE / DELETE。
+-- id 是连接 UUIDv7 本身（TEXT 主键，与 config.toml 的 ConnectionInfo.id 同源）：
+-- 每次保存连接（新建或修改）都换发新 UUIDv7（编辑 = 旧 id 废弃 + 新 id 接任，见
+-- ConnectionStore.update），所以一个 id 只对应一份记录，selectById 直接命中唯一行。
+-- 不需要跨 id 追溯版本链（旧 id 的记录天然留在表里，按 created_at 排序即变更轨迹）。
 -- 不存敏感信息（密码等）；host/port 只存单个主机；target 存逻辑容器
 -- （IBM MQ = qmgr_name）。type 预留多 MQ 类型，当前只有 "ibm-mq"。
 CREATE TABLE IF NOT EXISTS mq_connection (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    connection_id TEXT NOT NULL,             -- 连接 UUID（与 config.toml 的 ConnectionInfo.id 同源）
-    type          TEXT NOT NULL,             -- MQ 类型 = serviceId，当前只有 "ibm-mq"
-    name          TEXT,                      -- 连接名称快照
-    host          TEXT,                      -- 主机
-    port          INTEGER,                   -- 端口
-    target        TEXT,                      -- 逻辑容器（IBM MQ 存 qmgr_name）
-    user_name     TEXT,                      -- 用户名快照
-    created_time  INTEGER NOT NULL           -- 快照创建时间（Unix 毫秒）
+    id         TEXT PRIMARY KEY NOT NULL,  -- 连接 UUIDv7（= ConnectionInfo.id）
+    name       TEXT NOT NULL,              -- 连接名称快照
+    type       TEXT NOT NULL,              -- MQ 类型 = serviceId，当前只有 "ibm-mq"
+    host       TEXT NOT NULL,              -- 主机
+    port       INTEGER NOT NULL,           -- 端口
+    target     TEXT,                       -- 逻辑容器（IBM MQ 存 qmgr_name）
+    user_name  TEXT,                       -- 用户名快照
+    created_at INTEGER NOT NULL            -- 快照创建时间（Unix 毫秒）
 );
 
-CREATE INDEX IF NOT EXISTS idx_mq_connection_connection_id ON mq_connection(connection_id);
 CREATE INDEX IF NOT EXISTS idx_mq_connection_type ON mq_connection(type);
-CREATE INDEX IF NOT EXISTS idx_mq_connection_created_time ON mq_connection(created_time DESC);
+CREATE INDEX IF NOT EXISTS idx_mq_connection_created_at ON mq_connection(created_at DESC);
 
-insert:
-INSERT INTO mq_connection(connection_id, type, name, host, port, target, user_name, created_time)
+insertConnection:
+INSERT INTO mq_connection(id, name, type, host, port, target, user_name, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?);
 
-selectByConnectionId:
+selectAll:
 SELECT * FROM mq_connection
-WHERE connection_id = ?
-ORDER BY created_time DESC, id DESC;
-
-selectLatestByConnectionId:
-SELECT * FROM mq_connection
-WHERE connection_id = ?
-ORDER BY created_time DESC, id DESC
-LIMIT 1;
+ORDER BY created_at DESC;
 
 selectById:
 SELECT * FROM mq_connection
 WHERE id = ?;
 
-selectAll:
+selectByType:
 SELECT * FROM mq_connection
-ORDER BY created_time DESC, id DESC;
-
-deleteByConnectionId:
-DELETE FROM mq_connection
-WHERE connection_id = ?;
+WHERE type = ?
+ORDER BY created_at DESC;

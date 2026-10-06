@@ -19,6 +19,8 @@ kuiver = "0.4.2"
 # FileKit — 本地文件选择对话框（JVM 端：Windows 走 JNA 原生 IFileDialog）。
 # 注意选择器 API 在 dialogs 模块，core 只是它的传递依赖（PlatformFile 抽象所在）。
 filekit = "0.16.0"
+# UUIDv7 生成（时间有序，适合做数据库主键与按时间排序）。JVM-only。
+uuidCreator = "5.3.3"
 
 [libraries]
 # Compose Multiplatform
@@ -62,6 +64,9 @@ sqldelight-coroutines = { module = "app.cash.sqldelight:coroutines-extensions", 
 # runtime 依赖，编译期要单独引）。
 ktoml-core = { module = "com.akuleshov7:ktoml-core-jvm", version.ref = "ktoml" }
 ktoml-file = { module = "com.akuleshov7:ktoml-file-jvm", version.ref = "ktoml" }
+
+# uuid-creator: UUIDv7（时间有序）生成，连接 id 的唯一来源（见 Connection.kt 的 newConnectionId）。
+uuid-creator = { module = "com.github.f4b6a3:uuid-creator", version.ref = "uuidCreator" }
 
 # Kuiver — Compose Multiplatform UI 组件库.
 kuiver = { module = "io.github.justdeko:kuiver", version.ref = "kuiver" }

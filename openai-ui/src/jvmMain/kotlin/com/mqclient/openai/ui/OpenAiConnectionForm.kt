@@ -37,7 +37,7 @@ import com.mqclient.core.ConnectionFormUi
 import com.mqclient.uicommon.LabeledField
 import com.mqclient.uicommon.SettingsDropdownRow
 import com.mqclient.uicommon.i18n.stringResource
-import java.util.UUID
+import com.mqclient.core.newConnectionId
 
 /**
  * openai 兼容服务的「新建连接」表单（`ConnectionFormUi` SPI 实现）：
@@ -74,7 +74,7 @@ class OpenAiConnectionForm : ConnectionFormUi {
 
             override fun submit(): Boolean {
                 val connection = AiConnection(
-                    id = UUID.randomUUID().toString(),
+                    id = newConnectionId(),
                     name = name.ifBlank { defaultName },
                     providerId = providerId,
                     baseUrl = baseUrl.trim(),

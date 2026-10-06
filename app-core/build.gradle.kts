@@ -36,6 +36,8 @@ kotlin {
             // Ktoml — config.toml 的 TOML 编解码（ConfigManager）。
             implementation(libs.ktoml.core)
             implementation(libs.ktoml.file)
+            // uuid-creator — 连接 id 用 UUIDv7（时间有序，见 Connection.kt 的 newConnectionId）。
+            implementation(libs.uuid.creator)
         }
         jvmTest.dependencies {
             implementation(kotlin("test"))

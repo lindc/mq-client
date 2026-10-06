@@ -1,14 +1,23 @@
 package com.mqclient.core
 
+import com.github.f4b6a3.uuid.UuidCreator
 import com.mqclient.core.event.EventNames
 import com.mqclient.core.log.Log
-import java.util.UUID
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /** 连接数据的日志 tag；与上报错误的 source（`core.connection`）同一命名。 */
 private const val LOG_TAG = "core.connection"
+
+/**
+ * 连接 id 的唯一生成入口：UUIDv7（时间有序，`com.github.f4b6a3:uuid-creator`）。
+ *
+ * 为什么 v7 而不是 v4：id 直接当 mq_connection 快照表的主键，时间有序意味着按 id
+ * 排序 ≈ 按创建时间排序，B-tree 插入也落在索引右侧（随机 v4 会打散整棵索引）。
+ * 所有连接身份——MQ 连接与 AI 连接——都从这里领 id，不要再写 `UUID.randomUUID()`。
+ */
+fun newConnectionId(): String = UuidCreator.getTimeOrderedEpoch().toString()
 
 /**
  * 连接列表：**所有模块共同依赖的唯一入口**，背后是单文件配置 `~/.mqclient/config.toml`
@@ -103,7 +112,7 @@ object ConnectionStore {
                 ),
             )
         }
-        val reIded = connection.copy(id = UUID.randomUUID().toString())
+        val reIded = connection.copy(id = newConnectionId())
         return saveAll(current.toMutableList().also { it[index] = reIded })
     }
 

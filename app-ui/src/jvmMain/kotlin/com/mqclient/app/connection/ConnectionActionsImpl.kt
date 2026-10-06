@@ -10,7 +10,7 @@ import com.mqclient.core.ConnectionStore
 import com.mqclient.core.CoreModule
 import com.mqclient.core.event.getString
 import com.mqclient.uicommon.i18n.stringResource
-import java.util.UUID
+import com.mqclient.core.newConnectionId
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.coroutineScope
@@ -92,7 +92,7 @@ class ConnectionActionsImpl(private val state: ConnectionMenuState) : Connection
     override fun copy(connectionId: String) {
         val connection = connectionById(connectionId) ?: return
         val duplicate = connection.copy(
-            id = UUID.randomUUID().toString(),
+            id = newConnectionId(),
             name = connection.name + stringResource("connection_copy_suffix"),
             status = ConnectionStatus.Disconnected,
         )

@@ -7,7 +7,7 @@ import com.mqclient.core.ConfigStore
 import com.mqclient.core.CoreModule
 import com.mqclient.core.log.Log
 import java.util.Base64
-import java.util.UUID
+import com.mqclient.core.newConnectionId
 
 /** 本模块的日志 tag；与上报错误的 source（`ai`）同一命名。 */
 private const val LOG_TAG = "ai"
@@ -179,7 +179,7 @@ object AiConnectionRepository {
             val old = prevById[connection.id]
             when {
                 old == null || old.baseUrl != connection.baseUrl -> {
-                    val reIded = if (old == null) connection else connection.copy(id = UUID.randomUUID().toString())
+                    val reIded = if (old == null) connection else connection.copy(id = newConnectionId())
                     if (old != null) idRewrite[connection.id] = reIded.id
                     connections += reIded
                     candidates += SnapshotCandidate(reIded, prevId = old?.id)
@@ -247,7 +247,7 @@ object AiConnectionRepository {
             baseUrl = baseUrl.trimEnd('/') + "/v1"
         }
         return AiConnection(
-            id = UUID.randomUUID().toString(),
+            id = newConnectionId(),
             name = mapping?.name ?: providerId,
             providerId = mapping?.providerId ?: "openai-compatible",
             baseUrl = baseUrl,
