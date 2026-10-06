@@ -46,9 +46,28 @@ data class ConfigMetadata(
 @Serializable
 data class GeneralConfig(
     val language: Language = Language.SIMPLIFIED_CHINESE,
-    /** Past-N-days of history the app keeps around before pruning. */
-    val historyRetentionDays: Int = 90,
-)
+    /** Past-N-days of history the app keeps around before pruning (AI chat history now, status data later). */
+    val historyRetentionDays: Int = RETENTION_DAYS_DEFAULT,
+) {
+
+    /**
+     * 读取侧归一化：把落在范围外的历史值纠正回合法区间（旧版默认 90、手改 config.toml
+     * 的坏值等）。所有读取方（设置页 / 清理任务）都经 [ConfigManager.loadOrNull] 拿到
+     * 纠正后的值；磁盘上的旧值在用户下次保存设置时自然被覆盖，无需专门迁移。
+     */
+    fun normalized(): GeneralConfig = copy(
+        historyRetentionDays = historyRetentionDays.coerceIn(RETENTION_DAYS_MIN, RETENTION_DAYS_MAX),
+    )
+
+    companion object {
+        /** 保留天数默认值（新版；旧版曾是 90，读取时归一化到范围内）。 */
+        const val RETENTION_DAYS_DEFAULT = 7
+
+        /** 保留天数合法区间（设置页输入校验与读取侧 clamp 共用这一个来源）。 */
+        const val RETENTION_DAYS_MIN = 1
+        const val RETENTION_DAYS_MAX = 30
+    }
+}
 
 @Serializable
 enum class Language(val displayName: String) {

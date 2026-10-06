@@ -49,12 +49,12 @@ internal fun GeneralSettingsPane(
 
         NumberRow(
             label = stringResource("history_retention_label") +
-                " [${value.historyRetentionDays}] " + stringResource("unit_days") +
-                " " + stringResource("history_retention_note"),
+                " [${value.historyRetentionDays}] " + stringResource("unit_days"),
             suffix = stringResource("unit_days"),
             value = value.historyRetentionDays,
-            min = 7,
-            max = 365,
+            min = GeneralConfig.RETENTION_DAYS_MIN,
+            max = GeneralConfig.RETENTION_DAYS_MAX,
+            helpText = stringResource("history_retention_note"),
             onChange = { onChange(value.copy(historyRetentionDays = it)) },
         )
     }
@@ -86,6 +86,8 @@ private fun LanguageRow(
  * 输入期间以文本框内容为准，只把落在 [min]..[max] 里的值上报给 [onChange]；越界 / 空的
  * 草稿先留在框里，失焦时再归一化（clamp 或落回上一个合法值）—— 这样底层 config 永远
  * 拿不到非法值，用户也能正常输入多位数。
+ *
+ * [helpText] 非空时在输入行下方补一行帮助说明（可空参数保证既有调用方零改动）。
  */
 @Composable
 internal fun NumberRow(
@@ -95,6 +97,7 @@ internal fun NumberRow(
     min: Int,
     max: Int,
     onChange: (Int) -> Unit,
+    helpText: String? = null,
 ) {
     // 输入期间 text 是唯一真相：不能再按 value 重建 —— coerceIn 会把中间态夹住
     // （字号 12..18 里敲 "1" 会被夹成 12）→ value 变 → 状态重建 → 想输的数字永远打不出来。
@@ -139,6 +142,14 @@ internal fun NumberRow(
             Spacer(Modifier.width(8.dp))
             Text(
                 text = "$suffix ${stringResource("common_range_format").format(min, max)}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (helpText != null) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = helpText,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

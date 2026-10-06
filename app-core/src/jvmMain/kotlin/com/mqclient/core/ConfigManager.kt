@@ -208,7 +208,10 @@ object ConfigManager {
             val text = fs.read(path) { readUtf8() }
             if (text.isBlank()) return@synchronized Config()
             // 敏感字段的解密发生在序列化器里（EncryptedStringSerializer 等）。
-            toml.decodeFromString(Config.serializer(), text)
+            // 读取侧归一化：范围外的历史保留天数（旧版默认 90 / 手改坏值）纠正回合法区间，
+            // 所有读取方（设置页 / 清理任务）拿到的都是合法值；磁盘旧值在下次保存设置时自然覆盖。
+            val config = toml.decodeFromString(Config.serializer(), text)
+            config.copy(general = config.general.normalized())
         } catch (t: Throwable) {
             Log.error(LOG_TAG, "failed to read config: $t")
             null
