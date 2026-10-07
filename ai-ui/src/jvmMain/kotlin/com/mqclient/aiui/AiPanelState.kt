@@ -18,7 +18,9 @@ import com.mqclient.core.AiConfig
 import com.mqclient.core.AiConnection
 import com.mqclient.core.ConfigStore
 import com.mqclient.core.CoreModule
+import com.mqclient.core.event.EventNames
 import com.mqclient.core.log.Log
+import com.mqclient.core.newUuidV7
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -59,6 +61,12 @@ class AiPanelState internal constructor(
 
     /** 已经从 DB 加载过历史的连接（每连接只读一次；读失败也标记，避免每次发送都重试）。 */
     private val historyLoaded = mutableSetOf<String>()
+
+    /**
+     * 最近一次「询问 AI」分析的目标键（connectionId:objectType:objectName）。发送时与
+     * 当前目标比对：目标切换 = 新分析对话，清掉内存里的消息列表（chat_history 不动）。
+     */
+    private var lastChainTargetKey: String? = null
 
     /** 取某连接的会话列表（没有就建一份空的）。 */
     private fun listFor(connectionId: String): SnapshotStateList<AiMessage> =
@@ -147,6 +155,11 @@ class AiPanelState internal constructor(
      *
      * 历史加载只发生在这里：发送前若该连接的历史还没进过缓存，先读一次
      * chat_history（[ensureHistoryLoaded]），保证发给模型的上下文完整。
+     *
+     * 「询问 AI」链路分析（[AiContext.chain] 非空）走另一条消息组装路：用户消息
+     * 的 wire 版本是完整上下文 JSON（currentTime / chain / userQuestion，气泡里仍
+     * 显示原文），系统提示词附加链路分析提示词，且不注入 DB 历史 —— 分析会话从空
+     * 对话开始，切换目标对象（[lastChainTargetKey] 变化）即清内存重新开始。
      */
     fun sendUserMessage(text: String, context: AiContext?) {
         val trimmed = text.trim()
@@ -156,6 +169,17 @@ class AiPanelState internal constructor(
         // 连接自己的列表里 —— 两个连接的消息互不串。
         val list = listFor(connection.id)
 
+        val chain = context?.chain
+        val wireContent: String
+        val analysisPrompt: String?
+        if (chain != null) {
+            wireContent = buildChainContextJson(chain.contextJson, trimmed)
+            analysisPrompt = chainAnalysisSystemPrompt()
+        } else {
+            wireContent = buildContextPrefix(context)?.let { "$it\n\n$trimmed" } ?: trimmed
+            analysisPrompt = null
+        }
+
         val userMsg = AiMessage(
             id = newId(),
             role = Role.USER,
@@ -163,7 +187,10 @@ class AiPanelState internal constructor(
             timestamp = System.currentTimeMillis(),
         )
         // 落库的 question 是「含包装上下文」的 wire 版本（与发给模型的一致）。
-        val question = userMsg.copy(content = buildContextPrefix(context)?.let { "$it\n\n$trimmed" } ?: trimmed)
+        val question = userMsg.copy(content = wireContent)
+        // 链路分析不把大段 JSON 写进 chat_history 的 question —— 那边记原文，
+        // 完整上下文 JSON 由 mq_ai_conversation.context_json 单独承载。
+        val auditQuestion = if (chain != null) trimmed else question.content
 
         val assistantMsg = AiMessage(
             id = newId(),
@@ -175,8 +202,16 @@ class AiPanelState internal constructor(
         streamingMessageId = assistantMsg.id
 
         streamingJob = scope.launch {
-            // 发消息之前才读一次历史（每连接一次，之后走缓存）。
-            ensureHistoryLoaded(connection.id, list)
+            if (chain != null) {
+                // 切换分析目标 = 新对话：只清内存列表（chat_history 是审计，不动），
+                // 也不注入 DB 历史 —— 分析会话不带旧上下文。
+                val chainKey = "${connection.id}:${chain.objectType}:${chain.objectName}"
+                if (chainKey != lastChainTargetKey) list.clear()
+                lastChainTargetKey = chainKey
+            } else {
+                // 发消息之前才读一次历史（每连接一次，之后走缓存）。
+                ensureHistoryLoaded(connection.id, list)
+            }
             // 给模型的上下文 = 缓存里的全部消息 + 本条的 wire 版本。
             val historyForCall = list + question
             list.add(userMsg)
@@ -194,7 +229,9 @@ class AiPanelState internal constructor(
             try {
                 val producer = async {
                     try {
-                        chat.streamReply(historyForCall, connection, context) { chunk -> chunks.trySend(chunk) }
+                        chat.streamReply(historyForCall, connection, context, analysisPrompt) { chunk ->
+                            chunks.trySend(chunk)
+                        }
                     } finally {
                         chunks.close()
                     }
@@ -209,7 +246,7 @@ class AiPanelState internal constructor(
                 val reply = list.lastOrNull { it.id == assistantMsg.id }?.content.orEmpty()
                 emitChatSaved(
                     connection = connection,
-                    question = question.content,
+                    question = auditQuestion,
                     reply = reply,
                     createdAt = createdAt,
                     startedAt = startedAt,
@@ -218,9 +255,34 @@ class AiPanelState internal constructor(
                     errorMessage = null,
                     result = result,
                 )
+                if (chain != null) {
+                    emitAiConversationSaved(
+                        chain = chain,
+                        question = trimmed,
+                        wireContent = wireContent,
+                        answer = reply,
+                        status = STATUS_SUCCESS,
+                        errorMessage = null,
+                        requestTime = createdAt,
+                        finishedAt = finishedAt,
+                    )
+                }
             } catch (cancellation: CancellationException) {
                 // 取消不是失败，必须原样抛出（吞掉会让 scope 的取消失效）。
-                // 用户主动停止的半截回复不进审计表 —— 审计记录以「完成」为单位。
+                // 普通对话的半截回复不进 chat_history（审计以「完成」为单位）；链路分析
+                // 则按需求落一条 CANCELLED（answer = 已流出的部分）。
+                if (chain != null) {
+                    emitAiConversationSaved(
+                        chain = chain,
+                        question = trimmed,
+                        wireContent = wireContent,
+                        answer = list.lastOrNull { it.id == assistantMsg.id }?.content,
+                        status = STATUS_CANCELLED,
+                        errorMessage = null,
+                        requestTime = createdAt,
+                        finishedAt = System.currentTimeMillis(),
+                    )
+                }
                 throw cancellation
             } catch (error: Throwable) {
                 // 失败必须看得见：否则界面上只剩一个永远“…”的空气泡。未捕获异常逃出
@@ -230,7 +292,7 @@ class AiPanelState internal constructor(
                 panelError = error.message ?: error.javaClass.simpleName
                 emitChatSaved(
                     connection = connection,
-                    question = question.content,
+                    question = auditQuestion,
                     reply = null,
                     createdAt = createdAt,
                     startedAt = startedAt,
@@ -239,6 +301,18 @@ class AiPanelState internal constructor(
                     errorMessage = error.message ?: error.javaClass.simpleName,
                     result = null,
                 )
+                if (chain != null) {
+                    emitAiConversationSaved(
+                        chain = chain,
+                        question = trimmed,
+                        wireContent = wireContent,
+                        answer = list.lastOrNull { it.id == assistantMsg.id }?.content,
+                        status = STATUS_FAILED,
+                        errorMessage = error.message ?: error.javaClass.simpleName,
+                        requestTime = createdAt,
+                        finishedAt = System.currentTimeMillis(),
+                    )
+                }
             } finally {
                 streamingMessageId = null
                 // 一个字都没流出来就撤掉空气泡：出错时提示条已经说明了原因；被取消时
@@ -384,6 +458,42 @@ class AiPanelState internal constructor(
         list[idx] = list[idx].copy(content = list[idx].content + chunk)
     }
 
+    /**
+     * 广播 `core.mq.ai.conversation.completed`：链路分析问答结束（成功 / 失败 / 取消）
+     * 后由 app-core 的 MqAiConversationHandler 落 mq_ai_conversation 表。payload 的
+     * 字段契约见 EventNames 同名常量的文档。发事件而不是直接写库 —— 与 emitChatSaved
+     * 同一解耦理由，且失败不能影响对话本身（handler 内部消化，这里也不 try）。
+     */
+    private fun emitAiConversationSaved(
+        chain: AiChainTarget,
+        question: String,
+        wireContent: String,
+        answer: String?,
+        status: String,
+        errorMessage: String?,
+        requestTime: Long,
+        finishedAt: Long?,
+    ) {
+        CoreModule.eventBusOrNull?.emit(
+            name = EventNames.MQ_AI_CONVERSATION_COMPLETED,
+            payload = mapOf<String, Any?>(
+                "conversationId" to newUuidV7(),
+                "connectionId" to chain.connectionId,
+                "objectType" to chain.objectType,
+                "objectName" to chain.objectName,
+                "question" to question,
+                "contextJson" to wireContent,
+                "answer" to answer?.takeIf { it.isNotBlank() },
+                "status" to status,
+                "errorMessage" to errorMessage,
+                "requestTime" to requestTime,
+                "responseTime" to finishedAt,
+                "durationMs" to finishedAt?.let { it - requestTime },
+            ),
+            source = SOURCE_TAG,
+        )
+    }
+
     /** Builds a `[CONTEXT] k=v =` prefix from the current selection, or null if nothing to attach. */
     private fun buildContextPrefix(context: AiContext?): String? {
         if (context == null) return null
@@ -427,3 +537,8 @@ fun rememberAiPanelState(initialConfig: AiConfig = AiConfig()): AiPanelState {
 }
 
 private const val SOURCE_TAG = "ai-panel"
+
+/** mq_ai_conversation.status 取值（与 mq_command 同族：SUCCESS / FAILED / CANCELLED）。 */
+private const val STATUS_SUCCESS = "SUCCESS"
+private const val STATUS_FAILED = "FAILED"
+private const val STATUS_CANCELLED = "CANCELLED"

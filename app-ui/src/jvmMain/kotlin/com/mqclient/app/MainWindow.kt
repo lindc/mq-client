@@ -91,6 +91,7 @@ fun MainWindow(
     aiPanelState: AiPanelState,
     aiContext: AiContext?,
     onDismissAiPanel: () -> Unit,
+    onClearAiChainTarget: () -> Unit,
     onConnectionsChanged: () -> Unit,
 ) {
     // 连接列表由调用方（Main.kt 里 collectAsState 一次）传进来 —— 这里原来是
@@ -298,6 +299,7 @@ fun MainWindow(
                         state = aiPanelState,
                         currentContext = aiContext,
                         onDismiss = onDismissAiPanel,
+                        onClearChainTarget = onClearAiChainTarget,
                     )
                 }
             }

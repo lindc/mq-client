@@ -4,6 +4,8 @@ import com.mqclient.core.cache.CacheManager
 import com.mqclient.core.db.MqCommandHistoryHandler
 import com.mqclient.core.db.MqCommandHistoryRepository
 import com.mqclient.core.db.MqConnectionSnapshotHandler
+import com.mqclient.core.db.MqAiConversationHandler
+import com.mqclient.core.db.MqAiConversationRepository
 import com.mqclient.core.db.MqConnectionSnapshotRepository
 import com.mqclient.core.event.EventBus
 import com.mqclient.core.event.EventBusErrorReporter
@@ -60,6 +62,13 @@ object CoreModule {
      * 订阅与摸库时机同 [snapshotHandler]。
      */
     private val commandHistoryHandler = MqCommandHistoryHandler(MqCommandHistoryRepository)
+
+    /**
+     * MQ 对象 AI 分析问答落库的处理器（mq_ai_conversation 表）：AI 面板在分析问答
+     * 结束时广播 `core.mq.ai.conversation.completed`，这里统一写库。订阅与摸库时机
+     * 同 [snapshotHandler]。
+     */
+    private val aiConversationHandler = MqAiConversationHandler(MqAiConversationRepository)
 
     /** 应用级事件总线。在 [initialize] 之前访问会抛 [IllegalStateException]。 */
     val eventBus: EventBus
@@ -154,6 +163,7 @@ object CoreModule {
         // 连接快照落库（mq_connection 表）—— 订阅生命周期跟总线一致，见 snapshotHandler 的注释。
         created.on(EventNames.MQ_CONNECTION_SNAPSHOT_CREATED) { event -> snapshotHandler.handle(event) }
         created.on(EventNames.MQ_COMMAND_EXECUTED) { event -> commandHistoryHandler.handle(event) }
+        created.on(EventNames.MQ_AI_CONVERSATION_COMPLETED) { event -> aiConversationHandler.handle(event) }
         return created
     }
 

@@ -21,13 +21,22 @@ class AdapterChatService : ChatService {
         history: List<AiMessage>,
         connection: AiConnection,
         context: AiContext?,
+        systemPromptOverride: String?,
         onChunk: (String) -> Unit,
     ): AiStreamResult {
         val adapter = AiAdapterRegistry.adapter(connection.providerId)
             ?: throw AiException("没有 providerId=「${connection.providerId}」对应的适配器（连接「${connection.name}」）")
 
+        // 系统提示词 = 连接自己的（没填回退默认）+「询问 AI」分析提示词（非空时追加）。
+        val systemPrompt = buildString {
+            append(connection.systemPrompt.ifBlank { DEFAULT_SYSTEM_PROMPT })
+            if (!systemPromptOverride.isNullOrBlank()) {
+                append("\n\n")
+                append(systemPromptOverride)
+            }
+        }
         val messages = buildList {
-            add(AiChatMessage(AiRole.SYSTEM, connection.systemPrompt.ifBlank { DEFAULT_SYSTEM_PROMPT }))
+            add(AiChatMessage(AiRole.SYSTEM, systemPrompt))
             history.forEach { add(AiChatMessage(it.role.toAiRole(), it.content)) }
         }
 

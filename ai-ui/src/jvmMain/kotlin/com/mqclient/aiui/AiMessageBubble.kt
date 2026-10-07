@@ -31,6 +31,9 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.mikepenz.markdown.m3.Markdown
+import com.mikepenz.markdown.m3.markdownColor
+import com.mikepenz.markdown.m3.markdownTypography
 
 /**
  * One chat bubble plus the action strip below AI bubbles (copy / thumbs).
@@ -63,13 +66,24 @@ fun AiMessageBubble(
                 .background(bubbleColor)
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
-            Text(
-                text = message.content.ifEmpty { "…" },
-                color = textColor,
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    fontWeight = if (isUser) FontWeight.Medium else FontWeight.Normal,
-                ),
-            )
+            if (isUser) {
+                // 用户消息保持纯文本 —— 发出去的是原文（链路分析的 JSON 走消息组装，
+                // 不进气泡），Markdown 渲染没有意义。
+                Text(
+                    text = message.content.ifEmpty { "…" },
+                    color = textColor,
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                )
+            } else {
+                // AI 回答用 Markdown 渲染（代码块 / 列表 / 加粗）——运维定位回答里
+                // 常见。配色跟随主题与气泡色；流式期间逐片重组，内容量级下开销可忽略。
+                Markdown(
+                    content = message.content.ifEmpty { "…" },
+                    colors = markdownColor(text = textColor),
+                    typography = markdownTypography(text = MaterialTheme.typography.bodyMedium),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
         if (!isUser) {
             Spacer(Modifier.height(4.dp))

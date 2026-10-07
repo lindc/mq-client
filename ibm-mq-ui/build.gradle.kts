@@ -27,6 +27,8 @@ kotlin {
             implementation(compose.materialIconsExtended)
             // 表单字段组件（LabeledField / PressableButton / SettingsDropdownRow）与 i18n。
             implementation(projects.uiCommon)
+            // 「询问 AI」链路上下文的 JSON 序列化（AiChainBuilder，buildJsonObject）。
+            implementation(libs.kotlinx.serialization.json)
             // 消息解释器：聚合注册表一个依赖带上契约 + 全部解释器实现（运行时
             // classpath 供 ServiceLoader 发现），新增解释器宿主零改动。
             implementation(projects.messageInterpreterRegistry)

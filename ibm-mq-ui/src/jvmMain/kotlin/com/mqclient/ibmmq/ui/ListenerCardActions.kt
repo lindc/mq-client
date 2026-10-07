@@ -5,6 +5,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import com.mqclient.ibmmq.pcf.MqObjectSnapshot
+import com.mqclient.ibmmq.ui.ai.askAiCardAction
 import com.mqclient.mqui.objectlist.CardAction
 
 /**
@@ -41,12 +42,14 @@ object ListenerCardActions {
      * @param onOpenProperties 打开监听器属性 Dialog 的回调。
      * @param onStart 启动监听器的回调（仅当卡片显示【启动】按钮时触发）。
      * @param onStop 停止监听器的回调（仅当卡片显示【停止】按钮时触发；危险操作，调用方二次确认）。
+     * @param onAskAi 发起「询问 AI」的回调（宿主提供 AI 入口时显示；null = 不显示）。
      */
     fun create(
         snapshot: MqObjectSnapshot,
         onOpenProperties: () -> Unit,
         onStart: () -> Unit = {},
         onStop: () -> Unit = {},
+        onAskAi: (() -> Unit)? = null,
     ): List<CardAction> {
         val actions = mutableListOf<CardAction>()
 
@@ -63,6 +66,9 @@ object ListenerCardActions {
                 actions += stopAction(onStop, enabled = false, tooltip = "operation_unknown_state")
             }
         }
+
+        // 「询问 AI」插在属性按钮之前（监听器全部类型都是入口对象）。
+        onAskAi?.let { actions += askAiCardAction(it) }
 
         // 属性按钮恒在尾位。
         actions += CardAction(

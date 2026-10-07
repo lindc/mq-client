@@ -21,6 +21,8 @@ kuiver = "0.4.2"
 filekit = "0.16.0"
 # UUIDv7 生成（时间有序，适合做数据库主键与按时间排序）。JVM-only。
 uuidCreator = "5.3.3"
+# Markdown 渲染（AI 回答气泡）：纯 Compose 实现库，m3 模块提供 Material3 配色默认值。
+markdownRenderer = "0.45.0"
 
 [libraries]
 # Compose Multiplatform
@@ -40,6 +42,9 @@ material-kolor = { module = "com.materialkolor:material-kolor", version.ref = "m
 
 # JSON serialization for the AI panel's settings / message-history files.
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
+
+# Markdown rendering for the AI panel's assistant bubbles (code blocks / lists / bold).
+markdown-renderer-m3 = { module = "com.mikepenz:multiplatform-markdown-renderer-m3", version.ref = "markdownRenderer" }
 
 # File I/O for ConfigManager (atomic writes).
 okio = { module = "com.squareup.okio:okio-jvm", version.ref = "okio" }

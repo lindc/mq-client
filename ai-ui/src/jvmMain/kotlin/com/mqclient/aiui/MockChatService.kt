@@ -19,6 +19,7 @@ class MockChatService(
         history: List<AiMessage>,
         connection: AiConnection,
         context: AiContext?,
+        systemPromptOverride: String?,
         onChunk: (String) -> Unit,
     ): AiStreamResult {
         val lastUser = history.lastOrNull { it.role == Role.USER }?.content.orEmpty()

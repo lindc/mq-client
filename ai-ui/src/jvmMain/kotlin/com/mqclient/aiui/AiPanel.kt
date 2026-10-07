@@ -7,10 +7,16 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.foundation.layout.size
@@ -21,10 +27,17 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.mqclient.uicommon.i18n.stringResource
+import com.mqclient.uicommon.i18n.withArg
 
 /**
  * Right-side AI panel. Composed of three stacked bands: header (title +
@@ -32,12 +45,16 @@ import androidx.compose.ui.unit.dp
  *
  * Width is fixed at 360 dp so the main content never gets squeezed off
  * screen by an over-eager side panel.
+ *
+ * 「询问 AI」链路分析（[AiContext.chain] 非空）时，header 下方多一条分析目标栏：
+ * 「正在分析：{对象名}」+ 退出分析按钮 + 「查看发送内容」折叠区（完整 chain JSON）。
  */
 @Composable
 fun AiPanel(
     state: AiPanelState,
     currentContext: AiContext?,
     onDismiss: () -> Unit,
+    onClearChainTarget: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Row(modifier = modifier.width(360.dp).fillMaxHeight()) {
@@ -54,6 +71,12 @@ fun AiPanel(
                     onConnectionSelected = { picked -> state.updateConfig { it.copy(activeConnectionId = picked.id) } },
                     onDismiss = onDismiss,
                 )
+                currentContext?.chain?.let { chain ->
+                    ChainAnalysisBar(
+                        chain = chain,
+                        onClearChainTarget = onClearChainTarget,
+                    )
+                }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 AiMessageList(
                     messages = state.messages,
@@ -103,6 +126,75 @@ fun AiPanel(
                     onCancel = { state.cancelStreaming() },
                 )
             }
+        }
+    }
+}
+
+/**
+ * 「正在分析：{目标}」栏：AutoAwesome 图标 + 目标名 + 退出分析（✕）。下方可折叠的
+ * 「查看发送内容」展示本次分析携带的 chain JSON（发起时点构建，与发送给模型的一致，
+ * 仅 userQuestion 每条消息不同）——给用户核对「AI 到底看到了什么」。
+ */
+@Composable
+private fun ChainAnalysisBar(chain: AiChainTarget, onClearChainTarget: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.secondaryContainer),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 12.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Default.AutoAwesome,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                modifier = Modifier.size(14.dp),
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = stringResource("ai_chain_analyzing").withArg(chain.targetLabel),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onClearChainTarget) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                    modifier = Modifier.size(14.dp),
+                )
+            }
+        }
+        var showContext by remember { mutableStateOf(false) }
+        TextButton(
+            onClick = { showContext = !showContext },
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+        ) {
+            Text(
+                text = if (showContext) stringResource("ai_chain_hide_context") else stringResource("ai_chain_show_context"),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+        }
+        AnimatedVisibility(visible = showContext) {
+            Text(
+                text = chain.contextJson,
+                style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(160.dp)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 12.dp)
+                    .selectable(true) {},
+            )
         }
     }
 }

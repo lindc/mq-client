@@ -30,6 +30,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.dp
 import com.mqclient.aiservice.AiChatPersistence
 import com.mqclient.aiservice.AiConnectionRepository
+import com.mqclient.aiui.AiChainTarget
 import com.mqclient.aiui.AiContext
 import com.mqclient.aiui.rememberAiPanelState
 import com.mqclient.core.Config
@@ -179,10 +180,29 @@ private fun AppRoot(bootConfig: Config, onExit: () -> Unit) {
                 var aiPanelVisible by remember { mutableStateOf(false) }
                 val aiPanelState = rememberAiPanelState(appConfig.ai)
 
+                // 「询问 AI」链路分析目标（ibm-mq 属性对话框 / 卡片经 LocalAiAsk 发起）：
+                // 非空时 AI 面板进入分析模式（目标 chip + 链路上下文）。面板关闭 /
+                // 手动 toggle / 退出分析时清空 —— 下次普通打开回到「按导航选中」的上下文。
+                var aiChainTarget by remember { mutableStateOf<com.mqclient.uicommon.AiAskRequest?>(null) }
+
                 // Project the current main-UI selection into the small DTO the
                 // AI panel expects, so the panel doesn't need to know about
                 // NavSelection / ConnectionStore.
-                val aiContext: AiContext? = selection?.let { sel ->
+                val aiContext: AiContext? = aiChainTarget?.let { req ->
+                    val conn = connections.firstOrNull { it.id == req.connectionId }
+                    AiContext(
+                        connectionName = conn?.name ?: req.connectionId,
+                        serviceId = conn?.serviceId,
+                        objectType = req.objectType,
+                        chain = AiChainTarget(
+                            connectionId = req.connectionId,
+                            objectType = req.objectType,
+                            objectName = req.objectName,
+                            targetLabel = req.targetLabel,
+                            contextJson = req.contextJson,
+                        ),
+                    )
+                } ?: selection?.let { sel ->
                     val conn = connections.firstOrNull { it.id == sel.connectionId }
                     AiContext(
                         connectionName = conn?.name ?: sel.connectionId,
@@ -194,7 +214,15 @@ private fun AppRoot(bootConfig: Config, onExit: () -> Unit) {
                 // CompositionLocal 把 SnackbarHostState 下发给任意深层 Composable
                 // （如各业务模块的命令控制台），避免每个模块各包一层 Scaffold。
                 val snackbarHostState = remember { SnackbarHostState() }
-                CompositionLocalProvider(LocalSnackbarHostState.provides(snackbarHostState)) {
+                CompositionLocalProvider(
+                    LocalSnackbarHostState.provides(snackbarHostState),
+                    // 「询问 AI」宿主回调：业务模块（属性对话框 / 卡片按钮）发起链路分析
+                    // 时，记录目标并打开 AI 面板。
+                    com.mqclient.uicommon.LocalAiAsk provides com.mqclient.uicommon.AiAskStarter { request ->
+                        aiChainTarget = request
+                        aiPanelVisible = true
+                    },
+                ) {
                     Scaffold(
                         snackbarHost = {
                             SnackbarHost(snackbarHostState) { data ->
@@ -221,6 +249,7 @@ private fun AppRoot(bootConfig: Config, onExit: () -> Unit) {
                             (event.isMetaPressed || event.isCtrlPressed)
                         ) {
                             aiPanelVisible = !aiPanelVisible
+                            if (!aiPanelVisible) aiChainTarget = null
                             true
                         } else {
                             false
@@ -258,7 +287,10 @@ private fun AppRoot(bootConfig: Config, onExit: () -> Unit) {
                                 onShowNewConnection = { showNewConnection = true },
                                 onShowSettings = { showSettings = true },
                                 onShowAbout = { showAbout = true },
-                                onToggleAiPanel = { aiPanelVisible = !aiPanelVisible },
+                                onToggleAiPanel = {
+                                    aiPanelVisible = !aiPanelVisible
+                                    if (!aiPanelVisible) aiChainTarget = null
+                                },
                                 onExit = closeApp,
                             )
                             WindowControlButtons(
@@ -286,7 +318,11 @@ private fun AppRoot(bootConfig: Config, onExit: () -> Unit) {
                         aiPanelVisible = aiPanelVisible,
                         aiPanelState = aiPanelState,
                         aiContext = aiContext,
-                        onDismissAiPanel = { aiPanelVisible = false },
+                        onDismissAiPanel = {
+                            aiPanelVisible = false
+                            aiChainTarget = null
+                        },
+                        onClearAiChainTarget = { aiChainTarget = null },
                         // 编辑连接落盘后从磁盘重载内存 appConfig —— 与新建连接一致，
                         // 避免设置页的整份保存把刚改过的连接覆盖掉。列表本身由
                         // ConnectionStore.connections 的 StateFlow 订阅自动刷新。

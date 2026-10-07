@@ -31,6 +31,7 @@
   "toolbar_hide_system": "Hide System",
   "queue_action_properties": "Properties",
   "queue_action_messages": "Messages",
+  "mq_action_ask_ai": "Ask AI",
   "queue_messages_title": "Messages - %s",
   "queue_messages_tab_browse": "Browse Messages",
   "queue_messages_tab_send": "Send Messages",

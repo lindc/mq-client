@@ -22,6 +22,8 @@ kotlin {
             // Material Icons Extended：跨平台一致的矢量图标（Linux 无 Emoji 字体也能正常显示）。
             implementation(compose.materialIconsExtended)
             implementation(libs.kotlinx.serialization.json)
+            // AI 回答气泡的 Markdown 渲染（代码块 / 列表 / 加粗）；纯 Compose 实现。
+            implementation(libs.markdown.renderer.m3)
         }
         jvmTest.dependencies {
             implementation(kotlin("test"))

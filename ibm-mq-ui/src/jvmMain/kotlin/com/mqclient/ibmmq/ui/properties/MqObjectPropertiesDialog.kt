@@ -1,10 +1,23 @@
 package com.mqclient.ibmmq.ui.properties
 
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import com.mqclient.ibmmq.IbmMQModule
+import com.mqclient.ibmmq.ui.ai.AiChainBuilder
 import com.mqclient.ibmmq.pcf.MqObjectType
+import com.mqclient.ibmmq.pcf.MqObjectSnapshot
+import com.mqclient.ibmmq.ui.ChannelIconResolver
+import com.mqclient.ibmmq.ui.ChannelType
 import com.mqclient.ibmmq.ui.QmgrPropertiesPanel
 import com.mqclient.ibmmq.ui.properties.content.ChannelPropertiesContent
 import com.mqclient.ibmmq.ui.properties.content.MqObjectPropertiesContent
+import com.mqclient.ibmmq.ui.topology.isLocalQueue
+import com.mqclient.uicommon.LocalAiAsk
+import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.i18n.stringResource
 
@@ -15,15 +28,32 @@ import com.mqclient.uicommon.i18n.stringResource
  *
  * QUEUE_MANAGER 分支复用连接属性面板 [QmgrPropertiesPanel]（实时 INQUIRE Q_MGR，
  * 与 SPI 面板同数据源）——拓扑图 / 集群画布双击 QMgr 节点走这里。
+ *
+ * 底部操作区：本地队列 / 发送方通道 / 监听器三类目标对象多一个「询问 AI」按钮
+ * （发起链路分析，见 [AiChainBuilder]）；其余对象保持默认单一「关闭」。
  */
 @Composable
 fun MqObjectPropertiesDialog(
     state: ObjectPropertiesDialogState,
     onDismiss: () -> Unit,
 ) {
+    val aiStarter = LocalAiAsk.current
+    // 「询问 AI」按钮可见性：只给本地队列 / SENDER 通道 / 监听器三类入口对象显示。
+    // 快照从慢扫缓存按名取（与 MqObjectPropertiesContent 同源），缓存未就绪时按钮隐藏。
+    val askAiVisible = aiStarter != null && isAiAskTarget(state)
     ObjectDetailDialog(
         title = state.objectName,
         onDismiss = onDismiss,
+        footerActions = {
+            if (askAiVisible) {
+                FooterActionButton(label = stringResource("mq_action_ask_ai")) {
+                    AiChainBuilder.build(state.connectionId, state.objectType, state.objectName)
+                        ?.let(aiStarter::onAsk)
+                }
+            }
+            Spacer(Modifier.weight(1f))
+            FooterActionButton(label = stringResource("common_close")) { onDismiss() }
+        },
     ) {
         when (state.objectType) {
             MqObjectType.QUEUE -> MqObjectPropertiesContent(state, "queue_props_group_general") { resolveQueuePropertyGroups(it) }
@@ -42,24 +72,24 @@ fun MqObjectPropertiesDialog(
     }
 }
 
-/** [MqObjectType] → 类型显示名的 i18n 键（占位标题用）。 */
-internal fun MqObjectType.displayNameKey(): String = when (this) {
-    MqObjectType.QUEUE -> "object_type_queue"
-    MqObjectType.TOPIC -> "object_type_topic"
-    MqObjectType.SUBSCRIPTION -> "object_type_subscription"
-    MqObjectType.CHANNEL -> "object_type_channel"
-    MqObjectType.LISTENER -> "object_type_listener"
-    MqObjectType.SERVICE -> "object_type_service"
-    MqObjectType.PROCESS -> "object_type_process"
-    MqObjectType.NAMELIST -> "object_type_namelist"
-    MqObjectType.AUTH_INFO -> "object_type_auth_info"
-    MqObjectType.COMM_INFO -> "object_type_comm_info"
-    else -> "object_type_queue"
+/**
+ * 「询问 AI」入口对象判定：本地队列（QLOCAL + USAGE=NORMAL）/ SENDER 通道 / 监听器。
+ * 与卡片图标同一规则（卡片侧在各自 CardActions 里实现）。快照缺失（缓存未就绪）不算
+ * 入口对象——按钮随内容占位一起隐藏。
+ */
+private fun isAiAskTarget(state: ObjectPropertiesDialogState): Boolean {
+    val snapshot = cachedSnapshot(state) ?: return state.objectType == MqObjectType.LISTENER
+    return when (state.objectType) {
+        MqObjectType.QUEUE -> snapshot.isLocalQueue()
+        MqObjectType.CHANNEL -> ChannelIconResolver.resolveType(snapshot) == ChannelType.SENDER
+        MqObjectType.LISTENER -> true
+        else -> false
+    }
 }
 
-/** 便捷取类型显示名（i18n）。 */
-@Composable
-internal fun MqObjectType.displayName(): String = stringResource(displayNameKey())
+private fun cachedSnapshot(state: ObjectPropertiesDialogState): MqObjectSnapshot? =
+    IbmMQModule.serviceOrNull()?.cachedObjects(state.connectionId, state.objectType)
+        ?.firstOrNull { it.name == state.objectName }
 
 /**
  * 拓扑节点类型 → MQ 对象类型（属性对话框按 [MqObjectType] 分发内容）。
@@ -78,4 +108,13 @@ internal fun com.mqclient.graph.TopologyNodeType.toMqObjectType(): MqObjectType?
     // 集群关系图节点是 QMGR 角色视图，无对应的单对象属性页（QMGR 走连接属性面板）。
     com.mqclient.graph.TopologyNodeType.QMGR_FULL -> null
     com.mqclient.graph.TopologyNodeType.QMGR_PARTIAL -> null
+}
+
+@Composable
+private fun RowScope.FooterActionButton(label: String, onClick: () -> Unit) {
+    PressableButton(
+        onClick = onClick,
+        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+    ) { Text(label) }
 }

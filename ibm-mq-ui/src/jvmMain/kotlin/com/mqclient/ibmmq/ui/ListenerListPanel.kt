@@ -12,6 +12,7 @@ import androidx.compose.ui.Modifier
 import com.mqclient.ibmmq.IbmMQModule
 import com.mqclient.ibmmq.pcf.MqObjectType
 import com.mqclient.ibmmq.pcf.isSystemObject
+import com.mqclient.ibmmq.ui.ai.askAiClick
 import com.mqclient.ibmmq.ui.properties.ObjectPropertiesDialogHost
 import com.mqclient.ibmmq.ui.properties.rememberObjectPropertiesDialogController
 import com.mqclient.mqui.command.DangerousCommandDialog
@@ -20,6 +21,7 @@ import com.mqclient.mqui.state.LoadStateContent
 import com.mqclient.mqui.CommandOutcome
 import com.mqclient.mqui.PollOutcome
 import com.mqclient.mqui.pollUntil
+import com.mqclient.uicommon.LocalAiAsk
 import com.mqclient.uicommon.LocalSnackbarHostState
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
@@ -169,6 +171,8 @@ fun ListenerListPanel(
         // 空列表的呈现交给 ObjectListPanel（其内部自带空态 + 工具栏），故此处恒返回 false。
         emptyCheck = { false },
         content = { listeners ->
+            // 「询问 AI」宿主入口（null = 宿主未提供，卡片不显示 AI 图标）。
+            val aiAsk = LocalAiAsk.current
             val filtered = listeners
                 .filter { it.name.contains(searchText, ignoreCase = true) }
                 .filter { showSystem || !isSystemObject(it.name) }
@@ -182,6 +186,9 @@ fun ListenerListPanel(
                             },
                             onStart = { startListener(listener.name) },
                             onStop = { requestStopListener(listener.name) },
+                            onAskAi = aiAsk?.let {
+                                askAiClick(connectionId, MqObjectType.LISTENER, listener.name, it::onAsk)
+                            },
                         ),
                         executingActionIds = executingIdsFor(listener.name),
                         executingTarget = executingActions[listener.name],

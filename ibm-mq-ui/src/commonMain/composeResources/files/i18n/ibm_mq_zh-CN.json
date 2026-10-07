@@ -31,6 +31,7 @@
   "toolbar_hide_system": "隐藏系统",
   "queue_action_properties": "属性",
   "queue_action_messages": "消息处理",
+  "mq_action_ask_ai": "询问 AI",
   "queue_messages_title": "消息处理 - %s",
   "queue_messages_tab_browse": "浏览消息",
   "queue_messages_tab_send": "发送消息",

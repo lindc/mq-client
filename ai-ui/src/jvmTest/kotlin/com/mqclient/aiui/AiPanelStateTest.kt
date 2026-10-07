@@ -82,6 +82,7 @@ class AiPanelStateTest {
             history: List<AiMessage>,
             connection: AiConnection,
             context: AiContext?,
+            systemPromptOverride: String?,
             onChunk: (String) -> Unit,
         ): AiStreamResult {
             onChunk(PARTIAL_REPLY)

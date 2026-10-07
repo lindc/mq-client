@@ -52,6 +52,9 @@ fun MqObjectSnapshot.getAliasTarget(): String? =
         ?: attrStr("MQCA_TARGQ")
         ?: attrStr("MQCA_TARGET_Q_NAME")
 
+/** 远程队列定义的目标队列名（RNAME：远端队列在本 QMgr 侧的落点，可为 local / remote / alias）。 */
+fun MqObjectSnapshot.getRemoteName(): String? = attrStr("MQCA_REMOTE_NAME")
+
 /** 远程队列定义的目标 QMgr（RQMNAME；QREMOTE 定义自带，实测总有值）。 */
 fun MqObjectSnapshot.getRemoteQueueRqmName(): String? = attrStr("MQCA_REMOTE_Q_MGR_NAME")
 

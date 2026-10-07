@@ -97,6 +97,19 @@ object EventNames {
      */
     const val MQ_COMMAND_EXECUTED = "core.mq.command.executed"
 
+    /**
+     * 一次「MQ 对象 AI 分析问答」已结束（成功 / 失败 / 取消）；订阅方（app-core 的
+     * MqAiConversationHandler）把它写进 mq_ai_conversation 表（对象维度审计，只追加）。
+     * 发出方是 AI 面板（ai-ui 的 AiPanelState）——仅限从「询问 AI」入口发起的链路分析
+     * 会话，普通对话不报本事件（那部分走 ai-service 的 chat_history）。payload 自包含，
+     * 订阅者不需要再查任何数据：`conversationId`(记录 UUIDv7) / `connectionId` /
+     * `objectType`(QUEUE|CHANNEL|LISTENER，可空) / `objectName`(可空) / `question`(原文) /
+     * `contextJson`(链路上下文 JSON，可空) / `answer`(失败时为已流出部分，可空) /
+     * `status`(SUCCESS|FAILED|CANCELLED) / `errorMessage`(可空) / `requestTime` /
+     * `responseTime` / `durationMs`。
+     */
+    const val MQ_AI_CONVERSATION_COMPLETED = "core.mq.ai.conversation.completed"
+
     // AI 事件（`ai.*`）不在这里：契约常量跟着发出方走，现在在 ai-service 的
     // `AiEvents`（事件名）与 `AiPayloadKeys`（payload key）里 —— core 不再持有任何 AI 名字。
 }

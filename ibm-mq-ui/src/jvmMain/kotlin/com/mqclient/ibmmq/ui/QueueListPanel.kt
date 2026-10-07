@@ -12,10 +12,12 @@ import com.mqclient.ibmmq.IbmMQConfig
 import com.mqclient.ibmmq.ibmMQConfigFromOptions
 import com.mqclient.ibmmq.pcf.MqObjectType
 import com.mqclient.ibmmq.pcf.isSystemOrTempQueue
+import com.mqclient.ibmmq.ui.ai.askAiClick
 import com.mqclient.ibmmq.ui.properties.ObjectPropertiesDialogHost
 import com.mqclient.ibmmq.ui.properties.rememberObjectPropertiesDialogController
 import com.mqclient.mqui.objectlist.ObjectListPanel
 import com.mqclient.mqui.state.LoadStateContent
+import com.mqclient.uicommon.LocalAiAsk
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 
@@ -76,6 +78,8 @@ fun QueueListPanel(
         // 「显示系统」开关在空结果下仍需可用），故此处恒返回 false。
         emptyCheck = { false },
         content = { queues ->
+            // 「询问 AI」宿主入口（null = 宿主未提供，卡片不显示 AI 图标）。
+            val aiAsk = LocalAiAsk.current
             // 过滤 + 卡片数据构建较重（每张卡新建 action lambda，ObjectCardData 恒不等），
             // remember 隔离：搜索敲键 / isRefreshing 翻转之外不重建，网格不跟随全量重组。
             val filtered = remember(queues, searchText, showSystem, warningThreshold) {
@@ -93,6 +97,9 @@ fun QueueListPanel(
                                 propertiesController.open(MqObjectType.QUEUE, queue.name)
                             },
                                     onOpenMessages = { messagesDialogQueue = queue.name },
+                                    onAskAi = aiAsk?.let {
+                                        askAiClick(connectionId, MqObjectType.QUEUE, queue.name, it::onAsk)
+                                    },
                                 ),
                         )
                     }

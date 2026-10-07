@@ -1,0 +1,29 @@
+-- MQ 对象 AI 分析对话表（审计）：只有 INSERT，没有 UPDATE / DELETE。
+-- 记录「从 MQ 对象属性对话框 / 卡片的『询问 AI』入口发起的链路分析问答」——
+-- context_json 是发给模型的链路上下文（currentTime / chain / userQuestion 结构，
+-- 见 ibm-mq-ui 的 AiChainBuilder），question 存用户问题原文（不含 JSON 包装）。
+-- 与 ai-service 的 chat_history（全量对话审计）并存：本表是对象维度的专用落库，
+-- 带 objectType / objectName，供按对象回溯分析历史。
+-- 写入走事件（`core.mq.ai.conversation.completed`，app-core 的
+-- MqAiConversationHandler 落库）；本次只做写入，不做查询 UI（查询方法后续按需补）。
+CREATE TABLE IF NOT EXISTS mq_ai_conversation (
+    id            TEXT PRIMARY KEY NOT NULL,  -- 记录自身 UUIDv7（与连接 id 无关）
+    connection_id TEXT NOT NULL,              -- 连接 UUIDv7（= ConnectionInfo.id）
+    object_type   TEXT,                       -- 目标对象类型（QUEUE / CHANNEL / LISTENER）
+    object_name   TEXT,                       -- 目标对象名，如 ORDER.LOCAL.Q、QM1.TO.QM2
+    question      TEXT NOT NULL,              -- 用户问题原文（不含上下文 JSON 包装）
+    context_json  TEXT,                       -- 发给模型的链路上下文 JSON（完整原文）
+    answer        TEXT,                       -- AI 回答（失败时为已流出的部分文本，可能 NULL）
+    status        TEXT NOT NULL,              -- SUCCESS / FAILED / CANCELLED
+    error_message TEXT,                       -- 失败原因；成功 / 取消为 NULL
+    request_time  INTEGER NOT NULL,           -- 问题发起时刻（Unix 毫秒）
+    response_time INTEGER,                    -- 回答完成 / 失败时刻（Unix 毫秒）
+    duration_ms   INTEGER                     -- response_time - request_time
+);
+
+CREATE INDEX IF NOT EXISTS idx_mq_ai_conv_conn_time ON mq_ai_conversation(connection_id, request_time DESC);
+CREATE INDEX IF NOT EXISTS idx_mq_ai_conv_object ON mq_ai_conversation(connection_id, object_type, object_name, request_time DESC);
+
+insertConversation:
+INSERT INTO mq_ai_conversation(id, connection_id, object_type, object_name, question, context_json, answer, status, error_message, request_time, response_time, duration_ms)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
