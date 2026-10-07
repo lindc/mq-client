@@ -398,9 +398,6 @@ class IbmMQService(private val context: ServiceContext) {
             syncQueueDepths(connectionId, counts)
             val channelStatuses = objectScanner.scanChannelStatuses(connectionId)
             syncChannelStatuses(connectionId, channelStatuses)
-            // 状态采集旁路（mq_status 表）：队列深度 + 通道状态打包成一个快照事件落库，
-            // 原有缓存 / 事件流向不变。发射器内部 runCatching，不影响扫描主流程。
-            MqStatusSnapshotEmitter.emitHeartbeat(connectionId, counts, channelStatuses)
             context.emit(
                 name = IbmMQEvents.MESSAGES_SCANNED,
                 payload = mapOf(
@@ -461,10 +458,6 @@ class IbmMQService(private val context: ServiceContext) {
             cache?.put(objectsKey(MqObjectType.NAMELIST), result.namelists, ttlMs = OBJECTS_FULL_TTL_MS)
             cache?.put(objectsKey(MqObjectType.AUTH_INFO), result.authInfos, ttlMs = OBJECTS_FULL_TTL_MS)
             cache?.put(objectsKey(MqObjectType.COMM_INFO), result.commInfos, ttlMs = OBJECTS_FULL_TTL_MS)
-
-            // 状态采集旁路（mq_status 表）：慢扫只补监听器状态——队列深度 / 通道状态
-            // 已由秒级心跳覆盖，重复记只是翻倍行数。
-            MqStatusSnapshotEmitter.emitListenerStatuses(connectionId, result.listeners)
 
             context.emit(
                 name = IbmMQEvents.OBJECTS_SCANNED,

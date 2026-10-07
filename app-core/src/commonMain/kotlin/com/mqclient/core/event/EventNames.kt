@@ -97,15 +97,6 @@ object EventNames {
      */
     const val MQ_COMMAND_EXECUTED = "core.mq.command.executed"
 
-    /**
-     * 状态采集快照已广播；订阅方（app-core 的 MqStatusHistoryHandler）把整批记录
-     * 一个事务写进 mq_status 表（时序数据，只追加）。发出方是各 MQ 模块的扫描任务
-     * （IBM MQ = 消息心跳的队列深度 / 通道状态 + 对象慢扫的监听器状态，经
-     * MqStatusSnapshotEmitter——一次扫描一个事件，避免逐条事件的开销）。
-     * payload: `records`(List&lt;MqStatusRecord&gt;，类型化进程内对象，不序列化)。
-     */
-    const val MQ_STATUS_SNAPSHOT_CREATED = "core.mq.status.snapshot.created"
-
     // AI 事件（`ai.*`）不在这里：契约常量跟着发出方走，现在在 ai-service 的
     // `AiEvents`（事件名）与 `AiPayloadKeys`（payload key）里 —— core 不再持有任何 AI 名字。
 }
