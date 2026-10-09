@@ -9,8 +9,8 @@ import com.mqclient.core.database.DatabaseManager
  * 连接不支持并发，见 DatabaseManager 的线程模型注释。错误处理交给调用方
  * （事件 handler / UI），这里只做纯读写。
  *
- * 命名说明：SQLDelight 把驼峰表名 `aiConnection` 的 queries 属性生成为
- * `ai_connectionQueries`（数据类是 `Ai_connection`），下面的名字以生成物为准。
+ * 命名说明：SQLDelight 生成的 queries 属性是 `ai_connectionQueries`（数据类是
+ * `Ai_connection`，属性名与 snake_case 列名一致），下面的名字以生成物为准。
  */
 object AiConnectionSnapshotRepository {
 
@@ -25,10 +25,10 @@ object AiConnectionSnapshotRepository {
         createdTime: Long = System.currentTimeMillis(),
     ): Unit = withDatabase { db ->
         db.ai_connectionQueries.insertSnapshot(
-            connectionId = connectionId,
-            prevId = prevId,
-            serviceUrl = serviceUrl,
-            createdTime = createdTime,
+            connection_id = connectionId,
+            prev_id = prevId,
+            service_url = serviceUrl,
+            created_time = createdTime,
         )
     }
 

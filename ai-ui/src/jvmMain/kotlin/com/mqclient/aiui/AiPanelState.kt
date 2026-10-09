@@ -372,10 +372,10 @@ class AiPanelState internal constructor(
     private fun List<Chat_history>.toAiMessages(): List<AiMessage> =
         asSequence()
             .filter { it.status == ChatHistoryRepository.STATUS_SUCCESS }
-            .sortedWith(compareBy({ it.createdTime }, { it.id }))
+            .sortedWith(compareBy({ it.created_time }, { it.id }))
             .flatMap { row ->
                 buildList {
-                    add(AiMessage(id = newId(), role = Role.USER, content = row.question.orEmpty(), timestamp = row.createdTime))
+                    add(AiMessage(id = newId(), role = Role.USER, content = row.question.orEmpty(), timestamp = row.created_time))
                     // reply 是跨模块生成的开放属性，smart cast 不可用 —— 先落局部变量。
                     val reply = row.reply
                     if (!reply.isNullOrEmpty()) {
@@ -384,7 +384,7 @@ class AiPanelState internal constructor(
                                 id = newId(),
                                 role = Role.ASSISTANT,
                                 content = reply,
-                                timestamp = row.finishedTime ?: row.startedTime ?: row.createdTime,
+                                timestamp = row.finished_time ?: row.started_time ?: row.created_time,
                             ),
                         )
                     }

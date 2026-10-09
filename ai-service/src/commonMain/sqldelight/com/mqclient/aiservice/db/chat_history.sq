@@ -1,39 +1,42 @@
 -- 对话审计表：只在 AI 回复完成后插入一条完整记录。
 -- 只插入，不更新，不删除（cleanOld 是按保留天数的清理，不算业务删除）。
 -- FAILED 记录只进审计，面板加载对话历史时按 status 过滤。
--- `AS ChatHistory`：物理表名用蛇形，生成的 Kotlin 数据类保持驼峰名。
--- 链路分析（MQ 对象「询问 AI」）的记录 objectType 非空，且 contextJson 存发给模型
+-- 生成物说明：物理表名与列名均蛇形，SQLDelight 生成的数据类是 `Chat_history`、
+-- 属性名与列名一致（snake_case，无驼峰转换）。
+-- 链路分析（MQ 对象「询问 AI」）的记录 object_type 非空，且 context_json 存发给模型
 -- 的完整上下文 JSON；普通聊天这三列为 NULL。原先对象维度的 mq_ai_conversation 表
--- 已并入本表（那张表没有读取方，链路分析本就双写）。
+-- 已并入本表。
+-- snapshot_id 存的是 ai_connection.connection_id（UUID 字符串，LEFT JOIN 用），
+-- 不是自增 id——ai_connection 的主键就是 connection_id。
 CREATE TABLE IF NOT EXISTS chat_history (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
-    connectionId     TEXT NOT NULL,          -- 连接 UUID
-    snapshotId       INTEGER,                -- 指向 ai_connection.id
-    modelName        TEXT NOT NULL,          -- 本次对话用的模型
-    tokenCount       INTEGER DEFAULT 0,      -- 总 token 消耗
-    promptTokens     INTEGER DEFAULT 0,      -- 输入 token 数
-    completionTokens INTEGER DEFAULT 0,      -- 输出 token 数
-    createdTime      INTEGER NOT NULL,       -- 用户提问时间（Unix 毫秒）
-    startedTime      INTEGER,                -- 收到 AI 第一个 token 的时间
-    finishedTime     INTEGER,                -- AI 回复结束时间
+    connection_id    TEXT NOT NULL,         -- 连接 UUID
+    snapshot_id      TEXT,                  -- 指向 ai_connection.connection_id
+    model_name       TEXT NOT NULL,         -- 本次对话用的模型
+    token_count      INTEGER DEFAULT 0,     -- 总 token 消耗
+    prompt_tokens    INTEGER DEFAULT 0,     -- 输入 token 数
+    completion_tokens INTEGER DEFAULT 0,    -- 输出 token 数
+    created_time     INTEGER NOT NULL,      -- 用户提问时间（Unix 毫秒）
+    started_time     INTEGER,               -- 收到 AI 第一个 token 的时间
+    finished_time    INTEGER,               -- AI 回复结束时间
     status           TEXT DEFAULT 'SUCCESS', -- SUCCESS / FAILED / CANCELLED
-    errorMessage     TEXT,                   -- 失败时的错误信息
-    finishReason     TEXT,                   -- stop / length / ...
-    question         TEXT,                   -- 用户问题（普通聊天含包装的上下文数据；链路分析存原文）
-    reply            TEXT,                   -- AI 回复
-    objectType       TEXT,                   -- 链路分析目标类型（QUEUE / CHANNEL / LISTENER）；普通聊天为 NULL
-    objectName       TEXT,                   -- 链路分析目标名，如 ORDER.LOCAL.Q；普通聊天为 NULL
-    contextJson      TEXT                    -- 链路分析发给模型的上下文 JSON（currentTime/chain/userQuestion）；普通聊天为 NULL
+    error_message    TEXT,                  -- 失败时的错误信息
+    finish_reason    TEXT,                  -- stop / length / ...
+    question         TEXT,                  -- 用户问题（普通聊天含包装的上下文数据；链路分析存原文）
+    reply            TEXT,                  -- AI 回复
+    object_type      TEXT,                  -- 链路分析目标类型（QUEUE / CHANNEL / LISTENER）；普通聊天为 NULL
+    object_name      TEXT,                  -- 链路分析目标名，如 ORDER.LOCAL.Q；普通聊天为 NULL
+    context_json     TEXT                   -- 链路分析发给模型的上下文 JSON（currentTime/chain/userQuestion）；普通聊天为 NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_chat_history_connection_id ON chat_history(connectionId);
-CREATE INDEX IF NOT EXISTS idx_chat_history_created_time ON chat_history(createdTime DESC);
+CREATE INDEX IF NOT EXISTS idx_chat_history_connection_id ON chat_history(connection_id);
+CREATE INDEX IF NOT EXISTS idx_chat_history_created_time ON chat_history(created_time DESC);
 
 insertChat:
 INSERT INTO chat_history(
-    connectionId, snapshotId, modelName, tokenCount, promptTokens, completionTokens,
-    createdTime, startedTime, finishedTime, status, errorMessage, finishReason, question, reply,
-    objectType, objectName, contextJson
+    connection_id, snapshot_id, model_name, token_count, prompt_tokens, completion_tokens,
+    created_time, started_time, finished_time, status, error_message, finish_reason, question, reply,
+    object_type, object_name, context_json
 ) VALUES (
     ?, ?, ?, ?, ?, ?,
     ?, ?, ?, ?, ?, ?, ?, ?,
@@ -42,41 +45,41 @@ INSERT INTO chat_history(
 
 selectByConnectionId:
 SELECT * FROM chat_history
-WHERE connectionId = ?
-ORDER BY createdTime DESC, id DESC;
+WHERE connection_id = ?
+ORDER BY created_time DESC, id DESC;
 
 selectRecentByConnectionId:
 SELECT * FROM chat_history
-WHERE connectionId = ?
-ORDER BY createdTime DESC, id DESC
+WHERE connection_id = ?
+ORDER BY created_time DESC, id DESC
 LIMIT :limit;
 
 selectByModel:
 SELECT * FROM chat_history
-WHERE connectionId = ? AND modelName = ?
-ORDER BY createdTime DESC, id DESC;
+WHERE connection_id = ? AND model_name = ?
+ORDER BY created_time DESC, id DESC;
 
 selectByTimeRange:
 SELECT * FROM chat_history
-WHERE connectionId = ? AND createdTime >= :fromTime AND createdTime <= :toTime
-ORDER BY createdTime DESC, id DESC;
+WHERE connection_id = ? AND created_time >= :fromTime AND created_time <= :toTime
+ORDER BY created_time DESC, id DESC;
 
--- 连表查：对话 + 所属快照的 URL（snapshot_id → ai_connection.id）。
+-- 连表查：对话 + 所属快照的 service_url（snapshot_id → ai_connection.connection_id）。
 -- LEFT JOIN：FAILED / 无快照的行也要返回，此时 snapshotServiceUrl 为 null。
--- 生成类型 SelectWithSnapshot = ChatHistory 全字段 + snapshotServiceUrl。
+-- 生成类型 SelectWithSnapshot = Chat_history 全字段 + snapshotServiceUrl（别名原样保留）。
 selectWithSnapshot:
-SELECT chat_history.*, ai_connection.serviceUrl AS snapshotServiceUrl
+SELECT chat_history.*, ai_connection.service_url AS snapshotServiceUrl
 FROM chat_history
-LEFT JOIN ai_connection ON chat_history.snapshotId = ai_connection.id
-WHERE chat_history.connectionId = ?
-ORDER BY chat_history.createdTime DESC, chat_history.id DESC;
+LEFT JOIN ai_connection ON chat_history.snapshot_id = ai_connection.connection_id
+WHERE chat_history.connection_id = ?
+ORDER BY chat_history.created_time DESC, chat_history.id DESC;
 
 deleteByConnectionId:
 DELETE FROM chat_history
-WHERE connectionId = ?;
+WHERE connection_id = ?;
 
 -- DELETE 型语句生成 QueryResult<Long>，executeAsOne() 即受影响行数 ——
 -- 删除行数不需要额外的 SELECT changes()。
 cleanOld:
 DELETE FROM chat_history
-WHERE createdTime < ?;
+WHERE created_time < ?;

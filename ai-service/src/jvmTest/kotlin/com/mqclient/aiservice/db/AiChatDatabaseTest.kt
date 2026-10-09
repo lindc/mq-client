@@ -48,11 +48,11 @@ class AiChatDatabaseTest {
 
         val snapshots = AiConnectionSnapshotRepository.getAllSnapshots("new-uuid")
         assertEquals(1, snapshots.size)
-        assertEquals("old-uuid", snapshots.single().prevId, "prevId = 旧连接的 UUID（跨连接追溯）")
-        assertEquals("http://b", snapshots.single().serviceUrl)
+        assertEquals("old-uuid", snapshots.single().prev_id, "prevId = 旧连接的 UUID（跨连接追溯）")
+        assertEquals("http://b", snapshots.single().service_url)
 
         val latest = AiConnectionSnapshotRepository.getLatestSnapshot("new-uuid")
-        assertEquals("http://b", latest?.serviceUrl, "selectLatest 拿到的是最新一条")
+        assertEquals("http://b", latest?.service_url, "selectLatest 拿到的是最新一条")
 
         assertNull(AiConnectionSnapshotRepository.getLatestSnapshot("missing"), "没有快照的连接返回 null")
     }
@@ -76,8 +76,8 @@ class AiChatDatabaseTest {
             finishReason = "stop",
         )
         val row = ChatHistoryRepository.getByConnectionId("c1").single()
-        assertEquals(AiConnectionSnapshotRepository.getLatestSnapshot("c1")?.id, row.snapshotId)
-        assertEquals(10L, row.tokenCount)
+        assertEquals(AiConnectionSnapshotRepository.getLatestSnapshot("c1")?.connection_id, row.snapshot_id)
+        assertEquals(10L, row.token_count)
 
         // url 变化：旧连接 c1 废弃，新连接 c2 接任（prevId = 旧连接 UUID）；
         // 之后 c2 上的对话要指向 c2 自己的最新快照。
@@ -98,7 +98,7 @@ class AiChatDatabaseTest {
             finishReason = null,
         )
         val newRow = ChatHistoryRepository.getByConnectionId("c2").single()
-        assertEquals(AiConnectionSnapshotRepository.getLatestSnapshot("c2")?.id, newRow.snapshotId, "指向新连接自己的快照")
+        assertEquals(AiConnectionSnapshotRepository.getLatestSnapshot("c2")?.connection_id, newRow.snapshot_id, "指向新连接自己的快照")
     }
 
     @Test
@@ -150,7 +150,7 @@ class AiChatDatabaseTest {
         assertEquals(2, ChatHistoryRepository.getByModel("c1", "gpt-4o").size)
         assertEquals(
             listOf(2_000L, 1_000L),
-            ChatHistoryRepository.getByTimeRange("c1", fromTime = 500, toTime = 2_500).map { it.createdTime },
+            ChatHistoryRepository.getByTimeRange("c1", fromTime = 500, toTime = 2_500).map { it.created_time },
             "闭区间过滤 + 倒序",
         )
     }
@@ -177,7 +177,7 @@ class AiChatDatabaseTest {
         save(9_000)
 
         assertEquals(2, ChatHistoryRepository.cleanOldBefore(5_000), "返回删除行数")
-        assertEquals(listOf(9_000L), ChatHistoryRepository.getByConnectionId("c1").map { it.createdTime })
+        assertEquals(listOf(9_000L), ChatHistoryRepository.getByConnectionId("c1").map { it.created_time })
 
         assertEquals(1, ChatHistoryRepository.deleteByConnectionId("c1"), "整连接清理返回行数")
         assertTrue(ChatHistoryRepository.getByConnectionId("c1").isEmpty())
@@ -224,15 +224,15 @@ class AiChatDatabaseTest {
         val rows = ChatHistoryRepository.getByConnectionId("c1")
         assertEquals(2, rows.size)
 
-        val normal = rows.single { it.createdTime == 1_000L }
-        assertNull(normal.objectType)
-        assertNull(normal.objectName)
-        assertNull(normal.contextJson)
+        val normal = rows.single { it.created_time == 1_000L }
+        assertNull(normal.object_type)
+        assertNull(normal.object_name)
+        assertNull(normal.context_json)
 
-        val chain = rows.single { it.createdTime == 2_000L }
-        assertEquals("QUEUE", chain.objectType)
-        assertEquals("ORDER.LOCAL.Q", chain.objectName)
-        assertEquals("""{"currentTime":"..","chain":[],"userQuestion":".."}""", chain.contextJson)
+        val chain = rows.single { it.created_time == 2_000L }
+        assertEquals("QUEUE", chain.object_type)
+        assertEquals("ORDER.LOCAL.Q", chain.object_name)
+        assertEquals("""{"currentTime":"..","chain":[],"userQuestion":".."}""", chain.context_json)
         assertEquals(ChatHistoryRepository.STATUS_CANCELLED, chain.status)
     }
 

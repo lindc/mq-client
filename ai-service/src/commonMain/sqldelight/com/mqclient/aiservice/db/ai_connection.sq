@@ -1,35 +1,31 @@
 -- AI 连接快照表：只在「新建连接」或「service_url 变化」时插入一行。
 -- 只插入，不更新，不删除。
 -- api_key / name / model / system_prompt / enabled 等只活在 config.toml，不进这张表。
--- prevId 存的是**旧连接的 UUID**（url 变化 = 新 connection_id 接任，prevId 跨连接
--- 追溯旧 lineage；全新建为 NULL），不是本表的自增 id。
--- `AS AiConnection`：物理表名用蛇形，生成的 Kotlin 数据类保持驼峰名。
+-- prev_id 存的是**旧连接的 UUID**（url 变化 = 新 connection_id 接任，prev_id 跨连接
+-- 追溯旧 lineage；全新建为 NULL），不是外键。
+-- 既定约定「url 变化换发新 connection_id」保证 connection_id 全表唯一——直接作主键，
+-- 旧行不更新；快照链 = prev_id 串联，链内顺序由 created_time 表达（无自增 id）。
 CREATE TABLE IF NOT EXISTS ai_connection (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    connectionId TEXT NOT NULL,         -- 连接 UUID
-    prevId       TEXT,                  -- 旧连接的 UUID（新建 = NULL）
-    serviceUrl   TEXT NOT NULL,         -- 服务 URL 快照
-    createdTime  INTEGER NOT NULL       -- 快照创建时间（Unix 毫秒）
+    connection_id TEXT PRIMARY KEY NOT NULL,  -- 连接 UUID（= AiConnection.id）
+    prev_id       TEXT,                       -- 旧连接的 UUID（新建 = NULL）
+    service_url   TEXT NOT NULL,              -- 服务 URL 快照
+    created_time  INTEGER NOT NULL            -- 快照创建时间（Unix 毫秒）
 );
 
-CREATE INDEX IF NOT EXISTS idx_ai_connection_connection_id ON ai_connection(connectionId);
-CREATE INDEX IF NOT EXISTS idx_ai_connection_prev_id ON ai_connection(prevId);
+-- connection_id 是主键（隐式唯一索引），不再单列建索引；prev_id 反查索引保留。
+CREATE INDEX IF NOT EXISTS idx_ai_connection_prev_id ON ai_connection(prev_id);
 
 insertSnapshot:
-INSERT INTO ai_connection(connectionId, prevId, serviceUrl, createdTime)
+INSERT INTO ai_connection(connection_id, prev_id, service_url, created_time)
 VALUES (?, ?, ?, ?);
 
 selectLatestByConnectionId:
 SELECT * FROM ai_connection
-WHERE connectionId = ?
-ORDER BY id DESC
+WHERE connection_id = ?
+ORDER BY created_time DESC
 LIMIT 1;
 
 selectAllByConnectionId:
 SELECT * FROM ai_connection
-WHERE connectionId = ?
-ORDER BY id ASC;
-
-selectById:
-SELECT * FROM ai_connection
-WHERE id = ?;
+WHERE connection_id = ?
+ORDER BY created_time ASC;
