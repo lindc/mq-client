@@ -6,7 +6,9 @@ import com.mqclient.ibmmq.pcf.MqObjectType
 import com.mqclient.ibmmq.pcf.MqObjectSnapshot
 import com.mqclient.ibmmq.ui.ChannelIconResolver
 import com.mqclient.ibmmq.ui.ChannelType
+import com.mqclient.ibmmq.ui.topology.isAliasQueue
 import com.mqclient.ibmmq.ui.topology.isLocalQueue
+import com.mqclient.ibmmq.ui.topology.isRemoteQueue
 import com.mqclient.mqui.objectlist.CardAction
 import com.mqclient.uicommon.AiAskRequest
 
@@ -15,9 +17,9 @@ import com.mqclient.uicommon.AiAskRequest
  * 见各面板的 actions 拼接顺序），tooltip 与属性对话框 footer 按钮共用
  * `mq_action_ask_ai`。
  *
- * 显示规则见 [isCardAiTarget]：仅本地队列 / SENDER 通道 / 监听器三类（入口约定，
- * 见 AiChainBuilder）。队列 / 通道面板在拼接层判定；监听器卡片无拓扑前置，
- * 规则仍留在 ListenerCardActions 内。
+ * 显示规则见 [isCardAiTarget]：本地 / 别名 / 远程队列、SENDER 通道、监听器
+ * （入口约定，见 AiChainBuilder）。队列 / 通道面板在拼接层判定；监听器卡片无拓扑
+ * 前置，规则仍留在 ListenerCardActions 内。
  */
 internal fun askAiCardAction(onAskAi: () -> Unit): CardAction = CardAction(
     id = "mq.ask_ai",
@@ -43,7 +45,9 @@ internal fun askAiClick(
 /** 卡片 AI 图标可见性：快照是合法入口对象（与属性对话框 footer 同一规则）。 */
 internal fun isCardAiTarget(objectType: MqObjectType, snapshot: MqObjectSnapshot): Boolean =
     when (objectType) {
-        MqObjectType.QUEUE -> snapshot.isLocalQueue()
+        // 本地 / 别名 / 远程定义；模型 / 传输队列无入口语义。
+        MqObjectType.QUEUE ->
+            snapshot.isLocalQueue() || snapshot.isAliasQueue() || snapshot.isRemoteQueue()
         MqObjectType.CHANNEL -> ChannelIconResolver.resolveType(snapshot) == ChannelType.SENDER
         MqObjectType.LISTENER -> true
         else -> false

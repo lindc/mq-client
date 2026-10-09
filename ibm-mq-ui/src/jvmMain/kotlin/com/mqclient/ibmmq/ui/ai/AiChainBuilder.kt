@@ -59,16 +59,22 @@ object AiChainBuilder {
      * @param objectType 目标对象类型（QUEUE / CHANNEL / LISTENER——入口已按此三类过滤）。
      * @param objectName 目标对象名。
      * @return 缓存就绪且目标是合法入口对象时返回请求；服务不可用 / 快照缺失 / 子型不匹配
-     *         （如别名队列、RECEIVER 通道）返回 null，调用方忽略即可。
+     *         （如模型队列、传输队列、RECEIVER 通道）返回 null，调用方忽略即可。
      */
     fun build(connectionId: String, objectType: MqObjectType, objectName: String): AiAskRequest? {
         val service = IbmMQModule.serviceOrNull() ?: return null
         val nodes = when (objectType) {
             MqObjectType.QUEUE -> {
+                // 队列按子型分派：本地队列带上游（alias/remote/sub 指入）；远程定义 /
+                // 别名队列带下游（定义指向哪里、经过哪里）。模型 / 传输 / 未识别无入口。
                 val target = service.cachedObjects(connectionId, MqObjectType.QUEUE)
-                    .firstOrNull { it.name == objectName }?.takeIf { it.isLocalQueue() }
-                    ?: return null
-                buildQueueChain(connectionId, target)
+                    .firstOrNull { it.name == objectName } ?: return null
+                when {
+                    target.isLocalQueue() -> buildQueueChain(connectionId, target)
+                    target.isRemoteQueue() -> buildRemoteChain(connectionId, target)
+                    target.isAliasQueue() -> buildAliasChain(connectionId, target)
+                    else -> null
+                } ?: return null
             }
 
             MqObjectType.CHANNEL -> {
@@ -209,6 +215,119 @@ object AiChainBuilder {
                 rq.getRemoteQueueRqmName()?.takeIf { it.isNotBlank() }?.let { rq.getRemoteXmitQueue() to it }
             }.toMap()
         return rqmByXmitq[channel.getChannelXmitQueue()]
+    }
+
+    // ---- 远程队列定义 target：QREMOTE → xmitq → [通道] → 远端 QMgr → [RNAME 落点] ----
+
+    /**
+     * 出站定义链：QREMOTE(target) → XMITQ → SENDER 通道 → 远端 QMgr → RNAME 队列。
+     * 关系规则与拓扑图一致（remote→xmitq、xmitq→channel 反查、channel→RQMNAME）。
+     *
+     * @param isTarget 卡片点击的是这条 QREMOTE 时为 true（alias 链续接时为 false）。
+     * XMITQ 缺失 / 通道反查不中 / RQMNAME 缺失或指向本地 / RNAME 缺省时，链在相应位置
+     * 截断——截断本身也是诊断信息（别名与定义的自带 attributes 仍会序列化给模型）。
+     * 远端 QMgr 与 RNAME 落点是虚拟节点（不在本 QMgr 缓存内，无 attributes）。
+     */
+    private fun buildRemoteChain(
+        connectionId: String,
+        target: MqObjectSnapshot,
+        isTarget: Boolean = true,
+    ): List<ChainNode> {
+        val queues = cachedQueues(connectionId)
+        val channels = cached(connectionId, MqObjectType.CHANNEL)
+        val localQmgrName = localQmgrName(connectionId)
+
+        val xmitqName = target.getRemoteXmitQueue()
+        val xmitq = xmitqName?.let { x -> queues.filter { it.isTransmission() }.firstOrNull { it.name == x } }
+        // XMITQ → 通道反查（传输队列没有指向通道的属性，与拓扑图同规则）；只看出站 SENDER。
+        val channel = xmitqName?.let { x ->
+            channels.firstOrNull {
+                ChannelIconResolver.resolveType(it) == ChannelType.SENDER && it.getChannelXmitQueue() == x
+            }
+        }
+        // RQMNAME 缺失或指向本地（QREMOTE 指向本地队列的形态）时不建 QMgr 节点。
+        val rqmgrName = target.getRemoteQueueRqmName()
+            ?.takeIf { it.isNotBlank() && it != localQmgrName }
+        // 远端落点：RNAME（缺省 = 与本定义同名，MQ 语义）。
+        val remoteQueueName = rqmgrName?.let { target.getRemoteName() ?: target.name }
+
+        return buildList {
+            add(node(target, "REMOTE_QUEUE", isTarget = isTarget, relationToNext = if (xmitq != null) REL_USES_XMITQ else null))
+            if (xmitq != null) {
+                add(node(xmitq, "XMITQ", isTarget = false, relationToNext = if (channel != null) REL_TRIGGERS else null))
+                if (channel != null) {
+                    add(node(channel, "CHANNEL", isTarget = false, relationToNext = if (rqmgrName != null) REL_SENDS_TO else null))
+                    if (rqmgrName != null) {
+                        add(ChainNode(null, rqmgrName, "QMGR", isTarget = false, relationToNext = if (remoteQueueName != null) REL_DELIVERS_TO else null))
+                        if (remoteQueueName != null) {
+                            add(ChainNode(null, remoteQueueName, "QUEUE", isTarget = false, relationToNext = null))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ---- 别名队列 target：ALIAS → points_to → 目标（本地队列 / QREMOTE / 主题 / 另一条 alias）----
+
+    /**
+     * 别名解析链：从 alias 出发沿 [getAliasTarget] 逐跳解析（支持 alias→alias 链，
+     * visited 防环；拓扑同规则自环不连）。
+     *  - 终点是本地队列 / 主题对象：链止于此（终点属性已序列化，目标名也在别名的
+     *    BASE_OBJECT_NAME 里，模型可见）；
+     *  - 终点是 QREMOTE：整段接出站链（[buildRemoteChain]，isTarget = false）。
+     * 目标不在缓存（悬空定义）时与拓扑同规则不建边，链止于最后一个 alias。
+     */
+    private fun buildAliasChain(connectionId: String, target: MqObjectSnapshot): List<ChainNode> {
+        val queues = cachedQueues(connectionId)
+        val topics = cached(connectionId, MqObjectType.TOPIC).filterNotSystem()
+
+        val entries = mutableListOf<Pair<MqObjectSnapshot, String>>()
+        entries += target to "ALIAS_QUEUE"
+        val visited = mutableSetOf(target.name)
+        var remoteTail: List<ChainNode> = emptyList()
+        var cur = target
+        while (cur.isAliasQueue()) {
+            val nextName = cur.getAliasTarget() ?: break
+            if (nextName in visited) break
+            visited += nextName
+            val nextQueue = queues.firstOrNull { it.name == nextName }
+            when {
+                nextQueue != null && nextQueue.isAliasQueue() -> {
+                    entries += nextQueue to "ALIAS_QUEUE"
+                    cur = nextQueue
+                }
+                nextQueue != null && nextQueue.isRemoteQueue() -> {
+                    remoteTail = buildRemoteChain(connectionId, nextQueue, isTarget = false)
+                    break
+                }
+                nextQueue != null -> {
+                    entries += nextQueue to "QUEUE"
+                    break
+                }
+                else -> {
+                    // 目标不在队列缓存：可能是主题对象（alias→topic 发布入口）。
+                    topics.firstOrNull { it.name == nextName }?.let { entries += it to "TOPIC" }
+                    break
+                }
+            }
+        }
+
+        // 预算兜底：alias 链 + 出站尾段超预算时丢最远的 alias（列表头，target 恒保留）。
+        val overflow = entries.size + remoteTail.size - MAX_NODES
+        if (overflow > 0) {
+            entries.subList(1, (overflow + 1).coerceAtMost(entries.size)).clear()
+        }
+
+        return buildList {
+            entries.forEachIndexed { i, (snapshot, type) ->
+                val isLastEntry = i == entries.lastIndex
+                // 非「真末位」的 alias 节点都指向下一跳；末位在接了 remote 链时同样有下游。
+                val relation = if (!isLastEntry || remoteTail.isNotEmpty()) REL_POINTS_TO else null
+                add(ChainNode(snapshot, snapshot.name, type, isTarget = i == 0, relationToNext = relation))
+            }
+            addAll(remoteTail)
+        }
     }
 
     // ---- 上游截断：超出预算时从列表头（最远上游）开始丢 ----
