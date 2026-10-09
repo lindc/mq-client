@@ -18,8 +18,13 @@ import kotlinx.serialization.json.contentOrNull
 /** 适配器层统一日志 tag。 */
 internal const val AI_ADAPTER_LOG_TAG = "ai-adapter"
 
-/** 适配器层共享的 JSON 解析器：宽松（服务端多加字段、格式小偏差都不致命）。 */
-internal val aiJson: Json = Json {
+/**
+ * 适配器层共享的 JSON 解析器：宽松（服务端多加字段、格式小偏差都不致命）。
+ *
+ * 供所有适配器模块共用（Anthropic 等第二个适配器模块依赖本模块取用）——
+ * 曾经是 internal，多适配器时代放宽为 public（无逻辑改动）。
+ */
+val aiJson: Json = Json {
     ignoreUnknownKeys = true
     isLenient = true
 }
@@ -32,8 +37,10 @@ internal val aiJson: Json = Json {
  *
  * 超时策略：`requestTimeoutMillis = null` —— SSE 流式回复可能持续数分钟，整体超时
  * 会中途砍断它；改用 `socketTimeoutMillis` 表达「长时间没有新数据才算断」。
+ *
+ * public 化理由同 [aiJson]：所有适配器模块共用同一个客户端（超时策略、日志口径一致）。
  */
-internal object AiHttp {
+object AiHttp {
     val client: HttpClient by lazy {
         HttpClient(CIO) {
             expectSuccess = false
@@ -50,7 +57,7 @@ internal object AiHttp {
  * 连接的 baseUrl，去掉首尾空白与尾斜杠；没配就抛 [AiException]。
  * 错误信息带连接名 —— 用户一眼知道该改哪条连接。
  */
-internal fun AiConnection.baseUrlOrThrow(): String {
+fun AiConnection.baseUrlOrThrow(): String {
     val url = baseUrl.trim().trimEnd('/')
     if (url.isEmpty()) throw AiException("连接「$name」还没填接口地址（baseUrl）")
     return url
@@ -61,7 +68,7 @@ internal fun AiConnection.baseUrlOrThrow(): String {
  * （OpenAI 兼容生态的报错形状大体一致），否则截一段原始正文。错误响应不是流，可以放心
  * [bodyAsText]。
  */
-internal suspend fun HttpResponse.throwIfNotSuccess(provider: String) {
+suspend fun HttpResponse.throwIfNotSuccess(provider: String) {
     if (status.isSuccess()) return
     val body = runCatching { bodyAsText() }.getOrNull().orEmpty().trim()
     val detail = extractErrorMessage(body) ?: body.take(400)
@@ -85,7 +92,7 @@ internal fun extractErrorMessage(body: String): String? =
  * CancellationException 必须原样抛出（它是取消的正常控制流，吞掉会让协程取消失效）；
  * 其余异常全部吃掉 —— 测试按钮的语义是「返回结果」，不是「抛异常」。
  */
-internal suspend fun testQuietly(provider: String, connectionName: String, block: suspend () -> Unit): Boolean =
+suspend fun testQuietly(provider: String, connectionName: String, block: suspend () -> Unit): Boolean =
     try {
         block()
         true

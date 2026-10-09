@@ -38,6 +38,8 @@ include(
     ":ui-common",
     ":openai-service",
     ":openai-ui",
+    ":anthropic-service",
+    ":anthropic-ui",
     ":ibm-mq-service", ":ibm-mq-ui",
     ":mq-base",
     ":mq-ui",

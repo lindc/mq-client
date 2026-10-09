@@ -43,6 +43,7 @@ import com.mqclient.ai.AiAdapterRegistry
 import com.mqclient.ai.AiProvider
 import com.mqclient.core.AiConfig
 import com.mqclient.core.AiConnection
+import com.mqclient.core.ModuleRegistry
 import com.mqclient.openai.ui.ModelComboBox
 import com.mqclient.openai.ui.openAiIcon
 import com.mqclient.uicommon.LabeledField
@@ -107,10 +108,12 @@ internal fun AiSettingsPane(
             HorizontalDivider()
             Spacer(Modifier.height(16.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // 目前只有 openai-compatible 一个 provider，logo 直接用它的；
-                // 将来多 provider 时这里按 providerId 分发（谁的品牌归谁的 *-ui 模块）。
+                // 按 providerId 从 ModuleIcon SPI 取品牌图标（anthropic-ui 等注册即生效）；
+                // provider 没有 ui 模块时回落 openai 的 logo（保持既有展示）。
                 Image(
-                    painter = openAiIcon(),
+                    painter =
+                        ModuleRegistry.icons.firstOrNull { it.serviceId == activeConnection.providerId }
+                            ?.painter() ?: openAiIcon(),
                     contentDescription = null,
                     modifier = Modifier.size(20.dp),
                 )

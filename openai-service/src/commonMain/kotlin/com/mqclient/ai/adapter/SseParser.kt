@@ -11,8 +11,11 @@ import kotlinx.coroutines.flow.flow
  * OpenAI 兼容协议的流式响应只用单行 `data:`，
  * 所以不做多行拼接：跳过事件名（`event:`）、注释（`:` 开头的心跳行）与空行，
  * 通道关闭即流结束。
+ *
+ * Anthropic 的 SSE 同为「event: 行 + data: JSON 行」形状，本解析器直接兼容——
+ * event 类型信息在 data JSON 的 `type` 字段里，适配器自行分派。
  */
-internal fun ByteReadChannel.sseData(): Flow<String> = flow {
+fun ByteReadChannel.sseData(): Flow<String> = flow {
     while (true) {
         val line = readUTF8Line() ?: break
         if (!line.startsWith("data:")) continue

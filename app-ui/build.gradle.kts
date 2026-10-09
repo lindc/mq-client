@@ -37,6 +37,11 @@ kotlin {
             // OpenAI branding/resources (logo shown when creating a connection).
             implementation(projects.openaiUi)
 
+            // Anthropic AI adapter module — same shape as the OpenAI pair above; both
+            // are discovered via SPI at runtime and register into AiAdapterRegistry.
+            implementation(projects.anthropicService)
+            implementation(projects.anthropicUi)
+
             // Business modules (discovered via SPI at runtime).
             implementation(projects.ibmMqService)
             implementation(projects.ibmMqUi)
