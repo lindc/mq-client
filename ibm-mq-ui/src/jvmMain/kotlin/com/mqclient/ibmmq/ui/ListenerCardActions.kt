@@ -11,7 +11,9 @@ import com.mqclient.mqui.objectlist.CardAction
 /**
  * 构造 IBM MQ 监听器卡片上的操作按钮。
  *
- * 按钮布局（与通道 / 队列卡片同源：运维动作在前、属性按钮恒在尾位）：
+ * 按钮布局（监听器卡片没有拓扑前置，「询问 AI」即图标区第一个；运维动作随后、
+ * 属性按钮恒在尾位）：
+ *  - **询问 AI**（可选）：宿主提供 AI 入口时显示（监听器全部类型都是入口对象）；
  *  - **启动 / 停止**：按监听器状态条件追加（见下方规则）；
  *  - **属性**：恒在最后，与各对象类型的尾按钮位置一致。
  *
@@ -53,6 +55,9 @@ object ListenerCardActions {
     ): List<CardAction> {
         val actions = mutableListOf<CardAction>()
 
+        // 「询问 AI」绝对最左（图标区第一个位置，与队列 / 通道面板的拼接顺序一致）。
+        onAskAi?.let { actions += askAiCardAction(it) }
+
         when (val status = snapshot.listenerStatus) {
             in RUNNING_LIKE -> actions += stopAction(onStop)
             in STOPPED_LIKE, null -> actions += startAction(onStart)
@@ -66,9 +71,6 @@ object ListenerCardActions {
                 actions += stopAction(onStop, enabled = false, tooltip = "operation_unknown_state")
             }
         }
-
-        // 「询问 AI」插在属性按钮之前（监听器全部类型都是入口对象）。
-        onAskAi?.let { actions += askAiCardAction(it) }
 
         // 属性按钮恒在尾位。
         actions += CardAction(

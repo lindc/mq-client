@@ -12,7 +12,9 @@ import com.mqclient.ibmmq.IbmMQConfig
 import com.mqclient.ibmmq.ibmMQConfigFromOptions
 import com.mqclient.ibmmq.pcf.MqObjectType
 import com.mqclient.ibmmq.pcf.isSystemOrTempQueue
+import com.mqclient.ibmmq.ui.ai.askAiCardAction
 import com.mqclient.ibmmq.ui.ai.askAiClick
+import com.mqclient.ibmmq.ui.ai.isCardAiTarget
 import com.mqclient.ibmmq.ui.properties.ObjectPropertiesDialogHost
 import com.mqclient.ibmmq.ui.properties.rememberObjectPropertiesDialogController
 import com.mqclient.mqui.objectlist.ObjectListPanel
@@ -89,18 +91,24 @@ fun QueueListPanel(
                     .map { queue ->
                         queue.toQueueCardData(
                             warningThreshold = warningThreshold,
-                            // 拓扑查看在最前，属性按钮恒在最后（各对象类型尾按钮一致）。
-                            actions = listOf(topologyViewAction(connectionId, queue.name)) +
-                                QueueCardActions.create(
-                                    snapshot = queue,
-                                    onOpenProperties = {
-                                propertiesController.open(MqObjectType.QUEUE, queue.name)
+                            // 图标区顺序：AI（绝对最左）→ 拓扑查看 → 消息 → 属性
+                            //（属性按钮恒在最后，各对象类型尾按钮一致）。
+                            actions = buildList {
+                                aiAsk?.let {
+                                    val onAsk = askAiClick(connectionId, MqObjectType.QUEUE, queue.name, it::onAsk)
+                                    if (isCardAiTarget(MqObjectType.QUEUE, queue)) add(askAiCardAction(onAsk))
+                                }
+                                add(topologyViewAction(connectionId, queue.name))
+                                addAll(
+                                    QueueCardActions.create(
+                                        snapshot = queue,
+                                        onOpenProperties = {
+                                            propertiesController.open(MqObjectType.QUEUE, queue.name)
+                                        },
+                                        onOpenMessages = { messagesDialogQueue = queue.name },
+                                    ),
+                                )
                             },
-                                    onOpenMessages = { messagesDialogQueue = queue.name },
-                                    onAskAi = aiAsk?.let {
-                                        askAiClick(connectionId, MqObjectType.QUEUE, queue.name, it::onAsk)
-                                    },
-                                ),
                         )
                     }
             }

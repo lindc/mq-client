@@ -5,7 +5,6 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import com.mqclient.ibmmq.pcf.MqObjectSnapshot
-import com.mqclient.ibmmq.ui.ai.askAiCardAction
 import com.mqclient.mqui.objectlist.CardAction
 
 /**
@@ -61,15 +60,12 @@ object ChannelCardActions {
      * @param onOpenProperties 打开通道属性 Dialog 的回调。
      * @param onStart 启动通道的回调（仅当卡片显示【启动】按钮时触发）。
      * @param onStop 停止通道的回调（仅当卡片显示【停止】按钮时触发；危险操作，调用方二次确认）。
-     * @param onAskAi 发起「询问 AI」的回调（仅 SENDER 通道 + 宿主提供 AI 入口时有此按钮；
-     *                 null = 宿主未提供，按钮不显示）。
      */
     fun create(
         snapshot: MqObjectSnapshot,
         onOpenProperties: () -> Unit,
         onStart: () -> Unit = {},
         onStop: () -> Unit = {},
-        onAskAi: (() -> Unit)? = null,
     ): List<CardAction> {
         val actions = mutableListOf<CardAction>()
 
@@ -90,8 +86,8 @@ object ChannelCardActions {
             }
         }
 
-        // 「询问 AI」仅 SENDER 通道有（入口约定），插在属性按钮之前。
-        if (type == ChannelType.SENDER) onAskAi?.let { actions += askAiCardAction(it) }
+        // 「询问 AI」不在这里：它在 ChannelListPanel 的 actions 拼接层排到图标区
+        // 第一个位置（在拓扑按钮之前），显示规则见 ai 包的 isCardAiTarget。
 
         // 属性按钮恒在尾位。
         actions += CardAction(

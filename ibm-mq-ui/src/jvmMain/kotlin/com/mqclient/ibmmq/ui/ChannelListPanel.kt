@@ -12,7 +12,9 @@ import androidx.compose.ui.Modifier
 import com.mqclient.ibmmq.IbmMQModule
 import com.mqclient.ibmmq.pcf.MqObjectType
 import com.mqclient.ibmmq.pcf.isSystemObject
+import com.mqclient.ibmmq.ui.ai.askAiCardAction
 import com.mqclient.ibmmq.ui.ai.askAiClick
+import com.mqclient.ibmmq.ui.ai.isCardAiTarget
 import com.mqclient.ibmmq.ui.properties.ObjectPropertiesDialogHost
 import com.mqclient.ibmmq.ui.properties.rememberObjectPropertiesDialogController
 import com.mqclient.mqui.command.DangerousCommandDialog
@@ -182,19 +184,25 @@ fun ChannelListPanel(
             ObjectListPanel(
                 items = filtered.map { channel ->
                     channel.toChannelCardData(
-                        // 拓扑查看在最前，属性按钮恒在最后（各对象类型尾按钮一致）。
-                        actions = listOf(topologyViewAction(connectionId, channel.name)) +
-                            ChannelCardActions.create(
-                                snapshot = channel,
-                                onOpenProperties = {
-                                propertiesController.open(MqObjectType.CHANNEL, channel.name)
-                            },
-                                onStart = { startChannel(channel.name) },
-                                onStop = { requestStopChannel(channel.name, channel.channelStatus) },
-                                onAskAi = aiAsk?.let {
-                                    askAiClick(connectionId, MqObjectType.CHANNEL, channel.name, it::onAsk)
-                                },
-                            ),
+                        // 图标区顺序：AI（绝对最左）→ 拓扑查看 → 启停 → 属性
+                        //（属性按钮恒在最后，各对象类型尾按钮一致）。
+                        actions = buildList {
+                            aiAsk?.let {
+                                val onAsk = askAiClick(connectionId, MqObjectType.CHANNEL, channel.name, it::onAsk)
+                                if (isCardAiTarget(MqObjectType.CHANNEL, channel)) add(askAiCardAction(onAsk))
+                            }
+                            add(topologyViewAction(connectionId, channel.name))
+                            addAll(
+                                ChannelCardActions.create(
+                                    snapshot = channel,
+                                    onOpenProperties = {
+                                        propertiesController.open(MqObjectType.CHANNEL, channel.name)
+                                    },
+                                    onStart = { startChannel(channel.name) },
+                                    onStop = { requestStopChannel(channel.name, channel.channelStatus) },
+                                ),
+                            )
+                        },
                         executingActionIds = executingIdsFor(channel.name),
                         executingTarget = executingActions[channel.name],
                     )

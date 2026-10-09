@@ -1,7 +1,7 @@
 package com.mqclient.ibmmq.ui.ai
 
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Android
 import com.mqclient.ibmmq.pcf.MqObjectType
 import com.mqclient.ibmmq.pcf.MqObjectSnapshot
 import com.mqclient.ibmmq.ui.ChannelIconResolver
@@ -11,14 +11,17 @@ import com.mqclient.mqui.objectlist.CardAction
 import com.mqclient.uicommon.AiAskRequest
 
 /**
- * 「询问 AI」在三类列表卡片上的共享按钮构造：图标插在属性按钮**之前**（属性按钮
- * 恒在尾位的约定不破坏），tooltip 与属性对话框 footer 按钮共用 `mq_action_ask_ai`。
+ * 「询问 AI」在三类列表卡片上的共享按钮构造：**图标区的第一个位置**（AI 绝对最左，
+ * 见各面板的 actions 拼接顺序），tooltip 与属性对话框 footer 按钮共用
+ * `mq_action_ask_ai`。
  *
- * 仅本地队列 / SENDER 通道 / 监听器三类卡片调用（入口约定，见 AiChainBuilder）。
+ * 显示规则见 [isCardAiTarget]：仅本地队列 / SENDER 通道 / 监听器三类（入口约定，
+ * 见 AiChainBuilder）。队列 / 通道面板在拼接层判定；监听器卡片无拓扑前置，
+ * 规则仍留在 ListenerCardActions 内。
  */
 internal fun askAiCardAction(onAskAi: () -> Unit): CardAction = CardAction(
     id = "mq.ask_ai",
-    icon = Icons.Default.AutoAwesome,
+    icon = Icons.Default.Android,
     tooltip = "mq_action_ask_ai",
     onClick = onAskAi,
 )
