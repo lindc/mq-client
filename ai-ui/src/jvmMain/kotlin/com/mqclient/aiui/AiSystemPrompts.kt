@@ -39,7 +39,8 @@ private val CHAIN_TIME_FORMAT = java.time.format.DateTimeFormatter.ofPattern("yy
 
 /**
  * 把发起时点构建的 chain 数组 JSON（[chainArrayJson]）包装成发给模型的完整上下文：
- * `currentTime` + `chain` + `userQuestion`（结构契约见 EventNames.MQ_AI_CONVERSATION_COMPLETED）。
+ * `currentTime` + `chain` + `userQuestion`（结构契约见 ai-service 的 chat_history.sq
+ * 对 context_json 列的注释）。
  * currentTime 取发送时刻（比发起更接近真实提问时间）；chain JSON 解析失败时降级为
  * 空数组 —— 问题本身仍然发出，不让上下文构建失败挡住对话。
  */

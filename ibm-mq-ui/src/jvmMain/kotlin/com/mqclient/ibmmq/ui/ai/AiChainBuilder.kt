@@ -46,7 +46,7 @@ object AiChainBuilder {
     /** chain 长度上限：超过时优先保留目标对象与直接上下游（xmitq / 远端 QMgr）。 */
     private const val MAX_NODES = 10
 
-    /** relationToNext 取值（上下文 JSON 契约，见 EventNames.MQ_AI_CONVERSATION_COMPLETED 文档）。 */
+    /** relationToNext 取值（上下文 JSON 契约，见 ai-service 的 chat_history.sq 对 context_json 列的注释）。 */
     private const val REL_POINTS_TO = "points_to"
     private const val REL_USES_XMITQ = "uses_xmitq"
     private const val REL_TRIGGERS = "triggers"

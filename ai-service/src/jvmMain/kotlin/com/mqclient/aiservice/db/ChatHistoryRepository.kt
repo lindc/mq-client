@@ -14,11 +14,15 @@ object ChatHistoryRepository {
 
     const val STATUS_SUCCESS = "SUCCESS"
     const val STATUS_FAILED = "FAILED"
+    const val STATUS_CANCELLED = "CANCELLED"
 
     /**
      * 落一条对话记录。[snapshotId] 在**同一个** withDriver 块里查最新快照得到，
      * 避免快照订阅与对话订阅交错时读到不一致的快照链。业务侧约定：只在 AI 回复
      * 完成后调用一次（成功与失败都算"完成"）。
+     *
+     * 链路分析（MQ 对象「询问 AI」）传 [objectType] / [objectName] / [contextJson]
+     * 三者；普通聊天全部为 null。
      */
     suspend fun saveWithLatestSnapshot(
         connectionId: String,
@@ -34,6 +38,9 @@ object ChatHistoryRepository {
         status: String,
         errorMessage: String?,
         finishReason: String?,
+        objectType: String? = null,
+        objectName: String? = null,
+        contextJson: String? = null,
     ): Unit = withDatabase { db ->
         val snapshotId = db.ai_connectionQueries
             .selectLatestByConnectionId(connectionId)
@@ -55,6 +62,9 @@ object ChatHistoryRepository {
             finishReason = finishReason,
             question = question,
             reply = reply,
+            objectType = objectType,
+            objectName = objectName,
+            contextJson = contextJson,
         )
     }
 

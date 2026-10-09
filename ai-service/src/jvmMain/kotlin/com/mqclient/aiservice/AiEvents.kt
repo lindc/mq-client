@@ -28,7 +28,10 @@ object AiEvents {
      */
     const val AI_CONNECTION_SNAPSHOT_CREATED = "ai.connection.snapshot.created"
 
-    /** AI 对话已完成（成功或失败），请求落一条 chat_history 审计记录。 */
+    /**
+     * AI 对话已完成，请求落一条 chat_history 审计记录。成功 / 失败都发；
+     * 链路分析被用户取消时也发（status = CANCELLED，reply = 已流出的部分）。
+     */
     const val AI_CHAT_HISTORY_SAVE = "ai.chat.history.save"
 }
 
@@ -92,4 +95,15 @@ object AiPayloadKeys {
 
     /** 服务端给的结束原因（`stop` / `length` …）。 */
     const val FINISH_REASON = "finishReason"
+
+    // ---- 链路分析专用（普通聊天不传，落库为 NULL） ----
+
+    /** 链路分析目标对象类型（QUEUE / CHANNEL / LISTENER）；普通聊天为 null。 */
+    const val OBJECT_TYPE = "objectType"
+
+    /** 链路分析目标对象名（如 ORDER.LOCAL.Q）；普通聊天为 null。 */
+    const val OBJECT_NAME = "objectName"
+
+    /** 链路分析发给模型的完整上下文 JSON；普通聊天为 null。 */
+    const val CONTEXT_JSON = "contextJson"
 }

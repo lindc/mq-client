@@ -183,6 +183,59 @@ class AiChatDatabaseTest {
         assertTrue(ChatHistoryRepository.getByConnectionId("c1").isEmpty())
     }
 
+    @Test
+    fun `chain analysis fields round-trip and normal chat leaves them null`() = runBlocking {
+        // 普通聊天：不传链路字段，三列落 NULL。
+        ChatHistoryRepository.saveWithLatestSnapshot(
+            connectionId = "c1",
+            modelName = "m",
+            question = "q",
+            reply = "r",
+            tokenCount = 0,
+            promptTokens = 0,
+            completionTokens = 0,
+            createdTime = 1_000L,
+            startedTime = null,
+            finishedTime = null,
+            status = ChatHistoryRepository.STATUS_SUCCESS,
+            errorMessage = null,
+            finishReason = null,
+        )
+        // 链路分析：三列随事件 payload 落库。
+        ChatHistoryRepository.saveWithLatestSnapshot(
+            connectionId = "c1",
+            modelName = "m",
+            question = "这条队列为什么积压",
+            reply = "部分回答",
+            tokenCount = 0,
+            promptTokens = 0,
+            completionTokens = 0,
+            createdTime = 2_000L,
+            startedTime = null,
+            finishedTime = 2_500L,
+            status = ChatHistoryRepository.STATUS_CANCELLED,
+            errorMessage = null,
+            finishReason = null,
+            objectType = "QUEUE",
+            objectName = "ORDER.LOCAL.Q",
+            contextJson = """{"currentTime":"..","chain":[],"userQuestion":".."}""",
+        )
+
+        val rows = ChatHistoryRepository.getByConnectionId("c1")
+        assertEquals(2, rows.size)
+
+        val normal = rows.single { it.createdTime == 1_000L }
+        assertNull(normal.objectType)
+        assertNull(normal.objectName)
+        assertNull(normal.contextJson)
+
+        val chain = rows.single { it.createdTime == 2_000L }
+        assertEquals("QUEUE", chain.objectType)
+        assertEquals("ORDER.LOCAL.Q", chain.objectName)
+        assertEquals("""{"currentTime":"..","chain":[],"userQuestion":".."}""", chain.contextJson)
+        assertEquals(ChatHistoryRepository.STATUS_CANCELLED, chain.status)
+    }
+
     private companion object {
         const val DIR_PROPERTY = "mqclient.config.dir"
     }

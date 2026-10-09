@@ -18,9 +18,7 @@ import com.mqclient.core.AiConfig
 import com.mqclient.core.AiConnection
 import com.mqclient.core.ConfigStore
 import com.mqclient.core.CoreModule
-import com.mqclient.core.event.EventNames
 import com.mqclient.core.log.Log
-import com.mqclient.core.newUuidV7
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -188,8 +186,8 @@ class AiPanelState internal constructor(
         )
         // 落库的 question 是「含包装上下文」的 wire 版本（与发给模型的一致）。
         val question = userMsg.copy(content = wireContent)
-        // 链路分析不把大段 JSON 写进 chat_history 的 question —— 那边记原文，
-        // 完整上下文 JSON 由 mq_ai_conversation.context_json 单独承载。
+        // 链路分析不把大段 JSON 写进 chat_history 的 question —— 那里记原文，
+        // 完整上下文 JSON 由 chat_history.context_json 单独承载。
         val auditQuestion = if (chain != null) trimmed else question.content
 
         val assistantMsg = AiMessage(
@@ -246,6 +244,8 @@ class AiPanelState internal constructor(
                 val reply = list.lastOrNull { it.id == assistantMsg.id }?.content.orEmpty()
                 emitChatSaved(
                     connection = connection,
+                    chain = chain,
+                    contextJson = wireContent,
                     question = auditQuestion,
                     reply = reply,
                     createdAt = createdAt,
@@ -255,32 +255,23 @@ class AiPanelState internal constructor(
                     errorMessage = null,
                     result = result,
                 )
-                if (chain != null) {
-                    emitAiConversationSaved(
-                        chain = chain,
-                        question = trimmed,
-                        wireContent = wireContent,
-                        answer = reply,
-                        status = STATUS_SUCCESS,
-                        errorMessage = null,
-                        requestTime = createdAt,
-                        finishedAt = finishedAt,
-                    )
-                }
             } catch (cancellation: CancellationException) {
                 // 取消不是失败，必须原样抛出（吞掉会让 scope 的取消失效）。
-                // 普通对话的半截回复不进 chat_history（审计以「完成」为单位）；链路分析
-                // 则按需求落一条 CANCELLED（answer = 已流出的部分）。
+                // 普通对话的半截回复不落库（审计以「完成」为单位）；链路分析则落一条
+                // CANCELLED（reply = 已流出的部分）。
                 if (chain != null) {
-                    emitAiConversationSaved(
+                    emitChatSaved(
+                        connection = connection,
                         chain = chain,
-                        question = trimmed,
-                        wireContent = wireContent,
-                        answer = list.lastOrNull { it.id == assistantMsg.id }?.content,
-                        status = STATUS_CANCELLED,
-                        errorMessage = null,
-                        requestTime = createdAt,
+                        contextJson = wireContent,
+                        question = auditQuestion,
+                        reply = list.lastOrNull { it.id == assistantMsg.id }?.content,
+                        createdAt = createdAt,
+                        startedAt = startedAt,
                         finishedAt = System.currentTimeMillis(),
+                        status = ChatHistoryRepository.STATUS_CANCELLED,
+                        errorMessage = null,
+                        result = null,
                     )
                 }
                 throw cancellation
@@ -292,6 +283,8 @@ class AiPanelState internal constructor(
                 panelError = error.message ?: error.javaClass.simpleName
                 emitChatSaved(
                     connection = connection,
+                    chain = chain,
+                    contextJson = wireContent,
                     question = auditQuestion,
                     reply = null,
                     createdAt = createdAt,
@@ -301,18 +294,6 @@ class AiPanelState internal constructor(
                     errorMessage = error.message ?: error.javaClass.simpleName,
                     result = null,
                 )
-                if (chain != null) {
-                    emitAiConversationSaved(
-                        chain = chain,
-                        question = trimmed,
-                        wireContent = wireContent,
-                        answer = list.lastOrNull { it.id == assistantMsg.id }?.content,
-                        status = STATUS_FAILED,
-                        errorMessage = error.message ?: error.javaClass.simpleName,
-                        requestTime = createdAt,
-                        finishedAt = System.currentTimeMillis(),
-                    )
-                }
             } finally {
                 streamingMessageId = null
                 // 一个字都没流出来就撤掉空气泡：出错时提示条已经说明了原因；被取消时
@@ -414,12 +395,17 @@ class AiPanelState internal constructor(
     // ---------------------------- 审计落库事件 ----------------------------
 
     /**
-     * 广播 `ai.chat.history.save`：AI 回复完成（成功或失败）后由事件处理器落
-     * chat_history。发事件而不是直接写库，是为了解耦 —— 面板不关心表结构，
-     * 将来审计消费方（统计/导出）也可以直接订阅同一事件。
+     * 广播 `ai.chat.history.save`：AI 回复完成（成功 / 失败；链路分析被取消也算完成）
+     * 后由事件处理器落 chat_history。发事件而不是直接写库，是为了解耦 —— 面板不关心
+     * 表结构，将来审计消费方（统计/导出）也可以直接订阅同一事件。
+     *
+     * [chain] 非空 = 链路分析轮次：payload 带上目标对象与完整上下文 JSON，落库到
+     * chat_history 的三个专用列（原 mq_ai_conversation 表的字段，已并入）。
      */
     private fun emitChatSaved(
         connection: AiConnection,
+        chain: AiChainTarget?,
+        contextJson: String?,
         question: String,
         reply: String?,
         createdAt: Long,
@@ -446,6 +432,9 @@ class AiPanelState internal constructor(
                 AiPayloadKeys.STATUS to status,
                 AiPayloadKeys.ERROR_MESSAGE to errorMessage,
                 AiPayloadKeys.FINISH_REASON to result?.finishReason,
+                AiPayloadKeys.OBJECT_TYPE to chain?.objectType,
+                AiPayloadKeys.OBJECT_NAME to chain?.objectName,
+                AiPayloadKeys.CONTEXT_JSON to contextJson?.takeIf { chain != null },
             ),
             source = SOURCE_TAG,
         )
@@ -456,42 +445,6 @@ class AiPanelState internal constructor(
         if (idx < 0) return
         // 只改这一条：列表身份不变，只有读它的气泡重组。
         list[idx] = list[idx].copy(content = list[idx].content + chunk)
-    }
-
-    /**
-     * 广播 `core.mq.ai.conversation.completed`：链路分析问答结束（成功 / 失败 / 取消）
-     * 后由 app-core 的 MqAiConversationHandler 落 mq_ai_conversation 表。payload 的
-     * 字段契约见 EventNames 同名常量的文档。发事件而不是直接写库 —— 与 emitChatSaved
-     * 同一解耦理由，且失败不能影响对话本身（handler 内部消化，这里也不 try）。
-     */
-    private fun emitAiConversationSaved(
-        chain: AiChainTarget,
-        question: String,
-        wireContent: String,
-        answer: String?,
-        status: String,
-        errorMessage: String?,
-        requestTime: Long,
-        finishedAt: Long?,
-    ) {
-        CoreModule.eventBusOrNull?.emit(
-            name = EventNames.MQ_AI_CONVERSATION_COMPLETED,
-            payload = mapOf<String, Any?>(
-                "conversationId" to newUuidV7(),
-                "connectionId" to chain.connectionId,
-                "objectType" to chain.objectType,
-                "objectName" to chain.objectName,
-                "question" to question,
-                "contextJson" to wireContent,
-                "answer" to answer?.takeIf { it.isNotBlank() },
-                "status" to status,
-                "errorMessage" to errorMessage,
-                "requestTime" to requestTime,
-                "responseTime" to finishedAt,
-                "durationMs" to finishedAt?.let { it - requestTime },
-            ),
-            source = SOURCE_TAG,
-        )
     }
 
     /** Builds a `[CONTEXT] k=v =` prefix from the current selection, or null if nothing to attach. */
@@ -537,8 +490,3 @@ fun rememberAiPanelState(initialConfig: AiConfig = AiConfig()): AiPanelState {
 }
 
 private const val SOURCE_TAG = "ai-panel"
-
-/** mq_ai_conversation.status 取值（与 mq_command 同族：SUCCESS / FAILED / CANCELLED）。 */
-private const val STATUS_SUCCESS = "SUCCESS"
-private const val STATUS_FAILED = "FAILED"
-private const val STATUS_CANCELLED = "CANCELLED"

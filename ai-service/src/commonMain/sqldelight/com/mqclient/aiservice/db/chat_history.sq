@@ -2,6 +2,9 @@
 -- 只插入，不更新，不删除（cleanOld 是按保留天数的清理，不算业务删除）。
 -- FAILED 记录只进审计，面板加载对话历史时按 status 过滤。
 -- `AS ChatHistory`：物理表名用蛇形，生成的 Kotlin 数据类保持驼峰名。
+-- 链路分析（MQ 对象「询问 AI」）的记录 objectType 非空，且 contextJson 存发给模型
+-- 的完整上下文 JSON；普通聊天这三列为 NULL。原先对象维度的 mq_ai_conversation 表
+-- 已并入本表（那张表没有读取方，链路分析本就双写）。
 CREATE TABLE IF NOT EXISTS chat_history (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     connectionId     TEXT NOT NULL,          -- 连接 UUID
@@ -13,11 +16,14 @@ CREATE TABLE IF NOT EXISTS chat_history (
     createdTime      INTEGER NOT NULL,       -- 用户提问时间（Unix 毫秒）
     startedTime      INTEGER,                -- 收到 AI 第一个 token 的时间
     finishedTime     INTEGER,                -- AI 回复结束时间
-    status           TEXT DEFAULT 'SUCCESS', -- SUCCESS / FAILED
+    status           TEXT DEFAULT 'SUCCESS', -- SUCCESS / FAILED / CANCELLED
     errorMessage     TEXT,                   -- 失败时的错误信息
     finishReason     TEXT,                   -- stop / length / ...
-    question         TEXT,                   -- 用户问题（含包装的上下文数据）
-    reply            TEXT                    -- AI 回复
+    question         TEXT,                   -- 用户问题（普通聊天含包装的上下文数据；链路分析存原文）
+    reply            TEXT,                   -- AI 回复
+    objectType       TEXT,                   -- 链路分析目标类型（QUEUE / CHANNEL / LISTENER）；普通聊天为 NULL
+    objectName       TEXT,                   -- 链路分析目标名，如 ORDER.LOCAL.Q；普通聊天为 NULL
+    contextJson      TEXT                    -- 链路分析发给模型的上下文 JSON（currentTime/chain/userQuestion）；普通聊天为 NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_chat_history_connection_id ON chat_history(connectionId);
@@ -26,10 +32,12 @@ CREATE INDEX IF NOT EXISTS idx_chat_history_created_time ON chat_history(created
 insertChat:
 INSERT INTO chat_history(
     connectionId, snapshotId, modelName, tokenCount, promptTokens, completionTokens,
-    createdTime, startedTime, finishedTime, status, errorMessage, finishReason, question, reply
+    createdTime, startedTime, finishedTime, status, errorMessage, finishReason, question, reply,
+    objectType, objectName, contextJson
 ) VALUES (
     ?, ?, ?, ?, ?, ?,
-    ?, ?, ?, ?, ?, ?, ?, ?
+    ?, ?, ?, ?, ?, ?, ?, ?,
+    ?, ?, ?
 );
 
 selectByConnectionId:
