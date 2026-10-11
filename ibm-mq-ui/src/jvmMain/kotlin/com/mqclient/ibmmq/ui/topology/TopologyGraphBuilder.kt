@@ -13,7 +13,13 @@ import com.mqclient.graph.NodeSeverity
 import com.mqclient.ibmmq.IbmMQModule
 import com.mqclient.ibmmq.pcf.MqObjectType
 import com.mqclient.ibmmq.pcf.MqObjectSnapshot
+import com.mqclient.core.log.Log
 import androidx.compose.ui.unit.dp
+
+/** 拓扑链路的日志 tag（builder 与 panel 共用）。 */
+internal const val TOPOLOGY_LOG_TAG = "ibm-mq.topology"
+
+private const val LOG_TAG = TOPOLOGY_LOG_TAG
 
 /**
  * 从 [IbmMQModule] 的对象慢扫缓存（[IbmMQService.cachedObjects]）构建 Kuiver 拓扑图。
@@ -37,8 +43,13 @@ import androidx.compose.ui.unit.dp
  *  6. Channel → Remote QMGR（RQMNAME，仅 Sender/Requester）
  */
 fun buildKuiverFromCache(connectionId: String, warningThreshold: Int): TopologyData {
+    val start = System.currentTimeMillis()
+    Log.debug(LOG_TAG, "topology build start: connection=$connectionId warningThreshold=$warningThreshold%")
     val service = IbmMQModule.serviceOrNull()
-        ?: return TopologyData(Kuiver(), emptyMap(), emptyMap())
+        ?: run {
+            Log.debug(LOG_TAG, "topology build skipped (service not ready): connection=$connectionId")
+            return TopologyData(Kuiver(), emptyMap(), emptyMap())
+        }
 
     val queues = service.cachedObjects(connectionId, MqObjectType.QUEUE)
         .filterNotSystem()
@@ -106,7 +117,10 @@ fun buildKuiverFromCache(connectionId: String, warningThreshold: Int): TopologyD
         .filter { it.isNotBlank() && it != localQmgrName }
         .map(::remoteQmgrNodeId)
     remoteQmgrIds.forEach { put(it, TopologyNodeType.REMOTE_QMGR) }
-    if (nodeTypes.isEmpty()) return TopologyData(Kuiver(), emptyMap(), emptyMap())
+    if (nodeTypes.isEmpty()) {
+        Log.debug(LOG_TAG, "topology build empty (no objects in cache): connection=$connectionId")
+        return TopologyData(Kuiver(), emptyMap(), emptyMap())
+    }
 
     // ---- 边 ----
     val byName = (queues + topics + subs + channels).associateBy { it.name }
@@ -145,6 +159,11 @@ fun buildKuiverFromCache(connectionId: String, warningThreshold: Int): TopologyD
         nodeTypes.forEach { (id, _) -> addNode(KuiverNode(id, NodeDimensions(CARD_WIDTH.dp, CARD_HEIGHT.dp))) }
         edges.forEach { (from, to) -> addEdge(KuiverEdge(fromId = from, toId = to)) }
     }
+    Log.info(
+        LOG_TAG,
+        "topology built: connection=$connectionId nodes=${nodeTypes.size} edges=${edges.size} " +
+            "duration=${System.currentTimeMillis() - start}ms",
+    )
     return TopologyData(kuiver, nodeTypes, severities)
 }
 

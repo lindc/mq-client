@@ -139,10 +139,14 @@ class IbmMQService(private val context: ServiceContext) {
 
     /** 触发一次扫描；重复调用会取消上一次未完成的扫描。 */
     fun startScan(connectionId: String) {
+        ibmMqLog.debug("manual scan requested: connection=$connectionId")
         val started = context.coroutineScope.launch {
             scanLock.withLock {
                 // 显式连接模型：没连上就没有 cache 可写，也没有 MQ 句柄可查。
-                if (connectedContext(connectionId) == null) return@launch
+                if (connectedContext(connectionId) == null) {
+                    ibmMqLog.debug("manual scan skipped (not connected): connection=$connectionId")
+                    return@launch
+                }
                 // 事件名来自 IbmMQEvents，payload 里的 moduleId / source 由
                 // ServiceContext.emit 自动补上。
                 context.emit(IbmMQEvents.SCAN_STARTED, mapOf("connectionId" to connectionId))
@@ -163,8 +167,13 @@ class IbmMQService(private val context: ServiceContext) {
                     )
                 } catch (cancellation: CancellationException) {
                     // 扫描被取消（模块关闭 / 新扫描顶掉）不算失败，也不发事件。
+                    ibmMqLog.debug("manual scan cancelled: connection=$connectionId")
                     throw cancellation
                 } catch (error: Throwable) {
+                    ibmMqLog.warn(
+                        "manual scan failed: connection=$connectionId " +
+                            "error=${error.message ?: error::class.simpleName ?: "unknown"}",
+                    )
                     context.emit(
                         name = IbmMQEvents.SCAN_FAILED,
                         payload = mapOf(
@@ -195,7 +204,10 @@ class IbmMQService(private val context: ServiceContext) {
         val key = objectsKey(MqObjectType.CHANNEL)
         val existing = cache.getAs<List<MqObjectSnapshot>>(key) ?: emptyList()
         val idx = existing.indexOfFirst { it.name == name }
-        if (idx < 0) return null // 列表尚未扫描到该通道，无法确认状态，交给轮询下一轮
+        if (idx < 0) {
+            ibmMqLog.debug("channel status poll unresolved (not in cache yet): channel=$name")
+            return null // 列表尚未扫描到该通道，无法确认状态，交给轮询下一轮
+        }
         val resolved = statuses.firstOrNull()?.let { channelStatusName(it.second) } ?: "STOPPED"
         val statusValue = statuses.firstOrNull()?.second
         val updated = existing.toMutableList().apply {
@@ -205,6 +217,7 @@ class IbmMQService(private val context: ServiceContext) {
             )
         }
         cache.put(key, updated, ttlMs = OBJECTS_FULL_TTL_MS)
+        ibmMqLog.debug("channel status polled: channel=$name status=$resolved")
         context.emit(
             name = IbmMQEvents.MESSAGES_SCANNED,
             payload = mapOf(
@@ -231,7 +244,10 @@ class IbmMQService(private val context: ServiceContext) {
         val key = objectsKey(MqObjectType.LISTENER)
         val existing = cache.getAs<List<MqObjectSnapshot>>(key) ?: emptyList()
         val idx = existing.indexOfFirst { it.name == name }
-        if (idx < 0) return null // 列表尚未扫描到该监听器，无法确认状态，交给轮询下一轮
+        if (idx < 0) {
+            ibmMqLog.debug("listener status poll unresolved (not in cache yet): listener=$name")
+            return null // 列表尚未扫描到该监听器，无法确认状态，交给轮询下一轮
+        }
         val resolved = statuses.firstOrNull()?.let { listenerStatusName(it.second) } ?: "NOT_RUNNING"
         val statusValue = statuses.firstOrNull()?.second
         val updated = existing.toMutableList().apply {
@@ -241,6 +257,7 @@ class IbmMQService(private val context: ServiceContext) {
             )
         }
         cache.put(key, updated, ttlMs = OBJECTS_FULL_TTL_MS)
+        ibmMqLog.debug("listener status polled: listener=$name status=$resolved")
         context.emit(
             name = IbmMQEvents.MESSAGES_SCANNED,
             payload = mapOf(
@@ -271,7 +288,10 @@ class IbmMQService(private val context: ServiceContext) {
      */
     suspend fun openBrowseSession(connectionId: String, queueName: String): MessageBrowseSession {
         val manager = IbmMQModule.connectionOrNull(connectionId)?.mqConnection
-            ?: throw IllegalStateException("连接 $connectionId 未建立，无法浏览队列消息")
+            ?: run {
+                ibmMqLog.warn("browse session aborted (not connected): connection=$connectionId queue=$queueName")
+                throw IllegalStateException("连接 $connectionId 未建立，无法浏览队列消息")
+            }
         return MessageBrowseSession.open(manager, queueName)
     }
 
@@ -317,7 +337,10 @@ class IbmMQService(private val context: ServiceContext) {
      */
     suspend fun downloadMessageBody(connectionId: String, queueName: String, messageIdHex: String): MessageOperationResult {
         val manager = IbmMQModule.connectionOrNull(connectionId)?.mqConnection
-            ?: return MessageOperationResult.failure(null, "连接 $connectionId 未建立")
+            ?: run {
+                ibmMqLog.warn("msg download aborted (not connected): connection=$connectionId queue=$queueName")
+                return MessageOperationResult.failure(null, "连接 $connectionId 未建立")
+            }
         return downloadMessageBody(manager, queueName, messageIdHex)
     }
 
@@ -327,7 +350,10 @@ class IbmMQService(private val context: ServiceContext) {
      */
     suspend fun getMessageDetail(connectionId: String, queueName: String, messageIdHex: String): MessageOperationResult {
         val manager = IbmMQModule.connectionOrNull(connectionId)?.mqConnection
-            ?: return MessageOperationResult.failure(null, "连接 $connectionId 未建立")
+            ?: run {
+                ibmMqLog.warn("msg detail aborted (not connected): connection=$connectionId queue=$queueName")
+                return MessageOperationResult.failure(null, "连接 $connectionId 未建立")
+            }
         return getMessageDetail(manager, queueName, messageIdHex)
     }
 
@@ -337,7 +363,10 @@ class IbmMQService(private val context: ServiceContext) {
      */
     suspend fun deleteMessage(connectionId: String, queueName: String, messageIdHex: String): MessageOperationResult {
         val manager = IbmMQModule.connectionOrNull(connectionId)?.mqConnection
-            ?: return MessageOperationResult.failure(null, "连接 $connectionId 未建立")
+            ?: run {
+                ibmMqLog.warn("msg delete aborted (not connected): connection=$connectionId queue=$queueName")
+                return MessageOperationResult.failure(null, "连接 $connectionId 未建立")
+            }
         return deleteMessageById(manager, queueName, messageIdHex)
     }
 
@@ -362,7 +391,10 @@ class IbmMQService(private val context: ServiceContext) {
         replyToQMgrName: String? = null,
     ): SendResult {
         val manager = IbmMQModule.connectionOrNull(connectionId)?.mqConnection
-            ?: return SendResult.failure(null, "连接 $connectionId 未建立，无法发送消息")
+            ?: run {
+                ibmMqLog.warn("send aborted (not connected): connection=$connectionId queue=$queueName")
+                return SendResult.failure(null, "连接 $connectionId 未建立，无法发送消息")
+            }
         return sendMessageToQueue(
             manager = manager,
             queueName = queueName,
@@ -415,6 +447,7 @@ class IbmMQService(private val context: ServiceContext) {
             throw cancellation
         } catch (error: Throwable) {
             val message = error.message ?: error::class.simpleName ?: "unknown"
+            ibmMqLog.warn("heartbeat scan failed: connection=$connectionId error=$message")
             context.emit(
                 name = IbmMQEvents.MESSAGES_SCAN_FAILED,
                 payload = mapOf("connectionId" to connectionId, "message" to message),
@@ -427,6 +460,7 @@ class IbmMQService(private val context: ServiceContext) {
                 ctx.lastError = message
                 ctx.status = ConnectionStatus.Failed
                 ConnectionStore.reportStatus(connectionId, ConnectionStatus.Failed, context.moduleId)
+                ibmMqLog.warn("connection marked FAILED after heartbeat scan error: connection=$connectionId")
             }
         }
     }
@@ -505,6 +539,7 @@ class IbmMQService(private val context: ServiceContext) {
             throw cancellation
         } catch (error: Throwable) {
             val message = error.message ?: error::class.simpleName ?: "unknown"
+            ibmMqLog.error("objects scan failed: connection=$connectionId error=$message")
             context.emit(
                 name = IbmMQEvents.OBJECTS_SCAN_FAILED,
                 payload = mapOf("connectionId" to connectionId, "message" to message),
@@ -516,6 +551,7 @@ class IbmMQService(private val context: ServiceContext) {
                     ctx.lastError = message
                     ctx.status = ConnectionStatus.Failed
                     ConnectionStore.reportStatus(connectionId, ConnectionStatus.Failed, context.moduleId)
+                    ibmMqLog.warn("connection marked FAILED after objects scan error: connection=$connectionId")
                 }
             }
         }
@@ -645,6 +681,7 @@ class IbmMQService(private val context: ServiceContext) {
      * 保证的语义）。失败上报到错误通道，而不是只打一行控制台日志 —— 打包后没人看得到。
      */
     fun close() {
+        ibmMqLog.debug("service closing: resources=${resources.size}")
         scanJob.getAndSet(null)?.cancel()
         resources.keys.toList().forEach { key ->
             val handle = resources.remove(key) ?: return@forEach
@@ -755,9 +792,20 @@ class IbmMQService(private val context: ServiceContext) {
             )
 
             // 构造即发起连接；失败在这里直接抛 MQException。
-            val manager = MQQueueManager(config.queueManager.trim(), properties)
+            val start = System.currentTimeMillis()
+            val manager = try {
+                MQQueueManager(config.queueManager.trim(), properties)
+            } catch (error: Throwable) {
+                ibmMqLog.warn(
+                    "test connection failed: qmgr=${config.queueManager} " +
+                        "error=${error.message ?: error::class.simpleName ?: "unknown"} " +
+                        "duration=${System.currentTimeMillis() - start}ms",
+                )
+                throw error
+            }
             try {
                 // 连上即视为可达；不做更深的访问（列表 / 收发归正式连接的扫描链路）。
+                ibmMqLog.info("test connection ok: qmgr=${config.queueManager} duration=${System.currentTimeMillis() - start}ms")
             } finally {
                 // 用完即关：测试连接绝不留在 [resources] 里 —— 它不属于任何 connectionId。
                 manager.disconnect()

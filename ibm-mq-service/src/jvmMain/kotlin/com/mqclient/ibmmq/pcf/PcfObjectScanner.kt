@@ -63,11 +63,16 @@ class PcfObjectScanner {
         withAgent(connectionId) { scanQueueManagerWith(it) }
 
     internal suspend fun scanQueueManagerWith(agent: PCFMessageAgent): MqObjectSnapshot? {
+        val start = System.currentTimeMillis()
+        ibmMqLog.debug("pcf scan [qmgr]: start")
         // 注意：INQUIRE_Q_MGR 的 QMgrName **不允许通配符**（带 "*" 回 3097
         // MQRCCF_Q_MGR_NAME_ERROR）—— 省略参数即返回本连接的队列管理器。
         val response = inquire(agent, MQConstants.MQCMD_INQUIRE_Q_MGR) {
             // 无参数
-        }.firstOrNull() ?: return null
+        }.firstOrNull() ?: run {
+            ibmMqLog.warn("pcf scan [qmgr]: empty response")
+            return null
+        }
         // 并入运行状态（属性对话框 General 页的「队列管理器状态」）：部分平台 /
         // 权限受限平台可能查不动状态，失败只记日志，不让它拖垮整轮扫描。
         val status = runCatching {
@@ -75,6 +80,12 @@ class PcfObjectScanner {
                 // 无参数
             }.firstOrNull()?.intValue(MQConstants.MQIACF_Q_MGR_STATUS)
         }.getOrNull()
+        if (status == null) {
+            ibmMqLog.warn("pcf scan [qmgr]: status query unavailable, attributes only")
+        }
+        ibmMqLog.debug(
+            "pcf scan [qmgr]: done status=${status ?: "-"} duration=${System.currentTimeMillis() - start}ms",
+        )
         return queueManagerSnapshotFrom(response, status)
     }
 
@@ -86,6 +97,8 @@ class PcfObjectScanner {
         withAgent(connectionId) { scanQueuesWith(it) }
 
     internal suspend fun scanQueuesWith(agent: PCFMessageAgent): List<MqObjectSnapshot> {
+        val start = System.currentTimeMillis()
+        ibmMqLog.debug("pcf scan [queues]: start")
         // 不带 MQIACF_Q_ATTRS 才是全量应答；一旦带上，QMGR 只回点名的 attr，
         // 整个属性窗口会塌缩成几行（对齐 MQ Explorer 的行为）。
         val attributes = inquire(agent, MQConstants.MQCMD_INQUIRE_Q) {
@@ -112,7 +125,7 @@ class PcfObjectScanner {
             addParameter(MQConstants.MQIACF_Q_STATUS_TYPE, MQConstants.MQIACF_Q_HANDLE)
         }.mapNotNull(::openProcessIdPairFrom).groupBy({ it.first }, { it.second })
 
-        return attributes.mapNotNull { response ->
+        val result = attributes.mapNotNull { response ->
             val name = response.stringValue(MQConstants.MQCA_Q_NAME)
             queueSnapshotFrom(
                 response = response,
@@ -121,6 +134,10 @@ class PcfObjectScanner {
                 openProcessIds = openProcessIds[name],
             )
         }
+        ibmMqLog.debug(
+            "pcf scan [queues]: done count=${result.size} duration=${System.currentTimeMillis() - start}ms",
+        )
+        return result
     }
 
     /**
@@ -130,10 +147,15 @@ class PcfObjectScanner {
     suspend fun scanQueueStatuses(connectionId: String): List<Pair<String, Int>> =
         withAgent(connectionId) { scanQueueStatusesWith(it) }
 
-    internal suspend fun scanQueueStatusesWith(agent: PCFMessageAgent): List<Pair<String, Int>> =
-        inquire(agent, MQConstants.MQCMD_INQUIRE_Q_STATUS) {
+    internal suspend fun scanQueueStatusesWith(agent: PCFMessageAgent): List<Pair<String, Int>> {
+        val start = System.currentTimeMillis()
+        val result = inquire(agent, MQConstants.MQCMD_INQUIRE_Q_STATUS) {
             addParameter(MQConstants.MQCA_Q_NAME, "*")
         }.mapNotNull(::queueDepthPairFrom)
+        // 心跳快扫（默认 10s 一轮）：只打一行出口，控制日志量。
+        ibmMqLog.debug("pcf scan [q-statuses]: count=${result.size} duration=${System.currentTimeMillis() - start}ms")
+        return result
+    }
 
     /**
      * 通道状态快扫（心跳用）：只发 INQUIRE_CHANNEL_STATUS 一条，取名字 + 运行状态
@@ -142,10 +164,15 @@ class PcfObjectScanner {
     suspend fun scanChannelStatuses(connectionId: String): List<Pair<String, Int>> =
         withAgent(connectionId) { scanChannelStatusesWith(it) }
 
-    internal suspend fun scanChannelStatusesWith(agent: PCFMessageAgent): List<Pair<String, Int>> =
-        inquire(agent, MQConstants.MQCMD_INQUIRE_CHANNEL_STATUS) {
+    internal suspend fun scanChannelStatusesWith(agent: PCFMessageAgent): List<Pair<String, Int>> {
+        val start = System.currentTimeMillis()
+        val result = inquire(agent, MQConstants.MQCMD_INQUIRE_CHANNEL_STATUS) {
             addParameter(MQConstants.MQCACH_CHANNEL_NAME, "*")
         }.mapNotNull(::channelStatusPairFrom)
+        // 心跳快扫（同上）：只打一行出口，控制日志量。
+        ibmMqLog.debug("pcf scan [ch-statuses]: count=${result.size} duration=${System.currentTimeMillis() - start}ms")
+        return result
+    }
 
     /**
      * 单通道状态查询（通道启停后轮询用）：INQUIRE_CHANNEL_STATUS 只查指定通道名，
@@ -165,10 +192,15 @@ class PcfObjectScanner {
                 addParameter(MQConstants.MQCACH_CHANNEL_NAME, name)
             }
         } catch (e: PCFException) {
-            if (e.reasonCode == MQConstants.MQRCCF_CHL_STATUS_NOT_FOUND) return emptyList()
+            if (e.reasonCode == MQConstants.MQRCCF_CHL_STATUS_NOT_FOUND) {
+                ibmMqLog.debug("pcf channel status: channel=$name not running (3065), treated as stopped")
+                return emptyList()
+            }
             throw e
         }
-        return responses.mapNotNull(::channelStatusPairFrom)
+        val result = responses.mapNotNull(::channelStatusPairFrom)
+        ibmMqLog.debug("pcf channel status: channel=$name rows=${result.size}")
+        return result
     }
 
     /**
@@ -200,7 +232,10 @@ class PcfObjectScanner {
             throw e
         }
 
-        val current = statusRow(MQConstants.MQOT_CURRENT_CHANNEL) ?: return null
+        val current = statusRow(MQConstants.MQOT_CURRENT_CHANNEL) ?: run {
+            ibmMqLog.debug("pcf channel status detail: channel=$name not running")
+            return null
+        }
         val detail = channelStatusDetailFrom(name, current) ?: return null
         // 序列号回落：部分 QM（实测 9.2.4 容器）CURRENT 行的序列号恒为 0（流量计数
         // 不更新），真实序列号在 SAVED 行（上次实例的最终值）。0 / 缺失时回落 SAVED，
@@ -228,6 +263,8 @@ class PcfObjectScanner {
         withAgent(connectionId) { scanChannelsWith(it) }
 
     internal suspend fun scanChannelsWith(agent: PCFMessageAgent): List<MqObjectSnapshot> {
+        val start = System.currentTimeMillis()
+        ibmMqLog.debug("pcf scan [channels]: start")
         val attributes = inquire(agent, MQConstants.MQCMD_INQUIRE_CHANNEL) {
             addParameter(MQConstants.MQCACH_CHANNEL_NAME, "*")
         }
@@ -235,38 +272,36 @@ class PcfObjectScanner {
             addParameter(MQConstants.MQCACH_CHANNEL_NAME, "*")
         }.associateBy { it.stringValue(MQConstants.MQCACH_CHANNEL_NAME) }
 
-        return attributes.mapNotNull { response ->
+        val result = attributes.mapNotNull { response ->
             channelSnapshotFrom(response, statuses[response.stringValue(MQConstants.MQCACH_CHANNEL_NAME)])
         }
+        ibmMqLog.debug(
+            "pcf scan [channels]: done count=${result.size} duration=${System.currentTimeMillis() - start}ms",
+        )
+        return result
     }
 
     /** 所有主题定义。 */
     suspend fun scanTopics(connectionId: String): List<MqObjectSnapshot> =
         withAgent(connectionId) { scanTopicsWith(it) }
 
-    internal suspend fun scanTopicsWith(agent: PCFMessageAgent): List<MqObjectSnapshot> {
-        val responses = inquire(agent, MQConstants.MQCMD_INQUIRE_TOPIC) {
-            addParameter(MQConstants.MQCA_TOPIC_NAME, "*")
-        }
-        return responses.mapNotNull { it.toSnapshotOrNull(MqObjectType.TOPIC, MQConstants.MQCA_TOPIC_NAME) }
-    }
+    internal suspend fun scanTopicsWith(agent: PCFMessageAgent): List<MqObjectSnapshot> =
+        scanSimpleType(agent, "topics", MQConstants.MQCMD_INQUIRE_TOPIC, MQConstants.MQCA_TOPIC_NAME, MqObjectType.TOPIC)
 
     /** 所有订阅（有名字的；系统内部匿名订阅不在 INQUIRE_SUBSCRIPTION 通配范围内）。 */
     suspend fun scanSubscriptions(connectionId: String): List<MqObjectSnapshot> =
         withAgent(connectionId) { scanSubscriptionsWith(it) }
 
-    internal suspend fun scanSubscriptionsWith(agent: PCFMessageAgent): List<MqObjectSnapshot> {
-        val responses = inquire(agent, MQConstants.MQCMD_INQUIRE_SUBSCRIPTION) {
-            addParameter(MQConstants.MQCACF_SUB_NAME, "*")
-        }
-        return responses.mapNotNull { it.toSnapshotOrNull(MqObjectType.SUBSCRIPTION, MQConstants.MQCACF_SUB_NAME) }
-    }
+    internal suspend fun scanSubscriptionsWith(agent: PCFMessageAgent): List<MqObjectSnapshot> =
+        scanSimpleType(agent, "subscriptions", MQConstants.MQCMD_INQUIRE_SUBSCRIPTION, MQConstants.MQCACF_SUB_NAME, MqObjectType.SUBSCRIPTION)
 
     /** 所有监听器：INQUIRE_LISTENER + INQUIRE_LISTENER_STATUS（运行状态 / 端口）合并。 */
     suspend fun scanListeners(connectionId: String): List<MqObjectSnapshot> =
         withAgent(connectionId) { scanListenersWith(it) }
 
     internal suspend fun scanListenersWith(agent: PCFMessageAgent): List<MqObjectSnapshot> {
+        val start = System.currentTimeMillis()
+        ibmMqLog.debug("pcf scan [listeners]: start")
         val attributes = inquire(agent, MQConstants.MQCMD_INQUIRE_LISTENER) {
             addParameter(MQConstants.MQCACH_LISTENER_NAME, "*")
         }
@@ -274,9 +309,13 @@ class PcfObjectScanner {
             addParameter(MQConstants.MQCACH_LISTENER_NAME, "*")
         }.associateBy { it.stringValue(MQConstants.MQCACH_LISTENER_NAME) }
 
-        return attributes.mapNotNull { response ->
+        val result = attributes.mapNotNull { response ->
             listenerSnapshotFrom(response, statuses[response.stringValue(MQConstants.MQCACH_LISTENER_NAME)])
         }
+        ibmMqLog.debug(
+            "pcf scan [listeners]: done count=${result.size} duration=${System.currentTimeMillis() - start}ms",
+        )
+        return result
     }
 
     /**
@@ -295,66 +334,51 @@ class PcfObjectScanner {
                 addParameter(MQConstants.MQCACH_LISTENER_NAME, name)
             }
         } catch (e: PCFException) {
-            if (e.reasonCode == MQConstants.MQRC_UNKNOWN_OBJECT_NAME) return emptyList()
+            if (e.reasonCode == MQConstants.MQRC_UNKNOWN_OBJECT_NAME) {
+                ibmMqLog.debug("pcf listener status: listener=$name not running (2085), treated as stopped")
+                return emptyList()
+            }
             throw e
         }
-        return responses.mapNotNull(::listenerStatusPairFrom)
+        val result = responses.mapNotNull(::listenerStatusPairFrom)
+        ibmMqLog.debug("pcf listener status: listener=$name rows=${result.size}")
+        return result
     }
 
     /** 所有服务定义。 */
     suspend fun scanServices(connectionId: String): List<MqObjectSnapshot> =
         withAgent(connectionId) { scanServicesWith(it) }
 
-    internal suspend fun scanServicesWith(agent: PCFMessageAgent): List<MqObjectSnapshot> {
-        val responses = inquire(agent, MQConstants.MQCMD_INQUIRE_SERVICE) {
-            addParameter(MQConstants.MQCA_SERVICE_NAME, "*")
-        }
-        return responses.mapNotNull { it.toSnapshotOrNull(MqObjectType.SERVICE, MQConstants.MQCA_SERVICE_NAME) }
-    }
+    internal suspend fun scanServicesWith(agent: PCFMessageAgent): List<MqObjectSnapshot> =
+        scanSimpleType(agent, "services", MQConstants.MQCMD_INQUIRE_SERVICE, MQConstants.MQCA_SERVICE_NAME, MqObjectType.SERVICE)
 
     /** 所有进程定义。 */
     suspend fun scanProcesses(connectionId: String): List<MqObjectSnapshot> =
         withAgent(connectionId) { scanProcessesWith(it) }
 
-    internal suspend fun scanProcessesWith(agent: PCFMessageAgent): List<MqObjectSnapshot> {
-        val responses = inquire(agent, MQConstants.MQCMD_INQUIRE_PROCESS) {
-            addParameter(MQConstants.MQCA_PROCESS_NAME, "*")
-        }
-        return responses.mapNotNull { it.toSnapshotOrNull(MqObjectType.PROCESS, MQConstants.MQCA_PROCESS_NAME) }
-    }
+    internal suspend fun scanProcessesWith(agent: PCFMessageAgent): List<MqObjectSnapshot> =
+        scanSimpleType(agent, "processes", MQConstants.MQCMD_INQUIRE_PROCESS, MQConstants.MQCA_PROCESS_NAME, MqObjectType.PROCESS)
 
     /** 所有名称列表。 */
     suspend fun scanNamelists(connectionId: String): List<MqObjectSnapshot> =
         withAgent(connectionId) { scanNamelistsWith(it) }
 
-    internal suspend fun scanNamelistsWith(agent: PCFMessageAgent): List<MqObjectSnapshot> {
-        val responses = inquire(agent, MQConstants.MQCMD_INQUIRE_NAMELIST) {
-            addParameter(MQConstants.MQCA_NAMELIST_NAME, "*")
-        }
-        return responses.mapNotNull { it.toSnapshotOrNull(MqObjectType.NAMELIST, MQConstants.MQCA_NAMELIST_NAME) }
-    }
+    internal suspend fun scanNamelistsWith(agent: PCFMessageAgent): List<MqObjectSnapshot> =
+        scanSimpleType(agent, "namelists", MQConstants.MQCMD_INQUIRE_NAMELIST, MQConstants.MQCA_NAMELIST_NAME, MqObjectType.NAMELIST)
 
     /** 所有认证信息对象。 */
     suspend fun scanAuthInfos(connectionId: String): List<MqObjectSnapshot> =
         withAgent(connectionId) { scanAuthInfosWith(it) }
 
-    internal suspend fun scanAuthInfosWith(agent: PCFMessageAgent): List<MqObjectSnapshot> {
-        val responses = inquire(agent, MQConstants.MQCMD_INQUIRE_AUTH_INFO) {
-            addParameter(MQConstants.MQCA_AUTH_INFO_NAME, "*")
-        }
-        return responses.mapNotNull { it.toSnapshotOrNull(MqObjectType.AUTH_INFO, MQConstants.MQCA_AUTH_INFO_NAME) }
-    }
+    internal suspend fun scanAuthInfosWith(agent: PCFMessageAgent): List<MqObjectSnapshot> =
+        scanSimpleType(agent, "authInfos", MQConstants.MQCMD_INQUIRE_AUTH_INFO, MQConstants.MQCA_AUTH_INFO_NAME, MqObjectType.AUTH_INFO)
 
     /** 所有通信信息对象。 */
     suspend fun scanCommInfos(connectionId: String): List<MqObjectSnapshot> =
         withAgent(connectionId) { scanCommInfosWith(it) }
 
-    internal suspend fun scanCommInfosWith(agent: PCFMessageAgent): List<MqObjectSnapshot> {
-        val responses = inquire(agent, MQConstants.MQCMD_INQUIRE_COMM_INFO) {
-            addParameter(MQConstants.MQCA_COMM_INFO_NAME, "*")
-        }
-        return responses.mapNotNull { it.toSnapshotOrNull(MqObjectType.COMM_INFO, MQConstants.MQCA_COMM_INFO_NAME) }
-    }
+    internal suspend fun scanCommInfosWith(agent: PCFMessageAgent): List<MqObjectSnapshot> =
+        scanSimpleType(agent, "commInfos", MQConstants.MQCMD_INQUIRE_COMM_INFO, MQConstants.MQCA_COMM_INFO_NAME, MqObjectType.COMM_INFO)
 
     /**
      * 集群关系（集群关系 Tab）：本地 QMGR 的角色（REPOS 字段非空 = 完整仓库）+
@@ -379,7 +403,12 @@ class PcfObjectScanner {
             members.isNotEmpty() -> QmgrClusterRole.PARTIAL
             else -> QmgrClusterRole.NONE
         }
-        return ClusterRelations(role, reposClusterName, localQmgrName, members)
+        val relations = ClusterRelations(role, reposClusterName, localQmgrName, members)
+        ibmMqLog.debug(
+            "pcf cluster relations: localQmgr=${localQmgrName.ifEmpty { "-" }} role=$role " +
+                "cluster=${reposClusterName ?: "-"} members=${members.size}",
+        )
+        return relations
     }
 
     /** 成员列表（DISPLAY CLUSQMGR 逐条响应 → [ClusterMember]）。 */
@@ -400,6 +429,8 @@ class PcfObjectScanner {
      * 超时 / 其他）只记日志、该类返回空结果，不拖垮整轮；取消（应用退出）原样上抛。
      */
     suspend fun scanAll(connectionId: String): ScanResult = coroutineScope {
+        val start = System.currentTimeMillis()
+        ibmMqLog.debug("pcf scanAll start: connection=$connectionId")
         val queueManagerDeferred = async { safelyNullable("qmgr") { scanQueueManager(connectionId) } }
         val queuesDeferred = async { safelyList("queues") { scanQueues(connectionId) } }
         val channelsDeferred = async { safelyList("channels") { scanChannels(connectionId) } }
@@ -412,7 +443,7 @@ class PcfObjectScanner {
         val authInfosDeferred = async { safelyList("authInfos") { scanAuthInfos(connectionId) } }
         val commInfosDeferred = async { safelyList("commInfos") { scanCommInfos(connectionId) } }
 
-        ScanResult(
+        val result = ScanResult(
             queueManager = queueManagerDeferred.await(),
             queues = queuesDeferred.await(),
             channels = channelsDeferred.await(),
@@ -425,6 +456,15 @@ class PcfObjectScanner {
             authInfos = authInfosDeferred.await(),
             commInfos = commInfosDeferred.await(),
         )
+        ibmMqLog.info(
+            "pcf scanAll completed: connection=$connectionId " +
+                "queues=${result.queues.size} channels=${result.channels.size} topics=${result.topics.size} " +
+                "subscriptions=${result.subscriptions.size} listeners=${result.listeners.size} " +
+                "services=${result.services.size} processes=${result.processes.size} " +
+                "namelists=${result.namelists.size} authInfos=${result.authInfos.size} " +
+                "commInfos=${result.commInfos.size} duration=${System.currentTimeMillis() - start}ms",
+        )
+        result
     }
 
     /**
@@ -432,9 +472,11 @@ class PcfObjectScanner {
      * agent 逐类查询，逐类兜底语义与 [scanAll] 相同。
      */
     internal suspend fun scanAllWith(manager: MQQueueManager): ScanResult = withContext(Dispatchers.IO) {
+        val start = System.currentTimeMillis()
+        ibmMqLog.debug("pcf scanAllWith start")
         val agent = PCFMessageAgent(manager)
         try {
-            ScanResult(
+            val result = ScanResult(
                 queueManager = safelyNullable("qmgr") { scanQueueManagerWith(agent) },
                 queues = safelyList("queues") { scanQueuesWith(agent) },
                 channels = safelyList("channels") { scanChannelsWith(agent) },
@@ -447,6 +489,11 @@ class PcfObjectScanner {
                 authInfos = safelyList("authInfos") { scanAuthInfosWith(agent) },
                 commInfos = safelyList("commInfos") { scanCommInfosWith(agent) },
             )
+            ibmMqLog.debug(
+                "pcf scanAllWith completed: queues=${result.queues.size} channels=${result.channels.size} " +
+                    "duration=${System.currentTimeMillis() - start}ms",
+            )
+            result
         } finally {
             runCatching { agent.disconnect() }
         }
@@ -497,6 +544,8 @@ class PcfObjectScanner {
     private suspend fun <T> withAgent(connectionId: String, block: suspend (PCFMessageAgent) -> T): T {
         val manager: MQQueueManager = IbmMQModule.connectionOrNull(connectionId)?.mqConnection
             ?: throw IllegalStateException("连接 $connectionId 未建立，无法执行 PCF 查询")
+        val start = System.currentTimeMillis()
+        ibmMqLog.debug("pcf agent open: connection=$connectionId")
         return try {
             withTimeout(SCAN_TIMEOUT_MS) {
                 withContext(Dispatchers.IO) {
@@ -505,10 +554,14 @@ class PcfObjectScanner {
                         block(agent)
                     } finally {
                         runCatching { agent.disconnect() }
+                        ibmMqLog.debug(
+                            "pcf agent closed: connection=$connectionId duration=${System.currentTimeMillis() - start}ms",
+                        )
                     }
                 }
             }
         } catch (e: TimeoutCancellationException) {
+            ibmMqLog.error("pcf query timeout: connection=$connectionId timeout=${SCAN_TIMEOUT_MS / 1000}s")
             throw IllegalStateException("PCF 查询超时（${SCAN_TIMEOUT_MS / 1000}s）", e)
         }
     }
@@ -522,6 +575,28 @@ class PcfObjectScanner {
         val request = PCFMessage(command).apply(parameters)
         ibmMqLog.debug("pcf inquire: cmd=$command")
         return agent.send(request)
+    }
+
+    /**
+     * 简单类对象（单条通配 INQUIRE → 名字快照）的统一扫描：入口/出口 DEBUG 打点
+     * 在这里集中做，7 个同构的 `scanXxxWith` 复用。
+     */
+    private suspend fun scanSimpleType(
+        agent: PCFMessageAgent,
+        name: String,
+        command: Int,
+        nameSelector: Int,
+        type: MqObjectType,
+    ): List<MqObjectSnapshot> {
+        val start = System.currentTimeMillis()
+        ibmMqLog.debug("pcf scan [$name]: start")
+        val result = inquire(agent, command) {
+            addParameter(nameSelector, "*")
+        }.mapNotNull { it.toSnapshotOrNull(type, nameSelector) }
+        ibmMqLog.debug(
+            "pcf scan [$name]: done count=${result.size} duration=${System.currentTimeMillis() - start}ms",
+        )
+        return result
     }
 }
 

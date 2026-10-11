@@ -7,6 +7,7 @@ import com.ibm.mq.MQQueue
 import com.ibm.mq.MQQueueManager
 import com.ibm.mq.constants.MQConstants
 import com.mqclient.ibmmq.command.MqrcTranslator
+import com.mqclient.ibmmq.ibmMqLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -30,6 +31,8 @@ fun browseErrorText(e: Throwable): String = when (e) {
  */
 class MessageBrowseSession private constructor(
     private val queue: MQQueue,
+    /** 仅用于日志追踪的队列名（open 时从调用方取，MQQueue.name 需要额外属性访问）。 */
+    private val queueName: String,
 ) {
 
     /** 下一次 get 是否用 BROWSE_FIRST（首调或 [reset] 后为 true，其余 BROWSE_NEXT）。 */
@@ -40,28 +43,51 @@ class MessageBrowseSession private constructor(
      * 正常返回已拿到的部分——调用方以「返回条数 < [count]」判定浏览耗尽。
      */
     suspend fun browseNext(count: Int): List<MessageSummary> = withContext(Dispatchers.IO) {
-        val result = ArrayList<MessageSummary>(count)
-        val options = MQGetMessageOptions()
-        repeat(count) {
-            val useFirst = firstBrowse
-            options.options =
-                (if (useFirst) MQConstants.MQGMO_BROWSE_FIRST else MQConstants.MQGMO_BROWSE_NEXT) or
-                    MQConstants.MQGMO_FAIL_IF_QUIESCING
-            val message = MQMessage()
-            try {
-                queue.get(message, options)
-            } catch (e: MQException) {
-                if (e.reasonCode == MQConstants.MQRC_NO_MSG_AVAILABLE) return@withContext result
-                throw e
+        val start = System.currentTimeMillis()
+        ibmMqLog.debug("browse next: queue=$queueName count=$count")
+        try {
+            val result = ArrayList<MessageSummary>(count)
+            val options = MQGetMessageOptions()
+            repeat(count) {
+                val useFirst = firstBrowse
+                options.options =
+                    (if (useFirst) MQConstants.MQGMO_BROWSE_FIRST else MQConstants.MQGMO_BROWSE_NEXT) or
+                        MQConstants.MQGMO_FAIL_IF_QUIESCING
+                val message = MQMessage()
+                try {
+                    queue.get(message, options)
+                } catch (e: MQException) {
+                    if (e.reasonCode == MQConstants.MQRC_NO_MSG_AVAILABLE) {
+                        ibmMqLog.debug(
+                            "browse end of queue: queue=$queueName fetched=${result.size} " +
+                                "duration=${System.currentTimeMillis() - start}ms",
+                        )
+                        return@withContext result
+                    }
+                    throw e
+                }
+                firstBrowse = false
+                result += message.toSummary()
             }
-            firstBrowse = false
-            result += message.toSummary()
+            ibmMqLog.debug(
+                "browse done: queue=$queueName fetched=${result.size} " +
+                    "duration=${System.currentTimeMillis() - start}ms",
+            )
+            result
+        } catch (e: MQException) {
+            ibmMqLog.error(
+                "browse failed: queue=$queueName reason=MQRC ${e.reasonCode}: ${MqrcTranslator.translate(e.reasonCode)}",
+            )
+            throw e
+        } catch (e: Exception) {
+            ibmMqLog.error("browse failed: queue=$queueName error=${e.message ?: e::class.simpleName}")
+            throw e
         }
-        result
     }
 
     /** 光标重置：下一次 [browseNext] 从队首重新开始（刷新用）。 */
     fun reset() {
+        ibmMqLog.debug("browse cursor reset: queue=$queueName")
         firstBrowse = true
     }
 
@@ -69,7 +95,9 @@ class MessageBrowseSession private constructor(
     fun close() {
         if (closed) return
         closed = true
+        ibmMqLog.info("browse session closed: queue=$queueName")
         runCatching { queue.close() }
+            .onFailure { ibmMqLog.warn("browse queue close failed: queue=$queueName error=${it.message}") }
     }
 
     private var closed = false
@@ -84,7 +112,10 @@ class MessageBrowseSession private constructor(
             withContext(Dispatchers.IO) {
                 val openOptions =
                     MQConstants.MQOO_BROWSE or MQConstants.MQOO_FAIL_IF_QUIESCING
-                MessageBrowseSession(manager.accessQueue(queueName.trim(), openOptions))
+                val start = System.currentTimeMillis()
+                val session = MessageBrowseSession(manager.accessQueue(queueName.trim(), openOptions), queueName.trim())
+                ibmMqLog.debug("browse session opened: queue=$queueName duration=${System.currentTimeMillis() - start}ms")
+                session
             }
     }
 }

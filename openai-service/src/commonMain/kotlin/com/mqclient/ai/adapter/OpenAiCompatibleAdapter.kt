@@ -6,6 +6,8 @@ import com.mqclient.ai.AiResponse
 import com.mqclient.ai.AiRole
 import com.mqclient.ai.AiStreamChunk
 import com.mqclient.core.AiConnection
+import kotlin.time.TimeSource
+import com.mqclient.core.log.Log
 import io.ktor.client.HttpClient
 import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.get
@@ -17,6 +19,7 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.SerialName
@@ -42,66 +45,114 @@ class OpenAiCompatibleAdapter(private val client: HttpClient) : AiAdapter {
 
     /** 非流式对话。刻意不传 max_tokens：交给服务端默认值，兼容面最大。 */
     override suspend fun chat(connection: AiConnection, messages: List<AiChatMessage>): AiResponse {
-        val response = client.post(connection.endpoint("/chat/completions")) {
-            connection.applyAuth(this)
-            contentType(ContentType.Application.Json)
-            setBody(aiJson.encodeToString(ChatRequest.serializer(), ChatRequest(connection.model, messages.toDto())))
-        }
-        response.throwIfNotSuccess(PROVIDER_LABEL)
-
-        val dto = aiJson.decodeFromString(ChatResponse.serializer(), response.bodyAsText())
-        val choice = dto.choices.firstOrNull()
-        return AiResponse(
-            content = choice?.message?.content.orEmpty(),
-            model = dto.model ?: connection.model,
-            tokensUsed = dto.usage?.totalTokens,
-            finishReason = choice?.finishReason,
+        // 日志只记元数据（模型、消息条数、token 用量、耗时），绝不记消息内容与 token。
+        val start = TimeSource.Monotonic.markNow()
+        Log.debug(
+            AI_ADAPTER_LOG_TAG,
+            "chat start: connection='${connection.name}' model=${connection.model} " +
+                "messages=${messages.size} stream=false",
         )
+        try {
+            val response = client.post(connection.endpoint("/chat/completions")) {
+                connection.applyAuth(this)
+                contentType(ContentType.Application.Json)
+                setBody(aiJson.encodeToString(ChatRequest.serializer(), ChatRequest(connection.model, messages.toDto())))
+            }
+            response.throwIfNotSuccess(PROVIDER_LABEL)
+
+            val dto = aiJson.decodeFromString(ChatResponse.serializer(), response.bodyAsText())
+            val choice = dto.choices.firstOrNull()
+            val result = AiResponse(
+                content = choice?.message?.content.orEmpty(),
+                model = dto.model ?: connection.model,
+                tokensUsed = dto.usage?.totalTokens,
+                finishReason = choice?.finishReason,
+            )
+            Log.debug(
+                AI_ADAPTER_LOG_TAG,
+                "chat completed: model=${result.model} tokens=${result.tokensUsed ?: "-"} " +
+                    "finish=${result.finishReason ?: "-"} chars=${result.content.length} " +
+                    "duration=${start.elapsedNow().inWholeMilliseconds}ms",
+            )
+            return result
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Log.error(
+                AI_ADAPTER_LOG_TAG,
+                "chat failed: model=${connection.model} error=${e.message ?: e::class.simpleName}",
+            )
+            throw e
+        }
     }
 
     /** 流式对话：逐帧解析 `choices[0].delta.content`；usage 末帧经 [AiStreamChunk] 透出。 */
     override fun chatStream(connection: AiConnection, messages: List<AiChatMessage>): Flow<AiStreamChunk> = flow {
-        val response = client.post(connection.endpoint("/chat/completions")) {
-            connection.applyAuth(this)
-            contentType(ContentType.Application.Json)
-            setBody(
-                aiJson.encodeToString(
-                    ChatRequest.serializer(),
-                    // include_usage：OpenAI 规范行为，规范服务会在 [DONE] 前发一帧只有
-                    // usage 的收尾帧；不兼容的服务要么忽略、要么报错（后者值得暴露）。
-                    ChatRequest(
-                        connection.model,
-                        messages.toDto(),
-                        stream = true,
-                        // aiJson 没开 encodeDefaults：布尔字段必须显式传参才不会被省略。
-                        streamOptions = StreamOptions(includeUsage = true),
-                    ),
-                ),
-            )
-        }
-        response.throwIfNotSuccess(PROVIDER_LABEL)
-
-        response.bodyAsChannel().sseData().collect { payload ->
-            if (payload == DONE_SENTINEL) return@collect
-            // 解析不了的帧直接跳过：部分兼容服务会插非标准的心跳 / 注释帧。
-            val chunk = runCatching { aiJson.decodeFromString(StreamChunk.serializer(), payload) }.getOrNull()
-                ?: return@collect
-            // usage 收尾帧的 choices 为空（且 delta 为空），必须先于 choices 判空检查。
-            val usage = chunk.usage
-            if (usage != null) {
-                emit(
-                    AiStreamChunk(
-                        promptTokens = usage.promptTokens,
-                        completionTokens = usage.completionTokens,
-                        totalTokens = usage.totalTokens,
+        val start = TimeSource.Monotonic.markNow()
+        Log.debug(
+            AI_ADAPTER_LOG_TAG,
+            "chat stream start: connection='${connection.name}' model=${connection.model} " +
+                "messages=${messages.size} stream=true",
+        )
+        try {
+            val response = client.post(connection.endpoint("/chat/completions")) {
+                connection.applyAuth(this)
+                contentType(ContentType.Application.Json)
+                setBody(
+                    aiJson.encodeToString(
+                        ChatRequest.serializer(),
+                        // include_usage：OpenAI 规范行为，规范服务会在 [DONE] 前发一帧只有
+                        // usage 的收尾帧；不兼容的服务要么忽略、要么报错（后者值得暴露）。
+                        ChatRequest(
+                            connection.model,
+                            messages.toDto(),
+                            stream = true,
+                            // aiJson 没开 encodeDefaults：布尔字段必须显式传参才不会被省略。
+                            streamOptions = StreamOptions(includeUsage = true),
+                        ),
                     ),
                 )
             }
-            val choice = chunk.choices.firstOrNull() ?: return@collect
-            val delta = choice.delta?.content.orEmpty()
-            if (delta.isNotEmpty() || choice.finishReason != null) {
-                emit(AiStreamChunk(delta = delta, finishReason = choice.finishReason))
+            response.throwIfNotSuccess(PROVIDER_LABEL)
+
+            var deltaChars = 0
+            response.bodyAsChannel().sseData().collect { payload ->
+                if (payload == DONE_SENTINEL) return@collect
+                // 解析不了的帧直接跳过：部分兼容服务会插非标准的心跳 / 注释帧。
+                val chunk = runCatching { aiJson.decodeFromString(StreamChunk.serializer(), payload) }.getOrNull()
+                    ?: return@collect
+                // usage 收尾帧的 choices 为空（且 delta 为空），必须先于 choices 判空检查。
+                val usage = chunk.usage
+                if (usage != null) {
+                    emit(
+                        AiStreamChunk(
+                            promptTokens = usage.promptTokens,
+                            completionTokens = usage.completionTokens,
+                            totalTokens = usage.totalTokens,
+                        ),
+                    )
+                }
+                val choice = chunk.choices.firstOrNull() ?: return@collect
+                val delta = choice.delta?.content.orEmpty()
+                if (delta.isNotEmpty() || choice.finishReason != null) {
+                    deltaChars += delta.length
+                    emit(AiStreamChunk(delta = delta, finishReason = choice.finishReason))
+                }
             }
+            Log.debug(
+                AI_ADAPTER_LOG_TAG,
+                "chat stream completed: model=${connection.model} chars=$deltaChars " +
+                    "duration=${start.elapsedNow().inWholeMilliseconds}ms",
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Log.error(
+                AI_ADAPTER_LOG_TAG,
+                "chat stream failed: model=${connection.model} " +
+                    "error=${e.message ?: e::class.simpleName} duration=${start.elapsedNow().inWholeMilliseconds}ms",
+            )
+            throw e
         }
     }
 

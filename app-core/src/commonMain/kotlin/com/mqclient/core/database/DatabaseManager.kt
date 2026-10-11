@@ -1,8 +1,14 @@
 package com.mqclient.core.database
 
 import app.cash.sqldelight.db.SqlDriver
+import com.mqclient.core.event.systemTimeMillis
+import com.mqclient.core.log.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
+
+/** 数据库层的日志 tag。 */
+private const val LOG_TAG = "core.db"
 
 /**
  * SQLite 基础设施唯一入口（app-core 只提供基础设施，不定义任何表）：
@@ -74,12 +80,27 @@ object DatabaseManager {
      * 理由见类注释；测试里可以传自己的调度器。
      */
     fun initialize(driverFactory: DriverFactory, dbDispatcher: CoroutineDispatcher) {
-        if (_driver == null) {
-            synchronized(this) {
-                if (_driver == null) {
+        if (_driver != null) {
+            Log.debug(LOG_TAG, "db initialize ignored (already initialized)")
+            return
+        }
+        synchronized(this) {
+            if (_driver == null) {
+                try {
                     _driver = driverFactory.createDriver()
                     _dbContext = dbDispatcher
+                    Log.info(LOG_TAG, "database initialized: dispatcher=$dbDispatcher")
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    Log.error(
+                        LOG_TAG,
+                        "database initialize failed: error=${e.message ?: e::class.simpleName}",
+                    )
+                    throw e
                 }
+            } else {
+                Log.debug(LOG_TAG, "db initialize ignored (already initialized, inside lock)")
             }
         }
     }
@@ -90,11 +111,28 @@ object DatabaseManager {
      * [block] 非挂起（类型 + 编译器双保险）：需要跨挂起保持事务，请用
      * `transactionWithContext(dbContext)`。
      *
+     * 日志：正常路径一行 DEBUG（耗时），失败一行 ERROR 后原样上抛 —— DB 访问失败
+     * 不能只靠调用方上报，日志里必须有迹可查。
+     *
      * @throws IllegalStateException 若 [initialize] 尚未调用
      */
     suspend fun <T> withDriver(block: (SqlDriver) -> T): T {
         val driver = _driver ?: throw IllegalStateException(NOT_INITIALIZED)
-        return withContext(dbContext) { block(driver) }
+        val start = systemTimeMillis()
+        try {
+            val result = withContext(dbContext) { block(driver) }
+            Log.debug(LOG_TAG, "db op ok: duration=${systemTimeMillis() - start}ms")
+            return result
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Log.error(
+                LOG_TAG,
+                "db op failed: error=${e.message ?: e::class.simpleName} " +
+                    "duration=${systemTimeMillis() - start}ms",
+            )
+            throw e
+        }
     }
 
     /**
@@ -111,7 +149,14 @@ object DatabaseManager {
             val driver = _driver ?: return
             _driver = null
             _dbContext = null
-            driver.close()
+            try {
+                driver.close()
+                Log.info(LOG_TAG, "database closed")
+            } catch (e: Throwable) {
+                // 语义不变（仍上抛给退出流程），只是先留痕。
+                Log.error(LOG_TAG, "database close failed: error=${e.message ?: e::class.simpleName}")
+                throw e
+            }
         }
     }
 }

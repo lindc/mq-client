@@ -61,25 +61,41 @@ class IbmMQConnectionManager(
      * 建立（或取回）一条连接的 DISCONNECTED 上下文：启动补登记与 `connection.added`
      * 共用。**只登记，不连接** —— cache、MQ 句柄、定时任务全部留给 [connect]。
      */
-    fun ensureContext(connection: ConnectionInfo): IbmMQConnectionContext =
-        contexts.compute(connection.id) { id, existing ->
+    fun ensureContext(connection: ConnectionInfo): IbmMQConnectionContext {
+        var created = false
+        val ctx = contexts.compute(connection.id) { id, existing ->
+            if (existing == null) created = true
             existing ?: IbmMQConnectionContext(id, ibmMQConfigFromOptions(connection.options))
         }!!
+        ibmMqLog.debug(
+            "context ${if (created) "created" else "reused"}: connection=${connection.id} " +
+                "qmgr=${ctx.config.queueManager}",
+        )
+        return ctx
+    }
 
     /**
      * `connection.updated`：换配置快照。已连接 / 连接中的先断开 —— 配置变了继续用
      * 旧连接没有意义，下次显式连接自然用新配置。
      */
     fun updateContextConfig(connection: ConnectionInfo) {
-        val ctx = contexts[connection.id] ?: return
+        val ctx = contexts[connection.id] ?: run {
+            ibmMqLog.debug("config update ignored (no context): connection=${connection.id}")
+            return
+        }
         ctx.config = ibmMQConfigFromOptions(connection.options)
+        ibmMqLog.debug("context config updated: connection=${connection.id} qmgr=${ctx.config.queueManager}")
         if (ctx.status == ConnectionStatus.Connected || ctx.status == ConnectionStatus.Connecting) {
+            ibmMqLog.info(
+                "disconnecting active connection for config update: connection=${connection.id} status=${ctx.status}",
+            )
             disconnectAsync(connection.id, reason = "config updated")
         }
     }
 
     /** `connection.deleted`：断开 + 摘除上下文（cache 随 [IbmMQConnectionContext.cleanup] 清空）。 */
     fun remove(connectionId: String) {
+        ibmMqLog.debug("connection remove requested: connection=$connectionId")
         context.coroutineScope.launch {
             disconnectNow(connectionId, reason = "connection deleted")
             contexts.remove(connectionId)
@@ -105,6 +121,11 @@ class IbmMQConnectionManager(
             else -> Unit
         }
 
+        val start = System.currentTimeMillis()
+        ibmMqLog.debug(
+            "connect start: connection=$connectionId qmgr=${ctx.config.queueManager} " +
+                "timeout=${ctx.config.connectionTimeout}s",
+        )
         // FAILED 状态下可能残留坏句柄：先悄悄扔掉，connect 只管建新的。
         closeQuietly(ctx)
 
@@ -141,7 +162,10 @@ class IbmMQConnectionManager(
             setStatus(ctx, ConnectionStatus.Connected)
             registerScanJobs(ctx)
             context.emit(IbmMQEvents.CONNECTED, mapOf("connectionId" to connectionId))
-            ibmMqLog.info("connected: connection=$connectionId qmgr=${ctx.config.queueManager}")
+            ibmMqLog.info(
+                "connected: connection=$connectionId qmgr=${ctx.config.queueManager} " +
+                    "duration=${System.currentTimeMillis() - start}ms",
+            )
             Result.success(Unit)
         } catch (error: Throwable) {
             if (error is CancellationException) throw error
@@ -153,7 +177,10 @@ class IbmMQConnectionManager(
                 name = IbmMQEvents.CONNECT_FAILED,
                 payload = mapOf("connectionId" to connectionId, "message" to ctx.lastError),
             )
-            ibmMqLog.warn("connect failed: connection=$connectionId reason=${ctx.lastError}")
+            ibmMqLog.warn(
+                "connect failed: connection=$connectionId reason=${ctx.lastError} " +
+                    "duration=${System.currentTimeMillis() - start}ms",
+            )
             Result.failure(error)
         }
     }
@@ -185,6 +212,7 @@ class IbmMQConnectionManager(
 
     /** 模块销毁：全部连接断开 + 注册表清空（顺序：先断连接再摘表）。 */
     suspend fun shutdownAll() {
+        ibmMqLog.info("shutdown all connections: count=${contexts.size}")
         contexts.keys.toList().forEach { disconnectNow(it, reason = "module shutdown") }
         contexts.clear()
     }
@@ -226,6 +254,7 @@ class IbmMQConnectionManager(
 
     /** 按前缀收掉该连接的全部定时任务（连接断开 / 删除）。 */
     private fun unregisterScanJobs(connectionId: String) {
+        ibmMqLog.debug("scan jobs unregistering: connection=$connectionId")
         context.jobScheduler.cancelByPrefix(ScheduledJob.prefixFor(MODULE_ID, connectionId))
     }
 
@@ -246,6 +275,7 @@ class IbmMQConnectionManager(
         ctx.mqConnection = null
         try {
             withContext(Dispatchers.IO) { manager.disconnect() }
+            ibmMqLog.debug("mq handle closed: connection=${ctx.connectionId}")
         } catch (error: Throwable) {
             ibmMqLog.warn("mq disconnect failed: connection=${ctx.connectionId} error=$error")
         }

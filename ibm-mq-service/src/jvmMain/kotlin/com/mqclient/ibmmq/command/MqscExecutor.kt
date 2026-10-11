@@ -21,6 +21,11 @@ class MqscExecutor(
     private val historyRepository: MqscHistoryRepository,
 ) {
 
+    companion object {
+        /** 日志中命令文本的最大长度（防止超长 DISPLAY 输出刷屏）。 */
+        private const val MAX_LOG_COMMAND_LENGTH = 300
+    }
+
     /**
      * 顺序执行 [commands]（跳过注释 / 空行）。
      *
@@ -61,8 +66,16 @@ class MqscExecutor(
      * @param command 已展开的命令文本（调用方负责缩写展开）。
      */
     suspend fun executeSingle(connectionId: String, command: String, lineNumber: Int): MqscResult {
+        // 命令文本可能很长，日志里截断；不含密码类字段（MQSC 命令本身极少携带，
+        // 若未来有需再按字段脱敏）。
+        ibmMqLog.debug(
+            "mqsc execute: connection=$connectionId line=$lineNumber command='${command.trim().take(MAX_LOG_COMMAND_LENGTH)}'",
+        )
         val requestTime = System.currentTimeMillis()
         val result = executeOne(connectionId, MqscCommand(lineNumber = lineNumber, text = command))
+        ibmMqLog.debug(
+            "mqsc executed: line=$lineNumber success=${result.success} duration=${result.duration}ms",
+        )
         runCatching {
             historyRepository.add(
                 MqscHistoryItem(
@@ -109,6 +122,8 @@ class MqscExecutor(
                 errorMessage = MqrcTranslator.translate(e.reasonCode),
             )
         } catch (e: Exception) {
+            // 非 PCF 异常（网络断开、空指针等）：同样转成失败结果，但要留 ERROR 痕迹。
+            ibmMqLog.error("mqsc failed: line=${cmd.lineNumber} command='${cmd.text.trim().take(MAX_LOG_COMMAND_LENGTH)}' error=${e.message ?: e::class.simpleName}")
             MqscResult(
                 lineNumber = cmd.lineNumber,
                 command = cmd.text,

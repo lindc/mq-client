@@ -59,6 +59,7 @@ import com.mqclient.ibmmq.ui.properties.ObjectPropertiesDialogHost
 import com.mqclient.ibmmq.ui.properties.rememberObjectPropertiesDialogController
 import com.mqclient.ibmmq.ui.properties.toMqObjectType
 import com.mqclient.ibmmq.ibmMQConfigFromOptions
+import com.mqclient.core.log.Log
 import com.mqclient.uicommon.i18n.stringResource
 import kotlinx.coroutines.launch
 
@@ -102,14 +103,25 @@ fun TopologyPanel(
     /** 从慢扫缓存重建；**空图不落地**——保持加载态或保留旧图（刷新保留旧数据的语义）。 */
     fun rebuild() {
         val next = buildKuiverFromCache(connectionId, warningThreshold)
-        if (next.kuiver.nodes.isNotEmpty()) data = next
+        if (next.kuiver.nodes.isNotEmpty()) {
+            data = next
+        } else {
+            Log.debug(TOPOLOGY_LOG_TAG, "topology rebuild skipped (empty graph): connection=$connectionId")
+        }
     }
 
     /** 强制刷新：显式触发一次对象慢扫（扫完经 OBJECTS_SCANNED 驱动重建）。 */
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     fun rescan() {
+        Log.debug(TOPOLOGY_LOG_TAG, "topology rescan requested: connection=$connectionId")
         scope.launch {
             runCatching { IbmMQModule.serviceOrNull()?.scanObjects(connectionId) }
+                .onFailure {
+                    Log.warn(
+                        TOPOLOGY_LOG_TAG,
+                        "topology rescan failed: connection=$connectionId error=${it.message ?: it::class.simpleName}",
+                    )
+                }
         }
     }
 
@@ -128,6 +140,13 @@ fun TopologyPanel(
         bus?.on(IbmMQEvents.CONNECTED, scope = this) { event ->
             if (event.payload["connectionId"] as? String == connectionId && data == null) {
                 runCatching { IbmMQModule.serviceOrNull()?.scanObjects(connectionId) }
+                    .onFailure {
+                        Log.warn(
+                            TOPOLOGY_LOG_TAG,
+                            "topology initial scan (after connect) failed: connection=$connectionId " +
+                                "error=${it.message ?: it::class.simpleName}",
+                        )
+                    }
             }
         }
 
@@ -136,8 +155,16 @@ fun TopologyPanel(
         if (data == null) {
             if (IbmMQModule.connectionOrNull(connectionId)?.status == ConnectionStatus.Connected) {
                 runCatching { IbmMQModule.serviceOrNull()?.scanObjects(connectionId) }
+                    .onFailure {
+                        Log.warn(
+                            TOPOLOGY_LOG_TAG,
+                            "topology initial scan failed: connection=$connectionId " +
+                                "error=${it.message ?: it::class.simpleName}",
+                        )
+                    }
             } else {
                 // 未连接：隐式连接（fire-and-forget），连上后由上方 CONNECTED 分支接管扫描。
+                Log.debug(TOPOLOGY_LOG_TAG, "topology implicit connect requested: connection=$connectionId")
                 IbmMQModule.connectAsync(connectionId)
             }
         }

@@ -3,8 +3,13 @@ package com.mqclient.core.database
 import app.cash.sqldelight.db.SqlDriver
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import com.mqclient.core.ConfigManager
+import com.mqclient.core.event.systemTimeMillis
+import com.mqclient.core.log.Log
 import java.io.File
 import java.io.IOException
+
+/** 数据库层的日志 tag（与 commonMain 的 DatabaseManager 同值）。 */
+private const val LOG_TAG = "core.db"
 
 /**
  * JVM（桌面）驱动工厂：JDBC SQLite（org.xerial sqlite-jdbc）。
@@ -17,15 +22,23 @@ import java.io.IOException
 actual class DriverFactory {
 
     actual fun createDriver(): SqlDriver {
+        val start = systemTimeMillis()
         // 1. 确保目录存在（建不出来就明说 —— 之前忽略返回值，后面会以一个更难懂的错误失败）
         val dbDir = ConfigManager.configDir().toNioPath().toFile()
         if (!dbDir.exists() && !dbDir.mkdirs()) {
+            Log.error(LOG_TAG, "db dir create failed: dir=${dbDir.absolutePath}")
             throw IOException("无法创建数据库目录: ${dbDir.absolutePath}")
         }
         val dbPath = File(dbDir, DB_FILE_NAME).absolutePath
+        Log.debug(LOG_TAG, "db driver creating: file=$dbPath")
 
         // 2. 创建驱动
-        val driver = JdbcSqliteDriver("jdbc:sqlite:$dbPath")
+        val driver = try {
+            JdbcSqliteDriver("jdbc:sqlite:$dbPath")
+        } catch (e: Throwable) {
+            Log.error(LOG_TAG, "db driver create failed: file=$dbPath error=${e.message ?: e::class.simpleName}")
+            throw e
+        }
 
         // 3. 执行优化配置。WAL 写进库文件本身、是持久的；其余都是连接级 PRAGMA，
         //    每次建连接都要重放一遍（重复执行幂等）。读一下 .value，确保语句真的跑了。
@@ -41,11 +54,19 @@ actual class DriverFactory {
             driver.execute(null, "PRAGMA busy_timeout=5000", 0).value
             driver.execute(null, "PRAGMA foreign_keys=ON", 0).value
         } catch (cause: Throwable) {
+            Log.error(
+                LOG_TAG,
+                "db pragma failed (driver closed): file=$dbPath error=${cause.message ?: cause::class.simpleName}",
+            )
             // 关库失败不能盖掉真正的病因，所以兜住它（只留日志级的沉默）。
             runCatching { driver.close() }
             throw cause
         }
 
+        Log.debug(
+            LOG_TAG,
+            "db driver created: file=$dbPath duration=${systemTimeMillis() - start}ms",
+        )
         return driver
     }
 

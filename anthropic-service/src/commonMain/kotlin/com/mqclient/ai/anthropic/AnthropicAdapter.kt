@@ -13,6 +13,8 @@ import com.mqclient.ai.adapter.sseData
 import com.mqclient.ai.adapter.testQuietly
 import com.mqclient.ai.adapter.throwIfNotSuccess
 import com.mqclient.core.AiConnection
+import kotlin.time.TimeSource
+import com.mqclient.core.log.Log
 import io.ktor.client.HttpClient
 import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.get
@@ -23,12 +25,19 @@ import io.ktor.client.statement.bodyAsChannel
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 private const val PROVIDER_LABEL = "Anthropic"
+
+/**
+ * 日志 tag：与 openai-service 的 `AI_ADAPTER_LOG_TAG` 同值 —— 适配器层日志共用一个
+ * tag（该常量在 openai-service 是 internal，跨模块取不到，这里只能各写一份）。
+ */
+private const val LOG_TAG = "ai-adapter"
 
 /** Anthropic API 的版本头（当前唯一稳定版本串）。 */
 private const val API_VERSION = "2023-06-01"
@@ -54,33 +63,57 @@ class AnthropicAdapter(private val client: HttpClient) : AiAdapter {
 
     /** 非流式对话。 */
     override suspend fun chat(connection: AiConnection, messages: List<AiChatMessage>): AiResponse {
-        val response = client.post(connection.endpoint("/v1/messages")) {
-            connection.applyAuth(this)
-            contentType(ContentType.Application.Json)
-            setBody(
-                aiJson.encodeToString(
-                    ChatRequest.serializer(),
-                    ChatRequest(
-                        model = connection.model,
-                        // max_tokens 刻意无默认值：aiJson 的 encodeDefaults=false 会把
-                        // 等于默认值的字段整个省略，而 Anthropic 缺了它直接 400。
-                        maxTokens = DEFAULT_MAX_TOKENS,
-                        system = messages.systemText(),
-                        messages = messages.toDto(),
-                    ),
-                ),
-            )
-        }
-        response.throwIfNotSuccess(PROVIDER_LABEL)
-
-        val dto = aiJson.decodeFromString(ChatResponse.serializer(), response.bodyAsText())
-        return AiResponse(
-            // content 是块数组，只取 text 块拼接（tool_use / thinking 块第一版不转换）。
-            content = dto.content.filter { it.type == "text" }.mapNotNull { it.text }.joinToString(""),
-            model = dto.model ?: connection.model,
-            tokensUsed = dto.usage?.sum(),
-            finishReason = dto.stopReason,
+        // 日志只记元数据（模型、消息条数、token 用量、耗时），绝不记消息内容与 API Key。
+        val start = TimeSource.Monotonic.markNow()
+        Log.debug(
+            LOG_TAG,
+            "chat start: connection='${connection.name}' model=${connection.model} " +
+                "messages=${messages.size} stream=false",
         )
+        try {
+            val response = client.post(connection.endpoint("/v1/messages")) {
+                connection.applyAuth(this)
+                contentType(ContentType.Application.Json)
+                setBody(
+                    aiJson.encodeToString(
+                        ChatRequest.serializer(),
+                        ChatRequest(
+                            model = connection.model,
+                            // max_tokens 刻意无默认值：aiJson 的 encodeDefaults=false 会把
+                            // 等于默认值的字段整个省略，而 Anthropic 缺了它直接 400。
+                            maxTokens = DEFAULT_MAX_TOKENS,
+                            system = messages.systemText(),
+                            messages = messages.toDto(),
+                        ),
+                    ),
+                )
+            }
+            response.throwIfNotSuccess(PROVIDER_LABEL)
+
+            val dto = aiJson.decodeFromString(ChatResponse.serializer(), response.bodyAsText())
+            val result = AiResponse(
+                // content 是块数组，只取 text 块拼接（tool_use / thinking 块第一版不转换）。
+                content = dto.content.filter { it.type == "text" }.mapNotNull { it.text }.joinToString(""),
+                model = dto.model ?: connection.model,
+                tokensUsed = dto.usage?.sum(),
+                finishReason = dto.stopReason,
+            )
+            Log.debug(
+                LOG_TAG,
+                "chat completed: model=${result.model} tokens=${result.tokensUsed ?: "-"} " +
+                    "finish=${result.finishReason ?: "-"} chars=${result.content.length} " +
+                    "duration=${start.elapsedNow().inWholeMilliseconds}ms",
+            )
+            return result
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Log.error(
+                LOG_TAG,
+                "chat failed: model=${connection.model} error=${e.message ?: e::class.simpleName}",
+            )
+            throw e
+        }
     }
 
     /**
@@ -89,56 +122,84 @@ class AnthropicAdapter(private val client: HttpClient) : AiAdapter {
      * 之后通道关闭。中途的 `error` 事件转 [AiException] 抛出。
      */
     override fun chatStream(connection: AiConnection, messages: List<AiChatMessage>): Flow<AiStreamChunk> = flow {
-        val response = client.post(connection.endpoint("/v1/messages")) {
-            connection.applyAuth(this)
-            contentType(ContentType.Application.Json)
-            setBody(
-                aiJson.encodeToString(
-                    ChatRequest.serializer(),
-                    ChatRequest(
-                        model = connection.model,
-                        maxTokens = DEFAULT_MAX_TOKENS,
-                        system = messages.systemText(),
-                        messages = messages.toDto(),
-                        stream = true,
+        val start = TimeSource.Monotonic.markNow()
+        Log.debug(
+            LOG_TAG,
+            "chat stream start: connection='${connection.name}' model=${connection.model} " +
+                "messages=${messages.size} stream=true",
+        )
+        try {
+            val response = client.post(connection.endpoint("/v1/messages")) {
+                connection.applyAuth(this)
+                contentType(ContentType.Application.Json)
+                setBody(
+                    aiJson.encodeToString(
+                        ChatRequest.serializer(),
+                        ChatRequest(
+                            model = connection.model,
+                            maxTokens = DEFAULT_MAX_TOKENS,
+                            system = messages.systemText(),
+                            messages = messages.toDto(),
+                            stream = true,
+                        ),
                     ),
-                ),
-            )
-        }
-        response.throwIfNotSuccess(PROVIDER_LABEL)
+                )
+            }
+            response.throwIfNotSuccess(PROVIDER_LABEL)
 
-        var inputTokens: Int? = null
-        response.bodyAsChannel().sseData().collect { payload ->
-            // 解析不了的帧直接跳过（心跳 / 注释帧已由 sseData 挡掉，这里是兜底）。
-            val event = runCatching { aiJson.decodeFromString(StreamEvent.serializer(), payload) }.getOrNull()
-                ?: return@collect
-            when (event.type) {
-                "message_start" -> inputTokens = event.usage?.inputTokens ?: inputTokens
-                "content_block_delta" -> {
-                    val text = event.delta?.text
-                    if (!text.isNullOrEmpty()) emit(AiStreamChunk(delta = text))
-                }
-                "message_delta" -> {
-                    val output = event.usage?.outputTokens
-                    val stop = event.delta?.stopReason
-                    if (stop != null || output != null) {
-                        emit(
-                            AiStreamChunk(
-                                finishReason = stop,
-                                promptTokens = inputTokens,
-                                completionTokens = output,
-                                totalTokens = listOfNotNull(inputTokens, output).takeIf { it.isNotEmpty() }?.sum(),
-                            ),
+            var inputTokens: Int? = null
+            var deltaChars = 0
+            response.bodyAsChannel().sseData().collect { payload ->
+                // 解析不了的帧直接跳过（心跳 / 注释帧已由 sseData 挡掉，这里是兜底）。
+                val event = runCatching { aiJson.decodeFromString(StreamEvent.serializer(), payload) }.getOrNull()
+                    ?: return@collect
+                when (event.type) {
+                    "message_start" -> inputTokens = event.usage?.inputTokens ?: inputTokens
+                    "content_block_delta" -> {
+                        val text = event.delta?.text
+                        if (!text.isNullOrEmpty()) {
+                            deltaChars += text.length
+                            emit(AiStreamChunk(delta = text))
+                        }
+                    }
+                    "message_delta" -> {
+                        val output = event.usage?.outputTokens
+                        val stop = event.delta?.stopReason
+                        if (stop != null || output != null) {
+                            emit(
+                                AiStreamChunk(
+                                    finishReason = stop,
+                                    promptTokens = inputTokens,
+                                    completionTokens = output,
+                                    totalTokens = listOfNotNull(inputTokens, output).takeIf { it.isNotEmpty() }?.sum(),
+                                ),
+                            )
+                        }
+                    }
+                    "error" -> {
+                        // 流内错误帧：留 WARN 痕迹后再抛，外层统一按失败收尾。
+                        val detail = event.error?.message
+                        Log.warn(LOG_TAG, "chat stream error frame: model=${connection.model} detail=$detail")
+                        throw AiException(
+                            message = "$PROVIDER_LABEL 流式响应失败" + if (detail != null) "：$detail" else "",
                         )
                     }
                 }
-                "error" -> {
-                    val detail = event.error?.message
-                    throw AiException(
-                        message = "$PROVIDER_LABEL 流式响应失败" + if (detail != null) "：$detail" else "",
-                    )
-                }
             }
+            Log.debug(
+                LOG_TAG,
+                "chat stream completed: model=${connection.model} chars=$deltaChars " +
+                    "duration=${start.elapsedNow().inWholeMilliseconds}ms",
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Log.error(
+                LOG_TAG,
+                "chat stream failed: model=${connection.model} " +
+                    "error=${e.message ?: e::class.simpleName} duration=${start.elapsedNow().inWholeMilliseconds}ms",
+            )
+            throw e
         }
     }
 

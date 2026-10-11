@@ -6,6 +6,7 @@ import com.ibm.mq.MQQueue
 import com.ibm.mq.MQQueueManager
 import com.ibm.mq.constants.MQConstants
 import com.mqclient.ibmmq.command.MqrcTranslator
+import com.mqclient.ibmmq.ibmMqLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -51,6 +52,13 @@ suspend fun sendMessageToQueue(
     format: String? = null,
     replyToQMgrName: String? = null,
 ): SendResult = withContext(Dispatchers.IO) {
+    // 追踪日志只记元数据（队列、大小、属性），绝不记消息体 content。
+    ibmMqLog.debug(
+        "send start: queue=$queueName size=${content.size}B persistence=$persistence priority=$priority " +
+            "expiry=$expiryTenths hasCorrelId=${!correlationId.isNullOrBlank() || correlationIdBytes != null} " +
+            "replyToQueue=${replyToQueue?.trim()?.takeIf { it.isNotEmpty() } ?: "-"}",
+    )
+    val start = System.currentTimeMillis()
     var queue: MQQueue? = null
     try {
         queue = manager.accessQueue(
@@ -75,13 +83,23 @@ suspend fun sendMessageToQueue(
         }
         queue.put(message)
         // 客户端未显式设置 MessageId 时自行生成唯一 id，put 后回填在 message.messageId。
-        SendResult.success(messageId = message.messageId.toMqIdHex(), sentAt = System.currentTimeMillis())
+        val result = SendResult.success(messageId = message.messageId.toMqIdHex(), sentAt = System.currentTimeMillis())
+        ibmMqLog.info(
+            "send completed: queue=$queueName messageId=${result.messageId} " +
+                "size=${content.size}B duration=${System.currentTimeMillis() - start}ms",
+        )
+        result
     } catch (e: MQException) {
+        ibmMqLog.error(
+            "send failed: queue=$queueName reason=MQRC ${e.reasonCode}: ${MqrcTranslator.translate(e.reasonCode)}",
+        )
         SendResult.failure(e.reasonCode, "MQRC ${e.reasonCode}: ${MqrcTranslator.translate(e.reasonCode)}")
     } catch (e: Exception) {
+        ibmMqLog.error("send failed: queue=$queueName error=${e.message ?: e::class.simpleName}")
         SendResult.failure(null, e.message ?: e::class.simpleName ?: "Unknown")
     } finally {
         runCatching { queue?.close() }
+            .onFailure { ibmMqLog.warn("queue close failed after send: queue=$queueName error=${it.message}") }
     }
 }
 
