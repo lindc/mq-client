@@ -1,32 +1,23 @@
 package com.mqclient.kafka.ui
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.Checkbox
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import com.mqclient.core.AdapterUI
 import com.mqclient.core.ModuleI18nTable
-import mq_client.kafka_ui.generated.resources.Res
+import com.mqclient.kafka.KafkaModule
 import com.mqclient.uicommon.i18n.stringResource
+import mq_client.kafka_ui.generated.resources.Res
 
+/**
+ * Kafka 模块的 UI 入口（AdapterUI SPI）：与 ibm-mq 的 IbmMqUI 同构 —— 主页面只放
+ * 占位文案，真实内容经 [contentFor] 按导航项（Tab 的 objectType）贡献；连接 / 断开
+ * 等操作挂在侧边栏连接条目的右键菜单（见 KafkaModule 的 connectAsync / disconnectAsync）。
+ */
 class KafkaUI : AdapterUI {
     override val serviceId = "kafka"
     override val title = "Kafka"
@@ -38,52 +29,28 @@ class KafkaUI : AdapterUI {
         },
     )
 
-    override val content: @Composable () -> Unit = { KafkaDemo() }
-}
-
-@Composable
-private fun KafkaDemo() {
-    var text by remember { mutableStateOf("") }
-    var enabled by remember { mutableStateOf(true) }
-    var checked by remember { mutableStateOf(false) }
-
-    Column(
-        modifier =
-            Modifier
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Text("Kafka demo", style = MaterialTheme.typography.headlineSmall)
-        Text(
-            stringResource("kafka_demo_seed_color_note"),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(stringResource("kafka_settings_title"), style = MaterialTheme.typography.titleMedium)
-                OutlinedTextField(
-                    value = text,
-                    onValueChange = { text = it },
-                    label = { Text("Bootstrap servers") },
-                    placeholder = { Text("localhost:9092") },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Switch(checked = enabled, onCheckedChange = { enabled = it })
-                    Text(stringResource("kafka_auto_commit"))
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(checked = checked, onCheckedChange = { checked = it })
-                    Text(stringResource("kafka_sasl_ssl"))
-                }
-            }
+    override val content: @Composable () -> Unit = {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(
+                text = stringResource("kafka_ui_page_placeholder"),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
+    }
 
-        Button(onClick = {}, modifier = Modifier.fillMaxWidth()) {
-            Text(stringResource("kafka_connect"))
+    /**
+     * 模块贡献真实内容的导航项：`topics`（Topic 列表）。模块未初始化（拿不到连接
+     * 上下文）时回落 null —— 宿主显示「coming soon」占位页，极端时序下不崩、不破 Tab。
+     */
+    override fun contentFor(objectType: String, connectionId: String): (@Composable () -> Unit)? {
+        if (objectType != "topics") return null
+        if (KafkaModule.connectionOrNull(connectionId) == null) return null
+        return {
+            TopicListPanel(
+                connectionId = connectionId,
+                modifier = Modifier.fillMaxSize(),
+            )
         }
     }
 }

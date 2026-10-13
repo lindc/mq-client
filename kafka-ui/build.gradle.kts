@@ -11,13 +11,29 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             implementation(projects.appCore)
+            // KafkaConfig / toOptions / fromOptions：表单草稿与 options 的转换在
+            // kafka-service，表单只做 UI 与落盘调用。KafkaModule（连接上下文入口）同源。
+            implementation(projects.kafkaService)
+            // 对象列表通用组件（ObjectListPanel / ObjectCardData / LoadStateContent /
+            // CompactSearchField / ToolbarButton）：Topic 列表页复用。
+            implementation(projects.mqUi)
             implementation(libs.compose.runtime)
             implementation(libs.compose.foundation)
             implementation(compose.material3)
+            // Material Icons Extended：密码可见性切换等小图标，跨平台（Linux 无 Emoji 字体）一致。
+            implementation(compose.materialIconsExtended)
             // composeResources（品牌图标 drawable）需要资源 API 才能生成访问器。
             implementation(compose.components.resources)
             // stringResource（i18n 查表）来自 ui-common 的 LanguageResources。
             implementation(projects.uiCommon)
+            // 「询问 AI」链路上下文的 JSON 序列化（KafkaAiChainBuilder，buildJsonObject）。
+            implementation(libs.kotlinx.serialization.json)
+        }
+        jvmMain.dependencies {
+            // Kafka 客户端类型（AdminClient / ListTopicsOptions / TopicCollection）：
+            // TopicListPanel 直连实时查询。kafka-service 里是 implementation 不传递，
+            // 照模块间各声明坐标的惯例在本模块再声明一份（版本必须与 service 一致）。
+            implementation("org.apache.kafka:kafka-clients:3.9.0")
         }
     }
 }
