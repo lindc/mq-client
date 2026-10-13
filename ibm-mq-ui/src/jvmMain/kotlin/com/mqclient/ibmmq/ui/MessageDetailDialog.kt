@@ -66,8 +66,12 @@ import com.mqclient.message.interpreter.InterpreterResult
 import com.mqclient.message.interpreter.MessageCharsets
 import com.mqclient.message.interpreter.MessageInterpreter
 import com.mqclient.message.interpreter.ParamKind
+import com.mqclient.message.interpreter.hexPreview
+import com.mqclient.message.interpreter.isProbablyBinary
 import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
+import com.mqclient.uicommon.file.pickFile
+import com.mqclient.uicommon.file.saveFileBytes
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 import kotlinx.coroutines.CancellationException
@@ -562,48 +566,6 @@ private data class ContentPreview(
     val rawText: String,
     val hex: String,
 )
-
-/**
- * 二进制内容判定：前 8KB 内含 NUL 字节，或按 CCSID 解码后替换符（�）占比 > 5%
- * —— 任一命中即判为二进制，正文显示 hex 预览而非解码乱码。
- */
-private fun isProbablyBinary(content: ByteArray, codedCharSetId: Int): Boolean {
-    val scanEnd = minOf(content.size, 8192)
-    for (i in 0 until scanEnd) {
-        if (content[i] == 0.toByte()) return true
-    }
-    if (content.isEmpty()) return false
-    val text = MessageCharsets.decode(content, codedCharSetId)
-    if (text.isEmpty()) return false
-    val replacements = text.count { it == '�' }
-    return replacements.toFloat() / text.length > 0.05f
-}
-
-/**
- * 十六进制预览：`偏移  hex×16  |ASCII|` 行格式（不可见字节显示 ·），只取前
- * [maxBytes] 字节，超出以 … 收尾。二进制内容的兜底展示，用户至少能看到
- * 字节层面的事实（魔数、结构）。
- */
-private fun hexPreview(content: ByteArray, maxBytes: Int = 1024): String {
-    val end = minOf(content.size, maxBytes)
-    val sb = StringBuilder()
-    for (offset in 0 until end step 16) {
-        val rowEnd = minOf(offset + 16, end)
-        sb.append("%08X  ".format(offset))
-        for (i in offset until rowEnd) {
-            sb.append("%02X ".format(content[i]))
-        }
-        repeat(16 - (rowEnd - offset)) { sb.append("   ") }
-        sb.append(" |")
-        for (i in offset until rowEnd) {
-            val b = content[i].toInt() and 0xFF
-            sb.append(if (b in 0x20..0x7E) b.toChar() else '·')
-        }
-        sb.append('|').append('\n')
-    }
-    if (content.size > end) sb.append("…")
-    return sb.toString()
-}
 
 /** Tab 2：消息 Header（两列 Key / Value；每行 Value 右侧复制按钮）。 */
 @Composable

@@ -1,4 +1,4 @@
-package com.mqclient.ibmmq.ui
+package com.mqclient.uicommon.file
 
 import com.mqclient.core.log.Log
 import io.github.vinceglb.filekit.FileKit
@@ -12,7 +12,7 @@ import io.github.vinceglb.filekit.path
 import java.awt.GraphicsEnvironment
 import java.awt.KeyboardFocusManager
 
-private const val LOG_TAG = "ibm-mq-ui"
+private const val LOG_TAG = "ui-common"
 
 /** FileKit 对话框的公共组装：取焦点窗口做 parent，headless 直接不弹。 */
 private suspend fun dialogSettingsOrNull(title: String): FileKitDialogSettings? {

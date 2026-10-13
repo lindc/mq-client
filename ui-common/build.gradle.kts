@@ -29,6 +29,11 @@ kotlin {
             // @Serializable classes, so no serialization compiler plugin).
             implementation(libs.kotlinx.serialization.json)
         }
+        jvmMain.dependencies {
+            // FileKit 文件选择器（uicommon.file.FilePickerUtil 的 actual：证书路径 /
+            // 消息体导入导出等共用）。expect 侧只用 stdlib 类型，依赖只需给 actual。
+            implementation(libs.filekit.dialogs)
+        }
         // jvmTest: kotlin.test + JUnit4 runner for the i18n behaviour tests.
         jvmTest.dependencies {
             implementation(kotlin("test"))

@@ -12,6 +12,7 @@ import com.mqclient.ibmmq.IbmMQConfig
 import com.mqclient.ibmmq.IbmMQModule
 import com.mqclient.ibmmq.ibmMQConfigFromOptions
 import com.mqclient.ibmmq.toOptions
+import com.mqclient.uicommon.file.pickFile
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.core.newConnectionId
 import kotlinx.coroutines.CancellationException
