@@ -24,21 +24,21 @@ class IbmMqServiceAdapter : MQServiceAdapter() {
      */
     override fun navigationItems(connection: ConnectionInfo): List<NavigationItem> = listOf(
         // ===== 工具类 =====
-        NavigationItem(id = "topology", titleKey = "nav_topology", iconId = "topology", isTool = true),
-        NavigationItem(id = "clusterRelations", titleKey = "nav_cluster_relations", iconId = "clusterRelations", isTool = true),
-        NavigationItem(id = "command", titleKey = "nav_command", iconId = "command", isTool = true),
+        NavigationItem(id = "topology", titleKey = "ibm_mq_nav_topology", iconId = "topology", isTool = true),
+        NavigationItem(id = "clusterRelations", titleKey = "ibm_mq_nav_cluster_relations", iconId = "clusterRelations", isTool = true),
+        NavigationItem(id = "command", titleKey = "ibm_mq_nav_command", iconId = "command", isTool = true),
         NavigationItem.separator("tools.objects"),
         // ===== 对象类型 =====
-        NavigationItem(id = "queues", titleKey = "nav_queues", iconId = "queues"),
-        NavigationItem(id = "topics", titleKey = "nav_topics", iconId = "topics"),
-        NavigationItem(id = "subscriptions", titleKey = "nav_subscriptions", iconId = "subscriptions"),
-        NavigationItem(id = "channels", titleKey = "nav_channels", iconId = "channels"),
-        NavigationItem(id = "listeners", titleKey = "nav_listeners", iconId = "listeners"),
-        NavigationItem(id = "services", titleKey = "nav_services", iconId = "services"),
-        NavigationItem(id = "processDefinitions", titleKey = "nav_process_definitions", iconId = "processDefinitions"),
-        NavigationItem(id = "namelists", titleKey = "nav_namelists", iconId = "namelists"),
-        NavigationItem(id = "authInfo", titleKey = "nav_auth_info", iconId = "authInfo"),
-        NavigationItem(id = "commInfo", titleKey = "nav_comm_info", iconId = "commInfo"),
+        NavigationItem(id = "queues", titleKey = "ibm_mq_nav_queues", iconId = "queues"),
+        NavigationItem(id = "topics", titleKey = "ibm_mq_nav_topics", iconId = "topics"),
+        NavigationItem(id = "subscriptions", titleKey = "ibm_mq_nav_subscriptions", iconId = "subscriptions"),
+        NavigationItem(id = "channels", titleKey = "ibm_mq_nav_channels", iconId = "channels"),
+        NavigationItem(id = "listeners", titleKey = "ibm_mq_nav_listeners", iconId = "listeners"),
+        NavigationItem(id = "services", titleKey = "ibm_mq_nav_services", iconId = "services"),
+        NavigationItem(id = "processDefinitions", titleKey = "ibm_mq_nav_process_definitions", iconId = "processDefinitions"),
+        NavigationItem(id = "namelists", titleKey = "ibm_mq_nav_namelists", iconId = "namelists"),
+        NavigationItem(id = "authInfo", titleKey = "ibm_mq_nav_auth_info", iconId = "authInfo"),
+        NavigationItem(id = "commInfo", titleKey = "ibm_mq_nav_comm_info", iconId = "commInfo"),
     )
 
     /**

@@ -39,7 +39,7 @@ fun QueueMessagesDialog(
     var confirmCloseWhileSending by remember { mutableStateOf(false) }
 
     ObjectDetailDialog(
-        title = stringResource("queue_messages_title").withArg(queueName),
+        title = stringResource("ibm_mq_queue_messages_title").withArg(queueName),
         onDismiss = onDismiss,
         onCloseRequest = {
             if (sendState.busy) confirmCloseWhileSending = true else onDismiss()
@@ -51,12 +51,12 @@ fun QueueMessagesDialog(
                 Tab(
                     selected = selectedTab == 0,
                     onClick = { selectedTab = 0 },
-                    text = { Text(stringResource("queue_messages_tab_browse")) },
+                    text = { Text(stringResource("ibm_mq_queue_messages_tab_browse")) },
                 )
                 Tab(
                     selected = selectedTab == 1,
                     onClick = { selectedTab = 1 },
-                    text = { Text(stringResource("queue_messages_tab_send")) },
+                    text = { Text(stringResource("ibm_mq_queue_messages_tab_send")) },
                 )
             }
             when (selectedTab) {

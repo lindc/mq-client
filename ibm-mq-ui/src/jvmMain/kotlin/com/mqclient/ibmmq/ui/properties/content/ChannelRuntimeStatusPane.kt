@@ -74,7 +74,7 @@ internal fun ChannelRuntimeStatusPane(
         state = RuntimeState.Loading
         val service = IbmMQModule.serviceOrNull()
         state = when {
-            service == null -> RuntimeState.Failed(stringResource("channel_status_load_failed_service"))
+            service == null -> RuntimeState.Failed(stringResource("ibm_mq_channel_status_load_failed_service"))
             else -> try {
                 val detail = service.getChannelStatus(connectionId, channelName)
                 if (detail == null) RuntimeState.NotRunning else RuntimeState.Ready(detail)
@@ -96,7 +96,7 @@ internal fun ChannelRuntimeStatusPane(
 
     fun onResetConfirmed(newSeqNum: Long) {
         val executor = IbmMQModule.mqscExecutorOrNull() ?: run {
-            resetError = stringResource("channel_reset_no_executor")
+            resetError = stringResource("ibm_mq_channel_reset_no_executor")
             return
         }
         scope.launch {
@@ -111,7 +111,7 @@ internal fun ChannelRuntimeStatusPane(
                 if (result.success) {
                     showResetDialog = false
                     snackbarHostState.showSnackbar(
-                        stringResource("channel_reset_success").withArg(newSeqNum.toString()),
+                        stringResource("ibm_mq_channel_reset_success").withArg(newSeqNum.toString()),
                     )
                     refreshTick++ // 重置成功后自动刷新运行状态
                 } else {
@@ -136,7 +136,7 @@ internal fun ChannelRuntimeStatusPane(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = stringResource("channel_status_header_desc"),
+                    text = stringResource("ibm_mq_channel_status_header_desc"),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f),
@@ -151,7 +151,7 @@ internal fun ChannelRuntimeStatusPane(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text(stringResource("channel_status_refresh"))
+                        Text(stringResource("ibm_mq_channel_status_refresh"))
                     }
                 }
             }
@@ -166,7 +166,7 @@ internal fun ChannelRuntimeStatusPane(
                         CircularProgressIndicator()
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            text = stringResource("channel_status_loading"),
+                            text = stringResource("ibm_mq_channel_status_loading"),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -179,20 +179,20 @@ internal fun ChannelRuntimeStatusPane(
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            text = stringResource("channel_status_load_failed").withArg(s.message),
+                            text = stringResource("ibm_mq_channel_status_load_failed").withArg(s.message),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.error,
                             textAlign = TextAlign.Center,
                         )
                         Spacer(Modifier.height(8.dp))
                         PressableButton(onClick = { refreshTick++ }) {
-                            Text(stringResource("channel_status_retry"))
+                            Text(stringResource("ibm_mq_channel_status_retry"))
                         }
                     }
                 }
 
                 RuntimeState.NotRunning -> Text(
-                    text = stringResource("channel_status_not_running"),
+                    text = stringResource("ibm_mq_channel_status_not_running"),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -243,7 +243,7 @@ private fun RuntimeRows(
     onResetClick: () -> Unit,
 ) {
     val a = ChannelFieldApplicability.of(channelType)
-    val na = stringResource("channel_status_na")
+    val na = stringResource("ibm_mq_channel_status_na")
 
     fun metric(applies: Boolean, raw: Long?): String = when {
         !applies -> na
@@ -253,14 +253,14 @@ private fun RuntimeRows(
 
     // 通道状态（有实例行必有，理论上非空）。
     StatusRow(
-        label = stringResource("channel_status_prop_status"),
-        value = detail.status ?: stringResource("channel_status_unknown_value"),
+        label = stringResource("ibm_mq_channel_status_prop_status"),
+        value = detail.status ?: stringResource("ibm_mq_channel_status_unknown_value"),
     )
 
     // 当前序列号：发送侧通道显示重置按钮（接收侧由对端管理序列号，不给按钮）。
     if (a.seq || a.connectionLike) {
         StatusRow(
-            label = stringResource("channel_status_prop_seq"),
+            label = stringResource("ibm_mq_channel_status_prop_seq"),
             value = metric(a.seq, detail.currentSeqNo),
             trailing = if (a.reset && detail.currentSeqNo != null) {
                 {
@@ -269,7 +269,7 @@ private fun RuntimeRows(
                         standardMinWidth = false,
                         containerColor = MaterialTheme.colorScheme.surfaceVariant,
                         contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    ) { Text(stringResource("channel_status_prop_seq_reset")) }
+                    ) { Text(stringResource("ibm_mq_channel_status_prop_seq_reset")) }
                 }
             } else {
                 null
@@ -281,12 +281,12 @@ private fun RuntimeRows(
     if (a.inDoubt || a.connectionLike) {
         val inDoubt = detail.inDoubt
         StatusRow(
-            label = stringResource("channel_status_prop_indoubt"),
+            label = stringResource("ibm_mq_channel_status_prop_indoubt"),
             value = when {
                 !a.inDoubt -> na
                 inDoubt == null -> "-"
-                inDoubt -> stringResource("channel_status_indoubt_yes")
-                else -> stringResource("channel_status_indoubt_no")
+                inDoubt -> stringResource("ibm_mq_channel_status_indoubt_yes")
+                else -> stringResource("ibm_mq_channel_status_indoubt_no")
             },
             valueColor = if (a.inDoubt && inDoubt == true) MaterialTheme.colorScheme.error else null,
         )
@@ -295,15 +295,15 @@ private fun RuntimeRows(
     // 已处理消息数 / 字节（发送侧 BYTSSENT、接收侧 BYTSRCVD，双向通道两行都出）。
     if (a.msgs || a.bytesSent || a.bytesRcvd || a.connectionLike) {
         StatusRow(
-            label = stringResource("channel_status_prop_msgs"),
+            label = stringResource("ibm_mq_channel_status_prop_msgs"),
             value = metric(a.msgs, detail.messages),
         )
         StatusRow(
-            label = stringResource("channel_status_prop_bytes_sent"),
+            label = stringResource("ibm_mq_channel_status_prop_bytes_sent"),
             value = metric(a.bytesSent, detail.bytesSent),
         )
         StatusRow(
-            label = stringResource("channel_status_prop_bytes_rcvd"),
+            label = stringResource("ibm_mq_channel_status_prop_bytes_rcvd"),
             value = metric(a.bytesRcvd, detail.bytesReceived),
         )
 
@@ -313,7 +313,7 @@ private fun RuntimeRows(
             else -> formatLastMsgTime(detail.lastMsgDate, detail.lastMsgTime) ?: "-"
         }
         StatusRow(
-            label = stringResource("channel_status_prop_last_msg"),
+            label = stringResource("ibm_mq_channel_status_prop_last_msg"),
             value = lastMsg,
         )
     }

@@ -30,7 +30,7 @@ internal fun resolveGroupedObjectProperties(
                 nameKey = field.nameKey,
                 descKey = field.descKey,
                 labelEn = field.labelEn,
-                valueKey = "queue_value_none",
+                valueKey = "ibm_mq_queue_value_none",
                 valueFallbackKey = null,
                 rawValue = " ",
                 rawConstName = null,

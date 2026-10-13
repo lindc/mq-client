@@ -17,7 +17,7 @@ class KafkaServiceAdapter : MQServiceAdapter() {
      * `nav_topics` 解析文案、`topics` 解析图标）。Consumer Groups 等后续阶段追加。
      */
     override fun navigationItems(connection: ConnectionInfo): List<NavigationItem> = listOf(
-        NavigationItem(id = "topics", titleKey = "nav_topics", iconId = "topics"),
+        NavigationItem(id = "topics", titleKey = "kafka_ui_nav_topics", iconId = "topics"),
     )
 
     /**

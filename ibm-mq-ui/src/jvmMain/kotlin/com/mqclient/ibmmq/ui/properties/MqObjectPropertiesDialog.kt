@@ -46,7 +46,7 @@ fun MqObjectPropertiesDialog(
         onDismiss = onDismiss,
         footerActions = {
             if (askAiVisible) {
-                FooterActionButton(label = stringResource("mq_action_ask_ai")) {
+                FooterActionButton(label = stringResource("ibm_mq_mq_action_ask_ai")) {
                     AiChainBuilder.build(state.connectionId, state.objectType, state.objectName)
                         ?.let(aiStarter::onAsk)
                 }
@@ -56,16 +56,16 @@ fun MqObjectPropertiesDialog(
         },
     ) {
         when (state.objectType) {
-            MqObjectType.QUEUE -> MqObjectPropertiesContent(state, "queue_props_group_general") { resolveQueuePropertyGroups(it) }
-            MqObjectType.TOPIC -> MqObjectPropertiesContent(state, "topic_props_group_general") { resolveTopicPropertyGroups(it) }
-            MqObjectType.SUBSCRIPTION -> MqObjectPropertiesContent(state, "sub_props_group_general") { resolveSubscriptionPropertyGroups(it) }
+            MqObjectType.QUEUE -> MqObjectPropertiesContent(state, "ibm_mq_queue_props_group_general") { resolveQueuePropertyGroups(it) }
+            MqObjectType.TOPIC -> MqObjectPropertiesContent(state, "ibm_mq_topic_props_group_general") { resolveTopicPropertyGroups(it) }
+            MqObjectType.SUBSCRIPTION -> MqObjectPropertiesContent(state, "ibm_mq_sub_props_group_general") { resolveSubscriptionPropertyGroups(it) }
             MqObjectType.CHANNEL -> ChannelPropertiesContent(state)
-            MqObjectType.LISTENER -> MqObjectPropertiesContent(state, "listener_props_group_general") { resolveListenerPropertyGroups(it) }
-            MqObjectType.SERVICE -> MqObjectPropertiesContent(state, "service_props_group_general") { resolveServicePropertyGroups(it) }
-            MqObjectType.PROCESS -> MqObjectPropertiesContent(state, "process_props_group_general") { resolveProcessPropertyGroups(it) }
-            MqObjectType.NAMELIST -> MqObjectPropertiesContent(state, "namelist_props_group_general") { resolveNamelistPropertyGroups(it) }
-            MqObjectType.AUTH_INFO -> MqObjectPropertiesContent(state, "authinfo_props_group_general") { resolveAuthInfoPropertyGroups(it) }
-            MqObjectType.COMM_INFO -> MqObjectPropertiesContent(state, "comminfo_props_group_general") { resolveCommInfoPropertyGroups(it) }
+            MqObjectType.LISTENER -> MqObjectPropertiesContent(state, "ibm_mq_listener_props_group_general") { resolveListenerPropertyGroups(it) }
+            MqObjectType.SERVICE -> MqObjectPropertiesContent(state, "ibm_mq_service_props_group_general") { resolveServicePropertyGroups(it) }
+            MqObjectType.PROCESS -> MqObjectPropertiesContent(state, "ibm_mq_process_props_group_general") { resolveProcessPropertyGroups(it) }
+            MqObjectType.NAMELIST -> MqObjectPropertiesContent(state, "ibm_mq_namelist_props_group_general") { resolveNamelistPropertyGroups(it) }
+            MqObjectType.AUTH_INFO -> MqObjectPropertiesContent(state, "ibm_mq_authinfo_props_group_general") { resolveAuthInfoPropertyGroups(it) }
+            MqObjectType.COMM_INFO -> MqObjectPropertiesContent(state, "ibm_mq_comminfo_props_group_general") { resolveCommInfoPropertyGroups(it) }
             // QMgr：连接属性面板同一实现（实时查询），集群画布 / 拓扑双击复用。
             MqObjectType.QUEUE_MANAGER -> QmgrPropertiesPanel(state.connectionId)
         }

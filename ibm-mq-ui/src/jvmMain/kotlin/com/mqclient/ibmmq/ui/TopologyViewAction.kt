@@ -14,6 +14,6 @@ import com.mqclient.mqui.objectlist.CardAction
 fun topologyViewAction(connectionId: String, objectName: String): CardAction = CardAction(
     id = "object.view_topology",
     icon = Icons.Filled.AccountTree,
-    tooltip = "topology_view",
+    tooltip = "ibm_mq_topology_view",
     onClick = { TopologyFocusHolder.set(connectionId = connectionId, rootName = objectName) },
 )

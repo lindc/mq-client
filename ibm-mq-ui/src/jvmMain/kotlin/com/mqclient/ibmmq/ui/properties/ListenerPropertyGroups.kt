@@ -22,23 +22,23 @@ import com.mqclient.ibmmq.pcf.MqObjectSnapshot
  */
 internal val listenerPropertyGroups: List<ObjectPropertyGroup> = listOf(
     ObjectPropertyGroup(
-        titleKey = "listener_props_group_general",
+        titleKey = "ibm_mq_listener_props_group_general",
         fields = listOf(
             ObjectPropertyField(
-                nameKey = "listener_prop_name_listener_name",
-                descKey = "listener_prop_desc_listener_name",
+                nameKey = "ibm_mq_listener_prop_name_listener_name",
+                descKey = "ibm_mq_listener_prop_desc_listener_name",
                 labelEn = "Listener name",
                 keys = listOf("MQCACH_LISTENER_NAME"),
             ),
             ObjectPropertyField(
-                nameKey = "listener_prop_name_listener_desc",
-                descKey = "listener_prop_desc_listener_desc",
+                nameKey = "ibm_mq_listener_prop_name_listener_desc",
+                descKey = "ibm_mq_listener_prop_desc_listener_desc",
                 labelEn = "Description",
                 keys = listOf("MQCACH_LISTENER_DESC", "MQCACH_DESC"),
             ),
             ObjectPropertyField(
-                nameKey = "listener_prop_name_control",
-                descKey = "listener_prop_desc_control",
+                nameKey = "ibm_mq_listener_prop_name_control",
+                descKey = "ibm_mq_listener_prop_desc_control",
                 labelEn = "Control",
                 keys = listOf("MQIACH_LISTENER_CONTROL"),
                 // MQSVC_ 族内 CONTROL / STATUS / TYPE 三组常量同值碰撞（如 0 =
@@ -46,65 +46,65 @@ internal val listenerPropertyGroups: List<ObjectPropertyGroup> = listOf(
                 valuePrefix = "MQSVC_CONTROL",
             ),
             ObjectPropertyField(
-                nameKey = "listener_prop_name_transport_type",
-                descKey = "listener_prop_desc_transport_type",
+                nameKey = "ibm_mq_listener_prop_name_transport_type",
+                descKey = "ibm_mq_listener_prop_desc_transport_type",
                 labelEn = "Transmission protocol",
                 // 1501 = MQIACH_XMIT_PROTOCOL_TYPE，Java 客户端反查为别名 MQIACH_FIRST。
                 keys = listOf("MQIACH_XMIT_PROTOCOL_TYPE", "MQIACH_FIRST"),
                 valuePrefix = "MQXPT",
             ),
             ObjectPropertyField(
-                nameKey = "listener_prop_name_port",
-                descKey = "listener_prop_desc_port",
+                nameKey = "ibm_mq_listener_prop_name_port",
+                descKey = "ibm_mq_listener_prop_desc_port",
                 labelEn = "Port",
                 keys = listOf("MQIACH_PORT"),
             ),
             ObjectPropertyField(
-                nameKey = "listener_prop_name_ip_address",
-                descKey = "listener_prop_desc_ip_address",
+                nameKey = "ibm_mq_listener_prop_name_ip_address",
+                descKey = "ibm_mq_listener_prop_desc_ip_address",
                 labelEn = "IP address",
                 keys = listOf("MQCACH_IP_ADDRESS"),
             ),
             ObjectPropertyField(
-                nameKey = "listener_prop_name_backlog",
-                descKey = "listener_prop_desc_backlog",
+                nameKey = "ibm_mq_listener_prop_name_backlog",
+                descKey = "ibm_mq_listener_prop_desc_backlog",
                 labelEn = "Backlog",
                 keys = listOf("MQIACH_BACKLOG"),
             ),
             ObjectPropertyField(
-                nameKey = "listener_prop_name_listener_status",
-                descKey = "listener_prop_desc_listener_status",
+                nameKey = "ibm_mq_listener_prop_name_listener_status",
+                descKey = "ibm_mq_listener_prop_desc_listener_status",
                 labelEn = "Listener status",
                 keys = listOf("MQIACH_LISTENER_STATUS"),
                 valuePrefix = "MQSVC_STATUS",
             ),
             ObjectPropertyField(
-                nameKey = "listener_prop_name_start_date",
-                descKey = "listener_prop_desc_start_date",
+                nameKey = "ibm_mq_listener_prop_name_start_date",
+                descKey = "ibm_mq_listener_prop_desc_start_date",
                 labelEn = "Start date",
                 keys = listOf("MQCACH_LISTENER_START_DATE"),
             ),
             ObjectPropertyField(
-                nameKey = "listener_prop_name_start_time",
-                descKey = "listener_prop_desc_start_time",
+                nameKey = "ibm_mq_listener_prop_name_start_time",
+                descKey = "ibm_mq_listener_prop_desc_start_time",
                 labelEn = "Start time",
                 keys = listOf("MQCACH_LISTENER_START_TIME"),
             ),
             ObjectPropertyField(
-                nameKey = "listener_prop_name_process_id",
-                descKey = "listener_prop_desc_process_id",
+                nameKey = "ibm_mq_listener_prop_name_process_id",
+                descKey = "ibm_mq_listener_prop_desc_process_id",
                 labelEn = "Process ID",
                 keys = listOf("MQIACF_PROCESS_ID"),
             ),
             ObjectPropertyField(
-                nameKey = "listener_prop_name_alteration_date",
-                descKey = "listener_prop_desc_alteration_date",
+                nameKey = "ibm_mq_listener_prop_name_alteration_date",
+                descKey = "ibm_mq_listener_prop_desc_alteration_date",
                 labelEn = "Alteration date",
                 keys = listOf("MQCA_ALTERATION_DATE"),
             ),
             ObjectPropertyField(
-                nameKey = "listener_prop_name_alteration_time",
-                descKey = "listener_prop_desc_alteration_time",
+                nameKey = "ibm_mq_listener_prop_name_alteration_time",
+                descKey = "ibm_mq_listener_prop_desc_alteration_time",
                 labelEn = "Alteration time",
                 keys = listOf("MQCA_ALTERATION_TIME"),
             ),
@@ -121,5 +121,5 @@ internal fun resolveListenerPropertyGroups(
     resolveGroupedObjectProperties(
         snapshot = snapshot,
         groups = listenerPropertyGroups,
-        allGroupTitleKey = "listener_props_group_all",
+        allGroupTitleKey = "ibm_mq_listener_props_group_all",
     )

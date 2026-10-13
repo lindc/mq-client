@@ -36,7 +36,7 @@ internal fun ChannelPropertiesContent(
     if (snapshot == null) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(
-                text = stringResource("properties_placeholder_message"),
+                text = stringResource("ibm_mq_properties_placeholder_message"),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -50,13 +50,13 @@ internal fun ChannelPropertiesContent(
         // 合成组的 titleKey 与 customPanes 的键相同：左侧列表按位置渲染条目，
         // 右侧选中时命中 customPanes 渲染实时面板。全部属性不存在（罕见）时追加尾部。
         val runtimeGroup = ObjectPropertyGroup(RUNTIME_GROUP_KEY, emptyList()) to emptyList<ResolvedObjectProperty>()
-        val allIndex = static.indexOfFirst { it.first.titleKey == "channel_props_group_all" }
+        val allIndex = static.indexOfFirst { it.first.titleKey == "ibm_mq_channel_props_group_all" }
         if (allIndex < 0) static + runtimeGroup
         else static.subList(0, allIndex) + runtimeGroup + static.subList(allIndex, static.size)
     }
     PropertyGroupsPane(
         groups = groups,
-        defaultSelectionKey = "channel_props_group_general",
+        defaultSelectionKey = "ibm_mq_channel_props_group_general",
         customPanes = mapOf(
             RUNTIME_GROUP_KEY to {
                 ChannelRuntimeStatusPane(
@@ -70,4 +70,4 @@ internal fun ChannelPropertiesContent(
 }
 
 /** 运行状态分组的标题键（合成组 + customPanes 面板共用同一键）。 */
-private const val RUNTIME_GROUP_KEY = "channel_props_group_runtime"
+private const val RUNTIME_GROUP_KEY = "ibm_mq_channel_props_group_runtime"

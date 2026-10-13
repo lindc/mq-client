@@ -106,7 +106,7 @@ class QueueAliasExtendedGroupTest {
                 attributes = mapOf("MQCA_Q_NAME" to "ORDER.AUDIT.Q", "MQIA_Q_TYPE" to 1),
             ),
         ).flatMap { it.second }.firstOrNull { it.labelEn == "Accessing processes" }
-        assertEquals("queue_value_none", local?.valueKey)
+        assertEquals("ibm_mq_queue_value_none", local?.valueKey)
 
         val remoteHidden = resolveQueuePropertyGroups(
             MqObjectSnapshot(
@@ -272,7 +272,7 @@ class QueueAliasExtendedGroupTest {
         assertEquals("mqadmin", valueOf("User"))
 
         // 字节 ID 类参数（SUB_ID 等）不进「全部属性」兜底。
-        val allKeys = groups.lastOrNull { it.first.titleKey == "sub_props_group_all" }
+        val allKeys = groups.lastOrNull { it.first.titleKey == "ibm_mq_sub_props_group_all" }
             ?.second?.map { it.labelEn }.orEmpty()
         assertFalse(allKeys.any { it.contains("SUB_ID") || it.contains("ACCOUNTING") })
     }

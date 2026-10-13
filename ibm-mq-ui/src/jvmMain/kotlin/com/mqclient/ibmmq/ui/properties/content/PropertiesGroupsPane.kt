@@ -89,7 +89,7 @@ internal fun PropertyGroupsPane(
                 .orEmpty()
             if (rows.isEmpty()) {
                 Text(
-                    text = stringResource("properties_placeholder_message"),
+                    text = stringResource("ibm_mq_properties_placeholder_message"),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

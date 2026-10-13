@@ -161,9 +161,9 @@ private fun ClusterReadyPane(
     modifier: Modifier = Modifier,
 ) {
     val roleText = when (relations.role) {
-        QmgrClusterRole.FULL -> stringResource("cluster_relations_role_full")
-        QmgrClusterRole.PARTIAL -> stringResource("cluster_relations_role_partial")
-        QmgrClusterRole.NONE -> stringResource("cluster_relations_none")
+        QmgrClusterRole.FULL -> stringResource("ibm_mq_cluster_relations_role_full")
+        QmgrClusterRole.PARTIAL -> stringResource("ibm_mq_cluster_relations_role_partial")
+        QmgrClusterRole.NONE -> stringResource("ibm_mq_cluster_relations_none")
     }
 
     Column(modifier = modifier.fillMaxSize()) {
@@ -176,7 +176,7 @@ private fun ClusterReadyPane(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = stringResource("cluster_relations_title").withArg(relations.localQmgrName),
+                text = stringResource("ibm_mq_cluster_relations_title").withArg(relations.localQmgrName),
                 style = MaterialTheme.typography.titleSmall,
                 modifier = Modifier.weight(1f),
             )
@@ -195,7 +195,7 @@ private fun ClusterReadyPane(
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = stringResource("cluster_relations_none"),
+                    text = stringResource("ibm_mq_cluster_relations_none"),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -244,7 +244,7 @@ private fun ClusterCanvas(
     // 集群成员是远程管理器，属性查不到 → Snackbar 提示而非静默无反应。
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
-    val remoteQmgrHint = stringResource("cluster_qmgr_properties_unavailable")
+    val remoteQmgrHint = stringResource("ibm_mq_cluster_qmgr_properties_unavailable")
     val nodeDoubleClicked = remember {
         NodeDoubleClick { nodeId ->
             if (nodeId.startsWith(CLUSTER_LOCAL_PREFIX)) {
@@ -383,7 +383,7 @@ private fun MemberTable(
 ) {
     Column(modifier = modifier) {
         Text(
-            text = stringResource("cluster_relations_members"),
+            text = stringResource("ibm_mq_cluster_relations_members"),
             style = MaterialTheme.typography.titleSmall,
             color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
@@ -391,7 +391,7 @@ private fun MemberTable(
         if (relations.members.isEmpty()) {
             Box(modifier = Modifier.weight(1f).fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
-                    text = stringResource("cluster_relations_empty"),
+                    text = stringResource("ibm_mq_cluster_relations_empty"),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -400,12 +400,12 @@ private fun MemberTable(
         }
         // 表头
         Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-            MemberCell(stringResource("cluster_relations_col_qmgr"), COL_QMGR, bold = true)
-            MemberCell(stringResource("cluster_relations_col_cluster"), COL_CLUSTER, bold = true)
-            MemberCell(stringResource("cluster_relations_col_channel"), COL_CHANNEL, bold = true)
-            MemberCell(stringResource("cluster_relations_col_deftype"), COL_DEFTYPE, bold = true)
-            MemberCell(stringResource("cluster_relations_col_qmtype"), COL_QMTYPE, bold = true)
-            MemberCell(stringResource("cluster_relations_col_status"), COL_STATUS, bold = true)
+            MemberCell(stringResource("ibm_mq_cluster_relations_col_qmgr"), COL_QMGR, bold = true)
+            MemberCell(stringResource("ibm_mq_cluster_relations_col_cluster"), COL_CLUSTER, bold = true)
+            MemberCell(stringResource("ibm_mq_cluster_relations_col_channel"), COL_CHANNEL, bold = true)
+            MemberCell(stringResource("ibm_mq_cluster_relations_col_deftype"), COL_DEFTYPE, bold = true)
+            MemberCell(stringResource("ibm_mq_cluster_relations_col_qmtype"), COL_QMTYPE, bold = true)
+            MemberCell(stringResource("ibm_mq_cluster_relations_col_status"), COL_STATUS, bold = true)
         }
         HorizontalDivider()
         Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
@@ -468,7 +468,7 @@ private fun ClusterLoadingView(modifier: Modifier = Modifier) {
             CircularProgressIndicator()
             Spacer(Modifier.height(12.dp))
             Text(
-                text = stringResource("cluster_relations_loading"),
+                text = stringResource("ibm_mq_cluster_relations_loading"),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -482,13 +482,13 @@ private fun ClusterErrorView(reason: String, onRetry: () -> Unit, modifier: Modi
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
-                text = stringResource("cluster_relations_failed").withArg(reason),
+                text = stringResource("ibm_mq_cluster_relations_failed").withArg(reason),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.error,
             )
             Spacer(Modifier.height(12.dp))
             androidx.compose.material3.Button(onClick = onRetry) {
-                Text(stringResource("cluster_relations_retry"))
+                Text(stringResource("ibm_mq_cluster_relations_retry"))
             }
         }
     }

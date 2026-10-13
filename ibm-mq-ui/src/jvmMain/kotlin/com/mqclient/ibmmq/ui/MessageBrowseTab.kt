@@ -110,11 +110,11 @@ private val DISPLAY_TIME_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPatt
 
 /** 时间范围预设；CUSTOM 的起止由自定义输入框给出（留空 = 该侧不限制）。 */
 private enum class BrowseTimeRange(val labelKey: String) {
-    LAST_5_MIN("msg_time_5min"),
-    LAST_1_HOUR("msg_time_1hour"),
-    LAST_24_HOURS("msg_time_24hour"),
-    ALL("msg_time_all"),
-    CUSTOM("msg_time_custom"),
+    LAST_5_MIN("ibm_mq_msg_time_5min"),
+    LAST_1_HOUR("ibm_mq_msg_time_1hour"),
+    LAST_24_HOURS("ibm_mq_msg_time_24hour"),
+    ALL("ibm_mq_msg_time_all"),
+    CUSTOM("ibm_mq_msg_time_custom"),
 }
 
 /**
@@ -204,7 +204,7 @@ internal fun MessageBrowseTab(
 
     fun showCopied(text: String) {
         clipboard.setText(AnnotatedString(text))
-        scope.launch { snackbarHostState.showSnackbar(stringResource("msg_copied")) }
+        scope.launch { snackbarHostState.showSnackbar(stringResource("ibm_mq_msg_copied")) }
     }
 
     fun loadMore() {
@@ -267,17 +267,17 @@ internal fun MessageBrowseTab(
                     try {
                         val saved = saveFileBytes("msg_${message.messageId.take(8)}.bin", "bin", result.content!!)
                         if (saved != null) {
-                            scope.launch { snackbarHostState.showSnackbar(stringResource("msg_browse_saved").withArg(saved)) }
+                            scope.launch { snackbarHostState.showSnackbar(stringResource("ibm_mq_msg_browse_saved").withArg(saved)) }
                         }
                     } catch (e: Exception) {
                         scope.launch {
-                            snackbarHostState.showSnackbar(stringResource("msg_save_failed").withArg(e.message ?: ""))
+                            snackbarHostState.showSnackbar(stringResource("ibm_mq_msg_save_failed").withArg(e.message ?: ""))
                         }
                     }
                 }
                 else -> scope.launch {
                     snackbarHostState.showSnackbar(
-                        stringResource("msg_browse_op_failed").withArg(result.errorMessage ?: ""),
+                        stringResource("ibm_mq_msg_browse_op_failed").withArg(result.errorMessage ?: ""),
                     )
                 }
             }
@@ -307,9 +307,9 @@ internal fun MessageBrowseTab(
             scope.launch {
                 snackbarHostState.showSnackbar(
                     if (result.success) {
-                        stringResource("msg_browse_delete_ok")
+                        stringResource("ibm_mq_msg_browse_delete_ok")
                     } else {
-                        stringResource("msg_browse_op_failed").withArg(result.errorMessage ?: "")
+                        stringResource("ibm_mq_msg_browse_op_failed").withArg(result.errorMessage ?: "")
                     },
                 )
             }
@@ -334,8 +334,8 @@ internal fun MessageBrowseTab(
             },
             totalText = when {
                 ready == null -> ""
-                ready.messages.size >= ready.depth -> stringResource("msg_browse_total").withArg(ready.depth)
-                else -> stringResource("msg_browse_total_loaded")
+                ready.messages.size >= ready.depth -> stringResource("ibm_mq_msg_browse_total").withArg(ready.depth)
+                else -> stringResource("ibm_mq_msg_browse_total_loaded")
                     .withArg(ready.depth, ready.messages.size)
             },
             refreshing = ready?.refreshing == true,
@@ -355,9 +355,9 @@ internal fun MessageBrowseTab(
                 )
                 is BrowseUiState.Ready -> when {
                     state.messages.isEmpty() ->
-                        ObjectListEmptyState(message = stringResource("msg_browse_empty"))
+                        ObjectListEmptyState(message = stringResource("ibm_mq_msg_browse_empty"))
                     filtered.isEmpty() ->
-                        ObjectListEmptyState(message = stringResource("msg_browse_filter_empty"))
+                        ObjectListEmptyState(message = stringResource("ibm_mq_msg_browse_filter_empty"))
                     else -> MessageTable(
                         messages = filtered,
                         onCopy = ::showCopied,
@@ -430,10 +430,10 @@ private fun ConfirmDeleteMessageDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource("msg_browse_delete")) },
-        text = { Text(stringResource("msg_browse_delete_confirm")) },
+        title = { Text(stringResource("ibm_mq_msg_browse_delete")) },
+        text = { Text(stringResource("ibm_mq_msg_browse_delete_confirm")) },
         confirmButton = {
-            PressableButton(onClick = onConfirm, danger = true) { Text(stringResource("msg_browse_delete")) }
+            PressableButton(onClick = onConfirm, danger = true) { Text(stringResource("ibm_mq_msg_browse_delete")) }
         },
         dismissButton = {
             PressableButton(
@@ -466,7 +466,7 @@ private fun BrowseToolbar(
         CompactSearchField(
             value = rawSearch,
             onValueChange = onSearchChange,
-            placeholder = stringResource("msg_browse_search_hint"),
+            placeholder = stringResource("ibm_mq_msg_browse_search_hint"),
             modifier = Modifier.weight(1f),
         )
         // 时间范围下拉（对已加载消息做本地过滤）。
@@ -503,7 +503,7 @@ private fun BrowseToolbar(
             if (refreshing) {
                 CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
             } else {
-                Icon(Icons.Default.Refresh, contentDescription = stringResource("msg_browse_refresh"))
+                Icon(Icons.Default.Refresh, contentDescription = stringResource("ibm_mq_msg_browse_refresh"))
             }
         }
     }
@@ -529,13 +529,13 @@ private fun MessageTable(
                 .padding(horizontal = ROW_HPADDING, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TableHeaderText(stringResource("msg_col_message_id"), Modifier.weight(1f))
-            TableHeaderText(stringResource("msg_col_correlation_id"), Modifier.weight(1f))
-            TableHeaderText(stringResource("msg_col_time"), Modifier.width(COL_TIME))
-            TableHeaderText(stringResource("msg_col_size"), Modifier.width(COL_SIZE))
-            TableHeaderText(stringResource("msg_col_persistence"), Modifier.width(COL_PERSISTENCE))
-            TableHeaderText(stringResource("msg_col_priority"), Modifier.width(COL_PRIORITY))
-            TableHeaderText(stringResource("msg_send_col_actions"), Modifier.width(COL_DETAIL))
+            TableHeaderText(stringResource("ibm_mq_msg_col_message_id"), Modifier.weight(1f))
+            TableHeaderText(stringResource("ibm_mq_msg_col_correlation_id"), Modifier.weight(1f))
+            TableHeaderText(stringResource("ibm_mq_msg_col_time"), Modifier.width(COL_TIME))
+            TableHeaderText(stringResource("ibm_mq_msg_col_size"), Modifier.width(COL_SIZE))
+            TableHeaderText(stringResource("ibm_mq_msg_col_persistence"), Modifier.width(COL_PERSISTENCE))
+            TableHeaderText(stringResource("ibm_mq_msg_col_priority"), Modifier.width(COL_PRIORITY))
+            TableHeaderText(stringResource("ibm_mq_msg_send_col_actions"), Modifier.width(COL_DETAIL))
         }
         HorizontalDivider()
         LazyColumn(modifier = Modifier.weight(1f)) {
@@ -617,14 +617,14 @@ private fun MessageRow(
             // 详细：弹出详情对话框（内容待实装，先空壳）。
             RowActionIcon(
                 icon = Icons.Default.Info,
-                tooltip = stringResource("msg_col_detail"),
+                tooltip = stringResource("ibm_mq_msg_col_detail"),
                 enabled = !anyActionInProgress,
                 onClick = { onDetail(message) },
             )
             // 下载：取完整消息体弹「另存为」，队列消息不动。
             RowActionIcon(
                 icon = Icons.Default.Download,
-                tooltip = stringResource("msg_browse_download"),
+                tooltip = stringResource("ibm_mq_msg_browse_download"),
                 enabled = !anyActionInProgress,
                 executing = actionInProgress,
                 onClick = { onDownload(message) },
@@ -632,7 +632,7 @@ private fun MessageRow(
             // 删除：按 MessageId 消费掉该条（只动这一条），成功后刷新列表。
             RowActionIcon(
                 icon = Icons.Default.Delete,
-                tooltip = stringResource("msg_browse_delete"),
+                tooltip = stringResource("ibm_mq_msg_browse_delete"),
                 enabled = !anyActionInProgress,
                 executing = actionInProgress,
                 onClick = { onDelete(message) },
@@ -700,7 +700,7 @@ private fun IdCell(
 private fun PersistenceIcon(persistence: Int) {
     val persistent = persistence == 1 // MQPER_PERSISTENT
     val label = stringResource(
-        if (persistent) "msg_persistence_persistent" else "msg_persistence_non_persistent",
+        if (persistent) "ibm_mq_msg_persistence_persistent" else "ibm_mq_msg_persistence_non_persistent",
     )
     HoverTooltip(label) {
         Icon(
@@ -774,9 +774,9 @@ private fun BrowseBottomBar(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         val progressText = if (exhausted || loadedCount >= depth) {
-            stringResource("msg_browse_loaded_all").withArg(loadedCount)
+            stringResource("ibm_mq_msg_browse_loaded_all").withArg(loadedCount)
         } else {
-            stringResource("msg_browse_loaded_of").withArg(loadedCount, depth)
+            stringResource("ibm_mq_msg_browse_loaded_of").withArg(loadedCount, depth)
         }
         Text(
             text = progressText,
@@ -788,7 +788,7 @@ private fun BrowseBottomBar(
             PressableButton(onClick = onLoadMore, enabled = !loadingMore) {
                 Text(
                     stringResource(
-                        if (loadingMore) "msg_browse_loading_more" else "msg_browse_load_more",
+                        if (loadingMore) "ibm_mq_msg_browse_loading_more" else "ibm_mq_msg_browse_load_more",
                     ),
                 )
             }
@@ -808,7 +808,7 @@ private fun BrowseLoadingView(modifier: Modifier = Modifier) {
         CircularProgressIndicator()
         Spacer(Modifier.height(12.dp))
         Text(
-            text = stringResource("msg_browse_loading"),
+            text = stringResource("ibm_mq_msg_browse_loading"),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -834,7 +834,7 @@ private fun BrowseErrorView(
         )
         Spacer(Modifier.height(12.dp))
         Text(
-            text = stringResource("msg_browse_failed").withArg(reason),
+            text = stringResource("ibm_mq_msg_browse_failed").withArg(reason),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.error,
             textAlign = TextAlign.Center,
@@ -863,23 +863,23 @@ private fun CustomTimeRangeDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource("msg_time_custom")) },
+        title = { Text(stringResource("ibm_mq_msg_time_custom")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 TimeRangeRow(
-                    label = stringResource("msg_time_start"),
+                    label = stringResource("ibm_mq_msg_time_start"),
                     value = start,
                     onPick = { picking = TimeEditTarget.START },
                     onClear = { start = null },
                 )
                 TimeRangeRow(
-                    label = stringResource("msg_time_end"),
+                    label = stringResource("ibm_mq_msg_time_end"),
                     value = end,
                     onPick = { picking = TimeEditTarget.END },
                     onClear = { end = null },
                 )
                 Text(
-                    text = stringResource("msg_time_blank_hint"),
+                    text = stringResource("ibm_mq_msg_time_blank_hint"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -903,7 +903,7 @@ private fun CustomTimeRangeDialog(
     picking?.let { target ->
         val isStart = target == TimeEditTarget.START
         DateTimePickerDialog(
-            title = stringResource(if (isStart) "msg_time_start" else "msg_time_end"),
+            title = stringResource(if (isStart) "ibm_mq_msg_time_start" else "ibm_mq_msg_time_end"),
             initial = if (isStart) start else end,
             onConfirm = { value ->
                 if (isStart) start = value else end = value
@@ -937,7 +937,7 @@ private fun TimeRangeRow(
             containerColor = MaterialTheme.colorScheme.surfaceVariant,
             contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
         ) {
-            Text(value?.format(DISPLAY_TIME_FORMATTER) ?: stringResource("msg_time_not_set"))
+            Text(value?.format(DISPLAY_TIME_FORMATTER) ?: stringResource("ibm_mq_msg_time_not_set"))
         }
         if (value != null) {
             IconButton(onClick = onClear, modifier = Modifier.size(28.dp)) {
@@ -987,7 +987,7 @@ private fun DateTimePickerDialog(
                 PickerPhase.DATE -> PressableButton(
                     onClick = { phase = PickerPhase.TIME },
                     enabled = dateState.selectedDateMillis != null,
-                ) { Text(stringResource("msg_time_next")) }
+                ) { Text(stringResource("ibm_mq_msg_time_next")) }
                 PickerPhase.TIME -> PressableButton(onClick = {
                     val millis = dateState.selectedDateMillis ?: return@PressableButton
                     val date = Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate()
@@ -1003,7 +1003,7 @@ private fun DateTimePickerDialog(
                         onClick = { phase = PickerPhase.DATE },
                         containerColor = MaterialTheme.colorScheme.surfaceVariant,
                         contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    ) { Text(stringResource("msg_time_back")) }
+                    ) { Text(stringResource("ibm_mq_msg_time_back")) }
                 }
                 PressableButton(
                     onClick = onDismiss,

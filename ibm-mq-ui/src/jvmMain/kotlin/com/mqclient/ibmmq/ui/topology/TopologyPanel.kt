@@ -176,7 +176,7 @@ fun TopologyPanel(
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 CircularProgressIndicator()
                 Text(
-                    text = stringResource("topology_loading"),
+                    text = stringResource("ibm_mq_topology_loading"),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 12.dp),
@@ -188,7 +188,7 @@ fun TopologyPanel(
     if (current == null) {
         Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(
-                text = stringResource("topology_empty"),
+                text = stringResource("ibm_mq_topology_empty"),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -232,7 +232,7 @@ private fun MqTopologyCanvas(
     val propertiesController = rememberObjectPropertiesDialogController(connectionId)
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
-    val virtualNodeHint = stringResource("topology_no_properties")
+    val virtualNodeHint = stringResource("ibm_mq_topology_no_properties")
     val currentTypes by rememberUpdatedState(nodeTypes)
     val nodeDoubleClicked = remember {
         NodeDoubleClick { nodeId ->
@@ -481,7 +481,7 @@ private fun NodeDetailCard(
             IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
                 Icon(
                     imageVector = Icons.Filled.Close,
-                    contentDescription = stringResource("topology_detail_close"),
+                    contentDescription = stringResource("ibm_mq_topology_detail_close"),
                     modifier = Modifier.size(16.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

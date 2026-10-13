@@ -294,11 +294,11 @@ internal fun MessageSendTab(
 
     fun pickAndLoad() {
         pickScope.launch {
-            val paths = pickFiles(stringResource("msg_send_pick_title"))
+            val paths = pickFiles(stringResource("ibm_mq_msg_send_pick_title"))
             if (paths.isEmpty()) return@launch
             val failed = state.loadFiles(paths)
             failed.forEach { name ->
-                snackbarHostState.showSnackbar(stringResource("msg_send_read_failed").withArg(name))
+                snackbarHostState.showSnackbar(stringResource("ibm_mq_msg_send_read_failed").withArg(name))
             }
         }
     }
@@ -310,10 +310,10 @@ internal fun MessageSendTab(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            PressableButton(onClick = ::pickAndLoad) { Text(stringResource("msg_send_pick_file")) }
+            PressableButton(onClick = ::pickAndLoad) { Text(stringResource("ibm_mq_msg_send_pick_file")) }
             if (state.tasks.isNotEmpty()) {
                 Text(
-                    text = stringResource("msg_send_files_selected").withArg(state.tasks.size),
+                    text = stringResource("ibm_mq_msg_send_files_selected").withArg(state.tasks.size),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -324,7 +324,7 @@ internal fun MessageSendTab(
                 enabled = state.tasks.isNotEmpty(),
                 containerColor = MaterialTheme.colorScheme.surfaceVariant,
                 contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-            ) { Text(stringResource("msg_send_clear")) }
+            ) { Text(stringResource("ibm_mq_msg_send_clear")) }
         }
         HorizontalDivider()
 
@@ -332,7 +332,7 @@ internal fun MessageSendTab(
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
             when {
                 state.tasks.isEmpty() ->
-                    ObjectListEmptyState(message = stringResource("msg_send_empty"))
+                    ObjectListEmptyState(message = stringResource("ibm_mq_msg_send_empty"))
                 state.tasks.size == 1 -> SingleSendPane(state)
                 else -> MultiSendPane(state)
             }
@@ -345,7 +345,7 @@ internal fun MessageSendTab(
         SendBottomBar(
             state = state,
             onEmptyBodyWarning = {
-                pickScope.launch { snackbarHostState.showSnackbar(stringResource("msg_send_empty_body")) }
+                pickScope.launch { snackbarHostState.showSnackbar(stringResource("ibm_mq_msg_send_empty_body")) }
             },
         )
     }
@@ -374,7 +374,7 @@ private fun SingleSendPane(state: SendMessagesState) {
         )
         if (truncated && state.editingContent == null) {
             Text(
-                text = stringResource("msg_send_preview_truncated"),
+                text = stringResource("ibm_mq_msg_send_preview_truncated"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = ROW_HPADDING, vertical = 4.dp),
@@ -404,7 +404,7 @@ private fun AdvancedPropsSection(state: SendMessagesState) {
             )
             Spacer(Modifier.width(4.dp))
             Text(
-                text = stringResource("msg_send_advanced"),
+                text = stringResource("ibm_mq_msg_send_advanced"),
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -417,14 +417,14 @@ private fun AdvancedPropsSection(state: SendMessagesState) {
                 OutlinedTextField(
                     value = state.correlationId,
                     onValueChange = { state.correlationId = it },
-                    label = { Text(stringResource("msg_send_correlation_id")) },
+                    label = { Text(stringResource("ibm_mq_msg_send_correlation_id")) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
                     value = state.replyToQueue,
                     onValueChange = { state.replyToQueue = it },
-                    label = { Text(stringResource("msg_send_reply_to_queue")) },
+                    label = { Text(stringResource("ibm_mq_msg_send_reply_to_queue")) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -432,18 +432,18 @@ private fun AdvancedPropsSection(state: SendMessagesState) {
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    PropLabel(stringResource("msg_send_persistence"))
+                    PropLabel(stringResource("ibm_mq_msg_send_persistence"))
                     DropdownSelector(
                         selected = stringResource(
                             if (state.persistence == SendDefaults.PERSISTENCE_PERSISTENT) {
-                                "msg_persistence_persistent"
+                                "ibm_mq_msg_persistence_persistent"
                             } else {
-                                "msg_persistence_non_persistent"
+                                "ibm_mq_msg_persistence_non_persistent"
                             },
                         ),
                         options = listOf(
-                            stringResource("msg_persistence_persistent") to SendDefaults.PERSISTENCE_PERSISTENT,
-                            stringResource("msg_persistence_non_persistent") to SendDefaults.PERSISTENCE_NOT_PERSISTENT,
+                            stringResource("ibm_mq_msg_persistence_persistent") to SendDefaults.PERSISTENCE_PERSISTENT,
+                            stringResource("ibm_mq_msg_persistence_non_persistent") to SendDefaults.PERSISTENCE_NOT_PERSISTENT,
                         ),
                         onSelect = { state.persistence = it },
                     )
@@ -452,7 +452,7 @@ private fun AdvancedPropsSection(state: SendMessagesState) {
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    PropLabel(stringResource("msg_send_priority"))
+                    PropLabel(stringResource("ibm_mq_msg_send_priority"))
                     DropdownSelector(
                         selected = state.priority.toString(),
                         options = (0..9).map { it.toString() to it },
@@ -463,7 +463,7 @@ private fun AdvancedPropsSection(state: SendMessagesState) {
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    PropLabel(stringResource("msg_send_expiry"))
+                    PropLabel(stringResource("ibm_mq_msg_send_expiry"))
                     OutlinedTextField(
                         value = state.expirySeconds,
                         onValueChange = { state.expirySeconds = it.filter(Char::isDigit).take(9) },
@@ -471,7 +471,7 @@ private fun AdvancedPropsSection(state: SendMessagesState) {
                         modifier = Modifier.width(120.dp),
                     )
                     Text(
-                        text = stringResource("msg_send_expiry_hint"),
+                        text = stringResource("ibm_mq_msg_send_expiry_hint"),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -534,10 +534,10 @@ private fun MultiSendPane(state: SendMessagesState) {
                 .padding(horizontal = ROW_HPADDING, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TableHeaderText(stringResource("msg_send_col_file_name"), Modifier.weight(1f))
-            TableHeaderText(stringResource("msg_col_size"), Modifier.width(80.dp))
-            TableHeaderText(stringResource("msg_send_col_status"), Modifier.width(110.dp))
-            TableHeaderText(stringResource("msg_send_col_actions"), Modifier.width(80.dp))
+            TableHeaderText(stringResource("ibm_mq_msg_send_col_file_name"), Modifier.weight(1f))
+            TableHeaderText(stringResource("ibm_mq_msg_col_size"), Modifier.width(80.dp))
+            TableHeaderText(stringResource("ibm_mq_msg_send_col_status"), Modifier.width(110.dp))
+            TableHeaderText(stringResource("ibm_mq_msg_send_col_actions"), Modifier.width(80.dp))
         }
         HorizontalDivider()
         LazyColumn(modifier = Modifier.weight(1f)) {
@@ -585,9 +585,9 @@ private fun SendTaskRow(task: SendTask, state: SendMessagesState) {
         Box(modifier = Modifier.width(80.dp)) {
             when {
                 task.status == SendStatus.WAITING && state.canRemove(task) ->
-                    SmallSecondaryButton(stringResource("msg_send_remove"), onClick = { state.removeTask(task.id) })
+                    SmallSecondaryButton(stringResource("ibm_mq_msg_send_remove"), onClick = { state.removeTask(task.id) })
                 task.status == SendStatus.FAILED && !state.busy ->
-                    SmallSecondaryButton(stringResource("msg_send_retry"), onClick = { state.retryTask(task.id) })
+                    SmallSecondaryButton(stringResource("ibm_mq_msg_send_retry"), onClick = { state.retryTask(task.id) })
             }
         }
     }
@@ -603,19 +603,19 @@ private fun StatusCell(task: SendTask) {
             when (task.status) {
                 SendStatus.WAITING -> {
                     Box(Modifier.size(8.dp).clip(CircleShape).background(WaitingGray))
-                    StatusText(stringResource("msg_send_status_waiting"))
+                    StatusText(stringResource("ibm_mq_msg_send_status_waiting"))
                 }
                 SendStatus.SENDING -> {
                     CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
-                    StatusText(stringResource("msg_send_status_sending"))
+                    StatusText(stringResource("ibm_mq_msg_send_status_sending"))
                 }
                 SendStatus.SUCCESS -> {
                     Icon(imageVector = Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp), tint = SuccessGreen)
-                    StatusText(stringResource("msg_send_status_success"))
+                    StatusText(stringResource("ibm_mq_msg_send_status_success"))
                 }
                 SendStatus.FAILED -> {
                     Icon(imageVector = Icons.Default.Cancel, contentDescription = null, modifier = Modifier.size(16.dp), tint = FailedRed)
-                    StatusText(stringResource("msg_send_status_failed"))
+                    StatusText(stringResource("ibm_mq_msg_send_status_failed"))
                 }
             }
         }
@@ -664,7 +664,7 @@ private fun SendBottomBar(
                 if (outcome.success) {
                     Icon(imageVector = Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp), tint = SuccessGreen)
                     Text(
-                        text = stringResource("msg_send_sent_ok").withArg(outcome.messageId ?: ""),
+                        text = stringResource("ibm_mq_msg_send_sent_ok").withArg(outcome.messageId ?: ""),
                         style = MaterialTheme.typography.bodySmall,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -672,7 +672,7 @@ private fun SendBottomBar(
                     )
                     outcome.sentAt?.let {
                         Text(
-                            text = stringResource("msg_send_sent_at")
+                            text = stringResource("ibm_mq_msg_send_sent_at")
                                 .withArg(SENT_AT_FORMATTER.format(Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()))),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -681,21 +681,21 @@ private fun SendBottomBar(
                 } else {
                     Icon(imageVector = Icons.Default.Cancel, contentDescription = null, modifier = Modifier.size(16.dp), tint = FailedRed)
                     Text(
-                        text = stringResource("msg_send_failed_reason").withArg(outcome.errorMessage ?: ""),
+                        text = stringResource("ibm_mq_msg_send_failed_reason").withArg(outcome.errorMessage ?: ""),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false),
                     )
-                    SmallSecondaryButton(stringResource("msg_send_retry"), onClick = { state.sendSingle(onEmptyBodyWarning) })
+                    SmallSecondaryButton(stringResource("ibm_mq_msg_send_retry"), onClick = { state.sendSingle(onEmptyBodyWarning) })
                 }
             }
         }
         // 多文件：一轮完成后的汇总。
         state.batchSummary?.let { summary ->
             Text(
-                text = stringResource("msg_send_summary")
+                text = stringResource("ibm_mq_msg_send_summary")
                     .withArg(summary.total, summary.success, summary.failed),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -718,10 +718,10 @@ private fun SendBottomBar(
                 Text(
                     text = when {
                         state.busy && !single ->
-                            stringResource("msg_send_sending_progress").withArg(state.processedCount, state.batchTotal)
-                        state.busy -> stringResource("msg_send_sending")
-                        single -> stringResource("msg_send_send")
-                        else -> stringResource("msg_send_send_all")
+                            stringResource("ibm_mq_msg_send_sending_progress").withArg(state.processedCount, state.batchTotal)
+                        state.busy -> stringResource("ibm_mq_msg_send_sending")
+                        single -> stringResource("ibm_mq_msg_send_send")
+                        else -> stringResource("ibm_mq_msg_send_send_all")
                     },
                 )
             }
@@ -739,7 +739,7 @@ internal fun ConfirmCloseWhileSendingDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        text = { Text(stringResource("msg_send_close_confirm")) },
+        text = { Text(stringResource("ibm_mq_msg_send_close_confirm")) },
         confirmButton = {
             PressableButton(onClick = onConfirm) { Text(stringResource("common_ok")) }
         },

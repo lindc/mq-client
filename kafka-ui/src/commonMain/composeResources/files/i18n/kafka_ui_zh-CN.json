@@ -21,7 +21,6 @@
   "kafka_ui_error_bootstrap_required": "请填写 Bootstrap servers",
   "kafka_ui_error_timeout_range": "连接超时须为 5-300 之间的整数",
 
-  "nav_topics": "主题",
   "kafka_action_ask_ai": "询问 AI",
   "kafka_ui_search_placeholder": "搜索主题",
   "kafka_ui_refresh": "刷新",
@@ -29,5 +28,7 @@
   "kafka_ui_topic_partitions": "%1$d 分区",
   "kafka_ui_topic_replicas": "%1$d 副本",
   "kafka_ui_topic_internal": "内部主题",
-  "kafka_ui_error_not_connected": "尚未连接 —— 请先在左侧连接的右键菜单里选择「连接」"
+  "kafka_ui_error_not_connected": "尚未连接 —— 请先在左侧连接的右键菜单里选择「连接」",
+
+  "kafka_ui_nav_topics": "主题"
 }

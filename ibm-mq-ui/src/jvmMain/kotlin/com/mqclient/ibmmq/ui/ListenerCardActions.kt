@@ -62,13 +62,13 @@ object ListenerCardActions {
             in RUNNING_LIKE -> actions += stopAction(onStop)
             in STOPPED_LIKE, null -> actions += startAction(onStart)
             in BUSY_LIKE -> {
-                actions += startAction(onStart, enabled = false, tooltip = "operation_busy")
-                actions += stopAction(onStop, enabled = false, tooltip = "operation_busy")
+                actions += startAction(onStart, enabled = false, tooltip = "ibm_mq_operation_busy")
+                actions += stopAction(onStop, enabled = false, tooltip = "ibm_mq_operation_busy")
             }
             else -> {
                 // UNKNOWN 等未识别状态：信息不足，禁用并提示。
-                actions += startAction(onStart, enabled = false, tooltip = "operation_unknown_state")
-                actions += stopAction(onStop, enabled = false, tooltip = "operation_unknown_state")
+                actions += startAction(onStart, enabled = false, tooltip = "ibm_mq_operation_unknown_state")
+                actions += stopAction(onStop, enabled = false, tooltip = "ibm_mq_operation_unknown_state")
             }
         }
 
@@ -76,13 +76,13 @@ object ListenerCardActions {
         actions += CardAction(
             id = "listener.properties",
             icon = Icons.Default.Info,
-            tooltip = "listener_action_properties",
+            tooltip = "ibm_mq_listener_action_properties",
             onClick = onOpenProperties,
         )
         return actions
     }
 
-    private fun startAction(onClick: () -> Unit, enabled: Boolean = true, tooltip: String = "listener_action_start") =
+    private fun startAction(onClick: () -> Unit, enabled: Boolean = true, tooltip: String = "ibm_mq_listener_action_start") =
         CardAction(
             id = "listener.start",
             icon = Icons.Default.PlayArrow,
@@ -91,7 +91,7 @@ object ListenerCardActions {
             onClick = onClick,
         )
 
-    private fun stopAction(onClick: () -> Unit, enabled: Boolean = true, tooltip: String = "listener_action_stop") =
+    private fun stopAction(onClick: () -> Unit, enabled: Boolean = true, tooltip: String = "ibm_mq_listener_action_stop") =
         CardAction(
             id = "listener.stop",
             icon = Icons.Default.Stop,

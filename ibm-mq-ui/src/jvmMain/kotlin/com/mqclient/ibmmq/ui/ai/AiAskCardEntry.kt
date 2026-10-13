@@ -24,7 +24,7 @@ import com.mqclient.uicommon.AiAskRequest
 internal fun askAiCardAction(onAskAi: () -> Unit): CardAction = CardAction(
     id = "mq.ask_ai",
     icon = Icons.Default.Android,
-    tooltip = "mq_action_ask_ai",
+    tooltip = "ibm_mq_mq_action_ask_ai",
     onClick = onAskAi,
 )
 

@@ -39,7 +39,7 @@ internal fun MqObjectPropertiesContent(
     if (snapshot == null) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(
-                text = stringResource("properties_placeholder_message"),
+                text = stringResource("ibm_mq_properties_placeholder_message"),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

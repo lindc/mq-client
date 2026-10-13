@@ -154,9 +154,10 @@ fun MainWindow(
     }
 
     // 导航项 id → 国际化 titleKey：Tab 标题取 NavigationItem.titleKey，与侧边栏菜单
-    // 保持一致；不再硬编码 `nav_${id}`（后者对多词 id 会拼出错误 key，如
-    // nav_processDefinitions）。用第一条连接 Representative 取菜单项，拿不到时回退
-    // 到 `nav_${id}`（纯描述性模块无连接时仍可用）。
+    // 保持一致。**不按 `nav_${id}` 拼名字** —— 各模块的导航键带自己的模块前缀
+    // （`ibm_mq_nav_queues` / `kafka_ui_nav_topics`），宿主拼不出也不该拼；拼出来的对
+    // 多词 id 还会错（如 `nav_processDefinitions`）。用第一条连接 Representative 取
+    // 菜单项，取不到（一条连接都没有）就退回 objectType 本身。
     val titleKeyByObjectType = remember(connections) {
         val representative = connections.firstOrNull() ?: return@remember emptyMap<String, String>()
         ModuleRegistry.services
@@ -238,7 +239,10 @@ fun MainWindow(
                             active = activeTab,
                             // Tab 标题 = 连接名 / 导航项文案（取 NavigationItem.titleKey，i18n）。
                             tabTitle = {
-                                val titleKey = titleKeyByObjectType[it.objectType] ?: ("nav_" + it.objectType)
+                                // 各模块的导航键带模块前缀（ibm_mq_nav_queues …），宿主拼不出也不该拼；
+                                // 模块没声明该导航项时退回 objectType 本身。objectType 理论上可为
+                                // null（openTab 已挡掉那种情况），给空串而不是原来的 "nav_null"。
+                                val titleKey = titleKeyByObjectType[it.objectType] ?: it.objectType.orEmpty()
                                 "${connectionName(it)} / ${stringResource(titleKey)}"
                             },
                             onSelect = {
@@ -430,7 +434,7 @@ private fun ObjectTypeWorkspace(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        val titleKey = titleKeyByObjectType[objectType] ?: ("nav_" + objectType)
+        val titleKey = titleKeyByObjectType[objectType] ?: objectType
         Text(
             text = "$serviceName / ${stringResource(titleKey)}",
             style = MaterialTheme.typography.titleMedium,

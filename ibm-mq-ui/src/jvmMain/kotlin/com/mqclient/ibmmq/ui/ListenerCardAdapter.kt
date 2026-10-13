@@ -58,9 +58,9 @@ internal fun MqObjectSnapshot.toListenerCardData(
             else -> LISTENER_STATUS_NEUTRAL
         },
         statusText = when {
-            executingTarget == "RUNNING" -> stringResource("listener_status_starting")
-            executingTarget == "NOT_RUNNING" -> stringResource("listener_status_stopping")
-            status == null -> stringResource("listener_status_not_started")
+            executingTarget == "RUNNING" -> stringResource("ibm_mq_listener_status_starting")
+            executingTarget == "NOT_RUNNING" -> stringResource("ibm_mq_listener_status_stopping")
+            status == null -> stringResource("ibm_mq_listener_status_not_started")
             else -> listenerStatusText(status)
         },
         metricValue = port?.toString(),
@@ -72,12 +72,12 @@ internal fun MqObjectSnapshot.toListenerCardData(
 /** 监听器运行状态 → i18n 文案（未覆盖的状态值回退到「未知」，不丢信息）。 */
 internal fun listenerStatusText(status: String): String {
     val key = when (status) {
-        "RUNNING" -> "listener_status_running"
-        "NOT_RUNNING" -> "listener_status_not_running"
-        "STARTING" -> "listener_status_starting"
-        "STOPPING" -> "listener_status_stopping"
-        "STOPPED" -> "listener_status_stopped"
+        "RUNNING" -> "ibm_mq_listener_status_running"
+        "NOT_RUNNING" -> "ibm_mq_listener_status_not_running"
+        "STARTING" -> "ibm_mq_listener_status_starting"
+        "STOPPING" -> "ibm_mq_listener_status_stopping"
+        "STOPPED" -> "ibm_mq_listener_status_stopped"
         else -> null
     }
-    return key?.let { stringResource(it) } ?: stringResource("listener_status_unknown")
+    return key?.let { stringResource(it) } ?: stringResource("ibm_mq_listener_status_unknown")
 }

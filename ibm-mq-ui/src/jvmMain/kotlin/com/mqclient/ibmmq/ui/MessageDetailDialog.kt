@@ -129,7 +129,7 @@ internal fun MessageDetailDialog(
     }
 
     fun showCopied() {
-        scope.launch { snackbarHostState.showSnackbar(stringResource("msg_copied")) }
+        scope.launch { snackbarHostState.showSnackbar(stringResource("ibm_mq_msg_copied")) }
     }
 
     /** 下载：消息体已在详情里（Ready 时才可见），直接写盘，不再回查队列。 */
@@ -138,10 +138,10 @@ internal fun MessageDetailDialog(
             try {
                 val saved = saveFileBytes("msg_${detail.messageId.take(8)}.bin", "bin", detail.content)
                 if (saved != null) {
-                    snackbarHostState.showSnackbar(stringResource("msg_browse_saved").withArg(saved))
+                    snackbarHostState.showSnackbar(stringResource("ibm_mq_msg_browse_saved").withArg(saved))
                 }
             } catch (e: Exception) {
-                snackbarHostState.showSnackbar(stringResource("msg_save_failed").withArg(e.message ?: ""))
+                snackbarHostState.showSnackbar(stringResource("ibm_mq_msg_save_failed").withArg(e.message ?: ""))
             }
         }
     }
@@ -165,12 +165,12 @@ internal fun MessageDetailDialog(
                     text.toByteArray(Charsets.UTF_8),
                 )
                 if (saved != null) {
-                    snackbarHostState.showSnackbar(stringResource("msg_export_success").withArg(saved))
+                    snackbarHostState.showSnackbar(stringResource("ibm_mq_msg_export_success").withArg(saved))
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                snackbarHostState.showSnackbar(stringResource("msg_save_failed").withArg(e.message ?: ""))
+                snackbarHostState.showSnackbar(stringResource("ibm_mq_msg_save_failed").withArg(e.message ?: ""))
             }
         }
     }
@@ -184,11 +184,11 @@ internal fun MessageDetailDialog(
 
     fun startImport() {
         scope.launch {
-            val path = pickFile(stringResource("msg_import_pick_title"), emptyList()) ?: return@launch
+            val path = pickFile(stringResource("ibm_mq_msg_import_pick_title"), emptyList()) ?: return@launch
             val bytes = try {
                 withContext(Dispatchers.IO) { java.io.File(path).readBytes() }
             } catch (e: Exception) {
-                snackbarHostState.showSnackbar(stringResource("msg_import_read_failed").withArg(e.message ?: ""))
+                snackbarHostState.showSnackbar(stringResource("ibm_mq_msg_import_read_failed").withArg(e.message ?: ""))
                 return@launch
             }
             val parsed = withContext(Dispatchers.Default) { DmpmqmsgFormat.parse(String(bytes, Charsets.UTF_8)) }
@@ -209,7 +209,7 @@ internal fun MessageDetailDialog(
             importing = true
             importError = null
             try {
-                val service = IbmMQModule.serviceOrNull() ?: error(stringResource("msg_service_not_ready"))
+                val service = IbmMQModule.serviceOrNull() ?: error(stringResource("ibm_mq_msg_service_not_ready"))
                 val result = service.sendMessage(
                     connectionId = connectionId,
                     queueName = queueName,
@@ -227,7 +227,7 @@ internal fun MessageDetailDialog(
                     importPreview = null
                     importFallback = null
                     snackbarHostState.showSnackbar(
-                        stringResource("msg_import_success").withArg(result.messageId ?: ""),
+                        stringResource("ibm_mq_msg_import_success").withArg(result.messageId ?: ""),
                     )
                     onImported()
                 } else {
@@ -244,19 +244,19 @@ internal fun MessageDetailDialog(
     }
 
     ObjectDetailDialog(
-        title = stringResource("msg_detail_title").withArg(summary.messageId),
+        title = stringResource("ibm_mq_msg_detail_title").withArg(summary.messageId),
         onDismiss = onDismiss,
         minWidth = 720.dp,
         minHeight = 480.dp,
         footerActions = {
             val ready = uiState as? DetailUiState.Ready
-            FooterAction(stringResource("msg_detail_download"), enabled = ready != null) {
+            FooterAction(stringResource("ibm_mq_msg_detail_download"), enabled = ready != null) {
                 downloadDetail(ready!!.detail)
             }
-            FooterAction(stringResource("msg_detail_export_dmpmqmsg"), enabled = ready != null) {
+            FooterAction(stringResource("ibm_mq_msg_detail_export_dmpmqmsg"), enabled = ready != null) {
                 exportDmpmqmsg(ready!!.detail)
             }
-            FooterAction(stringResource("msg_detail_import_dmpmqmsg")) { startImport() }
+            FooterAction(stringResource("ibm_mq_msg_detail_import_dmpmqmsg")) { startImport() }
             Spacer(Modifier.weight(1f))
             FooterAction(stringResource("common_close")) { onDismiss() }
         },
@@ -283,7 +283,7 @@ internal fun MessageDetailDialog(
                     }) {
                         Icon(
                             imageVector = Icons.Default.ContentCopy,
-                            contentDescription = stringResource("msg_detail_copy_id"),
+                            contentDescription = stringResource("ibm_mq_msg_detail_copy_id"),
                             modifier = Modifier.height(16.dp),
                         )
                     }
@@ -379,12 +379,12 @@ private fun DetailReadyPane(
                 Tab(
                     selected = selectedTab == 0,
                     onClick = { onTabChange(0) },
-                    text = { Text(stringResource("msg_detail_tab_content")) },
+                    text = { Text(stringResource("ibm_mq_msg_detail_tab_content")) },
                 )
                 Tab(
                     selected = selectedTab == 1,
                     onClick = { onTabChange(1) },
-                    text = { Text(stringResource("msg_detail_tab_headers")) },
+                    text = { Text(stringResource("ibm_mq_msg_detail_tab_headers")) },
                 )
             }
             when (selectedTab) {
@@ -435,7 +435,7 @@ private fun ContentTab(
         // 「消息体为空」只看字节数，与解析失败是两个状态。
         Box(modifier = modifier, contentAlignment = Alignment.Center) {
             Text(
-                text = stringResource("msg_detail_empty_body"),
+                text = stringResource("ibm_mq_msg_detail_empty_body"),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -485,7 +485,7 @@ private fun ContentTab(
                 // 二进制：提示行 + hex 预览（不渲染乱码）。
                 base.isBinary -> {
                     Text(
-                        text = stringResource("msg_detail_binary_notice"),
+                        text = stringResource("ibm_mq_msg_detail_binary_notice"),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier
@@ -510,7 +510,7 @@ private fun ContentTab(
                         // 解析失败：保留原始内容 + 错误提示条。
                         renderedValue.parseError?.let { err ->
                             Text(
-                                text = stringResource("msg_detail_parse_failed").withArg(err),
+                                text = stringResource("ibm_mq_msg_detail_parse_failed").withArg(err),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.error,
                                 modifier = Modifier
@@ -534,7 +534,7 @@ private fun ContentTab(
                         if (renderedValue.text.length > MAX_PREVIEW_CHARS) {
                             Spacer(Modifier.height(8.dp))
                             Text(
-                                text = if (expanded) stringResource("msg_detail_collapse") else stringResource("msg_detail_expand"),
+                                text = if (expanded) stringResource("ibm_mq_msg_detail_collapse") else stringResource("ibm_mq_msg_detail_expand"),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.primary,
                                 fontWeight = FontWeight.Medium,
@@ -597,7 +597,7 @@ private fun HeaderTab(detail: MessageDetail, modifier: Modifier = Modifier) {
                 ) {
                     Icon(
                         imageVector = Icons.Default.ContentCopy,
-                        contentDescription = stringResource("msg_detail_copy_value"),
+                        contentDescription = stringResource("ibm_mq_msg_detail_copy_value"),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.height(14.dp),
                     )
@@ -627,7 +627,7 @@ private fun InterpreterPane(
 ) {
     Column(modifier = modifier.verticalScroll(rememberScrollState()).padding(12.dp)) {
         Text(
-            text = stringResource("msg_detail_interpreter"),
+            text = stringResource("ibm_mq_msg_detail_interpreter"),
             style = MaterialTheme.typography.titleSmall,
             color = MaterialTheme.colorScheme.primary,
         )
@@ -652,7 +652,7 @@ private fun InterpreterPane(
         // ---- 参数区：按 paramDefs 渲染；无参数给提示文案 ----
         if (interpreter.paramDefs.isEmpty()) {
             Text(
-                text = stringResource("msg_detail_no_params"),
+                text = stringResource("ibm_mq_msg_detail_no_params"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -742,7 +742,7 @@ private fun InterpreterPane(
         // ---- 辅助操作：复制正文 / 展开折叠（与左侧联动）----
         if (detail.dataLength > 0) {
             Text(
-                text = stringResource("msg_detail_copy_body"),
+                text = stringResource("ibm_mq_msg_detail_copy_body"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier
@@ -755,7 +755,7 @@ private fun InterpreterPane(
             )
             if (MessageCharsets.decode(detail.content, detail.codedCharSetId).length > MAX_PREVIEW_CHARS) {
                 Text(
-                    text = if (expanded) stringResource("msg_detail_collapse") else stringResource("msg_detail_expand"),
+                    text = if (expanded) stringResource("ibm_mq_msg_detail_collapse") else stringResource("ibm_mq_msg_detail_expand"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier
@@ -790,7 +790,7 @@ private fun DetailLoadingView(modifier: Modifier = Modifier) {
         CircularProgressIndicator()
         Spacer(Modifier.height(12.dp))
         Text(
-            text = stringResource("msg_detail_loading"),
+            text = stringResource("ibm_mq_msg_detail_loading"),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -812,11 +812,11 @@ private fun DetailErrorView(reason: String, onRetry: () -> Unit, modifier: Modif
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            text = stringResource("msg_detail_load_failed").withArg(reason),
+            text = stringResource("ibm_mq_msg_detail_load_failed").withArg(reason),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.error,
         )
         Spacer(Modifier.height(12.dp))
-        PressableButton(onClick = onRetry) { Text(stringResource("msg_detail_retry")) }
+        PressableButton(onClick = onRetry) { Text(stringResource("ibm_mq_msg_detail_retry")) }
     }
 }

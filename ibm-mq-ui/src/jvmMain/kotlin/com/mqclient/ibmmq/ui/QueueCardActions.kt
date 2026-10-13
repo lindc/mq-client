@@ -41,14 +41,14 @@ object QueueCardActions {
             actions += CardAction(
                 id = "queue.messages",
                 icon = Icons.Default.Email,
-                tooltip = "queue_action_messages",
+                tooltip = "ibm_mq_queue_action_messages",
                 onClick = onOpenMessages,
             )
         }
         actions += CardAction(
             id = "queue.properties",
             icon = Icons.Default.Info,
-            tooltip = "queue_action_properties",
+            tooltip = "ibm_mq_queue_action_properties",
             onClick = onOpenProperties,
         )
         return actions

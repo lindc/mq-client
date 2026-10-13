@@ -30,7 +30,7 @@ internal fun MqObjectSnapshot.toQueueCardData(
         typeIcon = QueueIconResolver.resolveIcon(this),
         statusIcon = if (hasWarning) Icons.Default.Warning else null,
         statusIconTint = if (hasWarning) Color(0xFFF44336) else null,
-        statusText = if (hasWarning) stringResource("queue_status_warning") else null,
+        statusText = if (hasWarning) stringResource("ibm_mq_queue_status_warning") else null,
         metricValue = (messageCount ?: 0).toString(),
         actions = actions,
     )

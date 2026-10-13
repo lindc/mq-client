@@ -113,7 +113,7 @@ private fun KafkaTopicInfo.toCardData(actions: List<CardAction> = emptyList()): 
     id = name,
     title = name,
     typeIcon = Icons.Default.Forum,
-    typeLabel = stringResource("nav_topics"),
+    typeLabel = stringResource("kafka_ui_nav_topics"),
     statusIcon = if (internal) Icons.Default.Lock else null,
     statusText =
         listOf(

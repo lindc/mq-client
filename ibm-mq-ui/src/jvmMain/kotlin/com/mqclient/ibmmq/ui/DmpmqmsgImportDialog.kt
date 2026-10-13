@@ -59,10 +59,10 @@ fun DmpmqmsgImportDialog(
 
     AlertDialog(
         onDismissRequest = { if (!executing) onDismiss() },
-        title = { Text(stringResource("msg_import_title").withArg(fileName)) },
+        title = { Text(stringResource("ibm_mq_msg_import_title").withArg(fileName)) },
         text = {
             Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                Text(stringResource("msg_import_count").withArg(messages.size.toString()))
+                Text(stringResource("ibm_mq_msg_import_count").withArg(messages.size.toString()))
                 if (messages.size > 1) {
                     Spacer(Modifier.height(8.dp))
                     ImportMessageSelector(
@@ -73,27 +73,27 @@ fun DmpmqmsgImportDialog(
                 }
 
                 Spacer(Modifier.height(12.dp))
-                ImportAttrRow(stringResource("msg_detail_h_msgid"), message.msgIdHex.ifBlank { "-" })
+                ImportAttrRow(stringResource("ibm_mq_msg_detail_h_msgid"), message.msgIdHex.ifBlank { "-" })
                 ImportAttrRow(
-                    stringResource("msg_detail_h_correlid"),
+                    stringResource("ibm_mq_msg_detail_h_correlid"),
                     if (message.hasCorrelId) message.correlIdHex else "-",
                 )
-                ImportAttrRow(stringResource("msg_detail_h_msgtype"), msgTypePretty(message.msgType))
-                ImportAttrRow(stringResource("msg_detail_h_persistence"), persistencePretty(message.persistence))
-                ImportAttrRow(stringResource("msg_detail_h_priority"), message.priority?.toString() ?: "-")
-                ImportAttrRow(stringResource("msg_detail_h_expiry"), expiryPretty(message.expiry))
-                ImportAttrRow(stringResource("msg_detail_h_format"), message.format.ifBlank { "-" })
-                ImportAttrRow(stringResource("msg_detail_h_ccsid"), message.ccsid?.toString() ?: "-")
+                ImportAttrRow(stringResource("ibm_mq_msg_detail_h_msgtype"), msgTypePretty(message.msgType))
+                ImportAttrRow(stringResource("ibm_mq_msg_detail_h_persistence"), persistencePretty(message.persistence))
+                ImportAttrRow(stringResource("ibm_mq_msg_detail_h_priority"), message.priority?.toString() ?: "-")
+                ImportAttrRow(stringResource("ibm_mq_msg_detail_h_expiry"), expiryPretty(message.expiry))
+                ImportAttrRow(stringResource("ibm_mq_msg_detail_h_format"), message.format.ifBlank { "-" })
+                ImportAttrRow(stringResource("ibm_mq_msg_detail_h_ccsid"), message.ccsid?.toString() ?: "-")
                 ImportAttrRow(
-                    stringResource("msg_detail_h_replyto"),
+                    stringResource("ibm_mq_msg_detail_h_replyto"),
                     listOf(message.replyToQMgr, message.replyToQueue).filter { it.isNotBlank() }
                         .joinToString("/").ifBlank { "-" },
                 )
-                ImportAttrRow(stringResource("msg_detail_h_datalength"), "${message.body.size}")
+                ImportAttrRow(stringResource("ibm_mq_msg_detail_h_datalength"), "${message.body.size}")
 
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    text = stringResource("msg_import_body_preview"),
+                    text = stringResource("ibm_mq_msg_import_body_preview"),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary,
                 )
@@ -110,7 +110,7 @@ fun DmpmqmsgImportDialog(
                 if (errorText != null) {
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        text = stringResource("msg_import_failed").withArg(errorText),
+                        text = stringResource("ibm_mq_msg_import_failed").withArg(errorText),
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -119,7 +119,7 @@ fun DmpmqmsgImportDialog(
         },
         confirmButton = {
             PressableButton(onClick = onImport, enabled = !executing) {
-                Text(if (executing) stringResource("msg_import_executing") else stringResource("msg_import_confirm"))
+                Text(if (executing) stringResource("ibm_mq_msg_import_executing") else stringResource("ibm_mq_msg_import_confirm"))
             }
         },
         dismissButton = {
@@ -143,7 +143,7 @@ private fun ImportMessageSelector(
     var menuExpanded by remember { mutableStateOf(false) }
     Column(modifier = Modifier.fillMaxWidth()) {
         OutlinedTextField(
-            value = stringResource("msg_import_message_label").withArg((selectedIndex + 1).toString()),
+            value = stringResource("ibm_mq_msg_import_message_label").withArg((selectedIndex + 1).toString()),
             onValueChange = {},
             readOnly = true,
             singleLine = true,
@@ -162,7 +162,7 @@ private fun ImportMessageSelector(
                     DropdownMenuItem(
                         text = {
                             Text(
-                                stringResource("msg_import_message_label").withArg((index + 1).toString()) +
+                                stringResource("ibm_mq_msg_import_message_label").withArg((index + 1).toString()) +
                                     " (${item.format.ifBlank { "-" }}, ${item.body.size} B)",
                             )
                         },
@@ -191,14 +191,14 @@ fun DmpmqmsgFallbackDialog(
 ) {
     AlertDialog(
         onDismissRequest = { if (!executing) onDismiss() },
-        title = { Text(stringResource("msg_import_fallback_title")) },
+        title = { Text(stringResource("ibm_mq_msg_import_fallback_title")) },
         text = {
             Column {
-                Text(stringResource("msg_import_fallback_message").withArg(fileName))
+                Text(stringResource("ibm_mq_msg_import_fallback_message").withArg(fileName))
                 if (errorText != null) {
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        text = stringResource("msg_import_failed").withArg(errorText),
+                        text = stringResource("ibm_mq_msg_import_failed").withArg(errorText),
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -207,7 +207,7 @@ fun DmpmqmsgFallbackDialog(
         },
         confirmButton = {
             PressableButton(onClick = onSendPlain, enabled = !executing) {
-                Text(if (executing) stringResource("msg_import_executing") else stringResource("msg_import_fallback_send"))
+                Text(if (executing) stringResource("ibm_mq_msg_import_executing") else stringResource("ibm_mq_msg_import_fallback_send"))
             }
         },
         dismissButton = {
@@ -270,7 +270,7 @@ private fun expiryPretty(value: Int?): String = when (value) {
 
 /** 消息体预览：文本按 CCSID 解码（前 2000 字符）；二进制给 hex 预览（前 256 字节）。 */
 private fun dmpmqmsgBodyPreview(message: DmpmqmsgMessage): String {
-    if (message.body.isEmpty()) return stringResource("msg_detail_empty_body")
+    if (message.body.isEmpty()) return stringResource("ibm_mq_msg_detail_empty_body")
     val ccsid = message.ccsid ?: 819
     val binary = message.body.size >= 8 && message.body.take(8192).any { it == 0.toByte() }
     return if (binary) {

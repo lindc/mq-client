@@ -21,7 +21,6 @@
   "kafka_ui_error_bootstrap_required": "Bootstrap servers is required",
   "kafka_ui_error_timeout_range": "Connection timeout must be an integer between 5 and 300",
 
-  "nav_topics": "Topics",
   "kafka_action_ask_ai": "Ask AI",
   "kafka_ui_search_placeholder": "Search topics",
   "kafka_ui_refresh": "Refresh",
@@ -29,5 +28,7 @@
   "kafka_ui_topic_partitions": "%1$d partitions",
   "kafka_ui_topic_replicas": "%1$d replicas",
   "kafka_ui_topic_internal": "internal",
-  "kafka_ui_error_not_connected": "Not connected — use the \"Connect\" item in the connection's context menu on the left"
+  "kafka_ui_error_not_connected": "Not connected — use the \"Connect\" item in the connection's context menu on the left",
+
+  "kafka_ui_nav_topics": "Topics"
 }

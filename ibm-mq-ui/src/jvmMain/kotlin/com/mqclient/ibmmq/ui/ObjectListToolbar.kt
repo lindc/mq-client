@@ -91,7 +91,7 @@ fun SystemObjectToggleButton(
 ) {
     ToolbarButton(
         icon = if (showSystem) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-        text = stringResource(if (showSystem) "toolbar_hide_system" else "toolbar_show_system"),
+        text = stringResource(if (showSystem) "ibm_mq_toolbar_hide_system" else "ibm_mq_toolbar_show_system"),
         onClick = onToggle,
     )
 }

@@ -67,14 +67,14 @@ fun QueueListPanel(
     val state = rememberMqObjectListState(
         connectionId = connectionId,
         objectType = MqObjectType.QUEUE,
-        loadFailedText = { e -> stringResource("queue_load_failed").withArg(e.message ?: e::class.simpleName ?: "") },
-        scanFailedText = { e -> stringResource("queue_scan_failed").withArg(e.message ?: e::class.simpleName ?: "") },
+        loadFailedText = { e -> stringResource("ibm_mq_queue_load_failed").withArg(e.message ?: e::class.simpleName ?: "") },
+        scanFailedText = { e -> stringResource("ibm_mq_queue_scan_failed").withArg(e.message ?: e::class.simpleName ?: "") },
     )
 
     LoadStateContent(
         state = state.loadState,
         onRetry = state.retry,
-        loadingMessage = stringResource("queue_loading"),
+        loadingMessage = stringResource("ibm_mq_queue_loading"),
         modifier = Modifier.fillMaxSize(),
         // 空列表的呈现交给 ObjectListPanel（其内部自带空态 + 工具栏，
         // 「显示系统」开关在空结果下仍需可用），故此处恒返回 false。
@@ -125,8 +125,8 @@ fun QueueListPanel(
                         onSearchChange = { searchText = it },
                         onRefresh = state.refresh,
                         refreshing = state.isRefreshing,
-                        placeholder = stringResource("queue_search_placeholder"),
-                        refreshText = stringResource("queue_refresh"),
+                        placeholder = stringResource("ibm_mq_queue_search_placeholder"),
+                        refreshText = stringResource("ibm_mq_queue_refresh"),
                         showSystemToggle = true,
                         showSystem = showSystem,
                         onShowSystemChange = { showSystem = !showSystem },

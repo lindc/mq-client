@@ -67,8 +67,8 @@ fun ListenerListPanel(
     val state = rememberMqObjectListState(
         connectionId = connectionId,
         objectType = MqObjectType.LISTENER,
-        loadFailedText = { e -> stringResource("listener_load_failed").withArg(e.message ?: e::class.simpleName ?: "") },
-        scanFailedText = { e -> stringResource("listener_scan_failed").withArg(e.message ?: e::class.simpleName ?: "") },
+        loadFailedText = { e -> stringResource("ibm_mq_listener_load_failed").withArg(e.message ?: e::class.simpleName ?: "") },
+        scanFailedText = { e -> stringResource("ibm_mq_listener_scan_failed").withArg(e.message ?: e::class.simpleName ?: "") },
     )
     val scope = rememberCoroutineScope()
     val snackbarHostState = LocalSnackbarHostState.current
@@ -129,16 +129,16 @@ fun ListenerListPanel(
                 // showSnackbar 挂起到提示关闭才返回——另起协程弹提示，finally 里的按钮
                 // 复位不被拖住（注释承诺的「按钮立即恢复」）。
                 is PollOutcome.CommandFailed ->
-                    scope.launch { snackbarHostState.showSnackbar(stringResource("operation_failed").withArg(outcome.errorMessage ?: "")) }
+                    scope.launch { snackbarHostState.showSnackbar(stringResource("ibm_mq_operation_failed").withArg(outcome.errorMessage ?: "")) }
                 is PollOutcome.Reached ->
                     scope.launch { snackbarHostState.showSnackbar(stringResource(successKey).withArg(name)) }
                 is PollOutcome.Timeout ->
                     scope.launch {
                         snackbarHostState.showSnackbar(
                             if (outcome.lastError != null) {
-                                stringResource("listener_operation_timeout_error").withArg(outcome.lastError!!)
+                                stringResource("ibm_mq_listener_operation_timeout_error").withArg(outcome.lastError!!)
                             } else {
-                                stringResource("listener_operation_timeout")
+                                stringResource("ibm_mq_listener_operation_timeout")
                             },
                         )
                     }
@@ -153,7 +153,7 @@ fun ListenerListPanel(
 
     fun startListener(name: String) {
         val job = scope.launch {
-            runListenerCommand(name, "START LISTENER('$name')", "listener_start_success", "RUNNING")
+            runListenerCommand(name, "START LISTENER('$name')", "ibm_mq_listener_start_success", "RUNNING")
         }
         pollJobs.add(job)
         job.invokeOnCompletion { pollJobs.remove(job) }
@@ -166,7 +166,7 @@ fun ListenerListPanel(
     LoadStateContent(
         state = state.loadState,
         onRetry = state.retry,
-        loadingMessage = stringResource("listener_loading"),
+        loadingMessage = stringResource("ibm_mq_listener_loading"),
         modifier = Modifier.fillMaxSize(),
         // 空列表的呈现交给 ObjectListPanel（其内部自带空态 + 工具栏），故此处恒返回 false。
         emptyCheck = { false },
@@ -204,8 +204,8 @@ fun ListenerListPanel(
                         onSearchChange = { searchText = it },
                         onRefresh = state.refresh,
                         refreshing = state.isRefreshing,
-                        placeholder = stringResource("listener_search_placeholder"),
-                        refreshText = stringResource("listener_refresh"),
+                        placeholder = stringResource("ibm_mq_listener_search_placeholder"),
+                        refreshText = stringResource("ibm_mq_listener_refresh"),
                         showSystemToggle = true,
                         showSystem = showSystem,
                         onShowSystemChange = { showSystem = !showSystem },
@@ -220,7 +220,7 @@ fun ListenerListPanel(
                     onConfirm = {
                         pendingStop = null
                         val job = scope.launch {
-                            runListenerCommand(name, command, "listener_stop_success", "NOT_RUNNING")
+                            runListenerCommand(name, command, "ibm_mq_listener_stop_success", "NOT_RUNNING")
                         }
                         pollJobs.add(job)
                         job.invokeOnCompletion { pollJobs.remove(job) }

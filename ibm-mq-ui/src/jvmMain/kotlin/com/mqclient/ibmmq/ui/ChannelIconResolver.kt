@@ -105,17 +105,17 @@ object ChannelIconResolver {
     fun resolveLabel(snapshot: MqObjectSnapshot): String {
         val type = resolveType(snapshot)
         return when (type) {
-            ChannelType.SENDER -> stringResource("channel_type_sender")
-            ChannelType.RECEIVER -> stringResource("channel_type_receiver")
-            ChannelType.REQUESTER -> stringResource("channel_type_requester")
-            ChannelType.SERVER -> stringResource("channel_type_server")
-            ChannelType.CLUSTER -> stringResource("channel_type_cluster")
-            ChannelType.SERVER_CONN -> stringResource("channel_type_server_conn")
-            ChannelType.CLIENT_CONN -> stringResource("channel_type_client_conn")
-            ChannelType.MQTT -> stringResource("channel_type_mqtt")
-            ChannelType.AMQP -> stringResource("channel_type_amqp")
+            ChannelType.SENDER -> stringResource("ibm_mq_channel_type_sender")
+            ChannelType.RECEIVER -> stringResource("ibm_mq_channel_type_receiver")
+            ChannelType.REQUESTER -> stringResource("ibm_mq_channel_type_requester")
+            ChannelType.SERVER -> stringResource("ibm_mq_channel_type_server")
+            ChannelType.CLUSTER -> stringResource("ibm_mq_channel_type_cluster")
+            ChannelType.SERVER_CONN -> stringResource("ibm_mq_channel_type_server_conn")
+            ChannelType.CLIENT_CONN -> stringResource("ibm_mq_channel_type_client_conn")
+            ChannelType.MQTT -> stringResource("ibm_mq_channel_type_mqtt")
+            ChannelType.AMQP -> stringResource("ibm_mq_channel_type_amqp")
             ChannelType.UNKNOWN ->
-                "${stringResource("channel_type_unknown")} ${stringResource("channel_type_unknown_raw").withArg(snapshot.channelType ?: "null")}"
+                "${stringResource("ibm_mq_channel_type_unknown")} ${stringResource("ibm_mq_channel_type_unknown_raw").withArg(snapshot.channelType ?: "null")}"
         }
     }
 }

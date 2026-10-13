@@ -96,7 +96,7 @@ internal fun QmgrPropertiesPanel(connectionId: String) {
             }
             PropertyGroupsPane(
                 groups = groups,
-                defaultSelectionKey = "qmgr_props_group_general",
+                defaultSelectionKey = "ibm_mq_qmgr_props_group_general",
             )
         }
     }

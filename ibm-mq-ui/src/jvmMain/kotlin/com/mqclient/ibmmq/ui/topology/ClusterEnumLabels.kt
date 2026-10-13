@@ -20,8 +20,8 @@ import com.mqclient.uicommon.i18n.stringResource
 @Composable
 internal fun clusterQmTypeLabel(value: String?): String = when (value?.uppercase()) {
     null, "", "-" -> "-"
-    "REPOS", "REPOSITORY", "1" -> stringResource("cluster_enum_qmtype_repos")
-    "NORMAL", "0" -> stringResource("cluster_enum_qmtype_normal")
+    "REPOS", "REPOSITORY", "1" -> stringResource("ibm_mq_cluster_enum_qmtype_repos")
+    "NORMAL", "0" -> stringResource("ibm_mq_cluster_enum_qmtype_normal")
     else -> unknownValue(value)
 }
 
@@ -29,9 +29,9 @@ internal fun clusterQmTypeLabel(value: String?): String = when (value?.uppercase
 @Composable
 internal fun clusterDefTypeLabel(value: String?): String = when (value?.uppercase()) {
     null, "", "-" -> "-"
-    "CLUSSDR" -> stringResource("cluster_enum_deftype_clussdr")
-    "CLUSSDRA" -> stringResource("cluster_enum_deftype_clussdra")
-    "CLUSRCVR" -> stringResource("cluster_enum_deftype_clusrcvr")
+    "CLUSSDR" -> stringResource("ibm_mq_cluster_enum_deftype_clussdr")
+    "CLUSSDRA" -> stringResource("ibm_mq_cluster_enum_deftype_clussdra")
+    "CLUSRCVR" -> stringResource("ibm_mq_cluster_enum_deftype_clusrcvr")
     else -> unknownValue(value)
 }
 
@@ -39,13 +39,13 @@ internal fun clusterDefTypeLabel(value: String?): String = when (value?.uppercas
 @Composable
 internal fun clusterStatusLabel(value: String?): String = when (value?.uppercase()) {
     null, "", "-" -> "-"
-    "RUNNING" -> stringResource("cluster_enum_status_running")
-    "RETRYING" -> stringResource("cluster_enum_status_retrying")
-    "STOPPED" -> stringResource("cluster_enum_status_stopped")
-    "STARTING" -> stringResource("cluster_enum_status_starting")
-    "STOPPING" -> stringResource("cluster_enum_status_stopping")
-    "INACTIVE" -> stringResource("cluster_enum_status_inactive")
-    "PAUSED" -> stringResource("cluster_enum_status_paused")
+    "RUNNING" -> stringResource("ibm_mq_cluster_enum_status_running")
+    "RETRYING" -> stringResource("ibm_mq_cluster_enum_status_retrying")
+    "STOPPED" -> stringResource("ibm_mq_cluster_enum_status_stopped")
+    "STARTING" -> stringResource("ibm_mq_cluster_enum_status_starting")
+    "STOPPING" -> stringResource("ibm_mq_cluster_enum_status_stopping")
+    "INACTIVE" -> stringResource("ibm_mq_cluster_enum_status_inactive")
+    "PAUSED" -> stringResource("ibm_mq_cluster_enum_status_paused")
     else -> unknownValue(value)
 }
 
@@ -60,4 +60,4 @@ internal fun clusterStatusColor(value: String?): Color = when (value?.uppercase(
 
 @Composable
 private fun unknownValue(value: String): String =
-    "${value.trim()} (${stringResource("cluster_enum_unknown")})"
+    "${value.trim()} (${stringResource("ibm_mq_cluster_enum_unknown")})"

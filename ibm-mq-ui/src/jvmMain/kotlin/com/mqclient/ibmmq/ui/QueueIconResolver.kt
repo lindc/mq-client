@@ -75,12 +75,12 @@ object QueueIconResolver {
 
     /** 类型的 i18n 键（Tooltip / 无障碍文案用）。 */
     fun typeNameKey(type: QueueType): String = when (type) {
-        QueueType.LOCAL -> "queue_type_local"
-        QueueType.TRANSMISSION -> "queue_type_transmission"
-        QueueType.REMOTE -> "queue_type_remote"
-        QueueType.ALIAS -> "queue_type_alias"
-        QueueType.MODEL -> "queue_type_model"
-        QueueType.UNKNOWN -> "queue_type_unknown"
+        QueueType.LOCAL -> "ibm_mq_queue_type_local"
+        QueueType.TRANSMISSION -> "ibm_mq_queue_type_transmission"
+        QueueType.REMOTE -> "ibm_mq_queue_type_remote"
+        QueueType.ALIAS -> "ibm_mq_queue_type_alias"
+        QueueType.MODEL -> "ibm_mq_queue_type_model"
+        QueueType.UNKNOWN -> "ibm_mq_queue_type_unknown"
     }
 
     /**

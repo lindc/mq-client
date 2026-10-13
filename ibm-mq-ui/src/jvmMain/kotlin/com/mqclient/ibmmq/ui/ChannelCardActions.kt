@@ -75,13 +75,13 @@ object ChannelCardActions {
                 in RUNNING_LIKE -> actions += stopAction(onStop)
                 in STOPPED_LIKE, null -> actions += startAction(onStart)
                 in BUSY_LIKE -> {
-                    actions += startAction(onStart, enabled = false, tooltip = "operation_busy")
-                    actions += stopAction(onStop, enabled = false, tooltip = "operation_busy")
+                    actions += startAction(onStart, enabled = false, tooltip = "ibm_mq_operation_busy")
+                    actions += stopAction(onStop, enabled = false, tooltip = "ibm_mq_operation_busy")
                 }
                 else -> {
                     // 未识别的状态值：信息不足，禁用并提示。
-                    actions += startAction(onStart, enabled = false, tooltip = "operation_unknown_state")
-                    actions += stopAction(onStop, enabled = false, tooltip = "operation_unknown_state")
+                    actions += startAction(onStart, enabled = false, tooltip = "ibm_mq_operation_unknown_state")
+                    actions += stopAction(onStop, enabled = false, tooltip = "ibm_mq_operation_unknown_state")
                 }
             }
         }
@@ -93,13 +93,13 @@ object ChannelCardActions {
         actions += CardAction(
             id = "channel.properties",
             icon = Icons.Default.Info,
-            tooltip = "channel_action_properties",
+            tooltip = "ibm_mq_channel_action_properties",
             onClick = onOpenProperties,
         )
         return actions
     }
 
-    private fun startAction(onClick: () -> Unit, enabled: Boolean = true, tooltip: String = "channel_action_start") =
+    private fun startAction(onClick: () -> Unit, enabled: Boolean = true, tooltip: String = "ibm_mq_channel_action_start") =
         CardAction(
             id = "channel.start",
             icon = Icons.Default.PlayArrow,
@@ -108,7 +108,7 @@ object ChannelCardActions {
             onClick = onClick,
         )
 
-    private fun stopAction(onClick: () -> Unit, enabled: Boolean = true, tooltip: String = "channel_action_stop") =
+    private fun stopAction(onClick: () -> Unit, enabled: Boolean = true, tooltip: String = "ibm_mq_channel_action_stop") =
         CardAction(
             id = "channel.stop",
             icon = Icons.Default.Stop,

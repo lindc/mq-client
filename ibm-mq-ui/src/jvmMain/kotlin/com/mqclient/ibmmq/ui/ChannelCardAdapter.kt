@@ -56,11 +56,11 @@ internal fun MqObjectSnapshot.toChannelCardData(
             else -> CHANNEL_STATUS_NEUTRAL
         },
         statusText = when {
-            executingTarget == "RUNNING" -> stringResource("channel_status_starting")
-            executingTarget == "STOPPED" -> stringResource("channel_status_stopping")
+            executingTarget == "RUNNING" -> stringResource("ibm_mq_channel_status_starting")
+            executingTarget == "STOPPED" -> stringResource("ibm_mq_channel_status_stopping")
             status != null -> channelStatusText(status)
-            isDefinedInactive -> stringResource("channel_status_inactive")
-            else -> stringResource("channel_status_unknown")
+            isDefinedInactive -> stringResource("ibm_mq_channel_status_inactive")
+            else -> stringResource("ibm_mq_channel_status_unknown")
         },
         metricValue = null,
         actions = actions,
@@ -71,16 +71,16 @@ internal fun MqObjectSnapshot.toChannelCardData(
 /** 通道运行状态 → i18n 文案（未覆盖的状态值回退到原始英文状态码，不丢信息）。 */
 internal fun channelStatusText(status: String): String {
     val key = when (status) {
-        "RUNNING" -> "channel_status_running"
-        "RETRYING" -> "channel_status_retrying"
-        "STOPPED" -> "channel_status_stopped"
-        "BINDING" -> "channel_status_binding"
-        "INITIALIZING" -> "channel_status_initializing"
-        "STARTING" -> "channel_status_starting"
-        "STOPPING" -> "channel_status_stopping"
-        "PAUSED" -> "channel_status_paused"
-        "REQUESTING" -> "channel_status_requesting"
-        "INACTIVE" -> "channel_status_inactive"
+        "RUNNING" -> "ibm_mq_channel_status_running"
+        "RETRYING" -> "ibm_mq_channel_status_retrying"
+        "STOPPED" -> "ibm_mq_channel_status_stopped"
+        "BINDING" -> "ibm_mq_channel_status_binding"
+        "INITIALIZING" -> "ibm_mq_channel_status_initializing"
+        "STARTING" -> "ibm_mq_channel_status_starting"
+        "STOPPING" -> "ibm_mq_channel_status_stopping"
+        "PAUSED" -> "ibm_mq_channel_status_paused"
+        "REQUESTING" -> "ibm_mq_channel_status_requesting"
+        "INACTIVE" -> "ibm_mq_channel_status_inactive"
         else -> null
     }
     return key?.let { stringResource(it) } ?: status

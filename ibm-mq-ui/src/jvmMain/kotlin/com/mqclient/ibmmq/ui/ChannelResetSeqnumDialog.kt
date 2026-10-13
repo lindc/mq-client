@@ -48,12 +48,12 @@ fun ChannelResetSeqnumDialog(
 
     AlertDialog(
         onDismissRequest = { if (!executing) onDismiss() },
-        title = { Text(stringResource("channel_reset_title").withArg(channelName)) },
+        title = { Text(stringResource("ibm_mq_channel_reset_title").withArg(channelName)) },
         text = {
             Column {
-                Text(stringResource("channel_reset_current").withArg(currentSeqNum?.toString() ?: "-"))
+                Text(stringResource("ibm_mq_channel_reset_current").withArg(currentSeqNum?.toString() ?: "-"))
                 Spacer(Modifier.height(12.dp))
-                Text(stringResource("channel_reset_message"))
+                Text(stringResource("ibm_mq_channel_reset_message"))
                 Spacer(Modifier.height(12.dp))
                 OutlinedTextField(
                     value = input,
@@ -61,14 +61,14 @@ fun ChannelResetSeqnumDialog(
                         // 只放行数字，天然挡掉负号 / 非法字符；范围校验在确认时做。
                         if (text.all { it.isDigit() } && text.length <= 10) input = text
                     },
-                    label = { Text(stringResource("channel_reset_new")) },
+                    label = { Text(stringResource("ibm_mq_channel_reset_new")) },
                     isError = input.isNotBlank() && parsed == null,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true,
                     enabled = !executing,
                     supportingText = {
                         if (input.isNotBlank() && parsed == null) {
-                            Text(stringResource("channel_reset_invalid"))
+                            Text(stringResource("ibm_mq_channel_reset_invalid"))
                         }
                     },
                     modifier = Modifier.fillMaxWidth(),
@@ -76,7 +76,7 @@ fun ChannelResetSeqnumDialog(
                 if (errorText != null) {
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        text = stringResource("channel_reset_failed").withArg(errorText),
+                        text = stringResource("ibm_mq_channel_reset_failed").withArg(errorText),
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.padding(top = 4.dp),
@@ -91,7 +91,7 @@ fun ChannelResetSeqnumDialog(
                 enabled = parsed != null && !executing,
                 danger = true,
             ) {
-                Text(if (executing) stringResource("channel_reset_executing") else stringResource("channel_reset_confirm"))
+                Text(if (executing) stringResource("ibm_mq_channel_reset_executing") else stringResource("ibm_mq_channel_reset_confirm"))
             }
         },
         dismissButton = {
