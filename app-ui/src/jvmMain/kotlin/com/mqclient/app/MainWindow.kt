@@ -262,7 +262,11 @@ fun MainWindow(
                                 // 模块没声明该导航项时退回 objectType 本身。objectType 理论上可为
                                 // null（openTab 已挡掉那种情况），给空串而不是原来的 "nav_null"。
                                 val titleKey = titleKeyByObjectType[it.objectType] ?: it.objectType.orEmpty()
-                                "${connectionName(it)} / ${stringResource(titleKey)}"
+                                // 拿不到文案时不留下「连接名 / 」—— titleKey 为空串时
+                                // stringResource 原样返回空串，拼出来就是条尾巴。
+                                listOf(connectionName(it), stringResource(titleKey))
+                                    .filter { part -> part.isNotBlank() }
+                                    .joinToString(" / ")
                             },
                             onSelect = {
                                 activeTab = it
