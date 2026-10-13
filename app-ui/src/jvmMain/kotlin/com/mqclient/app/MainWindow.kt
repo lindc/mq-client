@@ -86,7 +86,8 @@ fun MainWindow(
     isNavigationVisible: Boolean,
     connections: List<ConnectionInfo>,
     selection: NavSelection?,
-    onSelect: (NavSelection) -> Unit,
+    /** null = 清空选中（连接被删、已无 Tab 可落位时用；见下面的失效 Tab 清理）。 */
+    onSelect: (NavSelection?) -> Unit,
     aiPanelVisible: Boolean,
     aiPanelState: AiPanelState,
     aiContext: AiContext?,
@@ -179,6 +180,24 @@ fun MainWindow(
         val next = openTabs.getOrNull(index) ?: openTabs.lastOrNull()
         activeTab = next
         onSelect(next ?: NavSelection(tab.connectionId))
+    }
+
+    // 连接被删掉后它的 Tab 不该留着：否则 Tab 条标题退化成连接 UUID、内容区也拿不到
+    // tabUi（只剩「coming soon」占位）。connections 一变就按 id 对齐一次。
+    // 选中态与 activeTab 必须一起落位 —— 只改其一会出现“Tab 切了内容没切”的脱节
+    // （见下面 TopologyFocusHolder 的注释）；没有下家时传 null 把选中清掉，
+    // 否则侧栏 / 状态栏 / AI 上下文里会一直挂着一个不存在的连接 id。
+    LaunchedEffect(connections) {
+        val alive = connections.mapTo(mutableSetOf()) { it.id }
+        if (openTabs.none { it.connectionId !in alive }) return@LaunchedEffect
+        val activeIndex = openTabs.indexOf(activeTab)
+        openTabs = openTabs.filter { it.connectionId in alive }
+        if (activeTab?.connectionId !in alive) {
+            // 与 closeTab 同款落位：优先原位置，否则最后一个。
+            val next = openTabs.getOrNull(activeIndex) ?: openTabs.lastOrNull()
+            activeTab = next
+            onSelect(next)
+        }
     }
 
     // 列表页「在拓扑图中查看」写入焦点后，这里打开/激活对应连接的拓扑 Tab。
