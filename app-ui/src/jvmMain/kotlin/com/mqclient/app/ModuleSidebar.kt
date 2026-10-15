@@ -241,13 +241,17 @@ private fun ConnectionRow(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false),
                     )
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        text = "[${connection.mqName}]",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                    )
+                    // 方括号端点名：MQ 有 qmgr 显示 `QM1 [QM1]`；Kafka 等没有端点名的
+                    // 连接 mqName 为空串 —— 整块（含前置间距）不渲染，避免悬空的 `[]`。
+                    if (connection.mqName.isNotBlank()) {
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = "[${connection.mqName}]",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                        )
+                    }
                 }
                 Text(
                     text = connection.endpoint,
