@@ -15,6 +15,8 @@
   "kafka_ui_hint_truststore_path": "自签证书的 CA 信任库路径；.p12/.pfx 按 PKCS12 解析，其余按 JKS。留空使用 JVM 默认信任库",
   "kafka_ui_field_truststore_password": "Truststore 密码",
   "kafka_ui_field_connection_timeout": "连接超时",
+  "kafka_ui_field_object_scan_interval": "对象扫描间隔",
+  "kafka_ui_field_lag_scan_interval": "Lag 扫描间隔",
   "kafka_ui_file_dialog_title": "选择证书文件",
   "kafka_ui_test_running": "正在测试连接...",
   "kafka_ui_test_timeout": "连接超时（15 秒）",
@@ -28,6 +30,8 @@
   "kafka_ui_mechanism_scram512": "SCRAM-SHA-512",
   "kafka_ui_error_bootstrap_required": "请填写 Bootstrap servers",
   "kafka_ui_error_timeout_range": "连接超时须为 5-300 之间的整数",
+  "kafka_ui_error_object_scan_range": "对象扫描间隔须为 1-1440 之间的整数",
+  "kafka_ui_error_lag_scan_range": "Lag 扫描间隔须为 10-3600 之间的整数",
 
   "kafka_action_ask_ai": "询问 AI",
   "kafka_ui_search_placeholder": "搜索主题",
@@ -38,6 +42,7 @@
   "kafka_ui_topic_internal": "内部主题",
   "kafka_ui_connecting": "正在连接…",
   "kafka_ui_connect_failed": "连接失败",
+  "kafka_ui_connect_disconnected": "连接已断开",
 
   "kafka_ui_nav_topics": "主题",
   "kafka_ui_nav_groups": "消费组",

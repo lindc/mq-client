@@ -32,9 +32,14 @@ private val CERT_EXTENSIONS = listOf("p12", "pfx", "jks")
 data class KafkaFieldErrors(
     val bootstrapServers: String? = null,
     val connectionTimeout: String? = null,
+    val objectScanInterval: String? = null,
+    val lagScanInterval: String? = null,
 ) {
     val hasAny: Boolean
-        get() = bootstrapServers != null || connectionTimeout != null
+        get() = bootstrapServers != null ||
+            connectionTimeout != null ||
+            objectScanInterval != null ||
+            lagScanInterval != null
 }
 
 /**
@@ -61,6 +66,14 @@ class KafkaConnectionFormState(
 
         const val TIMEOUT_MIN = 5
         const val TIMEOUT_MAX = 300
+
+        /** 对象慢扫间隔的合法范围（分钟）。 */
+        const val OBJECT_SCAN_MIN = 1
+        const val OBJECT_SCAN_MAX = 1440
+
+        /** Lag 心跳间隔的合法范围（秒）。 */
+        const val LAG_SCAN_MIN = 10
+        const val LAG_SCAN_MAX = 3600
 
         /** securityProtocol 下拉的候选项（与 KafkaConfig.SECURITY_PROTOCOLS 同源）。 */
         val PROTOCOL_OPTIONS = listOf("PLAINTEXT", "SSL", "SASL_PLAINTEXT", "SASL_SSL")
@@ -97,6 +110,8 @@ class KafkaConnectionFormState(
     var truststorePath by mutableStateOf("")
     var truststorePassword by mutableStateOf("")
     var connectionTimeout by mutableStateOf(KafkaConfig.DEFAULT_CONNECTION_TIMEOUT_SECONDS.toString())
+    var objectScanIntervalMinutes by mutableStateOf(KafkaConfig.DEFAULT_OBJECT_SCAN_INTERVAL_MINUTES.toString())
+    var lagScanIntervalSeconds by mutableStateOf(KafkaConfig.DEFAULT_LAG_SCAN_INTERVAL_SECONDS.toString())
 
     // 编辑模式的原密码与「用户动过没有」标记：没动过 → 构建时沿用原值，
     // 界面上只显示占位符（见 loadFrom）。SASL 密码与 truststore 密码各一套。
@@ -131,6 +146,14 @@ class KafkaConnectionFormState(
         if (t == null || t !in TIMEOUT_MIN..TIMEOUT_MAX) {
             e = e.copy(connectionTimeout = stringResource("kafka_ui_error_timeout_range"))
         }
+        val o = objectScanIntervalMinutes.trim().toIntOrNull()
+        if (o == null || o !in OBJECT_SCAN_MIN..OBJECT_SCAN_MAX) {
+            e = e.copy(objectScanInterval = stringResource("kafka_ui_error_object_scan_range"))
+        }
+        val l = lagScanIntervalSeconds.trim().toIntOrNull()
+        if (l == null || l !in LAG_SCAN_MIN..LAG_SCAN_MAX) {
+            e = e.copy(lagScanInterval = stringResource("kafka_ui_error_lag_scan_range"))
+        }
         errors = e
         return !e.hasAny
     }
@@ -148,6 +171,10 @@ class KafkaConnectionFormState(
             else originalTruststorePassword,
         connectionTimeout = connectionTimeout.trim().toIntOrNull()
             ?: KafkaConfig.DEFAULT_CONNECTION_TIMEOUT_SECONDS,
+        objectScanIntervalMinutes = objectScanIntervalMinutes.trim().toIntOrNull()
+            ?: KafkaConfig.DEFAULT_OBJECT_SCAN_INTERVAL_MINUTES,
+        lagScanIntervalSeconds = lagScanIntervalSeconds.trim().toIntOrNull()
+            ?: KafkaConfig.DEFAULT_LAG_SCAN_INTERVAL_SECONDS,
     )
 
     /** 清空草稿回新建模式（宿主每次进入创建页都会调）。 */
@@ -162,6 +189,8 @@ class KafkaConnectionFormState(
         truststorePath = ""
         truststorePassword = ""
         connectionTimeout = KafkaConfig.DEFAULT_CONNECTION_TIMEOUT_SECONDS.toString()
+        objectScanIntervalMinutes = KafkaConfig.DEFAULT_OBJECT_SCAN_INTERVAL_MINUTES.toString()
+        lagScanIntervalSeconds = KafkaConfig.DEFAULT_LAG_SCAN_INTERVAL_SECONDS.toString()
         originalPassword = ""
         passwordChanged = false
         originalTruststorePassword = ""
@@ -188,6 +217,8 @@ class KafkaConnectionFormState(
         username = config.username
         truststorePath = config.truststorePath
         connectionTimeout = config.connectionTimeout.toString()
+        objectScanIntervalMinutes = config.objectScanIntervalMinutes.toString()
+        lagScanIntervalSeconds = config.lagScanIntervalSeconds.toString()
 
         originalPassword = config.password
         password = ""

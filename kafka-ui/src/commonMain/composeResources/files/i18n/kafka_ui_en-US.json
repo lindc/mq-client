@@ -15,6 +15,8 @@
   "kafka_ui_hint_truststore_path": "Path to a CA truststore for self-signed certificates; .p12/.pfx are parsed as PKCS12, anything else as JKS. Leave empty to use the JVM default truststore",
   "kafka_ui_field_truststore_password": "Truststore password",
   "kafka_ui_field_connection_timeout": "Connection timeout",
+  "kafka_ui_field_object_scan_interval": "Object scan interval",
+  "kafka_ui_field_lag_scan_interval": "Lag scan interval",
   "kafka_ui_file_dialog_title": "Select certificate file",
   "kafka_ui_test_running": "Testing connection...",
   "kafka_ui_test_timeout": "Connection timed out (15 s)",
@@ -28,6 +30,8 @@
   "kafka_ui_mechanism_scram512": "SCRAM-SHA-512",
   "kafka_ui_error_bootstrap_required": "Bootstrap servers is required",
   "kafka_ui_error_timeout_range": "Connection timeout must be an integer between 5 and 300",
+  "kafka_ui_error_object_scan_range": "Object scan interval must be an integer between 1 and 1440",
+  "kafka_ui_error_lag_scan_range": "Lag scan interval must be an integer between 10 and 3600",
 
   "kafka_action_ask_ai": "Ask AI",
   "kafka_ui_search_placeholder": "Search topics",
@@ -38,6 +42,7 @@
   "kafka_ui_topic_internal": "internal",
   "kafka_ui_connecting": "Connecting…",
   "kafka_ui_connect_failed": "Connection failed",
+  "kafka_ui_connect_disconnected": "Connection disconnected",
 
   "kafka_ui_nav_topics": "Topics",
   "kafka_ui_nav_groups": "Consumer Group",

@@ -160,6 +160,20 @@ internal fun KafkaConnectionFormContent(state: KafkaConnectionFormState) {
             errorMessage = state.errors.connectionTimeout,
             suffix = "s",
         )
+        TextRow(
+            label = stringResource("kafka_ui_field_object_scan_interval"),
+            value = state.objectScanIntervalMinutes,
+            onChange = { state.objectScanIntervalMinutes = it; state.clearErrors() },
+            errorMessage = state.errors.objectScanInterval,
+            suffix = "min",
+        )
+        TextRow(
+            label = stringResource("kafka_ui_field_lag_scan_interval"),
+            value = state.lagScanIntervalSeconds,
+            onChange = { state.lagScanIntervalSeconds = it; state.clearErrors() },
+            errorMessage = state.errors.lagScanInterval,
+            suffix = "s",
+        )
 
         // 测试进行中的提示（保存按钮已由宿主按 busy 禁用）。
         if (state.saveState == SaveState.Testing) {

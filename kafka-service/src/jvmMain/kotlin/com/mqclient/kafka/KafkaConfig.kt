@@ -26,11 +26,17 @@ data class KafkaConfig(
     val truststorePassword: String = "",
     /** 连接阶段（describeCluster 验证）的超时秒数；AdminClient 的 API 超时同源。 */
     val connectionTimeout: Int = DEFAULT_CONNECTION_TIMEOUT_SECONDS,
+    /** 对象慢扫间隔（分钟）：brokers / topics（分区明细）/ groups（见 KafkaScanService）。 */
+    val objectScanIntervalMinutes: Int = DEFAULT_OBJECT_SCAN_INTERVAL_MINUTES,
+    /** Lag 心跳快扫间隔（秒）：consumer group 的 current/latest offset 与 lag。 */
+    val lagScanIntervalSeconds: Int = DEFAULT_LAG_SCAN_INTERVAL_SECONDS,
 ) {
     companion object {
         const val DEFAULT_SECURITY_PROTOCOL = "PLAINTEXT"
         const val DEFAULT_SASL_MECHANISM = "PLAIN"
         const val DEFAULT_CONNECTION_TIMEOUT_SECONDS = 30
+        const val DEFAULT_OBJECT_SCAN_INTERVAL_MINUTES = 10
+        const val DEFAULT_LAG_SCAN_INTERVAL_SECONDS = 30
 
         /** securityProtocol 的合法值（Kafka 原生枚举名）；fromOptions 校验用。 */
         val SECURITY_PROTOCOLS = setOf("PLAINTEXT", "SSL", "SASL_PLAINTEXT", "SASL_SSL")
@@ -47,6 +53,8 @@ private object OptionKeys {
     const val TRUSTSTORE_PATH = "truststorePath"
     const val TRUSTSTORE_PASSWORD = "truststorePassword"
     const val CONNECTION_TIMEOUT = "connectionTimeout"
+    const val OBJECT_SCAN_INTERVAL = "objectScanIntervalMinutes"
+    const val LAG_SCAN_INTERVAL = "lagScanIntervalSeconds"
 }
 
 /** 摊平成 [ConnectionInfo.options]（值全字符串；敏感键落盘时由序列化器加密）。 */
@@ -59,6 +67,8 @@ fun KafkaConfig.toOptions(): Map<String, String> = buildMap {
     put(OptionKeys.TRUSTSTORE_PATH, truststorePath)
     put(OptionKeys.TRUSTSTORE_PASSWORD, truststorePassword)
     put(OptionKeys.CONNECTION_TIMEOUT, connectionTimeout.toString())
+    put(OptionKeys.OBJECT_SCAN_INTERVAL, objectScanIntervalMinutes.toString())
+    put(OptionKeys.LAG_SCAN_INTERVAL, lagScanIntervalSeconds.toString())
 }
 
 /** 从 [ConnectionInfo.options] 还原；缺键 / 解析失败回落默认值。 */
@@ -82,6 +92,14 @@ fun kafkaConfigFromOptions(options: Map<String, String>): KafkaConfig {
         truststorePath = options[OptionKeys.TRUSTSTORE_PATH].orEmpty().replace('\\', '/'),
         truststorePassword = options[OptionKeys.TRUSTSTORE_PASSWORD].orEmpty(),
         connectionTimeout = int(OptionKeys.CONNECTION_TIMEOUT, KafkaConfig.DEFAULT_CONNECTION_TIMEOUT_SECONDS),
+        objectScanIntervalMinutes = int(
+            OptionKeys.OBJECT_SCAN_INTERVAL,
+            KafkaConfig.DEFAULT_OBJECT_SCAN_INTERVAL_MINUTES,
+        ),
+        lagScanIntervalSeconds = int(
+            OptionKeys.LAG_SCAN_INTERVAL,
+            KafkaConfig.DEFAULT_LAG_SCAN_INTERVAL_SECONDS,
+        ),
     )
 }
 

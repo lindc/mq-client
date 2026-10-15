@@ -41,4 +41,19 @@ object KafkaEvents {
      * `message`(String) / `durationMs`(Long)。宿主（app-ui）订阅它弹结果对话框。
      */
     const val TEST_COMPLETED = "kafka.connection.test.completed"
+
+    // ---- 定时任务扫描事件（由 JobScheduler 周期性触发，命名对齐 ibm-mq）----
+    // 订阅方（UI）收到 completed 后读缓存刷新 —— 缓存优先、事件驱动的统一消费模式。
+
+    /** 对象慢扫完成（brokers / topics / groups 已全量替换进缓存）；payload: `connectionId` / 计数 */
+    const val OBJECTS_SCANNED = "kafka.scan.objects.completed"
+
+    /** 对象慢扫失败（整轮失败，如 describeCluster 不通）；payload: `connectionId` / `message` */
+    const val OBJECTS_SCAN_FAILED = "kafka.scan.objects.failed"
+
+    /** Lag 心跳扫完成（groupLags 已替换进缓存）；payload: `connectionId` / `groupCount` / `totalLag` */
+    const val LAG_SCANNED = "kafka.scan.lag.completed"
+
+    /** Lag 心跳扫失败；payload: `connectionId` / `message` */
+    const val LAG_SCAN_FAILED = "kafka.scan.lag.failed"
 }

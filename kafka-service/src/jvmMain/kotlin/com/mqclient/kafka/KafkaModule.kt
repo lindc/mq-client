@@ -28,6 +28,15 @@ internal val kafkaLog = Log.withTag(MODULE_ID)
 /** 「测试连接」的兜底超时：describeCluster 是阻塞等待，不能无限等。 */
 internal const val TEST_TIMEOUT_MS = 30_000L
 
+/** 对象慢扫任务的任务类型段（`kafka.<conn>.scan.objects`）。 */
+internal const val JOB_SCAN_OBJECTS = "scan.objects"
+
+/** Lag 心跳任务的任务类型段（`kafka.<conn>.scan.lag`）。 */
+internal const val JOB_SCAN_LAG = "scan.lag"
+
+/** 对象慢扫的起步延迟：先把首拍让给 Lag 心跳（见 KafkaConnectionManager.registerScanJobs）。 */
+internal const val OBJECTS_FIRST_DELAY_MS = 5_000L
+
 /**
  * Kafka 模块的初始化入口 —— **显式连接模型**（与 ibm-mq 的 IbmMQModule 同构）。
  *
@@ -44,6 +53,7 @@ internal const val TEST_TIMEOUT_MS = 30_000L
 object KafkaModule {
 
     private var moduleContext: ServiceContext? = null
+    private var service: KafkaScanService? = null
     private var manager: KafkaConnectionManager? = null
     private var subscriptions: List<Job> = emptyList()
 
@@ -54,7 +64,9 @@ object KafkaModule {
     fun initialize(context: ServiceContext) {
         if (manager != null) return
 
-        val created = KafkaConnectionManager(context)
+        val createdService = KafkaScanService(context)
+        val created = KafkaConnectionManager(context, createdService)
+        service = createdService
 
         subscriptions = listOf(
             // 跨模块：核心广播连接变化，只处理属于本模块的连接（payload 里 `type`
@@ -126,6 +138,18 @@ object KafkaModule {
         manager?.disconnectAsync(connectionId)
     }
 
+    /** 扫描服务（缓存只读口 / 手动扫描）；模块未初始化时为 null。 */
+    fun serviceOrNull(): KafkaScanService? = service
+
+    /**
+     * 手动扫描入口（UI 刷新按钮）：在模块 scope 里跑一轮**对象慢扫**（scanLock 串行，
+     * 与定时任务排队不重叠）；扫完经 OBJECTS_SCANNED 事件驱动 UI 刷新缓存数据。
+     */
+    fun scanNow(connectionId: String) {
+        val scanService = service ?: return
+        moduleContext?.coroutineScope?.launch { scanService.scanObjects(connectionId) }
+    }
+
     /**
      * 「测试连接」入口（连接表单的「完成」用）：按**表单草稿**的配置发起一次临时
      * 连接（describeCluster 验证，用完即关），失败抛异常。与 `kafka.connection.test`
@@ -158,6 +182,7 @@ object KafkaModule {
             managerToStop?.let { connectionManager -> runBlocking { connectionManager.shutdownAll() } }
         } finally {
             subscriptionsToCancel.forEach(Job::cancel)
+            service = null
             moduleContext = null
         }
     }

@@ -25,9 +25,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.mqclient.core.ConnectionStatus
+import com.mqclient.core.CoreModule
 import com.mqclient.core.log.Log
 import com.mqclient.graph.TopologyData
 import com.mqclient.graph.TopologyNodeType
+import com.mqclient.kafka.KafkaEvents
+import com.mqclient.kafka.KafkaModule
 import com.mqclient.kafka.ui.rememberKafkaConnectionStatus
 import com.mqclient.mqui.state.LoadState
 import com.mqclient.topology.TopologyCanvas
@@ -58,10 +61,17 @@ fun KafkaTopologyPanel(
 ) {
     val state = remember(connectionId) { KafkaTopologyState(connectionId) }
     val scope = rememberCoroutineScope()
-    // 连接状态可观察（侧边栏同源）：进入 Tab 自动加载；未连接/失败 → 隐式连接，
-    // 状态翻转后 LaunchedEffect 重跑（与 Topic 列表页同一套语义）。
+    // 进入 Tab 首次加载（组合期一次，含隐式连接兜底）；之后的状态变化走
+    // onStatusChanged —— 断开不再被面板静默重连（宿主会收掉断开连接的 Tab）。
     val connectionStatus = rememberKafkaConnectionStatus(connectionId)
-    LaunchedEffect(connectionId, connectionStatus) { state.load() }
+    LaunchedEffect(connectionId) { state.load() }
+    LaunchedEffect(connectionId, connectionStatus) { state.onStatusChanged(connectionStatus) }
+    // 扫描事件驱动：慢扫完成 → 读缓存重建（on(scope = this) 随 effect 离开自动取消）。
+    LaunchedEffect(connectionId) {
+        CoreModule.eventBusOrNull?.on(KafkaEvents.OBJECTS_SCANNED, scope = this) { event ->
+            if (event.payload["connectionId"] as? String == connectionId) state.onObjectsScanned()
+        }
+    }
 
     var showInternal by remember { mutableStateOf(false) }
     var showReplicaEdges by remember { mutableStateOf(false) }
@@ -189,7 +199,8 @@ fun KafkaTopologyPanel(
                 TopologyCanvas(
                     data = current,
                     layoutProvider = kafkaColumnLayoutProvider,
-                    onRescan = { scope.launch { state.load() } },
+                    // 手动扫描：一轮对象慢扫，扫完经 OBJECTS_SCANNED 事件回到 onObjectsScanned。
+                    onRescan = { KafkaModule.scanNow(connectionId) },
                     onNodeDoubleClick = { nodeId ->
                         when (current.nodeTypes[nodeId]) {
                             TopologyNodeType.TOPIC ->

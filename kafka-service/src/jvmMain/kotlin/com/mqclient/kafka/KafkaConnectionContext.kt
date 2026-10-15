@@ -1,6 +1,7 @@
 package com.mqclient.kafka
 
 import com.mqclient.core.ConnectionStatus
+import com.mqclient.core.cache.CacheManager
 import org.apache.kafka.clients.admin.AdminClient
 
 /**
@@ -31,15 +32,26 @@ class KafkaConnectionContext(
     @Volatile
     var adminClient: AdminClient? = null
 
+    /**
+     * 本连接专属的扫描缓存（[CacheManager]，扫描链路 write-through、读口只读）。
+     * 连接成功时创建、断开 / 失败时置空 —— 与 ibm-mq 的 IbmMQConnectionContext.cache
+     * 同一生命周期。
+     */
+    @Volatile
+    var cache: CacheManager? = null
+
     /** 最近一次失败的原因（连接或后续操作），UI 可以展示；成功连接时清空。 */
     @Volatile
     var lastError: String? = null
 
     /**
-     * 断开 / 删除时的清理：丢弃 AdminClient 引用。AdminClient 本身的 close 由
-     * [KafkaConnectionManager] 负责（「谁创建谁清理」：句柄是它连的）。
+     * 断开 / 删除时的清理：丢弃 AdminClient 引用并**清空缓存**（连接断开不留历史）。
+     * AdminClient 本身的 close 由 [KafkaConnectionManager] 负责（「谁创建谁清理」：
+     * 句柄是它连的）。
      */
     fun cleanup() {
         adminClient = null
+        cache?.clear()
+        cache = null
     }
 }

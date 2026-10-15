@@ -20,5 +20,8 @@ kotlin {
             // 才有 CompositeStrategy 的 modern-methods 兜底。
             implementation("org.apache.kafka:kafka-clients:3.9.1")
         }
+        jvmTest.dependencies {
+            implementation(kotlin("test"))
+        }
     }
 }

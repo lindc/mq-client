@@ -3,6 +3,8 @@ package com.mqclient.kafka
 import com.mqclient.core.ConnectionInfo
 import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ConnectionStore
+import com.mqclient.core.cache.CacheManager
+import com.mqclient.core.scheduler.ScheduledJob
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.emit
 import java.time.Duration
@@ -25,10 +27,10 @@ import org.apache.kafka.clients.admin.DescribeClusterOptions
  *  - 程序启动 / `connection.added` 只 [ensureContext] —— 登记 DISCONNECTED 上下文，
  *    **不连接**；
  *  - 用户显式动作才 [connect]：建 AdminClient → describeCluster 验证连通性 →
- *    报 CONNECTED（阶段一不注册任何定时任务，扫描留给后续阶段）；
- *  - [disconnectNow] / 删除 / 模块关闭：关 AdminClient → 报 DISCONNECTED。状态事实
- *    同时喂 `ConnectionStore.reportStatus`（侧边栏）与 [KafkaConnectionContext.status]
- *    （模块内守卫），见 [setStatus]。
+ *    建 cache → 按配置间隔注册扫描任务（对象慢扫 + Lag 心跳）→ 报 CONNECTED；
+ *  - [disconnectNow] / 删除 / 模块关闭：取消扫描任务 → 关 AdminClient → 清缓存 →
+ *    报 DISCONNECTED。状态事实同时喂 `ConnectionStore.reportStatus`（侧边栏）与
+ *    [KafkaConnectionContext.status]（模块内守卫），见 [setStatus]。
  *
  * 并发：同一连接的 connect / disconnect / 删除用**每连接一把 [Mutex]** 串行；
  * 不同连接互不阻塞。
@@ -41,6 +43,7 @@ import org.apache.kafka.clients.admin.DescribeClusterOptions
  */
 class KafkaConnectionManager(
     private val context: ServiceContext,
+    private val service: KafkaScanService,
 ) {
 
     private val contexts = ConcurrentHashMap<String, KafkaConnectionContext>()
@@ -129,7 +132,10 @@ class KafkaConnectionManager(
         ctx.lastError = null
         try {
             ctx.adminClient = createVerifiedAdmin(ctx.config)
+            // 缓存与扫描任务只属于活连接（与 ibm-mq 同一生命周期）。
+            ctx.cache = CacheManager()
             setStatus(ctx, ConnectionStatus.Connected)
+            registerScanJobs(ctx)
             context.emit(KafkaEvents.CONNECTED, mapOf("connectionId" to connectionId))
             kafkaLog.info(
                 "connected: connection=$connectionId bootstrap=${ctx.config.bootstrapServers} " +
@@ -176,14 +182,15 @@ class KafkaConnectionManager(
     }
 
     /**
-     * 断开：关 AdminClient → 状态回 DISCONNECTED。已经是 DISCONNECTED 时是空操作
-     * （重复点「断开」无副作用）。
+     * 断开：取消该连接全部定时任务 → 关 AdminClient → 清缓存 → 状态回 DISCONNECTED。
+     * 已经是 DISCONNECTED 时是空操作（重复点「断开」无副作用）。
      */
     suspend fun disconnectNow(connectionId: String, reason: String? = null) =
         lockFor(connectionId).withLock {
             val ctx = contexts[connectionId] ?: return@withLock
             if (ctx.status == ConnectionStatus.Disconnected) return@withLock
 
+            unregisterScanJobs(connectionId)
             closeQuietly(ctx)
             ctx.cleanup()
             setStatus(ctx, ConnectionStatus.Disconnected)
@@ -199,6 +206,48 @@ class KafkaConnectionManager(
         kafkaLog.info("shutdown all connections: count=${contexts.size}")
         contexts.keys.toList().forEach { disconnectNow(it, reason = "module shutdown") }
         contexts.clear()
+    }
+
+    /* ------------------------------ 定时任务 ------------------------------ */
+
+    /**
+     * 按配置注册两条扫描任务（与 ibm-mq 的 registerScanJobs 同构）—— 间隔来自用户
+     * 建连接时的配置，**不再硬编码**：
+     *  - Lag 心跳（快扫）：`lagScanIntervalSeconds`（默认 30 秒），runOnStart 立即首拍；
+     *  - 对象（慢扫）：`objectScanIntervalMinutes`（默认 10 分钟），晚 5 秒起步，
+     *    把首拍让给心跳。
+     *
+     * 幂等：同 ID 重复注册会顶掉旧的（见 JobScheduler），重连时直接重注册即可。
+     */
+    private fun registerScanJobs(ctx: KafkaConnectionContext) {
+        val scheduler = context.jobScheduler
+        val config = ctx.config
+        scheduler.schedule(
+            ScheduledJob(
+                id = ScheduledJob.idFor(MODULE_ID, ctx.connectionId, JOB_SCAN_LAG),
+                intervalMs = config.lagScanIntervalSeconds * 1_000L,
+                runOnStart = true,
+                action = { service.scanGroupLags(ctx.connectionId) },
+            ),
+        )
+        scheduler.schedule(
+            ScheduledJob(
+                id = ScheduledJob.idFor(MODULE_ID, ctx.connectionId, JOB_SCAN_OBJECTS),
+                intervalMs = config.objectScanIntervalMinutes * 60_000L,
+                initialDelayMs = OBJECTS_FIRST_DELAY_MS,
+                action = { service.scanObjects(ctx.connectionId) },
+            ),
+        )
+        kafkaLog.info(
+            "scan jobs registered: connection=${ctx.connectionId} " +
+                "lag=${config.lagScanIntervalSeconds}s objects=${config.objectScanIntervalMinutes}min",
+        )
+    }
+
+    /** 按前缀收掉该连接的全部定时任务（连接断开 / 删除）。 */
+    private fun unregisterScanJobs(connectionId: String) {
+        kafkaLog.debug("scan jobs unregistering: connection=$connectionId")
+        context.jobScheduler.cancelByPrefix(ScheduledJob.prefixFor(MODULE_ID, connectionId))
     }
 
     /* ------------------------------ 内部 ------------------------------ */

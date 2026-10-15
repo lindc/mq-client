@@ -12,16 +12,16 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.mqclient.core.ConnectionStatus
+import com.mqclient.core.CoreModule
+import com.mqclient.kafka.KafkaEvents
 import com.mqclient.mqui.command.ToolbarButton
 import com.mqclient.mqui.common.CompactSearchField
 import com.mqclient.mqui.objectlist.CardAction
@@ -30,13 +30,12 @@ import com.mqclient.mqui.objectlist.ObjectListPanel
 import com.mqclient.mqui.state.LoadStateContent
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
-import kotlinx.coroutines.launch
 
 /**
- * Consumer Group 列表页（导航项 `groups` 的 Tab 内容）：与 [TopicListPanel] 同一
- * 套骨架（实时查询 + 卡片网格 + 搜索），数据换成 listConsumerGroups +
- * describeConsumerGroups。连接观察走 [KafkaPanelGate] 共享层 —— 未连接自动隐式
- * 连接、连接中显示「正在连接…」、失败显示原因 + 重试，与主题页行为一致。
+ * Consumer Group 列表页（导航项 `groups` 的 Tab 内容）：与 [TopicListPanel] 同一套
+ * 骨架（缓存优先 + 事件驱动 + 卡片网格 + 搜索）：进页读扫描缓存，`kafka.scan.objects.
+ * completed` 事件驱动刷新，「刷新」触发一轮手动慢扫。连接观察走 [KafkaPanelGate]
+ * 共享层 —— 未连接自动隐式连接、连接中显示「正在连接…」、失败显示原因 + 重试。
  *
  * 卡片摘要：组状态（Stable / Empty / Dead…，行业术语不翻译）· 成员数；简单组
  * （无分配协议）加锁样式标记。组内主题/位点赞不进 v1 卡片，详情后续再做。
@@ -47,11 +46,17 @@ fun ConsumerGroupListPanel(
     modifier: Modifier = Modifier,
 ) {
     val state = remember(connectionId) { KafkaConsumerGroupsState(connectionId) }
-    val scope = rememberCoroutineScope()
-    // 连接状态可观察（侧边栏同源）：进入 Tab 自动加载；状态一变重跑（隐式连接
-    // 的发起与宿主侧栏同一行为，本页负责「状态到了就把界面翻过来」）。
+    // 进入 Tab 首次加载（组合期一次，含隐式连接兜底）；之后的状态变化走
+    // onStatusChanged —— 断开不再被面板静默重连（宿主会收掉断开连接的 Tab）。
     val connectionStatus = rememberKafkaConnectionStatus(connectionId)
-    LaunchedEffect(connectionId, connectionStatus) { state.load() }
+    LaunchedEffect(connectionId) { state.load() }
+    LaunchedEffect(connectionId, connectionStatus) { state.onStatusChanged(connectionStatus) }
+    // 扫描事件驱动：慢扫完成 → 读缓存重建列表（on(scope = this) 随 effect 离开自动取消）。
+    LaunchedEffect(connectionId) {
+        CoreModule.eventBusOrNull?.on(KafkaEvents.OBJECTS_SCANNED, scope = this) { event ->
+            if (event.payload["connectionId"] as? String == connectionId) state.onObjectsScanned()
+        }
+    }
 
     Column(modifier.fillMaxSize()) {
         Row(
@@ -68,25 +73,17 @@ fun ConsumerGroupListPanel(
                 placeholder = stringResource("kafka_ui_group_search_placeholder"),
                 modifier = Modifier.weight(1f),
             )
-            // 受限账号下被跳过的无权组数：轻提示，不算错误（0 时不占位）。
-            if (state.skippedCount > 0) {
-                Text(
-                    text = stringResource("kafka_ui_group_skipped").withArg(state.skippedCount),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
             ToolbarButton(
                 icon = Icons.Default.Refresh,
                 text = stringResource("kafka_ui_refresh"),
-                onClick = { scope.launch { state.load() } },
+                onClick = { state.requestScan() },
             )
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
         LoadStateContent(
             state = state.loadState,
-            onRetry = { scope.launch { state.retry() } },
+            onRetry = { state.retry() },
             loadingMessage =
                 if (connectionStatus == ConnectionStatus.Connecting) {
                     stringResource("kafka_ui_connecting")
