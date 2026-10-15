@@ -1,10 +1,11 @@
-package com.mqclient.ibmmq.ui.topology
+package com.mqclient.topology
 
 /**
  * kuiver 0.4.2 没有 `onNodeDoubleClick` 回调：用「[WINDOW_MS] 内同节点两击」手动判定。
  *
- * 拓扑图（TopologyPanel）与集群关系画布（ClusterRelationsPanel）共用。单击语义
- * （选中）不受影响——调用方在 [onClick] 外自行处理；画布空白点击时调 [reset] 防串。
+ * 拓扑画布（topology-ui 的 [TopologyCanvas]，宿主含 IBM MQ 拓扑面板）与各业务面板
+ * 共用。单击语义（选中）不受影响——调用方在 [onClick] 外自行处理；画布空白点击时
+ * 调 [reset] 防串。
  */
 class NodeDoubleClick(private val onDoubleClick: (String) -> Unit) {
 

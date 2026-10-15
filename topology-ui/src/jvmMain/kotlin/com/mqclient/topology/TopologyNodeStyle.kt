@@ -5,7 +5,9 @@ import androidx.compose.material.icons.automirrored.filled.AltRoute
 import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Inbox
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material.icons.filled.MarkEmailUnread
@@ -28,6 +30,11 @@ fun TopologyNodeType.getIcon(): ImageVector = when (this) {
     // 集群关系图：完整仓库用「仓库」语义图标，部分仓库沿用 QMGR 的服务器图标。
     TopologyNodeType.QMGR_FULL -> Icons.Filled.Storage
     TopologyNodeType.QMGR_PARTIAL -> Icons.Filled.Dns
+    // Kafka：分区是 topic 的横向切片用 Layers，broker 是服务器节点，
+    // 消费组用 Groups（分组语义）。
+    TopologyNodeType.PARTITION -> Icons.Filled.Layers
+    TopologyNodeType.BROKER -> Icons.Filled.Dns
+    TopologyNodeType.CONSUMER_GROUP -> Icons.Filled.Groups
 }
 
 /**
@@ -49,4 +56,9 @@ fun TopologyNodeType.getColor(): Color = when (this) {
     // 集群关系图：完整仓库紫（权威仓库），部分仓库灰（同 QMGR 系）。
     TopologyNodeType.QMGR_FULL -> Color(0xFF7C3AED)
     TopologyNodeType.QMGR_PARTIAL -> Color(0xFF6B7280)
+    // Kafka：分区天蓝（TOPIC 蓝 3B82F6 的浅阶，同族递进）、broker 绿（基础设施）、
+    // 消费组紫罗兰（避开既有 8B5CF6 紫与 7C3AED 仓库紫）。
+    TopologyNodeType.PARTITION -> Color(0xFF0EA5E9)
+    TopologyNodeType.BROKER -> Color(0xFF10B981)
+    TopologyNodeType.CONSUMER_GROUP -> Color(0xFFA855F7)
 }

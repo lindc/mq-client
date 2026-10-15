@@ -47,5 +47,13 @@
   "kafka_ui_group_loading": "正在加载消费组…",
   "kafka_ui_group_members": "%1$d 成员",
   "kafka_ui_group_simple": "简单组",
-  "kafka_ui_group_skipped": "%1$d 个消费组因权限未显示"
+  "kafka_ui_group_skipped": "%1$d 个消费组因权限未显示",
+
+  "kafka_ui_topology_loading": "正在加载拓扑数据…",
+  "kafka_ui_topology_empty": "没有可展示的 Topic 或 Broker",
+  "kafka_ui_topology_toggle_internal": "内部主题",
+  "kafka_ui_topology_toggle_replicas": "副本边",
+  "kafka_ui_topology_no_properties": "该节点暂无属性面板",
+  "kafka_ui_topology_partition_badge": "leader %1$d",
+  "kafka_ui_topology_partition_offline": "无 leader"
 }

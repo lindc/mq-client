@@ -10,6 +10,7 @@ import androidx.compose.ui.Modifier
 import com.mqclient.core.AdapterUI
 import com.mqclient.core.ModuleI18nTable
 import com.mqclient.kafka.KafkaModule
+import com.mqclient.kafka.ui.topology.KafkaTopologyPanel
 import com.mqclient.uicommon.i18n.stringResource
 import mq_client.kafka_ui.generated.resources.Res
 
@@ -63,6 +64,17 @@ class KafkaUI : AdapterUI {
                 } else {
                     {
                         ConsumerGroupListPanel(
+                            connectionId = connectionId,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
+            "topology" ->
+                if (KafkaModule.connectionOrNull(connectionId) == null) {
+                    null
+                } else {
+                    {
+                        KafkaTopologyPanel(
                             connectionId = connectionId,
                             modifier = Modifier.fillMaxSize(),
                         )

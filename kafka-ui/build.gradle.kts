@@ -28,14 +28,23 @@ kotlin {
             implementation(projects.uiCommon)
             // 「询问 AI」链路上下文的 JSON 序列化（KafkaAiChainBuilder，buildJsonObject）。
             implementation(libs.kotlinx.serialization.json)
+            // 拓扑图通用件：模型契约（graph-core）+ 通用渲染（TopologyCanvas 等，topology-ui）。
+            implementation(projects.graphCore)
+            implementation(projects.topologyUi)
         }
         jvmMain.dependencies {
+            // Kuiver 模型 API（buildKuiver / LayoutProvider / buildKuiverWithClassifiedEdges）：
+            // Kafka 拓扑 builder 与列布局 provider 直用（渲染走 topology-ui 的 TopologyCanvas）。
+            implementation(libs.kuiver)
             // Kafka 客户端类型（AdminClient / ListTopicsOptions / TopicCollection）：
             // TopicListPanel 直连实时查询。kafka-service 里是 implementation 不传递，
             // 照模块间各声明坐标的惯例在本模块再声明一份（版本必须与 service 一致）。
             // 版本须与 kafka-service 一致（3.9.1：JDK 24+ 移除 SecurityManager，
             // 3.9.0 的 SASL 登录在该 JDK 上会 UnsupportedOperationException）。
             implementation("org.apache.kafka:kafka-clients:3.9.1")
+        }
+        jvmTest.dependencies {
+            implementation(kotlin("test"))
         }
     }
 }

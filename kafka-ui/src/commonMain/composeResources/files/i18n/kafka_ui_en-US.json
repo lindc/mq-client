@@ -47,5 +47,13 @@
   "kafka_ui_group_loading": "Loading consumer groups…",
   "kafka_ui_group_members": "%1$d members",
   "kafka_ui_group_simple": "simple group",
-  "kafka_ui_group_skipped": "%1$d group(s) hidden due to permissions"
+  "kafka_ui_group_skipped": "%1$d group(s) hidden due to permissions",
+
+  "kafka_ui_topology_loading": "Loading topology…",
+  "kafka_ui_topology_empty": "No topics or brokers to display",
+  "kafka_ui_topology_toggle_internal": "Internal topics",
+  "kafka_ui_topology_toggle_replicas": "Replica edges",
+  "kafka_ui_topology_no_properties": "No properties panel for this node",
+  "kafka_ui_topology_partition_badge": "leader %1$d",
+  "kafka_ui_topology_partition_offline": "no leader"
 }

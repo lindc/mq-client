@@ -2,6 +2,7 @@ package com.mqclient.topology
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
@@ -45,6 +46,8 @@ fun TopologyNodeCard(
     severity: NodeSeverity = NodeSeverity.NORMAL,
     /** 链路高亮模式下不在选中闭包内：整体压暗，让选中的线路凸显。 */
     dimmed: Boolean = false,
+    /** 名称下方的辅助小字（如 Kafka topic 的分区数）；null 时不占位，维持纯名称形态。 */
+    badge: String? = null,
 ) {
     val accent = when (severity) {
         NodeSeverity.ERROR -> MaterialTheme.colorScheme.error
@@ -91,13 +94,33 @@ fun TopologyNodeCard(
                 modifier = Modifier.size(20.dp),
                 tint = accent,
             )
-            Text(
-                text = name,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
+            if (badge == null) {
+                Text(
+                    text = name,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            } else {
+                // badge 形态：名称一行 + 徽标一行（badge 有值时名称压到单行，防止溢出）。
+                Column {
+                    Text(
+                        text = name,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = badge,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
         }
     }
 }

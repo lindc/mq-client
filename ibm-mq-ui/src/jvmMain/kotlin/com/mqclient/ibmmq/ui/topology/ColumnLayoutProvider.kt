@@ -152,6 +152,10 @@ val columnLayoutProvider: LayoutProvider = labeled@{ kuiver, config ->
             // 集群关系面板专用节点（消息流拓扑里不出现）；归 REMOTE_QMGR 同列兜底。
             TopologyNodeType.QMGR_FULL -> 7 + maxAliasDepth
             TopologyNodeType.QMGR_PARTIAL -> 7 + maxAliasDepth
+            // Kafka 专属节点类型：MQ 图里不出现，归第 0 列兜底（保 exhaustive）。
+            TopologyNodeType.PARTITION -> 0
+            TopologyNodeType.BROKER -> 0
+            TopologyNodeType.CONSUMER_GROUP -> 0
             TopologyNodeType.LOCAL_QUEUE -> 9 + maxAliasDepth
         }
     }

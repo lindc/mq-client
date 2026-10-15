@@ -18,7 +18,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -49,6 +48,7 @@ import com.dk.kuiver.renderer.KuiverViewerConfig
 import com.mqclient.topology.topologyEdgeStyle
 import com.mqclient.topology.TopologyZoomControls
 import com.mqclient.topology.TopologyNodeCard
+import com.mqclient.topology.NodeDoubleClick
 import com.mqclient.topology.CARD_WIDTH
 import com.mqclient.topology.CARD_HEIGHT
 import com.mqclient.graph.TopologyNodeType
@@ -66,6 +66,7 @@ import com.mqclient.ibmmq.pcf.QmgrClusterRole
 import com.mqclient.ibmmq.ui.properties.ObjectPropertiesDialogController
 import com.mqclient.ibmmq.ui.properties.ObjectPropertiesDialogHost
 import com.mqclient.ibmmq.ui.properties.rememberObjectPropertiesDialogController
+import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 import kotlinx.coroutines.launch
@@ -366,7 +367,7 @@ private fun ClusterCanvas(
                 .padding(12.dp),
         )
 
-        SnackbarHost(
+        ThemedSnackbarHost(
             hostState = snackbarHostState,
             modifier = Modifier.align(Alignment.BottomCenter),
         )

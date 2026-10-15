@@ -108,6 +108,10 @@ internal fun com.mqclient.graph.TopologyNodeType.toMqObjectType(): MqObjectType?
     // 集群关系图节点是 QMGR 角色视图，无对应的单对象属性页（QMGR 走连接属性面板）。
     com.mqclient.graph.TopologyNodeType.QMGR_FULL -> null
     com.mqclient.graph.TopologyNodeType.QMGR_PARTIAL -> null
+    // Kafka 专属节点类型：不属 MQ 对象体系（Kafka 属性面板由 kafka-ui 自行演进）。
+    com.mqclient.graph.TopologyNodeType.PARTITION -> null
+    com.mqclient.graph.TopologyNodeType.BROKER -> null
+    com.mqclient.graph.TopologyNodeType.CONSUMER_GROUP -> null
 }
 
 @Composable

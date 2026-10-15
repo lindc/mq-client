@@ -1,53 +1,28 @@
 package com.mqclient.ibmmq.ui.topology
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import com.dk.kuiver.SelectionMode
-import com.dk.kuiver.model.Kuiver
-import com.dk.kuiver.model.layout.LayoutConfig
-import com.dk.kuiver.rememberKuiverViewerState
-import com.dk.kuiver.renderer.KuiverInteractionCallbacks
-import com.dk.kuiver.renderer.KuiverViewer
-import com.dk.kuiver.renderer.KuiverViewerConfig
-import com.mqclient.topology.topologyEdgeStyle
+import com.mqclient.topology.TopologyCanvas
 import com.mqclient.topology.getColor
-import com.mqclient.topology.getIcon
-import com.mqclient.topology.TopologyZoomControls
-import com.mqclient.topology.TopologyNodeCard
-import com.mqclient.graph.TopologyNodeType
 import com.mqclient.graph.TopologyData
-import com.mqclient.graph.NodeSeverity
+import com.mqclient.graph.TopologyNodeType
 import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.CoreModule
@@ -80,6 +55,9 @@ import kotlinx.coroutines.launch
  *
  * 焦点：列表页「在拓扑图中查看」经 [TopologyFocusHolder] 带入对象名，出图后选中该节点
  * （图内高亮 + 底部详情卡）——全量固定列图本身一屏可见，无需再按跳数裁剪。
+ *
+ * 画布组装（kuiver viewer / 选中高亮 / 流动动画 / 缩放控件 / 详情卡）已泛化为
+ * topology-ui 的 [TopologyCanvas]，本面板只提供数据与业务行为（双击开属性对话框）。
  */
 @Composable
 fun TopologyPanel(
@@ -111,7 +89,7 @@ fun TopologyPanel(
     }
 
     /** 强制刷新：显式触发一次对象慢扫（扫完经 OBJECTS_SCANNED 驱动重建）。 */
-    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val scope = rememberCoroutineScope()
     fun rescan() {
         Log.debug(TOPOLOGY_LOG_TAG, "topology rescan requested: connection=$connectionId")
         scope.launch {
@@ -195,7 +173,7 @@ fun TopologyPanel(
         }
         return
     }
-    MqTopologyCanvas(
+    MqTopologyContent(
         connectionId = connectionId,
         data = current,
         focusName = focusName,
@@ -206,12 +184,11 @@ fun TopologyPanel(
 }
 
 /**
- * kuiver 画布。viewer state 只建一次（保留缩放 / 平移），图数据变化经
- * updateKuiver + relayout 换入（updateKuiver 不触发布局，必须跟一次 relayout，
- * 且 relayout 前要把最新 nodeTypes 写进 [topologyNodeTypes] 供布局 provider 读取）。
+ * 业务行为装配：双击节点开属性对话框（无属性的虚拟节点 Snackbar 提示），数据交给
+ * 通用 [TopologyCanvas] 渲染。列布局 provider 见 [columnLayoutProvider]。
  */
 @Composable
-private fun MqTopologyCanvas(
+private fun MqTopologyContent(
     connectionId: String,
     data: TopologyData,
     focusName: String?,
@@ -219,285 +196,41 @@ private fun MqTopologyCanvas(
     onRescan: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val (kuiver, nodeTypes, severities) = data
-    val scheme = MaterialTheme.colorScheme
+    val nodeTypes = data.nodeTypes
 
-    // 对象属性对话框：**双击节点**打开（[NodeDoubleClick] 手动检测，kuiver 0.4.2
-    // 无 onNodeDoubleClick）。打开走统一的 [rememberObjectPropertiesDialogController]；
+    // 对象属性对话框：**双击节点**打开。打开走统一的 rememberObjectPropertiesDialogController；
     // 无属性可看的节点（rqmgr: 虚拟节点等）弹 Snackbar 提示而非静默无反应。
-    //
-    // 双击检测器是 remember 的稳定实例，回调里读类型必须经 rememberUpdatedState 的
-    // **最新** nodeTypes——此前直接捕获首帧 map，OBJECTS_SCANNED 重建图后新增的节点
-    // （通道 / 主题 / 订阅…）双击静默失效，只有首帧就在图里的队列能打开对话框。
+    // 回调经 rememberUpdatedState 读**最新** nodeTypes——此前直接捕获首帧 map，
+    // OBJECTS_SCANNED 重建图后新增的节点双击会静默失效。
     val propertiesController = rememberObjectPropertiesDialogController(connectionId)
     val snackbarHostState = remember { SnackbarHostState() }
-    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val scope = rememberCoroutineScope()
     val virtualNodeHint = stringResource("ibm_mq_topology_no_properties")
     val currentTypes by rememberUpdatedState(nodeTypes)
-    val nodeDoubleClicked = remember {
-        NodeDoubleClick { nodeId ->
+
+    TopologyCanvas(
+        data = data,
+        layoutProvider = columnLayoutProvider,
+        onRescan = onRescan,
+        onNodeDoubleClick = { nodeId ->
             val type = currentTypes[nodeId]?.toMqObjectType()
             if (type != null) {
                 propertiesController.open(type, nodeId)
             } else {
                 scope.launch { snackbarHostState.showSnackbar(virtualNodeHint) }
             }
-        }
-    }
-
-    val viewerState = rememberKuiverViewerState(
-        initialKuiver = Kuiver(),
-        layoutConfig = LayoutConfig.Custom(provider = columnLayoutProvider),
+        },
+        modifier = modifier,
+        // REMOTE_QMGR 虚拟节点 id 带 `rqmgr:` 前缀（避免与真实对象重名），显示时剥掉。
+        displayName = { it.removePrefix(REMOTE_QMGR_PREFIX) },
+        fallbackType = TopologyNodeType.LOCAL_QUEUE,
+        focusName = focusName,
+        onFocusApplied = onFocusApplied,
+        // 固定列布局 provider 在布局阶段读模块级类型查找表：写入与 relayout 由
+        // TopologyCanvas 保证主线程相邻（时序不变量见 TopologyCanvas 文档）。
+        onBeforeLayout = { topologyNodeTypes = it.nodeTypes },
+        snackbarHostState = snackbarHostState,
     )
 
-    var pendingFit by remember { mutableStateOf(false) }
-    LaunchedEffect(kuiver) {
-        topologyNodeTypes = nodeTypes
-        viewerState.updateKuiver(kuiver)
-        viewerState.relayout()
-        pendingFit = true
-    }
-
-    var selectedId by remember { mutableStateOf<String?>(null) }
-
-    /** 统一选中入口：selectedId 驱动详情卡，同时写 kuiver 自己的选中态（图内高亮的可靠来源）。 */
-    fun select(id: String?) {
-        selectedId = id
-        if (id != null) {
-            viewerState.interaction.select(id)
-        } else {
-            viewerState.interaction.clearSelection()
-        }
-    }
-
-    // 选中链路高亮：沿有向边做上下游闭包（上游=流入它的，下游=它流向的，BFS 防环）。
-    // 闭包内节点原样、相关边加粗提亮；闭包外节点压暗、无关边淡化——凸显消息流向。
-    val highlight = remember(selectedId, kuiver) {
-        val root = selectedId ?: return@remember null
-        val incoming = kuiver.edges.groupBy { it.toId }
-        val outgoing = kuiver.edges.groupBy { it.fromId }
-        fun closure(step: (String) -> List<String>): Set<String> {
-            val seen = mutableSetOf(root)
-            val queue = ArrayDeque(listOf(root))
-            while (queue.isNotEmpty()) {
-                val cur = queue.removeFirst()
-                for (nb in step(cur)) if (seen.add(nb)) queue += nb
-            }
-            return seen
-        }
-        val nodes = closure { id -> outgoing[id]?.map { it.toId }.orEmpty() } +
-            closure { id -> incoming[id]?.map { it.fromId }.orEmpty() }
-        val edges = kuiver.edges
-            .filter { it.fromId in nodes && it.toId in nodes }
-            .map { it.fromId to it.toId }
-            .toSet()
-        Highlight(nodes, edges)
-    }
-
-    // 高亮边的流动动画：kuiver 的 dashPathEffect 相位写死为 0（虚线锚在路径起点），
-    // 但**循环递增 gapLength 会把后续虚线段整体向终点推移**——位移满一个周期
-    // （dash+gap=20dp）后图案无缝归零，观感即"虚线沿消息方向持续流动"。
-    // 线性匀速 + Restart 无缝循环。**仅在有选中（highlight != null）时创建**——
-    // 无条件常驻会让整个面板空跑每帧动画，白耗 CPU。
-    val flowGap = if (highlight != null) {
-        rememberInfiniteTransition(label = "edgeFlow").animateFloat(
-            initialValue = FLOW_DASH,
-            targetValue = FLOW_DASH * 3,
-            animationSpec = infiniteRepeatable(tween(FLOW_PERIOD_MS, easing = LinearEasing)),
-            label = "flowGap",
-        ).value
-    } else {
-        FLOW_DASH
-    }
-
-    // 布局落定且画布已测量后执行一次「适应视图」；手动缩放 / 拖拽不置位 pendingFit。
-    // 焦点对象（列表页「在拓扑图中查看」）在首次出图后选中：图内高亮 + 底部详情卡。
-    LaunchedEffect(viewerState.layoutedKuiver, viewerState.canvasWidth) {
-        if (viewerState.canvasWidth > 0.dp &&
-            viewerState.layoutedKuiver.nodes.isNotEmpty()
-        ) {
-            if (pendingFit) {
-                viewerState.centerGraph(animated = true)
-                pendingFit = false
-            }
-            if (focusName != null &&
-                viewerState.layoutedKuiver.nodes.containsKey(focusName)
-            ) {
-                select(focusName)
-                onFocusApplied() // 应用一次即清空：防尺寸变化时复活旧选中
-            }
-        }
-    }
-
-    Box(modifier.fillMaxSize()) {
-        KuiverViewer(
-            state = viewerState,
-            modifier = Modifier.fillMaxSize(),
-            config = KuiverViewerConfig(
-                hoverEnabled = true,
-                selectionMode = SelectionMode.NONE,
-                // 固定列布局本身就是语义位置，禁拖拽防弄乱列序。
-                nodeDragEnabled = false,
-                // 滚轮缩放 / 画布平移是 kuiver 内建手势（无开关），这里只夹量程：
-                // 0.2x 看全景，2.0x 看细节。
-                minScale = 0.2f,
-                maxScale = 2.0f,
-                // fit 由本面板 pendingFit 统一驱动（首次加载即适应内容），不用引擎内置的一次性 fit。
-                fitToContent = false,
-                contentPadding = 0.9f,
-            ),
-            callbacks = remember {
-                KuiverInteractionCallbacks(
-                    onNodeClick = { node ->
-                        nodeDoubleClicked.onClick(node.id)
-                        select(node.id)
-                    },
-                    onCanvasClick = {
-                        nodeDoubleClicked.reset()
-                        select(null)
-                    },
-                )
-            },
-            nodeContent = { node ->
-                val type = nodeTypes[node.id] ?: TopologyNodeType.LOCAL_QUEUE
-                TopologyNodeCard(
-                    name = node.id.removePrefix(REMOTE_QMGR_PREFIX),
-                    type = type,
-                    isHovered = isHovered,
-                    // 选中高亮双保险：kuiver interaction 的 isSelected（内部状态，插槽
-                    // 作用域可靠失效）+ 本面板 selectedId（焦点选中的直接来源）。
-                    isSelected = isSelected || node.id == selectedId,
-                    // 告警覆盖类型色：队列积压→警告橙，通道 STOPPED/RETRYING→红。
-                    severity = severities[node.id] ?: NodeSeverity.NORMAL,
-                    // 链路高亮模式：闭包外节点压暗，凸显选中线路。
-                    dimmed = highlight != null && node.id !in highlight.nodes,
-                )
-            },
-            // 贝塞尔曲线边（EdgeShape.CURVED，见 CurvedEdgeContent.kt 的取舍说明）。
-            // 链路高亮模式：闭包内边满透明度加粗 + 虚线流动动画（见 flowGap 注释），
-            // 闭包外边淡到近隐——看消息流向。
-            edgeStyle = { edge ->
-                val inPath = highlight == null || (edge.fromId to edge.toId) in highlight.edges
-                val normalAlpha = if (highlight == null) 0.6f else if (inPath) 0.95f else 0.08f
-                val cycleAlpha = if (highlight == null) 0.8f else if (inPath) 1f else 0.1f
-                val base = topologyEdgeStyle(
-                    edge = edge,
-                    normalColor = scheme.outlineVariant.copy(alpha = normalAlpha),
-                    cycleColor = CYCLE_EDGE_COLOR.copy(alpha = cycleAlpha),
-                    strokeWidth = if (highlight != null && inPath) 2.dp else 1.5.dp,
-                )
-                if (highlight != null && inPath) {
-                    base.copy(dashed = true, dashLength = FLOW_DASH.dp, gapLength = flowGap.dp)
-                } else {
-                    base
-                }
-            },
-        )
-
-        // 右上角控件：重新扫描（强制刷新数据）+ 缩放（放大 / 缩小 / 适应视图 / 重置）。
-        TopologyZoomControls(
-            onRescan = onRescan,
-            onZoomIn = { viewerState.zoomIn() },
-            onZoomOut = { viewerState.zoomOut() },
-            onFitContent = { viewerState.centerGraph(animated = true) },
-            onReset = {
-                viewerState.clearManualPositions()
-                viewerState.centerGraph(animated = true)
-            },
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(12.dp),
-        )
-
-        ObjectPropertiesDialogHost(propertiesController)
-
-        SnackbarHost(
-            hostState = snackbarHostState,
-            modifier = Modifier.align(Alignment.BottomCenter),
-        )
-
-        selectedId?.let { id ->
-            val type = nodeTypes[id] ?: return@let
-            NodeDetailCard(
-                name = id.removePrefix(REMOTE_QMGR_PREFIX),
-                type = type,
-                severity = severities[id] ?: NodeSeverity.NORMAL,
-                onDismiss = { select(null) },
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(12.dp),
-            )
-        }
-    }
+    ObjectPropertiesDialogHost(propertiesController)
 }
-
-/** 选中节点的详情浮层（点击画布空白或关闭按钮消失）；告警节点图标同步换警告色。 */
-@Composable
-private fun NodeDetailCard(
-    name: String,
-    type: TopologyNodeType,
-    severity: NodeSeverity,
-    onDismiss: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val accent = when (severity) {
-        NodeSeverity.ERROR -> MaterialTheme.colorScheme.error
-        NodeSeverity.WARNING -> Color(0xFFED6C02)
-        NodeSeverity.NORMAL -> type.getColor()
-    }
-    Surface(
-        modifier = modifier.width(300.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHighest,
-        shape = RoundedCornerShape(12.dp),
-        tonalElevation = 4.dp,
-        shadowElevation = 4.dp,
-    ) {
-        androidx.compose.foundation.layout.Row(
-            modifier = Modifier.padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                imageVector = type.getIcon(),
-                contentDescription = type.name,
-                tint = accent,
-                modifier = Modifier.size(20.dp),
-            )
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(start = 8.dp),
-            ) {
-                Text(
-                    text = name,
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Text(
-                    text = type.name,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
-                Icon(
-                    imageVector = Icons.Filled.Close,
-                    contentDescription = stringResource("ibm_mq_topology_detail_close"),
-                    modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-    }
-}
-
-/** 环（BACK 边）的固定语义色：橙色（需求指定，异常信号不随主题翻转）。 */
-private val CYCLE_EDGE_COLOR = Color(0xFFFF9800)
-
-/** 选中链路高亮集：闭包节点 id + 闭包内边（fromId to id）。 */
-private data class Highlight(val nodes: Set<String>, val edges: Set<Pair<String, String>>)
-
-/** 高亮边流动动画：虚线段长（dp）；gap 从它循环递增到 3 倍即位移满一个周期（无缝）。 */
-private const val FLOW_DASH = 10f
-
-/** 流动动画一个完整位移周期的时长（ms）。 */
-private const val FLOW_PERIOD_MS = 700

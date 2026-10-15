@@ -26,6 +26,14 @@ enum class TopologyNodeType {
     QMGR_FULL,
     /** 集群关系图专用：部分仓库 QMgr。 */
     QMGR_PARTIAL,
+
+    // ---- Kafka（消息链路里 TOPIC 与 MQ 同源复用）----
+    /** Kafka 分区（leader / 副本分布的载体）。 */
+    PARTITION,
+    /** Kafka broker。 */
+    BROKER,
+    /** Kafka consumer group（消费关系图用）。 */
+    CONSUMER_GROUP,
 }
 
 /**
@@ -48,4 +56,9 @@ data class TopologyData(
     val kuiver: Kuiver,
     val nodeTypes: Map<String, TopologyNodeType>,
     val severities: Map<String, NodeSeverity>,
+    /**
+     * 节点辅助信息徽标（如 Kafka topic 的分区数、partition 的 leader id）。
+     * 渲染在节点卡片名称下方的小字；不传则卡片维持纯名称形态（IBM MQ 不用）。
+     */
+    val badges: Map<String, String> = emptyMap(),
 )
