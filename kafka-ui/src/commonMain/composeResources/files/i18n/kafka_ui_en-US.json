@@ -41,6 +41,8 @@
 
   "kafka_ui_nav_topics": "Topics",
   "kafka_ui_nav_groups": "Consumer Group",
+  "kafka_ui_nav_topology": "Topology",
+  "kafka_ui_nav_cluster": "Cluster Overview",
   "kafka_ui_group_search_placeholder": "Search consumer groups",
   "kafka_ui_group_loading": "Loading consumer groups…",
   "kafka_ui_group_members": "%1$d members",

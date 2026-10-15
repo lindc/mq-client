@@ -41,6 +41,8 @@
 
   "kafka_ui_nav_topics": "主题",
   "kafka_ui_nav_groups": "Consumer Group",
+  "kafka_ui_nav_topology": "拓扑图",
+  "kafka_ui_nav_cluster": "集群概览",
   "kafka_ui_group_search_placeholder": "搜索 Consumer Group",
   "kafka_ui_group_loading": "正在加载 Consumer Group…",
   "kafka_ui_group_members": "%1$d 成员",

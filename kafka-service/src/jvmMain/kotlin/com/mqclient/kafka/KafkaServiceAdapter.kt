@@ -13,10 +13,17 @@ class KafkaServiceAdapter : MQServiceAdapter() {
     // category = "MQ" 由 MQServiceAdapter 统一提供
 
     /**
-     * 导航树二级菜单：`topics`（Topic 列表）/ `groups`（Consumer Group 列表）
-     * （id = Tab 的 objectType，宿主按 titleKey 解析文案、iconId 解析图标）。
+     * 导航树二级菜单：工具类（拓扑图 / 集群概览）在前，分隔线之后是对象类型
+     * （主题 / Consumer Group）—— 与 ibm-mq 的分组模式一致。纯数据 —— 点击行为
+     * （开 Tab / 隐式连接）由宿主统一处理。工具类暂无专属内容区，`contentFor`
+     * 落到 null 由宿主渲染通用「coming soon」占位，后续实现时加分支即可。
      */
     override fun navigationItems(connection: ConnectionInfo): List<NavigationItem> = listOf(
+        // ===== 工具类 =====
+        NavigationItem(id = "topology", titleKey = "kafka_ui_nav_topology", iconId = "topology", isTool = true),
+        NavigationItem(id = "clusterOverview", titleKey = "kafka_ui_nav_cluster", iconId = "clusterRelations", isTool = true),
+        NavigationItem.separator("tools.objects"),
+        // ===== 对象类型 =====
         NavigationItem(id = "topics", titleKey = "kafka_ui_nav_topics", iconId = "topics"),
         NavigationItem(id = "groups", titleKey = "kafka_ui_nav_groups", iconId = "groups"),
     )
