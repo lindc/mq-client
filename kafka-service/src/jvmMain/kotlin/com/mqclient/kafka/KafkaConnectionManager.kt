@@ -157,10 +157,17 @@ class KafkaConnectionManager(
 
     /**
      * 「测试连接」：用给定配置发起一次**临时连接**（describeCluster 验证后立刻关掉，
-     * 不影响任何正式连接的状态），失败抛异常 —— 成功返回即连通。
+     * 不影响任何正式连接的状态），失败抛异常 —— 成功返回即连通。成功路径也必须关：
+     * 句柄是这里建的，丢弃不关等于每次测试泄漏一个连接。
      */
     suspend fun testConnection(config: KafkaConfig) {
-        createVerifiedAdmin(config)
+        val admin = createVerifiedAdmin(config)
+        try {
+            // 验证通过即达目的；close 交给 IO 线程，与 closeQuietly 同一套纪律。
+            withContext(Dispatchers.IO) { admin.close(Duration.ZERO) }
+        } catch (error: Throwable) {
+            kafkaLog.warn("test connection close failed: error=$error")
+        }
     }
 
     /** UI / 删除链路的入口：fire-and-forget，结果走状态上报与事件，不阻塞点击。 */

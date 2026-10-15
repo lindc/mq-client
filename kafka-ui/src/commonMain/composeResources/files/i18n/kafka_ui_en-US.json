@@ -3,6 +3,7 @@
 
   "kafka_ui_section_basic": "Basic",
   "kafka_ui_section_auth": "Authentication",
+  "kafka_ui_section_tls": "TLS truststore",
   "kafka_ui_section_advanced": "Advanced",
   "kafka_ui_field_bootstrap_servers": "Bootstrap servers",
   "kafka_ui_hint_bootstrap_servers": "Separate multiple brokers with commas, e.g. host1:9092,host2:9092",
@@ -10,7 +11,14 @@
   "kafka_ui_field_sasl_mechanism": "SASL mechanism",
   "kafka_ui_field_username": "Username",
   "kafka_ui_field_password": "Password",
+  "kafka_ui_field_truststore_path": "Truststore file",
+  "kafka_ui_hint_truststore_path": "Path to a CA truststore for self-signed certificates; .p12/.pfx are parsed as PKCS12, anything else as JKS. Leave empty to use the JVM default truststore",
+  "kafka_ui_field_truststore_password": "Truststore password",
   "kafka_ui_field_connection_timeout": "Connection timeout",
+  "kafka_ui_file_dialog_title": "Select certificate file",
+  "kafka_ui_test_running": "Testing connection...",
+  "kafka_ui_test_timeout": "Connection timed out (15 s)",
+  "kafka_ui_test_fail_prefix": "Connection failed: ",
   "kafka_ui_protocol_plaintext": "PLAINTEXT (no encryption)",
   "kafka_ui_protocol_ssl": "SSL (TLS encryption)",
   "kafka_ui_protocol_sasl_plaintext": "SASL_PLAINTEXT (auth, no encryption)",
@@ -28,7 +36,14 @@
   "kafka_ui_topic_partitions": "%1$d partitions",
   "kafka_ui_topic_replicas": "%1$d replicas",
   "kafka_ui_topic_internal": "internal",
-  "kafka_ui_error_not_connected": "Not connected — use the \"Connect\" item in the connection's context menu on the left",
+  "kafka_ui_connecting": "Connecting…",
+  "kafka_ui_connect_failed": "Connection failed",
 
-  "kafka_ui_nav_topics": "Topics"
+  "kafka_ui_nav_topics": "Topics",
+  "kafka_ui_nav_groups": "Consumer Group",
+  "kafka_ui_group_search_placeholder": "Search consumer groups",
+  "kafka_ui_group_loading": "Loading consumer groups…",
+  "kafka_ui_group_members": "%1$d members",
+  "kafka_ui_group_simple": "simple group",
+  "kafka_ui_group_skipped": "%1$d group(s) hidden due to permissions"
 }

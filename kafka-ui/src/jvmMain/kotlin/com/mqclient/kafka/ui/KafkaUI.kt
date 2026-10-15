@@ -40,17 +40,35 @@ class KafkaUI : AdapterUI {
     }
 
     /**
-     * 模块贡献真实内容的导航项：`topics`（Topic 列表）。模块未初始化（拿不到连接
-     * 上下文）时回落 null —— 宿主显示「coming soon」占位页，极端时序下不崩、不破 Tab。
+     * 模块贡献真实内容的导航项：`topics`（Topic 列表）/ `groups`（Consumer Group
+     * 列表）。模块未初始化（拿不到连接上下文）时回落 null —— 宿主显示「coming
+     * soon」占位页，极端时序下不崩、不破 Tab。
      */
     override fun contentFor(objectType: String, connectionId: String): (@Composable () -> Unit)? {
-        if (objectType != "topics") return null
-        if (KafkaModule.connectionOrNull(connectionId) == null) return null
-        return {
-            TopicListPanel(
-                connectionId = connectionId,
-                modifier = Modifier.fillMaxSize(),
-            )
+        return when (objectType) {
+            "topics" ->
+                if (KafkaModule.connectionOrNull(connectionId) == null) {
+                    null
+                } else {
+                    {
+                        TopicListPanel(
+                            connectionId = connectionId,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
+            "groups" ->
+                if (KafkaModule.connectionOrNull(connectionId) == null) {
+                    null
+                } else {
+                    {
+                        ConsumerGroupListPanel(
+                            connectionId = connectionId,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
+            else -> null
         }
     }
 }

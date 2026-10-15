@@ -3,6 +3,7 @@
 
   "kafka_ui_section_basic": "基本",
   "kafka_ui_section_auth": "认证",
+  "kafka_ui_section_tls": "TLS 信任库",
   "kafka_ui_section_advanced": "高级",
   "kafka_ui_field_bootstrap_servers": "Bootstrap servers",
   "kafka_ui_hint_bootstrap_servers": "多个 broker 用英文逗号分隔，如 host1:9092,host2:9092",
@@ -10,7 +11,14 @@
   "kafka_ui_field_sasl_mechanism": "SASL 机制",
   "kafka_ui_field_username": "用户名",
   "kafka_ui_field_password": "密码",
+  "kafka_ui_field_truststore_path": "Truststore 文件",
+  "kafka_ui_hint_truststore_path": "自签证书的 CA 信任库路径；.p12/.pfx 按 PKCS12 解析，其余按 JKS。留空使用 JVM 默认信任库",
+  "kafka_ui_field_truststore_password": "Truststore 密码",
   "kafka_ui_field_connection_timeout": "连接超时",
+  "kafka_ui_file_dialog_title": "选择证书文件",
+  "kafka_ui_test_running": "正在测试连接...",
+  "kafka_ui_test_timeout": "连接超时（15 秒）",
+  "kafka_ui_test_fail_prefix": "连接失败：",
   "kafka_ui_protocol_plaintext": "PLAINTEXT（无加密）",
   "kafka_ui_protocol_ssl": "SSL（TLS 加密）",
   "kafka_ui_protocol_sasl_plaintext": "SASL_PLAINTEXT（认证，无加密）",
@@ -28,7 +36,14 @@
   "kafka_ui_topic_partitions": "%1$d 分区",
   "kafka_ui_topic_replicas": "%1$d 副本",
   "kafka_ui_topic_internal": "内部主题",
-  "kafka_ui_error_not_connected": "尚未连接 —— 请先在左侧连接的右键菜单里选择「连接」",
+  "kafka_ui_connecting": "正在连接…",
+  "kafka_ui_connect_failed": "连接失败",
 
-  "kafka_ui_nav_topics": "主题"
+  "kafka_ui_nav_topics": "主题",
+  "kafka_ui_nav_groups": "Consumer Group",
+  "kafka_ui_group_search_placeholder": "搜索 Consumer Group",
+  "kafka_ui_group_loading": "正在加载 Consumer Group…",
+  "kafka_ui_group_members": "%1$d 成员",
+  "kafka_ui_group_simple": "简单组",
+  "kafka_ui_group_skipped": "%1$d 个组因权限未显示"
 }

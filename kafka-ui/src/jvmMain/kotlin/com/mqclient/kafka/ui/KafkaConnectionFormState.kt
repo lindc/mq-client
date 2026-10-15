@@ -9,9 +9,21 @@ import com.mqclient.core.ConnectionInfo
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.newConnectionId
 import com.mqclient.kafka.KafkaConfig
+import com.mqclient.kafka.KafkaModule
 import com.mqclient.kafka.kafkaConfigFromOptions
 import com.mqclient.kafka.toOptions
+import com.mqclient.mqui.state.SaveState
+import com.mqclient.uicommon.file.normalizePath
+import com.mqclient.uicommon.file.pickFile
 import com.mqclient.uicommon.i18n.stringResource
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
+
+/** 文件选择器放行的证书扩展名（不含点）；Kafka 场景没有 MQ 的 kdb，故比 MQ 少一项。 */
+private val CERT_EXTENSIONS = listOf("p12", "pfx", "jks")
 
 /**
  * 各字段自己的校验错误（null = 没问题）。分字段而不是一条总错误行：
@@ -26,19 +38,27 @@ data class KafkaFieldErrors(
 }
 
 /**
- * Kafka 连接表单的状态：字段草稿、分字段校验、落盘、编辑模式载入。UI 直接读写
- * 这些状态，业务规则（校验范围、密码保留语义、落盘路径）全部收在本类里。
+ * Kafka 连接表单的状态：字段草稿、分字段校验、保存链路（[SaveState] 状态机，与
+ * IBM MQ 表单同一套）、编辑模式载入。UI 直接读写这些状态，业务规则（校验范围、
+ * 密码保留语义、落盘路径）全部收在本类里。
  *
- * 与 ibm-mq 表单的差异：**同步表单** —— 没有「保存前测试连接」（右键菜单已有
- * 「测试连接」，这里不重复做一套 SaveState 状态机），校验通过直接落盘并返回 true，
- * 宿主随即关窗。密码保留语义与 ibm-mq 一致：编辑模式载入后输入框留空、显示占位符，
- * 用户不动就沿用原值（原值留在 [originalPassword]，构建配置时取回）。
+ * 保存链路与 IBM MQ 完全一致：**同步表单改异步** —— 「完成」先按草稿配置发起
+ * 一次临时连接测试（describeCluster，15 秒超时；busy 经宿主契约禁用「完成」），
+ * 成功直接落盘并回调宿主关窗；失败弹「是否仍要保存」确认框（[SaveAnywayDialog]），
+ * 「仍要保存」按测试时的配置快照落盘，「取消」回 Idle 留在向导里。
+ *
+ * 密码保留语义与 IBM MQ 一致：编辑模式载入后输入框留空、显示占位符，用户不动就
+ * 沿用原值（原值留在 original* 字段，构建配置时取回）。
  */
 class KafkaConnectionFormState(
     defaultName: String,
+    private val scope: CoroutineScope,
 ) : ConnectionFormState {
 
     companion object {
+        /** 「保存前测试连接」的超时：与 IBM MQ 表单同款，15 秒不返回按超时处理。 */
+        const val TEST_TIMEOUT_MS = 15_000L
+
         const val TIMEOUT_MIN = 5
         const val TIMEOUT_MAX = 300
 
@@ -49,11 +69,19 @@ class KafkaConnectionFormState(
         val SASL_MECHANISM_OPTIONS = listOf("PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-512")
     }
 
+    /** ---------------- 宿主契约（busy / onSaved）---------------- */
+
+    override val busy: Boolean get() = saveState == SaveState.Testing
+
     /** ---------------- 流程状态 ---------------- */
 
     var defaultName by mutableStateOf(defaultName); private set
     var errors by mutableStateOf(KafkaFieldErrors()); private set
     var saveError by mutableStateOf<String?>(null); private set
+    var saveState by mutableStateOf<SaveState>(SaveState.Idle); private set
+
+    /** 测试失败待确认的配置快照：用户选「仍要保存」时按它落盘。 */
+    var pendingConfig by mutableStateOf<KafkaConfig?>(null); private set
 
     /** 编辑模式的目标连接 id；null = 新建。 */
     var editingId by mutableStateOf<String?>(null); private set
@@ -66,17 +94,32 @@ class KafkaConnectionFormState(
     var saslMechanism by mutableStateOf(KafkaConfig.DEFAULT_SASL_MECHANISM)
     var username by mutableStateOf("")
     var password by mutableStateOf("")
+    var truststorePath by mutableStateOf("")
+    var truststorePassword by mutableStateOf("")
     var connectionTimeout by mutableStateOf(KafkaConfig.DEFAULT_CONNECTION_TIMEOUT_SECONDS.toString())
 
     // 编辑模式的原密码与「用户动过没有」标记：没动过 → 构建时沿用原值，
-    // 界面上只显示占位符（见 loadFrom）。
+    // 界面上只显示占位符（见 loadFrom）。SASL 密码与 truststore 密码各一套。
     var originalPassword by mutableStateOf(""); private set
     var passwordChanged by mutableStateOf(false)
+    var originalTruststorePassword by mutableStateOf(""); private set
+    var truststorePasswordChanged by mutableStateOf(false)
 
     /** 是否 SASL 协议：认证区（用户名 / 密码 / 机制）只在这种协议下显示与生效。 */
     val isSasl: Boolean get() = securityProtocol.startsWith("SASL")
 
+    /** 是否 TLS 协议：信任库区只在这种协议下显示与生效。 */
+    val isTls: Boolean get() = securityProtocol == "SSL" || securityProtocol == "SASL_SSL"
+
     /** ---------------- 公共动作 ---------------- */
+
+    /** 弹文件选择器挑信任库；取消则不动草稿。对话框在 IO 线程，EDT 不阻塞。 */
+    fun pickTrustStore() {
+        scope.launch {
+            val title = stringResource("kafka_ui_file_dialog_title")
+            pickFile(title, CERT_EXTENSIONS)?.let { truststorePath = normalizePath(it) }
+        }
+    }
 
     /** 分字段校验：错误写进 [errors]（字段下方红字），全部通过返回 true。 */
     fun validate(): Boolean {
@@ -99,6 +142,10 @@ class KafkaConnectionFormState(
         saslMechanism = saslMechanism,
         username = username.trim(),
         password = if (passwordChanged || originalPassword.isEmpty()) password else originalPassword,
+        truststorePath = truststorePath.trim(),
+        truststorePassword =
+            if (truststorePasswordChanged || originalTruststorePassword.isEmpty()) truststorePassword
+            else originalTruststorePassword,
         connectionTimeout = connectionTimeout.trim().toIntOrNull()
             ?: KafkaConfig.DEFAULT_CONNECTION_TIMEOUT_SECONDS,
     )
@@ -112,11 +159,17 @@ class KafkaConnectionFormState(
         saslMechanism = KafkaConfig.DEFAULT_SASL_MECHANISM
         username = ""
         password = ""
+        truststorePath = ""
+        truststorePassword = ""
         connectionTimeout = KafkaConfig.DEFAULT_CONNECTION_TIMEOUT_SECONDS.toString()
         originalPassword = ""
         passwordChanged = false
+        originalTruststorePassword = ""
+        truststorePasswordChanged = false
         errors = KafkaFieldErrors()
         saveError = null
+        pendingConfig = null
+        saveState = SaveState.Idle
     }
 
     /**
@@ -133,14 +186,20 @@ class KafkaConnectionFormState(
         securityProtocol = config.securityProtocol
         saslMechanism = config.saslMechanism
         username = config.username
+        truststorePath = config.truststorePath
         connectionTimeout = config.connectionTimeout.toString()
 
         originalPassword = config.password
         password = ""
         passwordChanged = false
+        originalTruststorePassword = config.truststorePassword
+        truststorePassword = ""
+        truststorePasswordChanged = false
 
         errors = KafkaFieldErrors()
         saveError = null
+        pendingConfig = null
+        saveState = SaveState.Idle
     }
 
     /** 清掉全部分字段错误：任一字段被编辑时调用（错误在下次提交时重算）。 */
@@ -149,16 +208,69 @@ class KafkaConnectionFormState(
     }
 
     /**
-     * 保存链路（同步）：校验 → 落盘。成功返回 true（宿主关窗）；失败（校验不过 /
-     * 落盘失败）返回 false，错误已展示在面板内，宿主保持对话框打开。
+     * 保存链路入口（宿主「完成」→ 本方法），与 IBM MQ 表单同一套状态机：
+     *  1. 校验不过 → 分字段错误留在面板内，返回 false；
+     *  2. 校验通过 → 进入 [SaveState.Testing]，按草稿配置发起临时连接测试
+     *     （15 秒超时；busy 经宿主契约禁用「完成」防重复提交）；
+     *  3. 成功 → 直接落盘（[doSave]）并回调宿主关窗；
+     *  4. 失败 / 超时 → [SaveState.Failed]，面板弹「是否仍要保存」确认框。
+     *
+     * 全程返回 false（测试是慢操作，无法同步给最终结果；宿主对 false 的唯一
+     * 反应就是保持对话框打开）。
      */
     override fun submit(): Boolean {
+        if (saveState != SaveState.Idle) return false
         saveError = null
         if (!validate()) return false
-        return doSave(buildConfig())
+
+        val config = buildConfig()
+        saveState = SaveState.Testing
+        scope.launch {
+            try {
+                withTimeout(TEST_TIMEOUT_MS) { KafkaModule.testConnection(config) }
+                doSave(config)
+            } catch (e: TimeoutCancellationException) {
+                // 超时不算「正常取消」，按失败处理（确认框可仍要保存）。
+                fail(config, stringResource("kafka_ui_test_timeout"))
+            } catch (e: CancellationException) {
+                // 对话框关闭 / 面板被销毁：正常退出，不落盘、不提示。
+                throw e
+            } catch (e: Exception) {
+                fail(config, stringResource("kafka_ui_test_fail_prefix") + failureMessage(e))
+            }
+        }
+        return false
+    }
+
+    /** 用户在确认框选「仍要保存」：按测试时的配置快照落盘。 */
+    fun confirmSave() {
+        pendingConfig?.let(::doSave)
+    }
+
+    /** 用户在确认框选「取消」：只关确认框，回到 Idle —— 主对话框保留，表单原样可改。 */
+    fun dismissFailed() {
+        pendingConfig = null
+        saveState = SaveState.Idle
     }
 
     /** ---------------- 内部 ---------------- */
+
+    private fun fail(config: KafkaConfig, message: String) {
+        pendingConfig = config
+        saveState = SaveState.Failed(message)
+    }
+
+    /**
+     * 失败原因转提示文案：沿 cause 链取前几条去重拼接（KafkaFuture 的
+     * ExecutionException 包装会把真正的错误藏在里面），确认框里才能看出根因。
+     */
+    private fun failureMessage(error: Throwable): String =
+        generateSequence(error) { it.cause }
+            .take(4)
+            .mapNotNull { it.message?.takeIf(String::isNotBlank) }
+            .distinct()
+            .joinToString("  ←  ")
+            .ifBlank { error::class.simpleName ?: "unknown" }
 
     /**
      * 落盘：新建走 [ConnectionStore.create]、编辑走 [ConnectionStore.update]（core
@@ -166,7 +278,7 @@ class KafkaConnectionFormState(
      * 成功自动发 `core.connection.added/updated`），这里不重复发。敏感键（password）
      * 落盘时由 SensitiveOptionsSerializer 自动加密，这里保持明文。
      */
-    private fun doSave(config: KafkaConfig): Boolean {
+    private fun doSave(config: KafkaConfig) {
         // host / port 取第一个 broker（endpoint 只是展示用途）；无端口的条目按
         // Kafka 客户端同款默认 9092。
         val first = config.bootstrapServers.split(",").firstOrNull()?.trim().orEmpty()
@@ -186,11 +298,14 @@ class KafkaConnectionFormState(
             if (editingId == null) ConnectionStore.create(info) else ConnectionStore.update(info)
         val failure = result.exceptionOrNull()
         if (failure != null) {
+            pendingConfig = null
+            saveState = SaveState.Idle
             saveError = failure.message ?: failure::class.simpleName
-            return false
+            return
         }
+        pendingConfig = null
+        saveState = SaveState.Idle
         savedCallback?.invoke()
-        return true
     }
 
     // 真正的存储槽；接口默认实现的 setter 是空操作，不持有它的话宿主赋值会被丢掉。

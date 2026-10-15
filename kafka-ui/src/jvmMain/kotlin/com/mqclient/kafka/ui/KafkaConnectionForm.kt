@@ -23,6 +23,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -30,7 +31,10 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.mqclient.core.ConnectionFormState
 import com.mqclient.core.ConnectionFormUi
+import com.mqclient.mqui.state.SaveAnywayDialog
+import com.mqclient.mqui.state.SaveState
 import com.mqclient.uicommon.LabeledField
+import com.mqclient.uicommon.PathRow
 import com.mqclient.uicommon.SettingsDropdownRow
 import com.mqclient.uicommon.i18n.stringResource
 
@@ -38,21 +42,25 @@ import com.mqclient.uicommon.i18n.stringResource
  * Kafka 的「新建 / 编辑连接」表单（`ConnectionFormUi` SPI 实现，注册见
  * `META-INF/services/com.mqclient.core.ConnectionFormUi`）。
  *
- * 字段、校验、错误展示、落盘全部归本面板 —— 宿主对话框只给容器和 footer 按钮。
- * 布局规则与 ibm-mq 表单一致：全部字段上下布局（标签在上、输入框占满整行宽），
- * 超出一屏走内部滚动。
+ * 字段、校验、错误展示、保存前测试连接、落盘全部归本面板 —— 宿主对话框只给
+ * 容器和 footer 按钮（「完成」即保存，Testing 时经 busy 契约禁用）。布局规则
+ * 与 ibm-mq 表单一致：全部字段上下布局（标签在上、输入框占满整行宽），超出一
+ * 屏走内部滚动。
  *
  * 动态显示：认证区（SASL 机制 / 用户名 / 密码）只在 securityProtocol 为 SASL_*
- * 时显示。同步表单：保存不发起测试连接（右键菜单有「测试连接」），校验通过
- * 直接落盘（见 [KafkaConnectionFormState.submit]）。
+ * 时显示；TLS 信任库区只在 SSL / SASL_SSL 时显示，truststore 路径只读展示、
+ * 经文件选择器填入（与 IBM MQ 同款 [PathRow]）。没有独立的「测试连接」按钮 ——
+ * 保存时自动测（见 [KafkaConnectionFormState.submit]）。
  */
 class KafkaConnectionForm : ConnectionFormUi {
 
     override val serviceId = "kafka"
 
     @Composable
-    override fun rememberFormState(defaultName: String): ConnectionFormState =
-        remember { KafkaConnectionFormState(defaultName) }
+    override fun rememberFormState(defaultName: String): ConnectionFormState {
+        val scope = rememberCoroutineScope()
+        return remember { KafkaConnectionFormState(defaultName, scope) }
+    }
 }
 
 /** 必填字段的标签：加 `*` 前缀。 */
@@ -122,6 +130,27 @@ internal fun KafkaConnectionFormContent(state: KafkaConnectionFormState) {
             )
         }
 
+        // 信任库区：TLS 协议（SSL / SASL_SSL）才显示。自签 CA 时需指定 truststore，
+        // 留空走 JVM 默认信任库。类型不单设字段：.p12/.pfx 按 PKCS12，其余按 JKS。
+        // 路径只读 + 「浏览」按钮，与 IBM MQ 表单同一套（ui-common PathRow）。
+        if (state.isTls) {
+            SectionDivider()
+            SectionHeader(stringResource("kafka_ui_section_tls"))
+            PathRow(
+                label = stringResource("kafka_ui_field_truststore_path"),
+                value = state.truststorePath,
+                onBrowse = state::pickTrustStore,
+            )
+            FieldHint(stringResource("kafka_ui_hint_truststore_path"))
+            Spacer(Modifier.height(12.dp))
+            PasswordRow(
+                label = stringResource("kafka_ui_field_truststore_password"),
+                value = state.truststorePassword,
+                onChange = { state.truststorePassword = it; state.truststorePasswordChanged = true },
+                showPlaceholder = state.originalTruststorePassword.isNotEmpty(),
+            )
+        }
+
         SectionDivider()
         SectionHeader(stringResource("kafka_ui_section_advanced"))
         TextRow(
@@ -132,6 +161,15 @@ internal fun KafkaConnectionFormContent(state: KafkaConnectionFormState) {
             suffix = "s",
         )
 
+        // 测试进行中的提示（保存按钮已由宿主按 busy 禁用）。
+        if (state.saveState == SaveState.Testing) {
+            Spacer(Modifier.height(12.dp))
+            Text(
+                text = stringResource("kafka_ui_test_running"),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         // 落盘失败原因（校验错误在各自字段下面；错误从不出面板边界）。
         state.saveError?.let { error ->
             Spacer(Modifier.height(12.dp))
@@ -142,6 +180,16 @@ internal fun KafkaConnectionFormContent(state: KafkaConnectionFormState) {
                 modifier = Modifier.fillMaxWidth(),
             )
         }
+    }
+
+    // 测试失败后的「是否仍要保存」确认框（mq-ui 公共组件，与 IBM MQ 同一交互）：
+    // 「保存」按测试时的配置快照落盘；「取消」只关本框，主对话框与表单原样保留。
+    (state.saveState as? SaveState.Failed)?.let { failed ->
+        SaveAnywayDialog(
+            message = failed.message,
+            onSave = state::confirmSave,
+            onCancel = state::dismissFailed,
+        )
     }
 }
 

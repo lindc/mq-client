@@ -12,9 +12,11 @@ import com.mqclient.ibmmq.IbmMQConfig
 import com.mqclient.ibmmq.IbmMQModule
 import com.mqclient.ibmmq.ibmMQConfigFromOptions
 import com.mqclient.ibmmq.toOptions
+import com.mqclient.uicommon.file.normalizePath
 import com.mqclient.uicommon.file.pickFile
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.core.newConnectionId
+import com.mqclient.mqui.state.SaveState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.TimeoutCancellationException
@@ -23,14 +25,6 @@ import kotlinx.coroutines.withTimeout
 
 /** 文件选择器放行的证书扩展名（不含点）。 */
 private val CERT_EXTENSIONS = listOf("jks", "p12", "pfx", "kdb")
-
-/**
- * Windows 路径统一成正斜杠：ktoml 0.7.1 的转义器对 `\U`（C:\Users）、`\t`（\trust）
- * 这类「恰好构成 TOML 转义前缀」的序列不转义，写出的 config.toml 自己都解析不了。
- * Java 在 Windows 上原生接受正斜杠（FileInputStream / JSSE / FileDialog 均可），
- * 从边界上避开整个转义问题。
- */
-private fun normalizePath(path: String): String = path.replace('\\', '/')
 
 /**
  * 各字段自己的校验错误（null = 没问题）。分字段而不是一条总错误行：

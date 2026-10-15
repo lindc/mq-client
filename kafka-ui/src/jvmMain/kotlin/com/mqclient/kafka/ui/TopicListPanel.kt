@@ -20,6 +20,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.mqclient.core.ConnectionStatus
 import com.mqclient.kafka.ui.ai.KafkaAiChainBuilder
 import com.mqclient.kafka.ui.ai.askAiCardAction
 import com.mqclient.mqui.command.ToolbarButton
@@ -40,7 +41,8 @@ import kotlinx.coroutines.launch
  *
  * 数据口径：全部主题（含 Kafka 内部主题 —— 卡片上以锁图标 + 文案标记，不做开关，
  * 数量不多且一眼可辨）；搜索按名称包含匹配。进入 Tab 自动加载，工具栏「刷新」重拉。
- * 未连接时展示引导文案（连接动作在侧边栏连接的右键菜单里）。
+ * 未连接时**自动隐式连接**（宿主侧栏同一行为），期间显示「正在连接…」，失败显示
+ * 原因 + 重试 —— 不再出现「请先在右键菜单连接」的引导文案。
  */
 @Composable
 fun TopicListPanel(
@@ -51,8 +53,11 @@ fun TopicListPanel(
     val scope = rememberCoroutineScope()
     // 「询问 AI」宿主回调：宿主没 Provide（独立预览等）时为 null —— AI 按钮不显示。
     val aiAsk = LocalAiAsk.current
-    // 进入 Tab 自动加载；刷新按钮触发同一入口。
-    LaunchedEffect(connectionId) { state.load() }
+    // 连接状态可观察（侧边栏同源）：进入 Tab 自动加载；未连接/失败 → 隐式连接 +
+    // Loading，连接成功/失败状态一变，这里重跑（导航点击的隐式连接由宿主侧栏
+    // 触发，本页只负责「状态到了就把界面翻过来」）。
+    val connectionStatus = rememberKafkaConnectionStatus(connectionId)
+    LaunchedEffect(connectionId, connectionStatus) { state.load() }
 
     Column(modifier.fillMaxSize()) {
         Row(
@@ -79,8 +84,13 @@ fun TopicListPanel(
 
         LoadStateContent(
             state = state.loadState,
-            onRetry = { scope.launch { state.load() } },
-            loadingMessage = stringResource("kafka_ui_topic_loading"),
+            onRetry = { scope.launch { state.retry() } },
+            loadingMessage =
+                if (connectionStatus == ConnectionStatus.Connecting) {
+                    stringResource("kafka_ui_connecting")
+                } else {
+                    stringResource("kafka_ui_topic_loading")
+                },
             modifier = Modifier.fillMaxWidth().weight(1f),
         ) { _ ->
             ObjectListPanel(

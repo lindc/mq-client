@@ -126,6 +126,18 @@ object KafkaModule {
         manager?.disconnectAsync(connectionId)
     }
 
+    /**
+     * 「测试连接」入口（连接表单的「完成」用）：按**表单草稿**的配置发起一次临时
+     * 连接（describeCluster 验证，用完即关），失败抛异常。与 `kafka.connection.test`
+     * 事件版的差异：事件版只测已登记连接的配置快照，表单需要测的是还没落盘的草稿。
+     * 模块未初始化（无头环境 / 测试）抛状态异常，由调用方按测试失败处理。
+     */
+    suspend fun testConnection(config: KafkaConfig) {
+        val connectionManager = manager
+            ?: throw IllegalStateException("Kafka 模块未初始化，无法测试连接")
+        connectionManager.testConnection(config)
+    }
+
     /** 一条连接的运行时上下文；未登记时为 null。 */
     fun connectionOrNull(connectionId: String): KafkaConnectionContext? =
         manager?.contextOrNull(connectionId)

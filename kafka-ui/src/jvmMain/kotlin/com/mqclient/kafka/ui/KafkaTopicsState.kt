@@ -5,6 +5,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.mqclient.core.ConnectionStatus
+import com.mqclient.core.ConnectionStore
 import com.mqclient.kafka.KafkaModule
 import com.mqclient.mqui.state.LoadState
 import com.mqclient.uicommon.i18n.stringResource
@@ -47,17 +48,38 @@ class KafkaTopicsState(
         }
 
     /**
-     * 拉取 topic 列表（进入 Tab 自动调一次，「刷新」按钮重拉）。
-     * 未连接（AdminClient 不存在）按失败态展示引导文案；查询超时用连接配置的
-     * connectionTimeout。失败沿 cause 链取前几条消息 —— KafkaFuture 的
-     * ExecutionException 包装会把真正的错误藏在里面。
+     * 拉取 topic 列表（进入 Tab 自动调一次，「刷新」按钮重拉；连接状态变化由
+     * [TopicListPanel] 的 LaunchedEffect 触发重跑）。与 IBM MQ 的 MqObjectListState
+     * 同一语义：**不提示「请先连接」** ——
+     *  - Connected：正常 listTopics + describeTopics；
+     *  - Connecting / Disconnected：保持 Loading（后者顺带兜底触发隐式连接），
+     *    等状态翻转后由 LaunchedEffect 重跑翻 Success；
+     *  - Failed：Error 态展示失败原因（ctx.lastError），配「重试」按钮。
      */
     suspend fun load() {
         loadState = LoadState.Loading
+        val status = ConnectionStore.connections.value
+            .firstOrNull { it.id == connectionId }?.status ?: ConnectionStatus.Disconnected
+        when (status) {
+            ConnectionStatus.Connecting -> return // 等 LaunchedEffect 在 Connected 时重跑
+            ConnectionStatus.Disconnected -> {
+                ensureKafkaConnecting(connectionId, status)
+                return
+            }
+            ConnectionStatus.Failed -> {
+                val reason = KafkaModule.connectionOrNull(connectionId)?.lastError
+                    ?.takeIf(String::isNotBlank)
+                    ?: stringResource("kafka_ui_connect_failed")
+                loadState = LoadState.Error(reason)
+                return
+            }
+            ConnectionStatus.Connected -> Unit
+        }
         val ctx = KafkaModule.connectionOrNull(connectionId)
         val admin = ctx?.adminClient
-        if (ctx == null || admin == null || ctx.status != ConnectionStatus.Connected) {
-            loadState = LoadState.Error(stringResource("kafka_ui_error_not_connected"))
+        if (ctx == null || admin == null) {
+            // 状态 Connected 但上下文/句柄未就绪（极短时序窗口）：保持 Loading，
+            // 等下一次状态变化或用户刷新，不误导成「未连接」。
             return
         }
         val timeoutMs = ctx.config.connectionTimeout * 1_000L
@@ -88,6 +110,13 @@ class KafkaTopicsState(
             if (error is kotlinx.coroutines.CancellationException) throw error
             loadState = LoadState.Error(failureMessage(error))
         }
+    }
+
+    /** 「重试」：失败态重新发起连接；连接成功后的数据加载由状态变化驱动。 */
+    fun retry() {
+        val status = ConnectionStore.connections.value
+            .firstOrNull { it.id == connectionId }?.status ?: ConnectionStatus.Disconnected
+        ensureKafkaConnecting(connectionId, status)
     }
 
     /** 失败原因转提示文案：沿 cause 链取前几条去重拼接（与 ibm-mq 表单同一套做法）。 */

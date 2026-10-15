@@ -16,6 +16,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -214,6 +215,7 @@ private fun AppRoot(bootConfig: Config, onExit: () -> Unit) {
                 // CompositionLocal 把 SnackbarHostState 下发给任意深层 Composable
                 // （如各业务模块的命令控制台），避免每个模块各包一层 Scaffold。
                 val snackbarHostState = remember { SnackbarHostState() }
+                val appScope = rememberCoroutineScope()
                 CompositionLocalProvider(
                     LocalSnackbarHostState.provides(snackbarHostState),
                     // 「询问 AI」宿主回调：业务模块（属性对话框 / 卡片按钮）发起链路分析
@@ -345,6 +347,12 @@ private fun AppRoot(bootConfig: Config, onExit: () -> Unit) {
                         // 对话框的草稿基于它，不同步的话下次整份覆盖保存会抹掉新连接。
                         onConnectionCreated = {
                             ConfigStore.loadConfigOrNull()?.let { loaded -> appConfig = loaded }
+                            // 「连接已创建」轻提示：对话框是独立窗口取不到
+                            // LocalSnackbarHostState，统一挂宿主 —— 用这里持有的
+                            // state 直接发。
+                            appScope.launch {
+                                snackbarHostState.showSnackbar(stringResource("common_connection_created"))
+                            }
                         },
                     )
                 }

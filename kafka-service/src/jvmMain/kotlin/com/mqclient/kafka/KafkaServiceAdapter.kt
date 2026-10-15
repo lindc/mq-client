@@ -13,11 +13,12 @@ class KafkaServiceAdapter : MQServiceAdapter() {
     // category = "MQ" 由 MQServiceAdapter 统一提供
 
     /**
-     * 导航树二级菜单：阶段三只有 Topic 列表（id = Tab 的 objectType，宿主按
-     * `nav_topics` 解析文案、`topics` 解析图标）。Consumer Groups 等后续阶段追加。
+     * 导航树二级菜单：`topics`（Topic 列表）/ `groups`（Consumer Group 列表）
+     * （id = Tab 的 objectType，宿主按 titleKey 解析文案、iconId 解析图标）。
      */
     override fun navigationItems(connection: ConnectionInfo): List<NavigationItem> = listOf(
         NavigationItem(id = "topics", titleKey = "kafka_ui_nav_topics", iconId = "topics"),
+        NavigationItem(id = "groups", titleKey = "kafka_ui_nav_groups", iconId = "groups"),
     )
 
     /**

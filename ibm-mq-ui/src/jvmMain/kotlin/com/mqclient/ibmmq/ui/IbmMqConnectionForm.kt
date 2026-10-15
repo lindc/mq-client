@@ -22,7 +22,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -36,7 +35,10 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.mqclient.core.ConnectionFormUi
 import com.mqclient.ibmmq.ConnectionMode
+import com.mqclient.mqui.state.SaveAnywayDialog
+import com.mqclient.mqui.state.SaveState
 import com.mqclient.uicommon.LabeledField
+import com.mqclient.uicommon.PathRow
 import com.mqclient.uicommon.SettingsDropdownRow
 import com.mqclient.uicommon.i18n.stringResource
 
@@ -406,30 +408,6 @@ private fun PasswordRow(
                             .clickable { visible = !visible }
                             .padding(horizontal = 8.dp),
                 )
-            },
-        )
-    }
-}
-
-/**
- * 只读路径字段 + 「浏览」按钮：路径只能经文件选择器填入（不允许手写），
- * 取消选择则保持原值。
- */
-@Composable
-private fun PathRow(
-    label: String,
-    value: String,
-    onBrowse: () -> Unit,
-) {
-    LabeledField(label) {
-        OutlinedTextField(
-            value = value,
-            onValueChange = { /* 只读：路径一律来自文件选择器 */ },
-            readOnly = true,
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            trailingIcon = {
-                TextButton(onClick = onBrowse) { Text(stringResource("ibm_mq_browse")) }
             },
         )
     }

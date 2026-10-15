@@ -4,6 +4,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Hearing
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Inbox
@@ -32,6 +33,8 @@ internal fun navigationIcon(iconId: String): ImageVector =
         "topology" -> Icons.Filled.Map
         "clusterRelations" -> Icons.Filled.Hub
         "command" -> Icons.Filled.Terminal
+        // ===== Kafka =====
+        "groups" -> Icons.Filled.Group
         // ===== IBM MQ 对象类型 =====
         "queues" -> Icons.Filled.Inbox
         "topics" -> Icons.Filled.Campaign

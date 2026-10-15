@@ -9,10 +9,8 @@ import java.util.Properties
  * [fromOptions] 还原。模式与 ibm-mq 的 IbmMQConfig 一致。
  *
  * 值一律存字符串（options 的契约）；类型解析在 [fromOptions] 里做，解析失败回落
- * 默认值。键名 `password` 命中 `ConfigManager.SENSITIVE_NAME_KEYWORDS`，落盘时由
- * `SensitiveOptionsSerializer` 统一加密 —— 模块内不做任何手工加密。
- *
- * 阶段一先只放「连得上」所需的字段；SSL 证书、扫描间隔等留待对应阶段再补。
+ * 默认值。键名 `password` / `truststorePassword` 命中 `ConfigManager.SENSITIVE_NAME_KEYWORDS`
+ * （子串匹配），落盘时由 `SensitiveOptionsSerializer` 统一加密 —— 模块内不做任何手工加密。
  */
 data class KafkaConfig(
     val bootstrapServers: String = "",
@@ -22,6 +20,10 @@ data class KafkaConfig(
     val saslMechanism: String = DEFAULT_SASL_MECHANISM,
     val username: String = "",
     val password: String = "",
+    /** TLS 协议（SSL / SASL_SSL）可选：truststore 文件路径。空 = 用 JVM 默认信任库。 */
+    val truststorePath: String = "",
+    /** TLS 协议可选：truststore 密码。 */
+    val truststorePassword: String = "",
     /** 连接阶段（describeCluster 验证）的超时秒数；AdminClient 的 API 超时同源。 */
     val connectionTimeout: Int = DEFAULT_CONNECTION_TIMEOUT_SECONDS,
 ) {
@@ -42,6 +44,8 @@ private object OptionKeys {
     const val SASL_MECHANISM = "saslMechanism"
     const val USERNAME = "username"
     const val PASSWORD = "password"
+    const val TRUSTSTORE_PATH = "truststorePath"
+    const val TRUSTSTORE_PASSWORD = "truststorePassword"
     const val CONNECTION_TIMEOUT = "connectionTimeout"
 }
 
@@ -52,6 +56,8 @@ fun KafkaConfig.toOptions(): Map<String, String> = buildMap {
     put(OptionKeys.SASL_MECHANISM, saslMechanism)
     put(OptionKeys.USERNAME, username)
     put(OptionKeys.PASSWORD, password)
+    put(OptionKeys.TRUSTSTORE_PATH, truststorePath)
+    put(OptionKeys.TRUSTSTORE_PASSWORD, truststorePassword)
     put(OptionKeys.CONNECTION_TIMEOUT, connectionTimeout.toString())
 }
 
@@ -70,6 +76,11 @@ fun kafkaConfigFromOptions(options: Map<String, String>): KafkaConfig {
             ?: KafkaConfig.DEFAULT_SASL_MECHANISM,
         username = options[OptionKeys.USERNAME].orEmpty(),
         password = options[OptionKeys.PASSWORD].orEmpty(),
+        // 读取侧归一化（Windows 反斜杠 → 正斜杠）：旧版本表单是手写输入框，可能落进
+        // `C:\Users\...` 这类裸反斜杠 —— ktoml 0.7.1 不转义 `\U` 这类 TOML 转义前缀，
+        // 写出的 config.toml 自己都解析不了（读取侧矫正 + 下次落盘自愈）。
+        truststorePath = options[OptionKeys.TRUSTSTORE_PATH].orEmpty().replace('\\', '/'),
+        truststorePassword = options[OptionKeys.TRUSTSTORE_PASSWORD].orEmpty(),
         connectionTimeout = int(OptionKeys.CONNECTION_TIMEOUT, KafkaConfig.DEFAULT_CONNECTION_TIMEOUT_SECONDS),
     )
 }
@@ -78,12 +89,27 @@ fun kafkaConfigFromOptions(options: Map<String, String>): KafkaConfig {
  * 组装 [AdminClient] 的连接属性。只有 SASL_* 协议才注入 JAAS 配置 —— PLAINTEXT/SSL
  * 下给了用户名也没意义。JAAS 字符串里对 username/password 做最小转义（反斜杠、双引
  * 号），避免特殊字符把配置炸出解析错误。
+ *
+ * TLS 协议（SSL / SASL_SSL）下若给了 [KafkaConfig.truststorePath]，注入自定义
+ * truststore —— 自签 CA 不在 JVM 默认信任库里，不注入握手必败。类型不单设字段：
+ * .p12 / .pfx 按 PKCS12，其余按 JKS（Kafka 客户端默认）。
  */
 fun KafkaConfig.toAdminProperties(): Properties = Properties().apply {
     put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers.trim())
     put(AdminClientConfig.SECURITY_PROTOCOL_CONFIG, securityProtocol)
     put(AdminClientConfig.REQUEST_TIMEOUT_MS_CONFIG, connectionTimeout * 1_000)
     put(AdminClientConfig.DEFAULT_API_TIMEOUT_MS_CONFIG, connectionTimeout * 1_000)
+    if (securityProtocol == "SSL" || securityProtocol == "SASL_SSL") {
+        val truststorePath = truststorePath.trim()
+        if (truststorePath.isNotEmpty()) {
+            put("ssl.truststore.location", truststorePath)
+            val lower = truststorePath.lowercase()
+            put("ssl.truststore.type", if (lower.endsWith(".p12") || lower.endsWith(".pfx")) "PKCS12" else "JKS")
+            if (truststorePassword.isNotEmpty()) {
+                put("ssl.truststore.password", truststorePassword)
+            }
+        }
+    }
     if (securityProtocol.startsWith("SASL")) {
         put("sasl.mechanism", saslMechanism)
         // LoginModule 类随机制走：SCRAM 与 PLAIN 各有各的实现，写死会让 SCRAM 连接直接报错。
