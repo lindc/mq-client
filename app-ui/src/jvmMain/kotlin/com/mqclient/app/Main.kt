@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -48,6 +47,7 @@ import com.mqclient.core.log.Log
 import com.mqclient.uicommon.i18n.LanguageResources
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.LocalSnackbarHostState
+import com.mqclient.uicommon.ThemedSnackbarHost
 import dev.nucleusframework.application.DecoratedWindow
 import mq_client.app_ui.generated.resources.Res
 import mq_client.app_ui.generated.resources.logo
@@ -226,20 +226,11 @@ private fun AppRoot(bootConfig: Config, onExit: () -> Unit) {
                     },
                 ) {
                     Scaffold(
-                        snackbarHost = {
-                            SnackbarHost(snackbarHostState) { data ->
-                                // 不用 inverseSurface/inverseOnSurface：本主题（MaterialKolor
-                                // TonalSpot）浅色模式下这对反色对比度过低（深字配黑底）。
-                                // secondaryContainer/onSecondaryContainer 是配套色对：
-                                // 浅色主题浅底深字、深色主题深底浅字；即使 contentColor
-                                // 被内层忽略，回退到的 onSurface 也与该底色保持可读。
-                                Snackbar(
-                                    snackbarData = data,
-                                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                                )
-                            }
-                        },
+                        // Snackbar 样式的唯一出处（ui-common ThemedSnackbarHost）：
+                        // secondaryContainer/onSecondaryContainer 跟主题走，不用 M3
+                        // 默认的 inverseSurface 反色对 —— 本主题（MaterialKolor TonalSpot）
+                        // 浅色模式下它对比度过低（深字配黑底）。
+                        snackbarHost = { ThemedSnackbarHost(snackbarHostState) },
                     ) {
                 WindowScaffold(
                     modifier = Modifier.macOSLargeCornerRadius().onPreviewKeyEvent { event ->

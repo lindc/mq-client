@@ -16,8 +16,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Snackbar
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -37,6 +35,7 @@ import com.mqclient.ibmmq.command.MqrcTranslator
 import com.mqclient.ibmmq.pcf.ChannelStatusDetail
 import com.mqclient.ibmmq.ui.ChannelResetSeqnumDialog
 import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 import kotlinx.coroutines.CancellationException
@@ -209,16 +208,10 @@ internal fun ChannelRuntimeStatusPane(
         }
 
         // 局部 Snackbar（独立窗口够不到主窗口宿主）。
-        SnackbarHost(
+        ThemedSnackbarHost(
             hostState = snackbarHostState,
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp),
-        ) { data ->
-            Snackbar(
-                snackbarData = data,
-                containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-            )
-        }
+        )
     }
 
     // 重置序列号二次确认对话框。

@@ -43,8 +43,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Snackbar
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -76,6 +74,7 @@ import com.mqclient.ibmmq.messaging.browseErrorText
 import com.mqclient.mqui.common.CompactSearchField
 import com.mqclient.mqui.objectlist.ObjectListEmptyState
 import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.file.saveFileBytes
 import com.mqclient.uicommon.i18n.LanguageResources
@@ -737,25 +736,6 @@ internal fun HoverTooltip(
         modifier = modifier,
         content = content,
     )
-}
-
-/**
- * 对话框内局部 Snackbar（对话框窗口够不到主窗口宿主）：配色对齐主窗口的定制
- * （Main.kt）——secondaryContainer/onSecondaryContainer 跟主题走，不用 M3 默认的
- * inverseSurface 黑底（浅色主题下黑底深字对比度差）。
- */
-@Composable
-internal fun ThemedSnackbarHost(
-    hostState: SnackbarHostState,
-    modifier: Modifier = Modifier,
-) {
-    SnackbarHost(hostState, modifier = modifier) { data ->
-        Snackbar(
-            snackbarData = data,
-            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-        )
-    }
 }
 
 /* ------------------------------- 底部 ------------------------------- */

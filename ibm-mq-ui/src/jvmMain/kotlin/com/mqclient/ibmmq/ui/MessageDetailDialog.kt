@@ -69,6 +69,7 @@ import com.mqclient.message.interpreter.ParamKind
 import com.mqclient.message.interpreter.hexPreview
 import com.mqclient.message.interpreter.isProbablyBinary
 import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.file.pickFile
 import com.mqclient.uicommon.file.saveFileBytes
