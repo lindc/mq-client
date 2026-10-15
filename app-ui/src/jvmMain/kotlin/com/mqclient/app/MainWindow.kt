@@ -54,6 +54,7 @@ import com.mqclient.app.connection.ConnectionMenuState
 import com.mqclient.app.connection.ConnectFailure
 import com.mqclient.app.connection.TestResultData
 import com.mqclient.core.ConnectionInfo
+import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.CoreModule
 import com.mqclient.core.ModuleRegistry
@@ -197,6 +198,32 @@ fun MainWindow(
             val next = openTabs.getOrNull(activeIndex) ?: openTabs.lastOrNull()
             activeTab = next
             onSelect(next)
+        }
+    }
+
+    // 断开连接（非删除）时收掉该连接的 Tab：Tab 还开着的话，面板的隐式连接兜底会
+    // 把用户刚点的「断开」静默撤销（状态一翻 Disconnected 面板就重新发起连接）。
+    // 宿主在状态翻到 Disconnected 的瞬间收 Tab，面板随组合销毁、隐式连接失去触发源。
+    // 与上面的删除清理同一套落位规则；区别是连接还在 —— Tab 全没了时回落到该连接的
+    // 一级页而不是清空选中（「重连」入口就在侧边栏选中态上）。
+    var lastStatuses by remember { mutableStateOf(emptyMap<String, ConnectionStatus>()) }
+    LaunchedEffect(connections) {
+        val current = connections.associate { it.id to it.status }
+        val disconnectedIds = current
+            .filter { (id, status) ->
+                status == ConnectionStatus.Disconnected && lastStatuses[id] != ConnectionStatus.Disconnected
+            }
+            .keys
+        lastStatuses = current
+        if (disconnectedIds.isEmpty() || openTabs.none { it.connectionId in disconnectedIds }) {
+            return@LaunchedEffect
+        }
+        val activeIndex = openTabs.indexOf(activeTab)
+        openTabs = openTabs.filter { it.connectionId !in disconnectedIds }
+        if (activeTab?.connectionId in disconnectedIds) {
+            val next = openTabs.getOrNull(activeIndex) ?: openTabs.lastOrNull()
+            activeTab = next
+            onSelect(next ?: NavSelection(disconnectedIds.first()))
         }
     }
 
