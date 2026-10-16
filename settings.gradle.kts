@@ -36,6 +36,8 @@ include(
     ":ai-ui",
     ":ai-service",
     ":ui-common",
+    // Compose UI 测试工具（画布手势 / 语义定位），各 UI 模块 jvmTest 共用。
+    ":ui-test-kit",
     ":openai-service",
     ":openai-ui",
     ":anthropic-service",

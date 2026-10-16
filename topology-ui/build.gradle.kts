@@ -22,5 +22,8 @@ kotlin {
             // TopologyZoomControls 的动作文案走公共 stringResource。
             implementation(projects.uiCommon)
         }
+        jvmTest.dependencies {
+            implementation(kotlin("test"))
+        }
     }
 }

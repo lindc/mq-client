@@ -38,6 +38,10 @@ kotlin {
         }
         jvmTest.dependencies {
             implementation(kotlin("test"))
+            // Compose UI 测试工具（画布手势 / 语义定位，ui-test-kit）；桌面 actual 还需
+            // Skia 原生运行时（ui-test-kit 不透传，声明 currentOs 带上）。
+            implementation(projects.uiTestKit)
+            implementation(compose.desktop.currentOs)
         }
     }
 }
