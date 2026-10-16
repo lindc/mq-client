@@ -117,19 +117,15 @@ fun kafkaConfigFromOptions(options: Map<String, String>): KafkaConfig {
 }
 
 /**
- * 组装 [AdminClient] 的连接属性。只有 SASL_* 协议才注入 JAAS 配置 —— PLAINTEXT/SSL
- * 下给了用户名也没意义。JAAS 字符串里对 username/password 做最小转义（反斜杠、双引
- * 号），避免特殊字符把配置炸出解析错误。
- *
- * TLS 协议（SSL / SASL_SSL）下若给了 [KafkaConfig.truststorePath]，注入自定义
- * truststore —— 自签 CA 不在 JVM 默认信任库里，不注入握手必败。类型不单设字段：
- * .p12 / .pfx 按 PKCS12，其余按 JKS（Kafka 客户端默认）。
+ * bootstrap / security.protocol / TLS / SASL 四块连接属性 —— AdminClient、KafkaConsumer、
+ * KafkaProducer 三种客户端通用（键名同源：CommonClientConfig 的常量就是这些字符串）。
+ * **刻意不带** AdminClientConfig 的 REQUEST_TIMEOUT_MS / DEFAULT_API_TIMEOUT_MS：
+ * consumer/producer 里同名键的语义与量级完全不同（如 consumer 的 request.timeout.ms），
+ * 复用会污染行为 —— 消息读写侧（KafkaMessageService）自己按需设。
  */
-fun KafkaConfig.toAdminProperties(): Properties = Properties().apply {
-    put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers.trim())
-    put(AdminClientConfig.SECURITY_PROTOCOL_CONFIG, securityProtocol)
-    put(AdminClientConfig.REQUEST_TIMEOUT_MS_CONFIG, connectionTimeout * 1_000)
-    put(AdminClientConfig.DEFAULT_API_TIMEOUT_MS_CONFIG, connectionTimeout * 1_000)
+internal fun KafkaConfig.toConnectionProperties(): Properties = Properties().apply {
+    put("bootstrap.servers", bootstrapServers.trim())
+    put("security.protocol", securityProtocol)
     if (securityProtocol == "SSL" || securityProtocol == "SASL_SSL") {
         val truststorePath = truststorePath.trim()
         if (truststorePath.isNotEmpty()) {
@@ -143,20 +139,31 @@ fun KafkaConfig.toAdminProperties(): Properties = Properties().apply {
     }
     if (securityProtocol.startsWith("SASL")) {
         put("sasl.mechanism", saslMechanism)
-        // LoginModule 类随机制走：SCRAM 与 PLAIN 各有各的实现，写死会让 SCRAM 连接直接报错。
-        val loginModule = when (saslMechanism.uppercase()) {
-            "SCRAM-SHA-256", "SCRAM-SHA-512" -> "org.apache.kafka.common.security.scram.ScramLoginModule"
-            else -> "org.apache.kafka.common.security.plain.PlainLoginModule"
-        }
-        put(
-            "sasl.jaas.config",
-            buildString {
-                append(loginModule).append(" required ")
-                append("username=\"").append(username.escapeJaas()).append("\" ")
-                append("password=\"").append(password.escapeJaas()).append("\";")
-            },
-        )
+        put("sasl.jaas.config", jaasConfig())
     }
+}
+
+/** SASL JAAS 配置串：LoginModule 类随机制走（SCRAM 与 PLAIN 各有各的实现，写死会让 SCRAM 直接报错）。 */
+internal fun KafkaConfig.jaasConfig(): String {
+    val loginModule = when (saslMechanism.uppercase()) {
+        "SCRAM-SHA-256", "SCRAM-SHA-512" -> "org.apache.kafka.common.security.scram.ScramLoginModule"
+        else -> "org.apache.kafka.common.security.plain.PlainLoginModule"
+    }
+    return buildString {
+        append(loginModule).append(" required ")
+        append("username=\"").append(username.escapeJaas()).append("\" ")
+        append("password=\"").append(password.escapeJaas()).append("\";")
+    }
+}
+
+/**
+ * 组装 [AdminClient] 的连接属性：连接四块见 [toConnectionProperties]，另加 AdminClient
+ * 专属的两个超时（与 [KafkaConfig.connectionTimeout] 同源）。
+ */
+fun KafkaConfig.toAdminProperties(): Properties = Properties().apply {
+    putAll(toConnectionProperties())
+    put(AdminClientConfig.REQUEST_TIMEOUT_MS_CONFIG, connectionTimeout * 1_000)
+    put(AdminClientConfig.DEFAULT_API_TIMEOUT_MS_CONFIG, connectionTimeout * 1_000)
 }
 
 /** JAAS 配置串的最小转义：反斜杠与双引号。 */

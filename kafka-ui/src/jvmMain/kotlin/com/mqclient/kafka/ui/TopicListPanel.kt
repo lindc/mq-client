@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
@@ -62,6 +63,8 @@ fun TopicListPanel(
     var showCreate by remember(connectionId) { mutableStateOf(false) }
     // 属性对话框的 topic 名；null = 关闭。
     var propsTopic by remember(connectionId) { mutableStateOf<String?>(null) }
+    // 消息对话框的 topic 名（卡片 ✉ / 双击打开）；null = 关闭。
+    var messagesTopic by remember(connectionId) { mutableStateOf<String?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     // 「询问 AI」宿主回调：宿主没 Provide（独立预览等）时为 null —— AI 按钮不显示。
@@ -143,6 +146,15 @@ fun TopicListPanel(
                                         },
                                     )
                                 }
+                                // 消息对话框（浏览 / 发送）—— 双击卡片同效。
+                                add(
+                                    CardAction(
+                                        id = "messages",
+                                        icon = Icons.Default.Email,
+                                        tooltip = "kafka_ui_topic_messages",
+                                        onClick = { messagesTopic = info.name },
+                                    ),
+                                )
                                 add(
                                     CardAction(
                                         id = "properties",
@@ -155,7 +167,7 @@ fun TopicListPanel(
                         )
                     },
                 onCardClick = {},
-                onCardDoubleClick = {},
+                onCardDoubleClick = { card -> messagesTopic = card.id },
                 modifier = Modifier.fillMaxSize(),
             )
         }
@@ -184,6 +196,16 @@ fun TopicListPanel(
                     snackbarHostState.showSnackbar(stringResource("kafka_ui_topic_props_delete_done"))
                 }
             },
+        )
+    }
+
+    // 消息对话框（卡片 ✉ / 双击）：分区数从列表状态传入，起点选择区的 Partition 下拉用。
+    messagesTopic?.let { topicName ->
+        KafkaMessagesDialog(
+            connectionId = connectionId,
+            topicName = topicName,
+            partitionCount = state.filtered.firstOrNull { it.name == topicName }?.partitions,
+            onDismiss = { messagesTopic = null },
         )
     }
 }

@@ -41,3 +41,6 @@ nul;
 
 # Agent 工具的本地工作目录（会话产物，与项目无关）。
 .codewhale/
+
+# diag 实连测试的本地凭据（chillbear truststore 等，从服务器拷贝，绝不入库）。
+.local-test/

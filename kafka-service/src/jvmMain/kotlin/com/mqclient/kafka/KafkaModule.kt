@@ -54,6 +54,7 @@ object KafkaModule {
 
     private var moduleContext: ServiceContext? = null
     private var service: KafkaScanService? = null
+    private var messageService: KafkaMessageService? = null
     private var manager: KafkaConnectionManager? = null
     private var subscriptions: List<Job> = emptyList()
 
@@ -65,8 +66,10 @@ object KafkaModule {
         if (manager != null) return
 
         val createdService = KafkaScanService(context)
+        val createdMessageService = KafkaMessageService()
         val created = KafkaConnectionManager(context, createdService)
         service = createdService
+        messageService = createdMessageService
 
         subscriptions = listOf(
             // 跨模块：核心广播连接变化，只处理属于本模块的连接（payload 里 `type`
@@ -141,6 +144,9 @@ object KafkaModule {
     /** 扫描服务（缓存只读口 / 手动扫描）；模块未初始化时为 null。 */
     fun serviceOrNull(): KafkaScanService? = service
 
+    /** 消息读写服务（浏览 / 发送 / 详情，即时查询不走缓存）；模块未初始化时为 null。 */
+    fun messageServiceOrNull(): KafkaMessageService? = messageService
+
     /**
      * 手动扫描入口（UI 刷新按钮）：在模块 scope 里跑一轮**对象慢扫**（scanLock 串行，
      * 与定时任务排队不重叠）；扫完经 OBJECTS_SCANNED 事件驱动 UI 刷新缓存数据。
@@ -183,6 +189,7 @@ object KafkaModule {
         } finally {
             subscriptionsToCancel.forEach(Job::cancel)
             service = null
+            messageService = null
             moduleContext = null
         }
     }
