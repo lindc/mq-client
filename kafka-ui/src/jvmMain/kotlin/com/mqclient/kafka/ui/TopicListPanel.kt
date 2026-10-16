@@ -1,6 +1,7 @@
 package com.mqclient.kafka.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -9,15 +10,18 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,8 +39,10 @@ import com.mqclient.mqui.objectlist.ObjectListEmptyState
 import com.mqclient.mqui.objectlist.ObjectListPanel
 import com.mqclient.mqui.state.LoadStateContent
 import com.mqclient.uicommon.LocalAiAsk
+import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
+import kotlinx.coroutines.launch
 
 /**
  * Topic 列表页（导航项 `topics` 的 Tab 内容）：**缓存优先 + 事件驱动**的卡片网格，
@@ -54,6 +60,10 @@ fun TopicListPanel(
     val state = remember(connectionId) { KafkaTopicsState(connectionId) }
     // 创建主题对话框开关（工具栏按钮 / 空态引导共用）。
     var showCreate by remember(connectionId) { mutableStateOf(false) }
+    // 属性对话框的 topic 名；null = 关闭。
+    var propsTopic by remember(connectionId) { mutableStateOf<String?>(null) }
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
     // 「询问 AI」宿主回调：宿主没 Provide（独立预览等）时为 null —— AI 按钮不显示。
     val aiAsk = LocalAiAsk.current
     // 进入 Tab 首次加载（组合期一次，含隐式连接兜底）；之后的状态变化走
@@ -68,7 +78,8 @@ fun TopicListPanel(
         }
     }
 
-    Column(modifier.fillMaxSize()) {
+    Box(modifier.fillMaxSize()) {
+        Column(modifier.fillMaxSize()) {
         Row(
             modifier =
                 Modifier
@@ -124,16 +135,23 @@ fun TopicListPanel(
                 items =
                     state.filtered.map { info ->
                         info.toCardData(
-                            actions =
+                            actions = buildList {
                                 if (aiAsk != null) {
-                                    listOf(
+                                    add(
                                         askAiCardAction {
                                             KafkaAiChainBuilder.build(connectionId, info)?.let(aiAsk::onAsk)
                                         },
                                     )
-                                } else {
-                                    emptyList()
-                                },
+                                }
+                                add(
+                                    CardAction(
+                                        id = "properties",
+                                        icon = Icons.Default.Info,
+                                        tooltip = "kafka_ui_topic_props",
+                                        onClick = { propsTopic = info.name },
+                                    ),
+                                )
+                            },
                         )
                     },
                 onCardClick = {},
@@ -141,12 +159,31 @@ fun TopicListPanel(
                 modifier = Modifier.fillMaxSize(),
             )
         }
+        }
+        ThemedSnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
     }
 
     if (showCreate) {
         KafkaCreateTopicDialog(
             connectionId = connectionId,
             onDismiss = { showCreate = false },
+        )
+    }
+
+    // Topic 属性对话框：删除成功 → 关对话框 + Snackbar 提示（列表经 scanNow 事件刷新）。
+    propsTopic?.let { topicName ->
+        KafkaTopicPropertiesDialog(
+            connectionId = connectionId,
+            topicName = topicName,
+            onDismiss = { propsTopic = null },
+            onDeleted = {
+                scope.launch {
+                    snackbarHostState.showSnackbar(stringResource("kafka_ui_topic_props_delete_done"))
+                }
+            },
         )
     }
 }

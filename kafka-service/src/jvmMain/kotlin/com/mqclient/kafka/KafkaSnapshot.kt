@@ -103,6 +103,20 @@ data class KafkaGroupOffsetDetail(
     val ownerId: String?,
 )
 
+/** Topic 的一个配置项（describeConfigs 投影，详情对话框实时查询产物）。 */
+data class KafkaTopicConfigSnapshot(
+    val key: String,
+    val value: String,
+    /** 是否 broker 默认值（未被显式覆盖）。 */
+    val isDefault: Boolean,
+)
+
+/** 一个分区的位移区间（earliest / latest，详情对话框实时查询产物）。 */
+data class KafkaTopicOffsetRange(
+    val earliest: Long,
+    val latest: Long,
+)
+
 /**
  * 消费组详情快照（详情对话框实时查询产物，不走扫描缓存 —— 详情要新鲜数据，
  * 与 ibm-mq 集群关系面板的实时查询同一哲学）。

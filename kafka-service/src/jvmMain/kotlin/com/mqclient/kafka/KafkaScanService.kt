@@ -14,6 +14,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.apache.kafka.clients.admin.AdminClient
+import org.apache.kafka.common.config.ConfigResource
 import org.apache.kafka.clients.admin.ListConsumerGroupsOptions
 import org.apache.kafka.clients.admin.NewTopic
 import org.apache.kafka.clients.admin.ListTopicsOptions
@@ -281,6 +282,60 @@ class KafkaScanService(private val context: ServiceContext) {
                 kafkaLog.warn("created topic cache sync failed: topic=$name error=${errorMessage(error)}")
             }
         }
+    }
+
+    // ---------------------------------------------------------------- Topic 属性 / 删除（实时）
+
+    /** Topic 配置项（describeConfigs 投影，按 key 排序）。 */
+    suspend fun getTopicConfigs(connectionId: String, name: String): List<KafkaTopicConfigSnapshot> {
+        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
+        val admin = ctx.adminClient ?: throw IllegalStateException("未连接")
+        val timeoutMs = ctx.config.connectionTimeout * 1_000L
+        return withContext(Dispatchers.IO) {
+            val config = admin.describeConfigs(listOf(ConfigResource(ConfigResource.Type.TOPIC, name)))
+                .all()
+                .get(timeoutMs, TimeUnit.MILLISECONDS)[ConfigResource(ConfigResource.Type.TOPIC, name)]
+            config?.entries()
+                ?.map { KafkaTopicConfigSnapshot(key = it.name(), value = it.value(), isDefault = it.isDefault()) }
+                ?.sortedBy { it.key }
+                ?: emptyList()
+        }
+    }
+
+    /** Topic 各分区的位移区间（earliest / latest，两次 listOffsets 批量 RPC）。 */
+    suspend fun getTopicOffsets(
+        connectionId: String,
+        name: String,
+        partitions: List<Int>,
+    ): Map<Int, KafkaTopicOffsetRange> {
+        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
+        val admin = ctx.adminClient ?: throw IllegalStateException("未连接")
+        val timeoutMs = ctx.config.connectionTimeout * 1_000L
+        return withContext(Dispatchers.IO) {
+            val tps = partitions.map { TopicPartition(name, it) }
+            if (tps.isEmpty()) return@withContext emptyMap()
+            val earliest = admin.listOffsets(tps.associateWith { OffsetSpec.earliest() })
+                .all()
+                .get(timeoutMs, TimeUnit.MILLISECONDS)
+                .mapValues { (_, info) -> info.offset() }
+            val latest = admin.listOffsets(tps.associateWith { OffsetSpec.latest() })
+                .all()
+                .get(timeoutMs, TimeUnit.MILLISECONDS)
+                .mapValues { (_, info) -> info.offset() }
+            tps.associateWith { tp -> KafkaTopicOffsetRange(earliest[tp] ?: 0L, latest[tp] ?: 0L) }
+                .mapKeys { it.key.partition() }
+        }
+    }
+
+    /** 删除主题（admin.deleteTopics）：权限不足 / 不存在等错误原样上抛由 UI 提示。 */
+    suspend fun deleteTopic(connectionId: String, name: String) {
+        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
+        val admin = ctx.adminClient ?: throw IllegalStateException("未连接")
+        val timeoutMs = ctx.config.connectionTimeout * 1_000L
+        withContext(Dispatchers.IO) {
+            admin.deleteTopics(setOf(name)).all().get(timeoutMs, TimeUnit.MILLISECONDS)
+        }
+        kafkaLog.info("topic deleted: connection=$connectionId topic=$name")
     }
 
     // ---------------------------------------------------------------- 组详情（实时）
