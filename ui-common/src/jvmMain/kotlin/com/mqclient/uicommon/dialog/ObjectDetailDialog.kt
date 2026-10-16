@@ -52,6 +52,12 @@ import dev.nucleusframework.window.windowDragArea
  * DialogWindow 会在非 EDT 上创建 SkiaLayer 而抛
  * `IllegalStateException: Method should be called from AWT event dispatch thread`（实测）。
  * ESC 也走关闭（对话框无系统标题栏，键盘出口得自己接——同 SettingsDialog）。
+ *
+ * **⚠️ 嵌套确认框必须声明在本外壳的 content lambda 内**：compose `Dialog`/`AlertDialog`
+ * 在 Desktop 上是独立窗口，owner = 声明它所在的组合所属的窗口——声明为本外壳的
+ * **兄弟节点**时挂到主窗口，会被本对话框窗口压住（实测：确认框在后面"看不见"）。
+ * 正确范本：QueueMessagesDialog → MessageBrowseTab 的删除确认；反例（已修）：
+ * KafkaGroupDetailDialog / KafkaTopicPropertiesDialog 曾把确认框声明在外层。
  */
 @Composable
 fun ObjectDetailDialog(

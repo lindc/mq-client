@@ -171,45 +171,47 @@ fun KafkaTopicPropertiesDialog(
             }
             SnackbarHost(hostState = snackbar)
         }
-    }
 
-    // ---- 删除二次确认 ----
-    if (deleteConfirm) {
-        AlertDialog(
-            onDismissRequest = { deleteConfirm = false },
-            title = { Text(stringResource("kafka_ui_topic_props_delete_confirm_title")) },
-            text = {
-                Text(
-                    text = stringResource("kafka_ui_topic_props_delete_confirm_text")
-                        .withArg(topicName, snapshot?.partitions?.size ?: 0),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            },
-            confirmButton = {
-                PressableButton(
-                    onClick = {
-                        deleteConfirm = false
-                        delete()
-                    },
-                    enabled = !deleting,
-                    danger = true,
-                ) {
+        // ---- 删除二次确认：**必须声明在本外壳 content lambda 内** —— compose Dialog
+        // 的窗口归属随声明组合走，声明在外层会挂到主窗口、被本对话框压住（实测坑，
+        // 见外壳 KDoc）。----
+        if (deleteConfirm) {
+            AlertDialog(
+                onDismissRequest = { deleteConfirm = false },
+                title = { Text(stringResource("kafka_ui_topic_props_delete_confirm_title")) },
+                text = {
                     Text(
-                        text = stringResource(
-                            if (deleting) "kafka_ui_topic_props_deleting" else "kafka_ui_topic_props_delete_confirm",
-                        ),
+                        text = stringResource("kafka_ui_topic_props_delete_confirm_text")
+                            .withArg(topicName, snapshot?.partitions?.size ?: 0),
+                        style = MaterialTheme.typography.bodyMedium,
                     )
-                }
-            },
-            dismissButton = {
-                PressableButton(
-                    onClick = { deleteConfirm = false },
-                    enabled = !deleting,
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                ) { Text(stringResource("common_cancel")) }
-            },
-        )
+                },
+                confirmButton = {
+                    PressableButton(
+                        onClick = {
+                            deleteConfirm = false
+                            delete()
+                        },
+                        enabled = !deleting,
+                        danger = true,
+                    ) {
+                        Text(
+                            text = stringResource(
+                                if (deleting) "kafka_ui_topic_props_deleting" else "kafka_ui_topic_props_delete_confirm",
+                            ),
+                        )
+                    }
+                },
+                dismissButton = {
+                    PressableButton(
+                        onClick = { deleteConfirm = false },
+                        enabled = !deleting,
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    ) { Text(stringResource("common_cancel")) }
+                },
+            )
+        }
     }
 }
 

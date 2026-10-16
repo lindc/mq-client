@@ -71,12 +71,14 @@ fun QueueMessagesDialog(
                 )
             }
         }
-    }
 
-    if (confirmCloseWhileSending) {
-        ConfirmCloseWhileSendingDialog(
-            onConfirm = onDismiss,
-            onDismiss = { confirmCloseWhileSending = false },
-        )
+        // 发送中关闭确认：**声明在本外壳 content lambda 内**——compose Dialog 的窗口
+        // 归属随声明组合走，挂到外层会被本对话框压住（见 ObjectDetailDialog KDoc）。
+        if (confirmCloseWhileSending) {
+            ConfirmCloseWhileSendingDialog(
+                onConfirm = onDismiss,
+                onDismiss = { confirmCloseWhileSending = false },
+            )
+        }
     }
 }

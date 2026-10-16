@@ -313,21 +313,23 @@ internal fun MessageDetailDialog(
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
         }
-    }
+        }
 
-    // dmpmqmsg 导入：预览确认 / fallback（文件不是 dmpmqmsg 格式）
-    importPreview?.let { (fileName, messages) ->
-        DmpmqmsgImportDialog(
-            fileName = fileName,
-            messages = messages,
-            selectedIndex = selectedImportIndex,
-            onSelectMessage = { selectedImportIndex = it },
-            executing = importing,
-            errorText = importError,
-            onImport = { performImport(messages[selectedImportIndex.coerceIn(0, messages.lastIndex)]) },
-            onDismiss = { if (!importing) importPreview = null },
-        )
-    }
+        // dmpmqmsg 导入：预览确认 / fallback（文件不是 dmpmqmsg 格式）。**声明在本外壳
+        // content lambda 内**——compose Dialog 的窗口归属随声明组合走，挂到外层会被
+        // 本对话框压住（见 ObjectDetailDialog KDoc）。
+        importPreview?.let { (fileName, messages) ->
+            DmpmqmsgImportDialog(
+                fileName = fileName,
+                messages = messages,
+                selectedIndex = selectedImportIndex,
+                onSelectMessage = { selectedImportIndex = it },
+                executing = importing,
+                errorText = importError,
+                onImport = { performImport(messages[selectedImportIndex.coerceIn(0, messages.lastIndex)]) },
+                onDismiss = { if (!importing) importPreview = null },
+            )
+        }
     importFallback?.let { (fileName, body) ->
         DmpmqmsgFallbackDialog(
             fileName = fileName,
