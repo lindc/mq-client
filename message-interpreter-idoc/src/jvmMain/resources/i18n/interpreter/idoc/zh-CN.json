@@ -1,0 +1,8 @@
+{
+  "msg_interp_idoc": "SAP IDoc",
+  "msg_interp_param_charset": "字符集",
+  "msg_interp_param_version": "版本",
+  "msg_interp_param_version_auto": "auto（自动判断）",
+  "msg_interp_param_show_raw": "显示原始 segment",
+  "msg_interp_param_expand": "展开嵌套结构"
+}

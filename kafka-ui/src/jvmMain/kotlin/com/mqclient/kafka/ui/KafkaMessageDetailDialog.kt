@@ -249,9 +249,9 @@ private fun DetailReadyPane(
 ) {
     // 解释器选择与参数（切换解释器时参数回默认值）。
     val interpreters = remember { MessageInterpreters.loadAll() }
-    var selectedId by remember { mutableStateOf(MessageInterpreters.byId("text").id) }
+    var selectedId by remember { mutableStateOf(MessageInterpreters.default().id) }
     val interpreter = remember(selectedId, interpreters) {
-        interpreters.firstOrNull { it.id == selectedId } ?: MessageInterpreters.byId(selectedId)
+        interpreters.firstOrNull { it.id == selectedId } ?: interpreters.first()
     }
     var params by remember(interpreter) { mutableStateOf(interpreter.defaultParams) }
     var expanded by remember(detail) { mutableStateOf(false) }

@@ -23,8 +23,27 @@ class MessageInterpretersTest {
     }
 
     @Test
-    fun `byId falls back to text for unknown id`() {
-        assertEquals("text", MessageInterpreters.byId("no_such_interpreter").id)
+    fun `byId returns null for unknown id`() {
+        assertEquals(null, MessageInterpreters.byId("no_such_interpreter"))
+    }
+
+    @Test
+    fun `default is the smallest sortOrder interpreter`() {
+        assertEquals("text", MessageInterpreters.default().id)
+    }
+
+    @Test
+    fun `every built-in interpreter ships i18n resources for both languages`() = kotlinx.coroutines.runBlocking {
+        val tables = MessageInterpreters.i18nTables
+        assertEquals(
+            listOf("msg_interp_text", "msg_interp_json", "msg_interp_xml", "msg_interp_base64", "msg_interp_idoc"),
+            tables.map { it.base },
+        )
+        for (table in tables) {
+            val zh = table.reader("zh-CN")
+            assertTrue(zh != null && zh.contains("msg_interp_"), "${table.base} 缺 zh-CN 资源")
+            assertTrue(table.reader("en-US") != null, "${table.base} 缺 en-US 资源")
+        }
     }
 
     @Test
@@ -35,7 +54,7 @@ class MessageInterpretersTest {
 
     @Test
     fun `idoc claims and parses a flat idoc file`() {
-        val idoc = MessageInterpreters.byId("idoc")
+        val idoc = MessageInterpreters.byId("idoc")!!
         val sample = """
             EDI_DC40  1000000000123456  30  ORDERS.ORDERS05  ORDERS  LS  SAPPRD  ERP000
             E2EDK01001  0000000000123456 000000001 000000000 01  header data
@@ -53,7 +72,7 @@ class MessageInterpretersTest {
 
     @Test
     fun `idoc does not claim plain text`() {
-        val idoc = MessageInterpreters.byId("idoc")
+        val idoc = MessageInterpreters.byId("idoc")!!
         val content = "hello world\nthis is not an idoc".toByteArray()
         assertEquals(false, idoc.canInterpret(content, 0, 1208))
         val result = idoc.interpret(content, 0, 1208, emptyMap())

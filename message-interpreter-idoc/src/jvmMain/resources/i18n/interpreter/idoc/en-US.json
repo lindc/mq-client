@@ -1,0 +1,8 @@
+{
+  "msg_interp_idoc": "SAP IDoc",
+  "msg_interp_param_charset": "Charset",
+  "msg_interp_param_version": "Version",
+  "msg_interp_param_version_auto": "auto (auto-detect)",
+  "msg_interp_param_show_raw": "Show raw segments",
+  "msg_interp_param_expand": "Expand nested structure"
+}

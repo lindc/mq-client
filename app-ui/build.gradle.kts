@@ -55,6 +55,9 @@ kotlin {
             implementation(projects.rabbitmqUi)
             implementation(projects.rocketmqService)
             implementation(projects.rocketmqUi)
+            // 解释器注册表：Main.kt 启动 / 换语言时把解释器的私有 i18n 表合进全局表
+            // （ibmMqUi/kafkaUi 的 implementation 依赖不传递，宿主自己声明一份）。
+            implementation(projects.messageInterpreterRegistry)
         }
         jvmMain.dependencies {
             implementation(compose.desktop.currentOs)

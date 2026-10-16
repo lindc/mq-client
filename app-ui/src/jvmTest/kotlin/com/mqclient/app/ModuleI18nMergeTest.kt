@@ -1,6 +1,8 @@
 package com.mqclient.app
 
+import com.mqclient.core.ModuleI18nTable
 import com.mqclient.core.ModuleRegistry
+import com.mqclient.message.interpreter.MessageInterpreters
 import com.mqclient.uicommon.i18n.LanguageResources
 import com.mqclient.uicommon.i18n.stringResource
 import kotlin.test.AfterTest
@@ -30,6 +32,48 @@ class ModuleI18nMergeTest {
         // 恢复公共表，别把其他用例的期望值污染掉（本模块没有别的 i18n 用例，防御性收尾）。
         runBlocking { LanguageResources.load(null) }
     }
+
+    /**
+     * 全量模块表 = AdapterUI 私有表 + 解释器私有表（registry 从各解释器模块的
+     * classpath 资源读出）。守卫用例与 Main.kt 的 [load 接线][allI18nTables] 必须
+     * 用同一份清单 —— 这里直接复制 Main.kt 的组装逻辑，接线漏掉解释器表时下面的
+     * 回归守卫会红。
+     */
+    private fun allTables(): List<ModuleI18nTable> =
+        ModuleRegistry.i18nTables + MessageInterpreters.i18nTables.map {
+            ModuleI18nTable(base = it.base, reader = it.reader)
+        }
+
+    /**
+     * 解释器键必须从**解释器自己的模块表**解析（曾回归过一次：键进了公共表 /
+     * 模块表没合入，界面上显示的是裸 key）。逐解释器内省 displayName / 参数 label /
+     * SELECT 选项 label，凡形如 i18n 键（小写 snake_case）的都要能解析出译文；
+     * 明文 label（如 IDoc 版本选项 "2.0"）按接口约定允许，不参与断言。
+     * 新增解释器没带资源会立刻红。
+     */
+    @Test
+    fun `interpreter keys resolve from their own module tables`() = runBlocking {
+        val interpreterKeys = MessageInterpreters.loadAll().flatMap { interpreter ->
+            listOf(interpreter.displayName) +
+                interpreter.paramDefs.flatMap { def -> listOf(def.label) + def.options.map { it.label } }
+        }.filter { looksLikeI18nKey(it) }.distinct()
+        assertTrue(interpreterKeys.isNotEmpty(), "解释器键一个都没内省到，守卫会空转")
+
+        LanguageResources.load("zh-CN", allTables())
+        assertEquals("文本", stringResource("msg_interp_text"))
+        assertEquals("字符集", stringResource("msg_interp_param_charset"))
+        val unresolvedZh = interpreterKeys.filter { stringResource(it) == it }
+        assertTrue(unresolvedZh.isEmpty(), "解释器键在 zh 下回落到了 key 本身：$unresolvedZh")
+
+        LanguageResources.load("en-US", allTables())
+        assertEquals("Text", stringResource("msg_interp_text"))
+        val unresolvedEn = interpreterKeys.filter { stringResource(it) == it }
+        assertTrue(unresolvedEn.isEmpty(), "解释器键在 en 下回落到了 key 本身：$unresolvedEn")
+    }
+
+    /** 形如 i18n 键：小写字母开头、只含小写字母 / 数字 / 下划线且带下划线分段（明文如 "2.0"、"auto" 不命中）。 */
+    private fun looksLikeI18nKey(text: String): Boolean =
+        text.matches(Regex("[a-z][a-z0-9]*(_[a-z0-9]+)+"))
 
     @Test
     fun `module tables merge through SPI and keys resolve`() = runBlocking {
@@ -62,7 +106,7 @@ class ModuleI18nMergeTest {
      */
     @Test
     fun `module tables do not collide with each other`() = runBlocking {
-        val byBase = ModuleRegistry.i18nTables.associate { table ->
+        val byBase = allTables().associate { table ->
             table.base to parseKeys(table.reader(LanguageResources.LANGUAGE_ZH_CN))
         }
         val bases = byBase.keys.sorted()
@@ -97,7 +141,7 @@ class ModuleI18nMergeTest {
      */
     @Test
     fun `module tables do not shadow the common table`() = runBlocking {
-        val moduleKeys = ModuleRegistry.i18nTables
+        val moduleKeys = allTables()
             .flatMap { parseKeys(it.reader(LanguageResources.LANGUAGE_ZH_CN)) }
             .toSet()
         LanguageResources.load(LanguageResources.LANGUAGE_ZH_CN) // 只有公共表

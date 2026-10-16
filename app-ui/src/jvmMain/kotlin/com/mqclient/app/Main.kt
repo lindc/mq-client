@@ -38,12 +38,14 @@ import com.mqclient.core.ConfigStore
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.CoreModule
 import com.mqclient.core.Language
+import com.mqclient.core.ModuleI18nTable
 import com.mqclient.core.ModuleRegistry
 import com.mqclient.core.ThemeMode
 import com.mqclient.core.database.DatabaseManager
 import com.mqclient.core.database.DriverFactory
 import com.mqclient.core.event.EventNames
 import com.mqclient.core.log.Log
+import com.mqclient.message.interpreter.MessageInterpreters
 import com.mqclient.uicommon.i18n.LanguageResources
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.LocalSnackbarHostState
@@ -79,6 +81,16 @@ private fun Language.toLanguageCode(): String = when (this) {
     Language.SIMPLIFIED_CHINESE -> LanguageResources.LANGUAGE_ZH_CN
 }
 
+/**
+ * 全量 i18n 表：模块私有表（AdapterUI.i18nTables）+ 解释器私有表（registry 从各
+ * 解释器模块的 classpath 资源读出，表结构与 ModuleI18nTable 同形，此处包一层）。
+ * 两处 [LanguageResources.load]（启动 + 语言热切换）都走这里，别只合其一。
+ */
+private fun allI18nTables(): List<ModuleI18nTable> =
+    ModuleRegistry.i18nTables + MessageInterpreters.i18nTables.map {
+        ModuleI18nTable(base = it.base, reader = it.reader)
+    }
+
 fun main() {
     // 启动准备放在窗口创建之前：这里的同步 IO（生成密钥 / 读配置 / 载字符串表）
     // 不该进组合体 —— 组合发生在窗口创建之后、首帧之前（会卡首帧），而且组合体
@@ -91,7 +103,7 @@ fun main() {
     // 模块私有表（AdapterUI.i18nTables）与公共表合并进同一张运行时表 —— 触发一次
     // SPI 发现（ModuleRegistry 惰性加载），只读元数据、不初始化模块，安全。
     runBlocking {
-        LanguageResources.load(bootConfig.general.language.toLanguageCode(), ModuleRegistry.i18nTables)
+        LanguageResources.load(bootConfig.general.language.toLanguageCode(), allI18nTables())
     }
 
     // 事件总线接线同样在窗口创建之前完成：任何组合里的 effect 都可能读到
@@ -121,7 +133,7 @@ private fun AppRoot(bootConfig: Config, onExit: () -> Unit) {
     LaunchedEffect(Unit) {
         CoreModule.eventBus.on(EventNames.LANGUAGE_CHANGED, this) { event ->
             val language = event.payload["language"] as? Language ?: return@on
-            LanguageResources.load(language.toLanguageCode(), ModuleRegistry.i18nTables)
+            LanguageResources.load(language.toLanguageCode(), allI18nTables())
         }
     }
     var appConfig by remember { mutableStateOf(bootConfig) }

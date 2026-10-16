@@ -3,9 +3,18 @@ package com.mqclient.message.interpreter
 import java.util.ServiceLoader
 import java.util.logging.Level
 import java.util.logging.Logger
-import com.mqclient.message.interpreter.text.TextInterpreter
 
 private val log = Logger.getLogger("message-interpreter-registry")
+
+/**
+ * 解释器的私有 i18n 表描述：与 app-core 的 ModuleI18nTable 同形（base 仅标识，
+ * reader 按语言返回扁平 JSON 文本），但**不依赖 app-core** —— registry 保持
+ * 零耦合，由宿主（Main.kt）负责包成 ModuleI18nTable 合入全局表。
+ */
+class InterpreterI18nTable(
+    val base: String,
+    val reader: suspend (language: String) -> String?,
+)
 
 /**
  * 解释器注册表（全项目唯一）：ServiceLoader 装载 + 排序。任何宿主（各 MQ 的
@@ -16,9 +25,17 @@ private val log = Logger.getLogger("message-interpreter-registry")
  *    —— 同一坏迭代器会反复抛同一个错，继续循环等于死循环；
  *  - 按 [MessageInterpreter.sortOrder] 升序稳定排序（同序保持加载顺序），
  *    跨 JAR 的 ServiceLoader 注册顺序不可依赖；
+ *  - 实现经 runtimeOnly 聚合进入运行时 classpath（编译期 registry 不依赖任何
+ *    实现 —— 新增解释器 = 新模块 + settings include + 这里加一行 runtimeOnly）；
  *  - 日志走 JDK JUL（本模块不依赖任何日志框架 / app-core，保持零耦合）。
  */
 object MessageInterpreters {
+
+    /** 解释器私有 i18n 资源的 classpath 根路径（按 id 派生子目录）。 */
+    private const val I18N_RESOURCE_DIR = "i18n/interpreter/"
+
+    /** 解释器私有 i18n 表的 base 前缀（全局唯一，供日志与守卫测试识别）。 */
+    private const val I18N_BASE_PREFIX = "msg_interp_"
 
     /** ServiceLoader 装载到的全部实现（内置与第三方同一条路）。 */
     fun loadAll(): List<MessageInterpreter> {
@@ -40,7 +57,30 @@ object MessageInterpreters {
         return out.sortedBy { it.sortOrder }
     }
 
-    /** 按 id 查找（恢复选中项用；找不到回落文本解释器）。 */
-    fun byId(id: String): MessageInterpreter =
-        loadAll().firstOrNull { it.id == id } ?: TextInterpreter()
+    /** 按 id 查找（恢复选中项用）；找不到返回 null，调用方回落 [default]。 */
+    fun byId(id: String): MessageInterpreter? =
+        loadAll().firstOrNull { it.id == id }
+
+    /**
+     * 默认解释器：sortOrder 最小者（内置即 text = 10）。classpath 上一个实现都
+     * 没有属于装配错误，宁可尽早抛也不要静默错行为。
+     */
+    fun default(): MessageInterpreter = loadAll().first()
+
+    /**
+     * 各解释器的私有 i18n 表：`base = "msg_interp_<id>"`，reader 从实现自身的
+     * classpath 读 `i18n/interpreter/<id>/<lang>.json`（扁平 JSON，格式与全局
+     * 字符串表一致）。第三方解释器只要在自己的 jar 放同路径资源即可获得 i18n，
+     * 无需任何注册；没有资源则 reader 返回 null —— 调用侧（stringResource）
+     * 按 key 原样回落，此时 displayName 应写明文而非键名。
+     */
+    val i18nTables: List<InterpreterI18nTable> by lazy {
+        loadAll().map { impl ->
+            InterpreterI18nTable(base = I18N_BASE_PREFIX + impl.id) { language ->
+                impl.javaClass.classLoader
+                    .getResourceAsStream("$I18N_RESOURCE_DIR${impl.id}/$language.json")
+                    ?.readBytes()?.decodeToString()
+            }
+        }
+    }
 }

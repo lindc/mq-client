@@ -15,7 +15,10 @@ package com.mqclient.message.interpreter
  *  - 解释器自身无状态 —— 参数经 [interpret] 的 [params] 传入（键值来自
  *    [paramDefs] 描述的输入项，初始值取 [defaultParams]）；
  *  - 实现类必须是 **public class 且带 public 无参构造**（ServiceLoader 反射
- *    实例化；Kotlin `object` 的构造器是 private，注册不了）。
+ *    实例化；Kotlin `object` 的构造器是 private，注册不了）；
+ *  - 内置解释器如需 i18n 文案：在自己模块 `src/jvmMain/resources/i18n/interpreter/<id>/`
+ *    放 `{zh-CN,en-US}.json` 扁平表（displayName / label 填键名，registry 会按实例
+ *    classloader 读取并合入全局字符串表）；不提供资源时 displayName / label 应写明文。
  */
 interface MessageInterpreter {
 
