@@ -15,6 +15,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.apache.kafka.clients.admin.AdminClient
 import org.apache.kafka.clients.admin.ListConsumerGroupsOptions
+import org.apache.kafka.clients.admin.NewTopic
 import org.apache.kafka.clients.admin.ListTopicsOptions
 import org.apache.kafka.clients.admin.OffsetSpec
 import org.apache.kafka.clients.consumer.OffsetAndMetadata
@@ -210,6 +211,30 @@ class KafkaScanService(private val context: ServiceContext) {
     /** 当前缓存的组级 lag（快扫产物）；key = groupId。 */
     fun cachedGroupLags(connectionId: String): Map<String, KafkaGroupLagSnapshot> =
         cacheOf(connectionId)?.getAs(KEY_GROUP_LAGS) ?: emptyMap()
+
+    // ---------------------------------------------------------------- 写操作
+
+    /**
+     * 创建主题（AdminClient.createTopics）：v1 只带名称 / 分区数 / 副本因子三要素，
+     * 不带 config。TopicExistsException 等服务端错误原样上抛，由调用方（创建对话框）
+     * 显示在表单内。
+     */
+    suspend fun createTopic(
+        connectionId: String,
+        name: String,
+        partitions: Int,
+        replicationFactor: Int,
+    ) {
+        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
+        val admin = ctx.adminClient ?: throw IllegalStateException("未连接")
+        val timeoutMs = ctx.config.connectionTimeout * 1_000L
+        withContext(Dispatchers.IO) {
+            admin.createTopics(listOf(NewTopic(name, partitions, replicationFactor.toShort())))
+                .all()
+                .get(timeoutMs, TimeUnit.MILLISECONDS)
+        }
+        kafkaLog.info("topic created: connection=$connectionId topic=$name partitions=$partitions replicas=$replicationFactor")
+    }
 
     // ---------------------------------------------------------------- 组详情（实时）
 

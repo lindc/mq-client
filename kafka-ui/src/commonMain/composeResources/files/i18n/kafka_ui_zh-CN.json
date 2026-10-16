@@ -133,5 +133,15 @@
   "kafka_ui_broker_detail_role_leader": "Leader",
   "kafka_ui_broker_detail_role_follower": "Follower",
   "kafka_ui_broker_detail_search": "搜索 Topic",
-  "kafka_ui_broker_detail_no_partitions": "该 Broker 未承载任何分区"
+  "kafka_ui_broker_detail_no_partitions": "该 Broker 未承载任何分区",
+  "kafka_ui_topic_create": "创建主题",
+  "kafka_ui_topic_create_title": "创建主题",
+  "kafka_ui_topic_create_field_name": "主题名",
+  "kafka_ui_topic_create_field_partitions": "分区数",
+  "kafka_ui_topic_create_field_replicas": "副本因子",
+  "kafka_ui_topic_create_confirm": "创建",
+  "kafka_ui_topic_create_error_name_required": "主题名不能为空",
+  "kafka_ui_topic_create_error_partitions": "分区数须为正整数",
+  "kafka_ui_topic_create_error_replicas": "副本因子须为正整数",
+  "kafka_ui_topic_empty": "还没有主题，点击「创建主题」开始"
 }

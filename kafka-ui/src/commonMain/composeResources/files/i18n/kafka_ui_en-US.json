@@ -133,5 +133,15 @@
   "kafka_ui_broker_detail_role_leader": "Leader",
   "kafka_ui_broker_detail_role_follower": "Follower",
   "kafka_ui_broker_detail_search": "Search topics",
-  "kafka_ui_broker_detail_no_partitions": "No partitions hosted on this broker"
+  "kafka_ui_broker_detail_no_partitions": "No partitions hosted on this broker",
+  "kafka_ui_topic_create": "Create Topic",
+  "kafka_ui_topic_create_title": "Create Topic",
+  "kafka_ui_topic_create_field_name": "Topic name",
+  "kafka_ui_topic_create_field_partitions": "Partitions",
+  "kafka_ui_topic_create_field_replicas": "Replication factor",
+  "kafka_ui_topic_create_confirm": "Create",
+  "kafka_ui_topic_create_error_name_required": "Topic name is required",
+  "kafka_ui_topic_create_error_partitions": "Partitions must be a positive integer",
+  "kafka_ui_topic_create_error_replicas": "Replication factor must be a positive integer",
+  "kafka_ui_topic_empty": "No topics yet — click Create Topic to get started"
 }

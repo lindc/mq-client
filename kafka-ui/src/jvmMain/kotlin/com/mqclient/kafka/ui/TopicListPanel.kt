@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Refresh
@@ -15,7 +16,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -28,6 +31,7 @@ import com.mqclient.mqui.command.ToolbarButton
 import com.mqclient.mqui.common.CompactSearchField
 import com.mqclient.mqui.objectlist.CardAction
 import com.mqclient.mqui.objectlist.ObjectCardData
+import com.mqclient.mqui.objectlist.ObjectListEmptyState
 import com.mqclient.mqui.objectlist.ObjectListPanel
 import com.mqclient.mqui.state.LoadStateContent
 import com.mqclient.uicommon.LocalAiAsk
@@ -48,6 +52,8 @@ fun TopicListPanel(
     modifier: Modifier = Modifier,
 ) {
     val state = remember(connectionId) { KafkaTopicsState(connectionId) }
+    // 创建主题对话框开关（工具栏按钮 / 空态引导共用）。
+    var showCreate by remember(connectionId) { mutableStateOf(false) }
     // 「询问 AI」宿主回调：宿主没 Provide（独立预览等）时为 null —— AI 按钮不显示。
     val aiAsk = LocalAiAsk.current
     // 进入 Tab 首次加载（组合期一次，含隐式连接兜底）；之后的状态变化走
@@ -78,6 +84,11 @@ fun TopicListPanel(
                 modifier = Modifier.weight(1f),
             )
             ToolbarButton(
+                icon = Icons.Default.Add,
+                text = stringResource("kafka_ui_topic_create"),
+                onClick = { showCreate = true },
+            )
+            ToolbarButton(
                 icon = Icons.Default.Refresh,
                 text = stringResource("kafka_ui_refresh"),
                 onClick = { state.requestScan() },
@@ -97,6 +108,19 @@ fun TopicListPanel(
             modifier = Modifier.fillMaxWidth().weight(1f),
         ) { _ ->
             ObjectListPanel(
+                emptyContent = {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        ObjectListEmptyState(stringResource("kafka_ui_topic_empty"))
+                        ToolbarButton(
+                            icon = Icons.Default.Add,
+                            text = stringResource("kafka_ui_topic_create"),
+                            onClick = { showCreate = true },
+                        )
+                    }
+                },
                 items =
                     state.filtered.map { info ->
                         info.toCardData(
@@ -117,6 +141,13 @@ fun TopicListPanel(
                 modifier = Modifier.fillMaxSize(),
             )
         }
+    }
+
+    if (showCreate) {
+        KafkaCreateTopicDialog(
+            connectionId = connectionId,
+            onDismiss = { showCreate = false },
+        )
     }
 }
 
