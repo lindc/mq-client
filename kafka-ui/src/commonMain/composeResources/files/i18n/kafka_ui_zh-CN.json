@@ -60,5 +60,22 @@
   "kafka_ui_topology_toggle_replicas": "副本边",
   "kafka_ui_topology_no_properties": "该节点暂无属性面板",
   "kafka_ui_topology_partition_badge": "leader %1$d",
-  "kafka_ui_topology_partition_offline": "无 leader"
+  "kafka_ui_topology_partition_offline": "无 leader",
+  "kafka_ui_cluster_title": "集群概览",
+  "kafka_ui_cluster_loading": "正在加载集群信息…",
+  "kafka_ui_cluster_failed": "集群信息加载失败：%1$s",
+  "kafka_ui_cluster_empty": "未发现 Broker",
+  "kafka_ui_cluster_brokers": "Broker 列表",
+  "kafka_ui_cluster_info_cluster_id": "Cluster ID",
+  "kafka_ui_cluster_info_controller": "Controller",
+  "kafka_ui_cluster_info_brokers": "Broker 数",
+  "kafka_ui_cluster_info_topics": "Topic 数",
+  "kafka_ui_cluster_col_id": "ID",
+  "kafka_ui_cluster_col_host": "Host",
+  "kafka_ui_cluster_col_port": "Port",
+  "kafka_ui_cluster_col_rack": "Rack",
+  "kafka_ui_cluster_col_role": "角色",
+  "kafka_ui_cluster_role_controller": "Controller",
+  "kafka_ui_cluster_offline": "离线（推断）",
+  "kafka_ui_cluster_detail_unavailable": "Broker 详情将在后续版本提供"
 }

@@ -34,8 +34,8 @@ import org.apache.kafka.common.TopicPartition
  *    整轮失败 → 连接转 FAILED；跑通 → reportStatus(Connected) 保活（与 MQ 心跳同款）。
  *
  * 缓存：该连接专属的 [CacheManager]（挂 [KafkaConnectionContext.cache]，连接成功
- * 创建、断开清空）。key：`brokers` / `topics` / `groups` / `groupLags`。读口
- * [cachedBrokers] 等只查缓存、不碰 AdminClient、不挂起。
+ * 创建、断开清空）。key：`brokers` / `cluster` / `topics` / `groups` / `groupLags`。
+ * 读口 [cachedBrokers] 等只查缓存、不碰 AdminClient、不挂起。
  *
  * 事件：完成 / 失败都发（KafkaEvents.OBJECTS_SCANNED 等），订阅方（UI）读缓存刷新
  * —— 缓存优先、事件驱动的统一消费模式，与 ibm-mq 完全一致。全程不碰 UI 线程
@@ -46,6 +46,9 @@ class KafkaScanService(private val context: ServiceContext) {
     private companion object {
         /** 缓存 key：broker 列表。 */
         const val KEY_BROKERS = "brokers"
+
+        /** 缓存 key：集群元信息（Cluster ID + controller，与 brokers 同源于 describeCluster）。 */
+        const val KEY_CLUSTER = "cluster"
 
         /** 缓存 key：topic 列表（含分区明细）。 */
         const val KEY_TOPICS = "topics"
@@ -87,7 +90,11 @@ class KafkaScanService(private val context: ServiceContext) {
             // 取消语义 —— CancellationException 在 safely 里原样上抛，带动整组退出）。
             val result = withContext(Dispatchers.IO) {
                 coroutineScope {
-                    val brokers = async { safely("brokers", emptyList()) { scanBrokers(admin, timeoutMs) } }
+                    val brokers = async {
+                        safely("brokers", ClusterScan(emptyList(), KafkaClusterSnapshot(null, null))) {
+                            scanBrokers(admin, timeoutMs)
+                        }
+                    }
                     val topics = async { safely("topics", emptyList()) { scanTopics(admin, timeoutMs) } }
                     val groups = async { safely("groups", emptyList()) { scanGroups(admin, timeoutMs) } }
                     ScanResult(brokers.await(), topics.await(), groups.await())
@@ -95,21 +102,26 @@ class KafkaScanService(private val context: ServiceContext) {
             }
 
             val cache = ctx.cache
-            cache?.put(KEY_BROKERS, result.brokers, ttlMs = objectsTtl)
+            cache?.put(KEY_BROKERS, result.brokerScan.brokers, ttlMs = objectsTtl)
             cache?.put(KEY_TOPICS, result.topics, ttlMs = objectsTtl)
             cache?.put(KEY_GROUPS, result.groups, ttlMs = objectsTtl)
+            // 集群元信息只在 broker 扫到货时落缓存：describeCluster 整体失败（safely
+            // 兜底的空 Scan）不覆盖上一轮的 Cluster ID。
+            if (result.brokerScan.brokers.isNotEmpty()) {
+                cache?.put(KEY_CLUSTER, result.brokerScan.cluster, ttlMs = objectsTtl)
+            }
 
             context.emit(
                 name = KafkaEvents.OBJECTS_SCANNED,
                 payload = mapOf(
                     "connectionId" to connectionId,
-                    "brokerCount" to result.brokers.size,
+                    "brokerCount" to result.brokerScan.brokers.size,
                     "topicCount" to result.topics.size,
                     "groupCount" to result.groups.size,
                 ),
             )
             kafkaLog.info(
-                "objects scanned: connection=$connectionId brokers=${result.brokers.size} " +
+                "objects scanned: connection=$connectionId brokers=${result.brokerScan.brokers.size} " +
                     "topics=${result.topics.size} groups=${result.groups.size}",
             )
         } catch (cancellation: CancellationException) {
@@ -182,6 +194,10 @@ class KafkaScanService(private val context: ServiceContext) {
     fun cachedBrokers(connectionId: String): List<KafkaBrokerSnapshot> =
         cacheOf(connectionId)?.getAs(KEY_BROKERS) ?: emptyList()
 
+    /** 当前缓存的集群元信息（Cluster ID / controller）；未扫过返回 null。 */
+    fun cachedCluster(connectionId: String): KafkaClusterSnapshot? =
+        cacheOf(connectionId)?.getAs(KEY_CLUSTER)
+
     /** 当前缓存的 topic 列表（含分区明细）；未连接 / 未扫过返回空列表。 */
     fun cachedTopics(connectionId: String): List<KafkaTopicSnapshot> =
         cacheOf(connectionId)?.getAs(KEY_TOPICS) ?: emptyList()
@@ -196,12 +212,30 @@ class KafkaScanService(private val context: ServiceContext) {
 
     // ---------------------------------------------------------------- 内部：查询
 
-    private suspend fun scanBrokers(admin: AdminClient, timeoutMs: Long): List<KafkaBrokerSnapshot> {
+    /**
+     * describeCluster 一次调用的双产出：broker 明细（含 controller 标记）+ 集群元信息。
+     * clusterId 单独兜底 —— 部分受限账号对 Describe Cluster 的细项 ACL 缺失时抛
+     * Unauthorized，broker 列表照常产出、clusterId 置 null。
+     */
+    private data class ClusterScan(
+        val brokers: List<KafkaBrokerSnapshot>,
+        val cluster: KafkaClusterSnapshot,
+    )
+
+    private suspend fun scanBrokers(admin: AdminClient, timeoutMs: Long): ClusterScan {
         val cluster = admin.describeCluster(
             org.apache.kafka.clients.admin.DescribeClusterOptions().timeoutMs(timeoutMs.toInt()),
         )
         val controllerId = cluster.controller().get(timeoutMs, TimeUnit.MILLISECONDS)?.id()
-        return cluster.nodes().get(timeoutMs, TimeUnit.MILLISECONDS)
+        val clusterId = try {
+            cluster.clusterId().get(timeoutMs, TimeUnit.MILLISECONDS)
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (error: Throwable) {
+            kafkaLog.warn("clusterId unavailable: error=${errorMessage(error)}")
+            null
+        }
+        val brokers = cluster.nodes().get(timeoutMs, TimeUnit.MILLISECONDS)
             .map {
                 KafkaBrokerSnapshot(
                     brokerId = it.id(),
@@ -212,6 +246,7 @@ class KafkaScanService(private val context: ServiceContext) {
                 )
             }
             .sortedBy { it.brokerId }
+        return ClusterScan(brokers, KafkaClusterSnapshot(clusterId = clusterId, controllerId = controllerId))
     }
 
     private suspend fun scanTopics(admin: AdminClient, timeoutMs: Long): List<KafkaTopicSnapshot> {
@@ -394,7 +429,7 @@ class KafkaScanService(private val context: ServiceContext) {
     // ---------------------------------------------------------------- 内部：杂项
 
     private data class ScanResult(
-        val brokers: List<KafkaBrokerSnapshot>,
+        val brokerScan: ClusterScan,
         val topics: List<KafkaTopicSnapshot>,
         val groups: List<KafkaGroupSnapshot>,
     )

@@ -80,6 +80,17 @@ class KafkaUI : AdapterUI {
                         )
                     }
                 }
+            "clusterOverview" ->
+                if (KafkaModule.connectionOrNull(connectionId) == null) {
+                    null
+                } else {
+                    {
+                        KafkaClusterOverviewPanel(
+                            connectionId = connectionId,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
             else -> null
         }
     }

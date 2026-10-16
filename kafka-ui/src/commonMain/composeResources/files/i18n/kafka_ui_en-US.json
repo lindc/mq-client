@@ -60,5 +60,22 @@
   "kafka_ui_topology_toggle_replicas": "Replica edges",
   "kafka_ui_topology_no_properties": "No properties panel for this node",
   "kafka_ui_topology_partition_badge": "leader %1$d",
-  "kafka_ui_topology_partition_offline": "no leader"
+  "kafka_ui_topology_partition_offline": "no leader",
+  "kafka_ui_cluster_title": "Cluster Overview",
+  "kafka_ui_cluster_loading": "Loading cluster info…",
+  "kafka_ui_cluster_failed": "Failed to load cluster info: %1$s",
+  "kafka_ui_cluster_empty": "No broker found",
+  "kafka_ui_cluster_brokers": "Brokers",
+  "kafka_ui_cluster_info_cluster_id": "Cluster ID",
+  "kafka_ui_cluster_info_controller": "Controller",
+  "kafka_ui_cluster_info_brokers": "Brokers",
+  "kafka_ui_cluster_info_topics": "Topics",
+  "kafka_ui_cluster_col_id": "ID",
+  "kafka_ui_cluster_col_host": "Host",
+  "kafka_ui_cluster_col_port": "Port",
+  "kafka_ui_cluster_col_rack": "Rack",
+  "kafka_ui_cluster_col_role": "Role",
+  "kafka_ui_cluster_role_controller": "Controller",
+  "kafka_ui_cluster_offline": "Offline (inferred)",
+  "kafka_ui_cluster_detail_unavailable": "Broker details will be available in a future version"
 }

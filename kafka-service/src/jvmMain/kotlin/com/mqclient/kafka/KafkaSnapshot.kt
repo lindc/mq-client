@@ -18,6 +18,16 @@ data class KafkaBrokerSnapshot(
     val isController: Boolean = false,
 )
 
+/**
+ * 集群元信息快照（describeCluster 投影，慢扫产物）：Cluster ID + 当前 controller。
+ * broker 明细走独立的 `brokers` 缓存（两份产物同源于一次 describeCluster 调用）。
+ * clusterId 在部分受限账号（无 Describe Cluster ACL 细项）下可能取不到 → null。
+ */
+data class KafkaClusterSnapshot(
+    val clusterId: String?,
+    val controllerId: Int?,
+)
+
 /** 一个分区的副本布局快照（TopicPartitionInfo 投影）。 */
 data class KafkaPartitionSnapshot(
     val id: Int,
