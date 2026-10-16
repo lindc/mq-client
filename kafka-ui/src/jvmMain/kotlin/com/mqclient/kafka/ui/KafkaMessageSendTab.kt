@@ -430,10 +430,14 @@ private fun TargetRow(state: KafkaSendMessagesState) {
     }
 }
 
-/** Headers 键值对编辑器：一行一个 header，右侧加/删按钮，value 可勾「按 HEX 发送」。 */
+/** Headers 键值对编辑器：一行一个 header，右侧加/删按钮，value 可勾「按 HEX 发送」。
+ *  行间距 8dp（与 MQ AdvancedPropsSection 等项目表单惯例一致），与上方 Topic 行同理。 */
 @Composable
 private fun HeadersEditor(state: KafkaSendMessagesState) {
-    Column(modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = stringResource("kafka_ui_send_headers"),
