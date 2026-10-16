@@ -1,5 +1,9 @@
 package com.mqclient.topology
 
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -15,10 +19,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mqclient.graph.NodeSeverity
@@ -36,6 +42,8 @@ const val CARD_HEIGHT = 56
  *
  * 告警级别（[severity]）覆盖类型色：队列积压 WARNING → 警告橙，通道故障 ERROR →
  * 红（主题 error 色，随主题适配）——描边与图标同步换色，一眼定位问题节点。
+ *
+ * 状态投影 / 拖动缩放走 spring 动画：拾起加深投影并弹性放大，松手弹回。
  */
 @Composable
 fun TopologyNodeCard(
@@ -56,11 +64,41 @@ fun TopologyNodeCard(
         NodeSeverity.WARNING -> WARNING_ACCENT
         NodeSeverity.NORMAL -> type.getColor()
     }
+
+    // 拖动动效：拾起时投影弹性加深 + 卡片弹性放大，松手弹回 —— 「提离桌面」手感。
+    // kuiver 拖动中经 placement 移动节点（不重组合），缩放动画在卡片内部，二者无冲突；
+    // 松手提交的位置与松手点一致，无位置跳跃需要动画。
+    val shadowElevation by animateDpAsState(
+        targetValue = when {
+            isSelected || isDragging -> 8.dp
+            isHovered -> 4.dp
+            else -> 1.dp
+        },
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMediumLow,
+        ),
+        label = "topology_node_shadow",
+    )
+    val dragScale by animateFloatAsState(
+        targetValue = if (isDragging) DRAG_LIFT_SCALE else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMediumLow,
+        ),
+        label = "topology_node_drag_scale",
+    )
+
     Surface(
         modifier = Modifier
             .width(CARD_WIDTH.dp)
             .height(CARD_HEIGHT.dp)
-            .alpha(if (dimmed) 0.25f else 1f),
+            .alpha(if (dimmed) 0.25f else 1f)
+            // 缩放走 draw 期 lambda 直读动画值：拖动中节点仅 placement 移动，逐帧只更新图层。
+            .graphicsLayer {
+                scaleX = dragScale
+                scaleY = dragScale
+            },
         shape = RoundedCornerShape(12.dp),
         // 底色恒为主题表面（不垫类型色块）：选中只用「描边 + 投影」表达，
         // 避免描边外圈与内部填充块两层颜色不一致的割裂感。
@@ -78,11 +116,7 @@ fun TopologyNodeCard(
                 else -> accent.copy(alpha = 0.5f)
             },
         ),
-        shadowElevation = when {
-            isSelected || isDragging -> 8.dp
-            isHovered -> 4.dp
-            else -> 1.dp
-        },
+        shadowElevation = shadowElevation,
     ) {
         Row(
             modifier = Modifier
@@ -130,3 +164,6 @@ fun TopologyNodeCard(
 
 /** WARNING 级固定警告色（橙）：容量类告警语义，不随主题翻转（与 ERROR 的主题红区分）。 */
 private val WARNING_ACCENT = Color(0xFFED6C02)
+
+/** 拖动中卡片的放大倍数：轻微提离感，不盖住相邻节点的可读性。 */
+private const val DRAG_LIFT_SCALE = 1.06f
