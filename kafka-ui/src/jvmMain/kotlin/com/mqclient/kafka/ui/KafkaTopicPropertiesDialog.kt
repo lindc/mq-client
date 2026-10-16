@@ -1,6 +1,7 @@
 package com.mqclient.kafka.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -44,8 +45,6 @@ import com.mqclient.kafka.KafkaTopicSnapshot
 import com.mqclient.mqui.common.CompactSearchField
 import com.mqclient.mqui.state.LoadState
 import com.mqclient.uicommon.PressableButton
-import com.mqclient.uicommon.PropertyRow
-import com.mqclient.uicommon.PropertySection
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
@@ -214,7 +213,38 @@ fun KafkaTopicPropertiesDialog(
     }
 }
 
-/** 概览 Tab：属性行（ui-common PropertySection/PropertyRow，与 MQ 属性面板同一视觉）。 */
+/** 概览 Tab 的 label 固定宽度（最长 4 个汉字 + 呼吸感；过长自动换行）。 */
+private val OVERVIEW_LABEL_WIDTH = 80.dp
+
+/**
+ * 概览 Tab 一行：label 固定宽在左（次要色），value 紧随其后左对齐占满余量（正常色）。
+ * 刻意不用 ui-common 的 PropertyRow（value 右对齐到边缘，label/value 距离过远）。
+ */
+@Composable
+private fun OverviewFieldRow(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    monospace: Boolean = false,
+) {
+    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(OVERVIEW_LABEL_WIDTH),
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            fontFamily = if (monospace) FontFamily.Monospace else FontFamily.Default,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+/** 概览 Tab：主题名独占一行；其余两栏（分区数/消息总数 | 副本因子/内部主题）。 */
 @Composable
 private fun OverviewTab(
     snapshot: KafkaTopicSnapshot,
@@ -225,32 +255,49 @@ private fun OverviewTab(
     val messageTotal = (offsets as? LoadState.Success)?.data
         ?.values
         ?.sumOf { (it.latest - it.earliest).coerceAtLeast(0L) }
-    Column(modifier.verticalScroll(rememberScrollState())) {
-        PropertySection(stringResource("kafka_ui_topic_props_overview_section")) {
-            PropertyRow(
-                label = stringResource("kafka_ui_topic_create_field_name"),
-                value = snapshot.name,
-            )
-            PropertyRow(
-                label = stringResource("kafka_ui_topic_props_overview_partitions"),
-                value = snapshot.partitions.size.toString(),
-            )
-            PropertyRow(
-                label = stringResource("kafka_ui_topic_props_overview_replicas"),
-                value = snapshot.partitions.firstOrNull()?.replicaIds?.size?.toString() ?: "-",
-            )
-            PropertyRow(
-                label = stringResource("kafka_ui_topic_props_overview_messages"),
-                value = messageTotal?.let(::formatLag) ?: "…",
-            )
-            PropertyRow(
-                label = stringResource("kafka_ui_topic_internal"),
-                value = if (snapshot.internal) {
-                    stringResource("kafka_ui_topic_props_overview_internal_yes")
-                } else {
-                    stringResource("kafka_ui_topic_props_overview_internal_no")
-                },
-            )
+    Column(
+        modifier = modifier
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        OverviewFieldRow(
+            label = stringResource("kafka_ui_topic_create_field_name"),
+            value = snapshot.name,
+            monospace = true,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                OverviewFieldRow(
+                    label = stringResource("kafka_ui_topic_props_overview_partitions"),
+                    value = snapshot.partitions.size.toString(),
+                )
+                OverviewFieldRow(
+                    label = stringResource("kafka_ui_topic_props_overview_messages"),
+                    value = messageTotal?.let(::formatLag) ?: "…",
+                    monospace = true,
+                )
+            }
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                OverviewFieldRow(
+                    label = stringResource("kafka_ui_topic_props_overview_replicas"),
+                    value = snapshot.partitions.firstOrNull()?.replicaIds?.size?.toString() ?: "-",
+                )
+                OverviewFieldRow(
+                    label = stringResource("kafka_ui_topic_internal"),
+                    value = if (snapshot.internal) {
+                        stringResource("kafka_ui_topic_props_overview_internal_yes")
+                    } else {
+                        stringResource("kafka_ui_topic_props_overview_internal_no")
+                    },
+                )
+            }
         }
     }
 }
