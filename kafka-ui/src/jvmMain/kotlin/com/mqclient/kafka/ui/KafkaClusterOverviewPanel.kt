@@ -222,7 +222,7 @@ private fun ClusterMetricsRow(snapshot: KafkaClusterOverviewSnapshot) {
 
 /** 一个指标：小字标签 + 主值（Cluster ID 等长值用等宽字体省略）。 */
 @Composable
-private fun MetricCell(label: String, value: String, modifier: Modifier = Modifier, monospace: Boolean = false) {
+internal fun MetricCell(label: String, value: String, modifier: Modifier = Modifier, monospace: Boolean = false) {
     Column(modifier) {
         Text(
             text = label,

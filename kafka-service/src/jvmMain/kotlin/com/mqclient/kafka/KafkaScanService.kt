@@ -17,6 +17,7 @@ import org.apache.kafka.clients.admin.AdminClient
 import org.apache.kafka.clients.admin.ListConsumerGroupsOptions
 import org.apache.kafka.clients.admin.ListTopicsOptions
 import org.apache.kafka.clients.admin.OffsetSpec
+import org.apache.kafka.clients.consumer.OffsetAndMetadata
 import org.apache.kafka.common.TopicCollection
 import org.apache.kafka.common.TopicPartition
 
@@ -209,6 +210,137 @@ class KafkaScanService(private val context: ServiceContext) {
     /** 当前缓存的组级 lag（快扫产物）；key = groupId。 */
     fun cachedGroupLags(connectionId: String): Map<String, KafkaGroupLagSnapshot> =
         cacheOf(connectionId)?.getAs(KEY_GROUP_LAGS) ?: emptyMap()
+
+    // ---------------------------------------------------------------- 组详情（实时）
+
+    /**
+     * 消费组详情（实时查询，不走扫描缓存 —— 详情要新鲜数据）：describeConsumerGroups
+     * 取成员明细与 assignment（分区 → 成员归属映射），listConsumerGroupOffsets +
+     * listOffsets(LATEST) 取位点行。组不存在时抛原异常（UI 显示原因）。
+     */
+    suspend fun getGroupDetail(connectionId: String, groupId: String): KafkaGroupDetailSnapshot {
+        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
+        val admin = ctx.adminClient ?: throw IllegalStateException("未连接")
+        val timeoutMs = ctx.config.connectionTimeout * 1_000L
+        return withContext(Dispatchers.IO) {
+            val described = admin.describeConsumerGroups(
+                listOf(groupId),
+                org.apache.kafka.clients.admin.DescribeConsumerGroupsOptions()
+                    .timeoutMs(timeoutMs.toInt()),
+            ).describedGroups()[groupId]
+                ?.get(timeoutMs, TimeUnit.MILLISECONDS)
+                ?: throw IllegalStateException("消费组不存在: $groupId")
+
+            val memberDetails = described.members().map { m ->
+                val tps = m.assignment().topicPartitions()
+                    .sortedWith(compareBy({ it.topic() }, { it.partition() }))
+                m to tps
+            }
+            val members = memberDetails.map { (m, tps) ->
+                KafkaGroupMemberSnapshot(
+                    memberId = m.consumerId(),
+                    clientId = m.clientId(),
+                    host = m.host(),
+                    partitions = tps.map { KafkaTopicPartitionRef(it.topic(), it.partition()) },
+                )
+            }
+            // 分区 → 成员归属：assignment 直接映射（TopicPartition 为主键）。
+            val ownerByPartition = memberDetails
+                .flatMap { (m, tps) -> tps.map { it to m.consumerId() } }
+                .toMap()
+
+            val committed = admin.listConsumerGroupOffsets(groupId)
+                .partitionsToOffsetAndMetadata()
+                .get(timeoutMs, TimeUnit.MILLISECONDS)
+                .mapValues { (_, m) -> m.offset() }
+            // 关心分区 = assignment ∪ 已提交（组空时 assignment 空、只剩已提交）。
+            val partitions = (memberDetails.flatMap { (_, tps) -> tps }.toSet() + committed.keys)
+                .sortedWith(compareBy({ it.topic() }, { it.partition() }))
+            val latest = if (partitions.isEmpty()) {
+                emptyMap()
+            } else {
+                admin.listOffsets(partitions.associateWith { OffsetSpec.latest() })
+                    .all()
+                    .get(timeoutMs, TimeUnit.MILLISECONDS)
+                    .mapValues { (_, info) -> info.offset() }
+            }
+
+            val offsets = partitions.map { tp ->
+                val current = committed[tp]
+                val end = latest[tp] ?: 0L
+                KafkaGroupOffsetDetail(
+                    topic = tp.topic(),
+                    partition = tp.partition(),
+                    currentOffset = current,
+                    latestOffset = end,
+                    lag = end - (current ?: 0L),
+                    ownerId = ownerByPartition[tp],
+                )
+            }
+            KafkaGroupDetailSnapshot(
+                groupId = groupId,
+                state = described.state().toString(),
+                members = members,
+                offsets = offsets,
+                totalLag = offsets.sumOf { it.lag },
+                subscribedTopics = members
+                    .flatMap { it.partitions }
+                    .map { it.topic }
+                    .toSortedSet(),
+            )
+        }
+    }
+
+    /**
+     * 重置位移：该组**已提交**分区的位移全部重置到 earliest / latest（第一版只支持
+     * 两档）。没有已提交位移的组无法重置（Kafka 语义：alterConsumerGroupOffsets 要
+     * 指定分区）—— 抛 IllegalStateException 由 UI 提示。活跃消费者会立刻重新提交
+     * 覆盖重置结果，UI 侧负责警示。
+     *
+     * @return 重置的分区数。
+     */
+    suspend fun resetGroupOffsets(
+        connectionId: String,
+        groupId: String,
+        toEarliest: Boolean,
+    ): Int {
+        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
+        val admin = ctx.adminClient ?: throw IllegalStateException("未连接")
+        val timeoutMs = ctx.config.connectionTimeout * 1_000L
+        return withContext(Dispatchers.IO) {
+            val committed = admin.listConsumerGroupOffsets(groupId)
+                .partitionsToOffsetAndMetadata()
+                .get(timeoutMs, TimeUnit.MILLISECONDS)
+            if (committed.isEmpty()) {
+                throw IllegalStateException("该组没有已提交位移，无法重置")
+            }
+            val spec = if (toEarliest) OffsetSpec.earliest() else OffsetSpec.latest()
+            val targets = admin.listOffsets(committed.keys.associateWith { spec })
+                .all()
+                .get(timeoutMs, TimeUnit.MILLISECONDS)
+                .mapValues { (_, info) -> info.offset() }
+            admin.alterConsumerGroupOffsets(
+                groupId,
+                targets.mapValues { (_, offset) -> OffsetAndMetadata(offset) },
+            ).all().get(timeoutMs, TimeUnit.MILLISECONDS)
+            targets.size
+        }
+    }
+
+    /**
+     * 删除消费组（admin.deleteConsumerGroups）：组内有成员 / 有活跃提交时 Kafka 侧
+     * 拒绝（GroupNotEmpty 等），异常原样上抛由 UI 提示。
+     */
+    suspend fun deleteGroup(connectionId: String, groupId: String) {
+        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
+        val admin = ctx.adminClient ?: throw IllegalStateException("未连接")
+        val timeoutMs = ctx.config.connectionTimeout * 1_000L
+        withContext(Dispatchers.IO) {
+            admin.deleteConsumerGroups(setOf(groupId))
+                .all()
+                .get(timeoutMs, TimeUnit.MILLISECONDS)
+        }
+    }
 
     // ---------------------------------------------------------------- 内部：查询
 

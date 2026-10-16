@@ -75,3 +75,45 @@ data class KafkaGroupLagSnapshot(
     val totalLag: Long,
     val partitions: List<KafkaPartitionLag>,
 )
+
+/** 一个分区的定位（成员 assignment / 位移行共用）。 */
+data class KafkaTopicPartitionRef(
+    val topic: String,
+    val partition: Int,
+)
+
+/** 组成员明细（describeConsumerGroups 投影，详情对话框实时查询产物）。 */
+data class KafkaGroupMemberSnapshot(
+    val memberId: String,
+    val clientId: String,
+    val host: String,
+    /** 分配给该成员的分区。 */
+    val partitions: List<KafkaTopicPartitionRef>,
+)
+
+/** 组的一条位移行：定位 + 位点 + lag + 归属成员（按 assignment 映射）。 */
+data class KafkaGroupOffsetDetail(
+    val topic: String,
+    val partition: Int,
+    /** 已提交位点；该分区无提交时为 null（展示「-」，lag 按末端位点全额计）。 */
+    val currentOffset: Long?,
+    val latestOffset: Long,
+    val lag: Long,
+    /** 分配到该分区的成员 id；无归属（组空 / 未分配）为 null。 */
+    val ownerId: String?,
+)
+
+/**
+ * 消费组详情快照（详情对话框实时查询产物，不走扫描缓存 —— 详情要新鲜数据，
+ * 与 ibm-mq 集群关系面板的实时查询同一哲学）。
+ */
+data class KafkaGroupDetailSnapshot(
+    val groupId: String,
+    val state: String,
+    val members: List<KafkaGroupMemberSnapshot>,
+    /** 位移行：assignment ∪ 已提交分区，按 topic/partition 排序。 */
+    val offsets: List<KafkaGroupOffsetDetail>,
+    val totalLag: Long,
+    /** 订阅的 topic 名单（assignment 覆盖，与慢扫快照同口径）。 */
+    val subscribedTopics: Set<String>,
+)

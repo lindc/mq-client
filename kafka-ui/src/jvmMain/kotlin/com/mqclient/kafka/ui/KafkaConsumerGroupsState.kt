@@ -14,10 +14,15 @@ data class KafkaGroupInfo(
     val name: String,
     /** 组状态（Stable / Empty / Dead…，行业术语不翻译）。 */
     val state: String,
-    /** 当前成员数。 */
+    /** 当前成员数（卡片不展示，进详情对话框看）。 */
     val members: Int,
     /** 简单组：没有分配协议（客户端手工分区分配）。 */
     val simple: Boolean,
+    /**
+     * 总 Lag（快扫缓存 groupLags 按 groupId 联表）；null = 还没有心跳产物
+     * （连接刚建 / 快扫未跑）—— 卡片右上角不显示 Lag 位。
+     */
+    val totalLag: Long? = null,
 )
 
 /**
@@ -101,9 +106,19 @@ class KafkaConsumerGroupsState(
         KafkaModule.scanNow(connectionId)
     }
 
-    /** 读扫描缓存投影成卡片模型；空缓存不落地。 */
+    /**
+     * Lag 告警阈值（连接设置 lagWarningThreshold，默认 10000；0 = 不告警）：
+     * 卡片右上角 Lag 超过它换警示色。读当前连接的配置快照。
+     */
+    val lagWarningThreshold: Long
+        get() = KafkaModule.connectionOrNull(connectionId)?.config?.lagWarningThreshold
+            ?: 10_000L
+
+    /** 读扫描缓存投影成卡片模型；空缓存不落地。groups 与 groupLags 按 groupId 联表。 */
     private fun refreshFromCache() {
-        val groups = KafkaModule.serviceOrNull()?.cachedGroups(connectionId) ?: emptyList()
+        val service = KafkaModule.serviceOrNull()
+        val groups = service?.cachedGroups(connectionId) ?: emptyList()
+        val lags = service?.cachedGroupLags(connectionId) ?: emptyMap()
         if (groups.isNotEmpty()) {
             loadState = LoadState.Success(
                 groups.map { g ->
@@ -112,6 +127,7 @@ class KafkaConsumerGroupsState(
                         state = g.state,
                         members = g.members,
                         simple = g.simple,
+                        totalLag = lags[g.groupId]?.totalLag,
                     )
                 },
             )

@@ -7,15 +7,15 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Group
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -29,7 +29,6 @@ import com.mqclient.mqui.objectlist.ObjectCardData
 import com.mqclient.mqui.objectlist.ObjectListPanel
 import com.mqclient.mqui.state.LoadStateContent
 import com.mqclient.uicommon.i18n.stringResource
-import com.mqclient.uicommon.i18n.withArg
 
 /**
  * Consumer Group 列表页（导航项 `groups` 的 Tab 内容）：与 [TopicListPanel] 同一套
@@ -37,8 +36,9 @@ import com.mqclient.uicommon.i18n.withArg
  * completed` 事件驱动刷新，「刷新」触发一轮手动慢扫。连接观察走 [KafkaPanelGate]
  * 共享层 —— 未连接自动隐式连接、连接中显示「正在连接…」、失败显示原因 + 重试。
  *
- * 卡片摘要：组状态（Stable / Empty / Dead…，行业术语不翻译）· 成员数；简单组
- * （无分配协议）加锁样式标记。组内主题/位点赞不进 v1 卡片，详情后续再做。
+ * 卡片摘要：状态色点（与 IBM MQ 通道卡片同一实现）+ 状态文字、右上角 Lag（千分位，
+ * 超过连接设置的告警阈值换警示色，见 [GroupCardAdapter]）；成员数进详情对话框。
+ * 单击 / 双击卡片或右下角 ⓘ 打开消费组详情（[KafkaGroupDetailDialog]）。
  */
 @Composable
 fun ConsumerGroupListPanel(
@@ -46,6 +46,8 @@ fun ConsumerGroupListPanel(
     modifier: Modifier = Modifier,
 ) {
     val state = remember(connectionId) { KafkaConsumerGroupsState(connectionId) }
+    // 当前打开详情的消费组 id；null = 关闭。
+    var detailGroupId by remember(connectionId) { mutableStateOf<String?>(null) }
     // 进入 Tab 首次加载（组合期一次，含隐式连接兜底）；之后的状态变化走
     // onStatusChanged —— 断开不再被面板静默重连（宿主会收掉断开连接的 Tab）。
     val connectionStatus = rememberKafkaConnectionStatus(connectionId)
@@ -93,29 +95,22 @@ fun ConsumerGroupListPanel(
             modifier = Modifier.fillMaxWidth().weight(1f),
         ) { _ ->
             ObjectListPanel(
-                items = state.filtered.map { it.toCardData() },
-                onCardClick = {},
-                onCardDoubleClick = {},
+                items = state.filtered.map { group ->
+                    group.toCardData(state.lagWarningThreshold) { detailGroupId = group.name }
+                },
+                onCardClick = { detailGroupId = it.id },
+                onCardDoubleClick = { detailGroupId = it.id },
                 modifier = Modifier.fillMaxSize(),
             )
         }
     }
-}
 
-/** Group → 卡片数据：类型图标 + 状态 / 成员数摘要，简单组加锁标记。 */
-@Composable
-private fun KafkaGroupInfo.toCardData(): ObjectCardData = ObjectCardData(
-    id = name,
-    title = name,
-    typeIcon = Icons.Default.Group,
-    typeLabel = stringResource("kafka_ui_nav_groups"),
-    statusIcon = if (simple) Icons.Default.Lock else null,
-    statusText =
-        listOf(
-            state,
-            stringResource("kafka_ui_group_members").withArg(members),
-            if (simple) stringResource("kafka_ui_group_simple") else null,
-        ).filterNotNull()
-            .joinToString(" · "),
-    actions = emptyList(),
-)
+    // 详情对话框：卡片单击 / 双击 / 右下角 ⓘ 都走这里。
+    detailGroupId?.let { id ->
+        KafkaGroupDetailDialog(
+            connectionId = connectionId,
+            groupId = id,
+            onDismiss = { detailGroupId = null },
+        )
+    }
+}

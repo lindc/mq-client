@@ -34,12 +34,14 @@ data class KafkaFieldErrors(
     val connectionTimeout: String? = null,
     val objectScanInterval: String? = null,
     val lagScanInterval: String? = null,
+    val lagWarningThreshold: String? = null,
 ) {
     val hasAny: Boolean
         get() = bootstrapServers != null ||
             connectionTimeout != null ||
             objectScanInterval != null ||
-            lagScanInterval != null
+            lagScanInterval != null ||
+            lagWarningThreshold != null
 }
 
 /**
@@ -74,6 +76,9 @@ class KafkaConnectionFormState(
         /** Lag 心跳间隔的合法范围（秒）。 */
         const val LAG_SCAN_MIN = 10
         const val LAG_SCAN_MAX = 3600
+
+        /** Lag 告警阈值：0（不告警）或正整数（Long）。 */
+        const val LAG_THRESHOLD_MIN = 0L
 
         /** securityProtocol 下拉的候选项（与 KafkaConfig.SECURITY_PROTOCOLS 同源）。 */
         val PROTOCOL_OPTIONS = listOf("PLAINTEXT", "SSL", "SASL_PLAINTEXT", "SASL_SSL")
@@ -112,6 +117,7 @@ class KafkaConnectionFormState(
     var connectionTimeout by mutableStateOf(KafkaConfig.DEFAULT_CONNECTION_TIMEOUT_SECONDS.toString())
     var objectScanIntervalMinutes by mutableStateOf(KafkaConfig.DEFAULT_OBJECT_SCAN_INTERVAL_MINUTES.toString())
     var lagScanIntervalSeconds by mutableStateOf(KafkaConfig.DEFAULT_LAG_SCAN_INTERVAL_SECONDS.toString())
+    var lagWarningThreshold by mutableStateOf(KafkaConfig.DEFAULT_LAG_WARNING_THRESHOLD.toString())
 
     // 编辑模式的原密码与「用户动过没有」标记：没动过 → 构建时沿用原值，
     // 界面上只显示占位符（见 loadFrom）。SASL 密码与 truststore 密码各一套。
@@ -154,6 +160,10 @@ class KafkaConnectionFormState(
         if (l == null || l !in LAG_SCAN_MIN..LAG_SCAN_MAX) {
             e = e.copy(lagScanInterval = stringResource("kafka_ui_error_lag_scan_range"))
         }
+        val w = lagWarningThreshold.trim().toLongOrNull()
+        if (w == null || w < LAG_THRESHOLD_MIN) {
+            e = e.copy(lagWarningThreshold = stringResource("kafka_ui_error_lag_threshold_range"))
+        }
         errors = e
         return !e.hasAny
     }
@@ -175,6 +185,8 @@ class KafkaConnectionFormState(
             ?: KafkaConfig.DEFAULT_OBJECT_SCAN_INTERVAL_MINUTES,
         lagScanIntervalSeconds = lagScanIntervalSeconds.trim().toIntOrNull()
             ?: KafkaConfig.DEFAULT_LAG_SCAN_INTERVAL_SECONDS,
+        lagWarningThreshold = lagWarningThreshold.trim().toLongOrNull()
+            ?: KafkaConfig.DEFAULT_LAG_WARNING_THRESHOLD,
     )
 
     /** 清空草稿回新建模式（宿主每次进入创建页都会调）。 */
@@ -191,6 +203,7 @@ class KafkaConnectionFormState(
         connectionTimeout = KafkaConfig.DEFAULT_CONNECTION_TIMEOUT_SECONDS.toString()
         objectScanIntervalMinutes = KafkaConfig.DEFAULT_OBJECT_SCAN_INTERVAL_MINUTES.toString()
         lagScanIntervalSeconds = KafkaConfig.DEFAULT_LAG_SCAN_INTERVAL_SECONDS.toString()
+        lagWarningThreshold = KafkaConfig.DEFAULT_LAG_WARNING_THRESHOLD.toString()
         originalPassword = ""
         passwordChanged = false
         originalTruststorePassword = ""
@@ -219,6 +232,7 @@ class KafkaConnectionFormState(
         connectionTimeout = config.connectionTimeout.toString()
         objectScanIntervalMinutes = config.objectScanIntervalMinutes.toString()
         lagScanIntervalSeconds = config.lagScanIntervalSeconds.toString()
+        lagWarningThreshold = config.lagWarningThreshold.toString()
 
         originalPassword = config.password
         password = ""

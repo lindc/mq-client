@@ -174,6 +174,13 @@ internal fun KafkaConnectionFormContent(state: KafkaConnectionFormState) {
             errorMessage = state.errors.lagScanInterval,
             suffix = "s",
         )
+        TextRow(
+            label = stringResource("kafka_ui_field_lag_threshold"),
+            value = state.lagWarningThreshold,
+            onChange = { state.lagWarningThreshold = it; state.clearErrors() },
+            errorMessage = state.errors.lagWarningThreshold,
+            hint = stringResource("kafka_ui_field_lag_threshold_hint"),
+        )
 
         // 测试进行中的提示（保存按钮已由宿主按 busy 禁用）。
         if (state.saveState == SaveState.Testing) {

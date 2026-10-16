@@ -30,6 +30,11 @@ data class KafkaConfig(
     val objectScanIntervalMinutes: Int = DEFAULT_OBJECT_SCAN_INTERVAL_MINUTES,
     /** Lag 心跳快扫间隔（秒）：consumer group 的 current/latest offset 与 lag。 */
     val lagScanIntervalSeconds: Int = DEFAULT_LAG_SCAN_INTERVAL_SECONDS,
+    /**
+     * Lag 告警阈值：消费组卡片右上角 Lag 超过它高亮警示（0 = 不告警）。
+     * UI 侧展示语义，扫描链路不读。
+     */
+    val lagWarningThreshold: Long = DEFAULT_LAG_WARNING_THRESHOLD,
 ) {
     companion object {
         const val DEFAULT_SECURITY_PROTOCOL = "PLAINTEXT"
@@ -37,6 +42,7 @@ data class KafkaConfig(
         const val DEFAULT_CONNECTION_TIMEOUT_SECONDS = 30
         const val DEFAULT_OBJECT_SCAN_INTERVAL_MINUTES = 10
         const val DEFAULT_LAG_SCAN_INTERVAL_SECONDS = 30
+        const val DEFAULT_LAG_WARNING_THRESHOLD = 10_000L
 
         /** securityProtocol 的合法值（Kafka 原生枚举名）；fromOptions 校验用。 */
         val SECURITY_PROTOCOLS = setOf("PLAINTEXT", "SSL", "SASL_PLAINTEXT", "SASL_SSL")
@@ -55,6 +61,7 @@ private object OptionKeys {
     const val CONNECTION_TIMEOUT = "connectionTimeout"
     const val OBJECT_SCAN_INTERVAL = "objectScanIntervalMinutes"
     const val LAG_SCAN_INTERVAL = "lagScanIntervalSeconds"
+    const val LAG_WARNING_THRESHOLD = "lagWarningThreshold"
 }
 
 /** 摊平成 [ConnectionInfo.options]（值全字符串；敏感键落盘时由序列化器加密）。 */
@@ -69,11 +76,13 @@ fun KafkaConfig.toOptions(): Map<String, String> = buildMap {
     put(OptionKeys.CONNECTION_TIMEOUT, connectionTimeout.toString())
     put(OptionKeys.OBJECT_SCAN_INTERVAL, objectScanIntervalMinutes.toString())
     put(OptionKeys.LAG_SCAN_INTERVAL, lagScanIntervalSeconds.toString())
+    put(OptionKeys.LAG_WARNING_THRESHOLD, lagWarningThreshold.toString())
 }
 
 /** 从 [ConnectionInfo.options] 还原；缺键 / 解析失败回落默认值。 */
 fun kafkaConfigFromOptions(options: Map<String, String>): KafkaConfig {
     fun int(key: String, default: Int) = options[key]?.trim()?.toIntOrNull() ?: default
+    fun long(key: String, default: Long) = options[key]?.trim()?.toLongOrNull() ?: default
     return KafkaConfig(
         bootstrapServers = options[OptionKeys.BOOTSTRAP_SERVERS].orEmpty(),
         securityProtocol = options[OptionKeys.SECURITY_PROTOCOL]
@@ -99,6 +108,10 @@ fun kafkaConfigFromOptions(options: Map<String, String>): KafkaConfig {
         lagScanIntervalSeconds = int(
             OptionKeys.LAG_SCAN_INTERVAL,
             KafkaConfig.DEFAULT_LAG_SCAN_INTERVAL_SECONDS,
+        ),
+        lagWarningThreshold = long(
+            OptionKeys.LAG_WARNING_THRESHOLD,
+            KafkaConfig.DEFAULT_LAG_WARNING_THRESHOLD,
         ),
     )
 }

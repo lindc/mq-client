@@ -183,13 +183,14 @@ fun ObjectCard(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
-                // 右上角 badge 位：数值（队列深度 / 监听端口），弱色小字号不与对象名混淆。
+                // 右上角 badge 位：数值（队列深度 / Lag 等），弱色小字号不与对象名混淆；
+                // metricColor 告警语义时换色（如 Lag 超阈值警示橙）。
                 data.metricValue?.let { value ->
                     Text(
                         text = value,
                         style = MaterialTheme.typography.bodySmall,
                         fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = data.metricColor ?: MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }

@@ -28,6 +28,11 @@ data class ObjectCardData(
     val statusText: String? = null,
     /** 右侧数值（如队列深度 / 消息数）；null 不显示。 */
     val metricValue: String? = null,
+    /**
+     * 右上角数值的颜色；null 用主题的 onSurfaceVariant（次要色）。告警语义时给
+     * 警示色（如消费组 Lag 超阈值）—— null 时与普通数值无异。
+     */
+    val metricColor: Color? = null,
     /** 第 1 行的操作按钮（[CardAction]，由各 MQ 模块构造）；空则不渲染。 */
     val actions: List<CardAction> = emptyList(),
     /**
