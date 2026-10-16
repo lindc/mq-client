@@ -79,7 +79,7 @@
   "kafka_ui_cluster_offline": "Offline (inferred)",
   "kafka_ui_cluster_detail_unavailable": "Broker details will be available in a future version",
   "kafka_ui_group_state_stable": "Stable",
-  "kafka_ui_group_state_empty": "Empty",
+  "kafka_ui_group_state_empty": "Empty group",
   "kafka_ui_group_state_dead": "Dead",
   "kafka_ui_group_state_rebalance": "Rebalancing",
   "kafka_ui_group_state_unknown": "Unknown",
@@ -113,5 +113,11 @@
   "kafka_ui_group_detail_delete_done": "Group deleted",
   "kafka_ui_field_lag_threshold": "Lag warning threshold",
   "kafka_ui_field_lag_threshold_hint": "Highlight group cards whose Lag exceeds this; 0 = disabled",
-  "kafka_ui_error_lag_threshold_range": "Must be 0 or a positive integer"
+  "kafka_ui_error_lag_threshold_range": "Must be 0 or a positive integer",
+  "kafka_ui_group_state_stable_desc": "Stable (consuming normally)",
+  "kafka_ui_group_state_empty_desc": "Empty group (no active members)",
+  "kafka_ui_group_state_dead_desc": "Dead (no alive members, will be cleaned up)",
+  "kafka_ui_group_state_rebalance_desc": "Rebalancing (partitions reassigned)",
+  "kafka_ui_group_state_unknown_desc": "Unknown",
+  "kafka_ui_group_detail_overview_state": "State"
 }

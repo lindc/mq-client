@@ -79,9 +79,9 @@
   "kafka_ui_cluster_offline": "离线（推断）",
   "kafka_ui_cluster_detail_unavailable": "Broker 详情将在后续版本提供",
   "kafka_ui_group_state_stable": "稳定",
-  "kafka_ui_group_state_empty": "空",
+  "kafka_ui_group_state_empty": "空组",
   "kafka_ui_group_state_dead": "已死",
-  "kafka_ui_group_state_rebalance": "重平衡",
+  "kafka_ui_group_state_rebalance": "重平衡中",
   "kafka_ui_group_state_unknown": "未知",
   "kafka_ui_group_detail": "查看详情",
   "kafka_ui_group_detail_loading": "正在加载组详情…",
@@ -113,5 +113,11 @@
   "kafka_ui_group_detail_delete_done": "消费组已删除",
   "kafka_ui_field_lag_threshold": "Lag 告警阈值",
   "kafka_ui_field_lag_threshold_hint": "消费组卡片 Lag 超过该值高亮；0 = 不告警",
-  "kafka_ui_error_lag_threshold_range": "须为 0 或正整数"
+  "kafka_ui_error_lag_threshold_range": "须为 0 或正整数",
+  "kafka_ui_group_state_stable_desc": "稳定（消费正常）",
+  "kafka_ui_group_state_empty_desc": "空组（无活跃成员）",
+  "kafka_ui_group_state_dead_desc": "已死（无存活成员，将被清理）",
+  "kafka_ui_group_state_rebalance_desc": "重平衡中（分区重新分配）",
+  "kafka_ui_group_state_unknown_desc": "未知",
+  "kafka_ui_group_detail_overview_state": "状态"
 }

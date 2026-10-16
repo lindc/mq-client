@@ -37,14 +37,45 @@ internal object GroupStatusStyle {
     val UNKNOWN = Color(0xFF616161)
 }
 
-/** 组状态 → 色点颜色 / 本地化文案（行业术语映射中文，Unknown 兜底）。 */
-internal fun groupStateStyle(state: String): Pair<Color, String> = when (state.uppercase()) {
-    "STABLE" -> GroupStatusStyle.STABLE to stringResource("kafka_ui_group_state_stable")
-    "EMPTY" -> GroupStatusStyle.EMPTY to stringResource("kafka_ui_group_state_empty")
-    "DEAD" -> GroupStatusStyle.DEAD to stringResource("kafka_ui_group_state_dead")
-    "PREPARING_REBALANCE", "COMPLETING_REBALANCE" ->
-        GroupStatusStyle.REBALANCE to stringResource("kafka_ui_group_state_rebalance")
-    else -> GroupStatusStyle.UNKNOWN to stringResource("kafka_ui_group_state_unknown")
+/**
+ * 组状态的展示三元组：色点颜色 + 卡片短文案 + 详情对话框长文案（带语境说明）。
+ * 卡片与详情共用本映射——改一处两边生效。
+ */
+internal data class GroupStateStyle(
+    val color: Color,
+    /** 卡片行 2 的短文案（紧凑）。 */
+    val cardText: String,
+    /** 详情对话框概览行的长文案（带语境说明）。 */
+    val detailText: String,
+)
+
+/** 组状态 → 展示三元组（行业术语映射中文，Unknown 兜底）。 */
+internal fun groupStateStyle(state: String): GroupStateStyle = when (state.uppercase()) {
+    "STABLE" -> GroupStateStyle(
+        GroupStatusStyle.STABLE,
+        stringResource("kafka_ui_group_state_stable"),
+        stringResource("kafka_ui_group_state_stable_desc"),
+    )
+    "EMPTY" -> GroupStateStyle(
+        GroupStatusStyle.EMPTY,
+        stringResource("kafka_ui_group_state_empty"),
+        stringResource("kafka_ui_group_state_empty_desc"),
+    )
+    "DEAD" -> GroupStateStyle(
+        GroupStatusStyle.DEAD,
+        stringResource("kafka_ui_group_state_dead"),
+        stringResource("kafka_ui_group_state_dead_desc"),
+    )
+    "PREPARING_REBALANCE", "COMPLETING_REBALANCE" -> GroupStateStyle(
+        GroupStatusStyle.REBALANCE,
+        stringResource("kafka_ui_group_state_rebalance"),
+        stringResource("kafka_ui_group_state_rebalance_desc"),
+    )
+    else -> GroupStateStyle(
+        GroupStatusStyle.UNKNOWN,
+        stringResource("kafka_ui_group_state_unknown"),
+        stringResource("kafka_ui_group_state_unknown_desc"),
+    )
 }
 
 /** Lag 的千分位格式化（Locale 分组；与消息表格同一风格）。 */
@@ -54,7 +85,9 @@ internal fun KafkaGroupInfo.toCardData(
     lagWarningThreshold: Long,
     onDetail: () -> Unit,
 ): ObjectCardData {
-    val (dotColor, stateText) = groupStateStyle(state)
+    val style = groupStateStyle(state)
+    val dotColor = style.color
+    val stateText = style.cardText
     // Lag 着色：无心跳产物不显示；0 用次要色（默认）；超阈值（阈值 > 0 才启用）警示橙。
     val lagColor = when {
         totalLag == null || totalLag == 0L -> null

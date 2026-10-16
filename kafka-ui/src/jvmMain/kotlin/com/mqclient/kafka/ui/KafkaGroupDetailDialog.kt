@@ -115,18 +115,24 @@ fun KafkaGroupDetailDialog(
         minHeight = 420.dp,
         footerActions = {
             val ready = (detail as? LoadState.Success)?.data
-            TextButton(onClick = { resetChoice = false }) {
+            // 主操作（主色）：比关闭突出。
+            PressableButton(onClick = { resetChoice = false }) {
                 Text(stringResource("kafka_ui_group_detail_action_reset"))
             }
+            // 危险操作：与删除连接 / 危险命令同一 danger 档（error 底 + onError 字）。
             PressableButton(
                 onClick = { deleteConfirm = true },
                 enabled = ready != null && ready.state.equals("EMPTY", ignoreCase = true),
-                containerColor = MaterialTheme.colorScheme.error.copy(alpha = 0.12f),
-                contentColor = MaterialTheme.colorScheme.error,
+                danger = true,
             ) {
                 Text(stringResource("kafka_ui_group_detail_action_delete"))
             }
-            PressableButton(onClick = onDismiss) {
+            // 次级（surfaceVariant）：与各确认框取消键同款。
+            PressableButton(
+                onClick = onDismiss,
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            ) {
                 Text(stringResource("common_close"))
             }
         },
@@ -218,15 +224,21 @@ fun KafkaGroupDetailDialog(
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
-                    resetChoice?.let { reset(it) }
-                    resetChoice = null
-                }) { Text(stringResource("kafka_ui_group_detail_reset_confirm")) }
+                // 重置会覆盖位点：确认键走 danger 档（同 MQ ChannelResetSeqnumDialog）。
+                PressableButton(
+                    onClick = {
+                        resetChoice?.let { reset(it) }
+                        resetChoice = null
+                    },
+                    danger = true,
+                ) { Text(stringResource("kafka_ui_group_detail_reset_confirm")) }
             },
             dismissButton = {
-                TextButton(onClick = { resetChoice = null }) {
-                    Text(stringResource("common_close"))
-                }
+                PressableButton(
+                    onClick = { resetChoice = null },
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                ) { Text(stringResource("common_cancel")) }
             },
         )
     }
@@ -243,20 +255,20 @@ fun KafkaGroupDetailDialog(
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
-                    deleteConfirm = false
-                    delete()
-                }) {
-                    Text(
-                        text = stringResource("kafka_ui_group_detail_action_delete"),
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
+                PressableButton(
+                    onClick = {
+                        deleteConfirm = false
+                        delete()
+                    },
+                    danger = true,
+                ) { Text(stringResource("kafka_ui_group_detail_action_delete")) }
             },
             dismissButton = {
-                TextButton(onClick = { deleteConfirm = false }) {
-                    Text(stringResource("common_close"))
-                }
+                PressableButton(
+                    onClick = { deleteConfirm = false },
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                ) { Text(stringResource("common_cancel")) }
             },
         )
     }
@@ -265,7 +277,7 @@ fun KafkaGroupDetailDialog(
 /** 概览行：状态（色点 + 文字）/ 成员数 / 总 Lag（千分位）/ 订阅 Topic 数。 */
 @Composable
 private fun GroupOverviewRow(snapshot: KafkaGroupDetailSnapshot) {
-    val (dotColor, stateText) = groupStateStyle(snapshot.state)
+    val style = groupStateStyle(snapshot.state)
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -274,18 +286,27 @@ private fun GroupOverviewRow(snapshot: KafkaGroupDetailSnapshot) {
         horizontalArrangement = Arrangement.spacedBy(24.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(0.8f)) {
+        // 状态：label + 色点 + 长文案（带语境说明，如「空组（无活跃成员）」）。
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1.2f)) {
+            Text(
+                text = stringResource("kafka_ui_group_detail_overview_state"),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.width(8.dp))
             Text(
                 text = "●",
-                color = dotColor,
+                color = style.color,
                 style = MaterialTheme.typography.bodySmall,
             )
             Spacer(Modifier.width(6.dp))
             Text(
-                text = stateText,
+                text = style.detailText,
                 style = MaterialTheme.typography.bodyMedium,
-                color = dotColor,
+                color = style.color,
                 fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
         MetricCell(
