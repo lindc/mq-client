@@ -172,5 +172,6 @@
   "kafka_ui_topic_props_deleting": "删除中…",
   "kafka_ui_topic_props_delete_done": "主题已删除",
   "kafka_ui_topic_props_delete_failed": "删除失败：%1$s",
-  "kafka_ui_topic_props_not_in_cache": "该主题不在扫描缓存中，请刷新列表后重试"
+  "kafka_ui_topic_props_not_in_cache": "该主题不在扫描缓存中，请刷新列表后重试",
+  "kafka_ui_topic_props_overview_section": "概览"
 }

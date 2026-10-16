@@ -1,7 +1,6 @@
 package com.mqclient.kafka.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -45,6 +44,8 @@ import com.mqclient.kafka.KafkaTopicSnapshot
 import com.mqclient.mqui.common.CompactSearchField
 import com.mqclient.mqui.state.LoadState
 import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.PropertyRow
+import com.mqclient.uicommon.PropertySection
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
@@ -213,58 +214,42 @@ fun KafkaTopicPropertiesDialog(
     }
 }
 
-/** 概览 Tab：主题名 / 分区数 / 副本因子 / 消息总数 / 内部主题标记。 */
+/** 概览 Tab：属性行（ui-common PropertySection/PropertyRow，与 MQ 属性面板同一视觉）。 */
 @Composable
 private fun OverviewTab(
     snapshot: KafkaTopicSnapshot,
     offsets: LoadState<Map<Int, KafkaTopicOffsetRange>>,
     modifier: Modifier = Modifier,
 ) {
+    // 消息总数 = 各分区 (latest - earliest) 合计；随位移实时加载，加载中显示占位。
     val messageTotal = (offsets as? LoadState.Success)?.data
         ?.values
         ?.sumOf { (it.latest - it.earliest).coerceAtLeast(0L) }
-    Column(
-        modifier = modifier
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-            MetricCell(
+    Column(modifier.verticalScroll(rememberScrollState())) {
+        PropertySection(stringResource("kafka_ui_topic_props_overview_section")) {
+            PropertyRow(
                 label = stringResource("kafka_ui_topic_create_field_name"),
                 value = snapshot.name,
-                modifier = Modifier.weight(1.4f),
-                monospace = true,
             )
-            MetricCell(
+            PropertyRow(
                 label = stringResource("kafka_ui_topic_props_overview_partitions"),
                 value = snapshot.partitions.size.toString(),
-                modifier = Modifier.weight(0.6f),
             )
-            MetricCell(
+            PropertyRow(
                 label = stringResource("kafka_ui_topic_props_overview_replicas"),
                 value = snapshot.partitions.firstOrNull()?.replicaIds?.size?.toString() ?: "-",
-                modifier = Modifier.weight(0.6f),
             )
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-            MetricCell(
+            PropertyRow(
                 label = stringResource("kafka_ui_topic_props_overview_messages"),
-                value = when {
-                    messageTotal == null -> "…"
-                    else -> formatLag(messageTotal)
-                },
-                modifier = Modifier.weight(1f),
-                monospace = true,
+                value = messageTotal?.let(::formatLag) ?: "…",
             )
-            MetricCell(
+            PropertyRow(
                 label = stringResource("kafka_ui_topic_internal"),
                 value = if (snapshot.internal) {
                     stringResource("kafka_ui_topic_props_overview_internal_yes")
                 } else {
                     stringResource("kafka_ui_topic_props_overview_internal_no")
                 },
-                modifier = Modifier.weight(0.8f),
             )
         }
     }
