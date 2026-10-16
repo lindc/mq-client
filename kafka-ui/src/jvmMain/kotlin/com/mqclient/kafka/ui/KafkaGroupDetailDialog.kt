@@ -19,7 +19,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
@@ -45,6 +44,7 @@ import com.mqclient.kafka.KafkaModule
 import com.mqclient.mqui.state.LoadState
 import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
+import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 import kotlinx.coroutines.launch
@@ -195,83 +195,84 @@ fun KafkaGroupDetailDialog(
                     }
                 }
             }
-            SnackbarHost(hostState = snackbar, modifier = Modifier.align(Alignment.BottomCenter))
+            ThemedSnackbarHost(hostState = snackbar, modifier = Modifier.align(Alignment.BottomCenter))
+        }
+
+        // ---- 重置位移确认：earliest / latest 单选 + 警示（活跃消费者会覆盖）----
+        resetChoice?.let { choice ->
+            AlertDialog(
+                onDismissRequest = { resetChoice = null },
+                title = { Text(stringResource("kafka_ui_group_detail_action_reset")) },
+                text = {
+                    Column {
+                        Text(
+                            text = stringResource("kafka_ui_group_detail_reset_confirm_text").withArg(groupId),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        ResetOptionRow(
+                            label = stringResource("kafka_ui_group_detail_reset_to_earliest"),
+                            selected = choice == true,
+                            onSelect = { resetChoice = true },
+                        )
+                        ResetOptionRow(
+                            label = stringResource("kafka_ui_group_detail_reset_to_latest"),
+                            selected = choice == false,
+                            onSelect = { resetChoice = false },
+                        )
+                    }
+                },
+                confirmButton = {
+                    // 重置会覆盖位点：确认键走 danger 档（同 MQ ChannelResetSeqnumDialog）。
+                    PressableButton(
+                        onClick = {
+                            resetChoice?.let { reset(it) }
+                            resetChoice = null
+                        },
+                        danger = true,
+                    ) { Text(stringResource("kafka_ui_group_detail_reset_confirm")) }
+                },
+                dismissButton = {
+                    PressableButton(
+                        onClick = { resetChoice = null },
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    ) { Text(stringResource("common_cancel")) }
+                },
+            )
+        }
+
+        // ---- 删除确认 ----
+        if (deleteConfirm) {
+            AlertDialog(
+                onDismissRequest = { deleteConfirm = false },
+                title = { Text(stringResource("kafka_ui_group_detail_action_delete")) },
+                text = {
+                    Text(
+                        text = stringResource("kafka_ui_group_detail_delete_confirm_text").withArg(groupId),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                },
+                confirmButton = {
+                    PressableButton(
+                        onClick = {
+                            deleteConfirm = false
+                            delete()
+                        },
+                        danger = true,
+                    ) { Text(stringResource("kafka_ui_group_detail_action_delete")) }
+                },
+                dismissButton = {
+                    PressableButton(
+                        onClick = { deleteConfirm = false },
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    ) { Text(stringResource("common_cancel")) }
+                },
+            )
         }
     }
 
-    // ---- 重置位移确认：earliest / latest 单选 + 警示（活跃消费者会覆盖）----
-    resetChoice?.let { choice ->
-        AlertDialog(
-            onDismissRequest = { resetChoice = null },
-            title = { Text(stringResource("kafka_ui_group_detail_action_reset")) },
-            text = {
-                Column {
-                    Text(
-                        text = stringResource("kafka_ui_group_detail_reset_confirm_text").withArg(groupId),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    ResetOptionRow(
-                        label = stringResource("kafka_ui_group_detail_reset_to_earliest"),
-                        selected = choice == true,
-                        onSelect = { resetChoice = true },
-                    )
-                    ResetOptionRow(
-                        label = stringResource("kafka_ui_group_detail_reset_to_latest"),
-                        selected = choice == false,
-                        onSelect = { resetChoice = false },
-                    )
-                }
-            },
-            confirmButton = {
-                // 重置会覆盖位点：确认键走 danger 档（同 MQ ChannelResetSeqnumDialog）。
-                PressableButton(
-                    onClick = {
-                        resetChoice?.let { reset(it) }
-                        resetChoice = null
-                    },
-                    danger = true,
-                ) { Text(stringResource("kafka_ui_group_detail_reset_confirm")) }
-            },
-            dismissButton = {
-                PressableButton(
-                    onClick = { resetChoice = null },
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                ) { Text(stringResource("common_cancel")) }
-            },
-        )
-    }
-
-    // ---- 删除确认 ----
-    if (deleteConfirm) {
-        AlertDialog(
-            onDismissRequest = { deleteConfirm = false },
-            title = { Text(stringResource("kafka_ui_group_detail_action_delete")) },
-            text = {
-                Text(
-                    text = stringResource("kafka_ui_group_detail_delete_confirm_text").withArg(groupId),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            },
-            confirmButton = {
-                PressableButton(
-                    onClick = {
-                        deleteConfirm = false
-                        delete()
-                    },
-                    danger = true,
-                ) { Text(stringResource("kafka_ui_group_detail_action_delete")) }
-            },
-            dismissButton = {
-                PressableButton(
-                    onClick = { deleteConfirm = false },
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                ) { Text(stringResource("common_cancel")) }
-            },
-        )
-    }
 }
 
 /** 概览行：状态（色点 + 文字）/ 成员数 / 总 Lag（千分位）/ 订阅 Topic 数。 */
