@@ -114,6 +114,7 @@ fun KafkaGroupDetailDialog(
         minWidth = 640.dp,
         minHeight = 420.dp,
         footerActions = {
+            // MQ 约定：操作按钮在左，弹性 Spacer 占位，「关闭」独占右侧。
             val ready = (detail as? LoadState.Success)?.data
             // 主操作（主色）：比关闭突出。
             PressableButton(onClick = { resetChoice = false }) {
@@ -127,6 +128,7 @@ fun KafkaGroupDetailDialog(
             ) {
                 Text(stringResource("kafka_ui_group_detail_action_delete"))
             }
+            Spacer(Modifier.weight(1f))
             // 次级（surfaceVariant）：与各确认框取消键同款。
             PressableButton(
                 onClick = onDismiss,
