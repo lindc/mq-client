@@ -119,5 +119,19 @@
   "kafka_ui_group_state_dead_desc": "Dead (no alive members, will be cleaned up)",
   "kafka_ui_group_state_rebalance_desc": "Rebalancing (partitions reassigned)",
   "kafka_ui_group_state_unknown_desc": "Unknown",
-  "kafka_ui_group_detail_overview_state": "State"
+  "kafka_ui_group_detail_overview_state": "State",
+  "kafka_ui_broker_detail_title": "Broker Details · %1$d",
+  "kafka_ui_broker_detail_role_normal": "Regular",
+  "kafka_ui_broker_detail_rack_unassigned": "Unassigned",
+  "kafka_ui_broker_detail_stat_leader": "Leader partitions",
+  "kafka_ui_broker_detail_stat_follower": "Follower partitions",
+  "kafka_ui_broker_detail_stat_topics": "Hosted topics",
+  "kafka_ui_broker_detail_col_topic": "Topic",
+  "kafka_ui_broker_detail_col_partition": "Partition",
+  "kafka_ui_broker_detail_col_role": "Role",
+  "kafka_ui_broker_detail_col_isr": "ISR",
+  "kafka_ui_broker_detail_role_leader": "Leader",
+  "kafka_ui_broker_detail_role_follower": "Follower",
+  "kafka_ui_broker_detail_search": "Search topics",
+  "kafka_ui_broker_detail_no_partitions": "No partitions hosted on this broker"
 }

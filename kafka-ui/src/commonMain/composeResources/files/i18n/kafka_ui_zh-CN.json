@@ -119,5 +119,19 @@
   "kafka_ui_group_state_dead_desc": "已死（无存活成员，将被清理）",
   "kafka_ui_group_state_rebalance_desc": "重平衡中（分区重新分配）",
   "kafka_ui_group_state_unknown_desc": "未知",
-  "kafka_ui_group_detail_overview_state": "状态"
+  "kafka_ui_group_detail_overview_state": "状态",
+  "kafka_ui_broker_detail_title": "Broker 详情 · %1$d",
+  "kafka_ui_broker_detail_role_normal": "普通节点",
+  "kafka_ui_broker_detail_rack_unassigned": "未分配",
+  "kafka_ui_broker_detail_stat_leader": "Leader 分区",
+  "kafka_ui_broker_detail_stat_follower": "Follower 分区",
+  "kafka_ui_broker_detail_stat_topics": "承载 Topic",
+  "kafka_ui_broker_detail_col_topic": "Topic",
+  "kafka_ui_broker_detail_col_partition": "Partition",
+  "kafka_ui_broker_detail_col_role": "角色",
+  "kafka_ui_broker_detail_col_isr": "ISR",
+  "kafka_ui_broker_detail_role_leader": "Leader",
+  "kafka_ui_broker_detail_role_follower": "Follower",
+  "kafka_ui_broker_detail_search": "搜索 Topic",
+  "kafka_ui_broker_detail_no_partitions": "该 Broker 未承载任何分区"
 }

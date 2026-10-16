@@ -18,7 +18,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -27,7 +26,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,10 +40,8 @@ import com.mqclient.kafka.KafkaEvents
 import com.mqclient.kafka.KafkaModule
 import com.mqclient.kafka.ui.rememberKafkaConnectionStatus
 import com.mqclient.mqui.state.LoadState
-import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
-import kotlinx.coroutines.launch
 
 /**
  * Kafka 集群概览面板（导航项 `clusterOverview` 的 Tab 内容）：Cluster ID / Controller /
@@ -61,7 +57,7 @@ import kotlinx.coroutines.launch
  *  - 离线行：红色文字 + 淡红底 —— 副本分配引用但不在存活列表的 broker id（推断语义，
  *    describeCluster 只回存活节点）。
  *
- * Broker 行点击选中高亮 + Snackbar 提示（详情页后续版本）。
+ * Broker 行点击选中高亮并打开 Broker 详情对话框（缓存过滤，见 KafkaBrokerDetailDialog）。
  */
 @Composable
 fun KafkaClusterOverviewPanel(
@@ -128,10 +124,9 @@ private fun ClusterOverviewPane(
     snapshot: KafkaClusterOverviewSnapshot,
     modifier: Modifier = Modifier,
 ) {
-    val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
-    val detailHint = stringResource("kafka_ui_cluster_detail_unavailable")
     var selectedId by remember { mutableStateOf<Int?>(null) }
+    // 当前打开详情的 broker id；null = 关闭。
+    var detailBrokerId by remember { mutableStateOf<Int?>(null) }
 
     Box(modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -172,18 +167,25 @@ private fun ClusterOverviewPane(
                     selectedId = selectedId,
                     onSelect = { id ->
                         selectedId = id
-                        if (id != null) {
-                            scope.launch { snackbarHostState.showSnackbar(detailHint) }
-                        }
+                        detailBrokerId = id
                     },
                     modifier = Modifier.weight(1f).fillMaxSize(),
                 )
             }
         }
-        ThemedSnackbarHost(
-            hostState = snackbarHostState,
-            modifier = Modifier.align(Alignment.BottomCenter),
-        )
+    }
+
+    // Broker 详情：数据取当前快照（缓存过滤），无加载态。
+    detailBrokerId?.let { id ->
+        snapshot.brokers.firstOrNull { it.brokerId == id }?.let { broker ->
+            KafkaBrokerDetailDialog(
+                broker = broker,
+                topics = snapshot.topics,
+                isController = snapshot.controllerId == id,
+                offline = id in snapshot.offlineBrokerIds,
+                onDismiss = { detailBrokerId = null },
+            )
+        }
     }
 }
 
@@ -296,7 +298,12 @@ private fun BrokerTable(
 
 /** 角色单元格：Controller 绿色徽章 / 离线红字 / 普通「-」。 */
 @Composable
-private fun BrokerRoleCell(broker: KafkaBrokerSnapshot, offline: Boolean, width: androidx.compose.ui.unit.Dp) {
+internal fun BrokerRoleCell(
+    broker: KafkaBrokerSnapshot,
+    offline: Boolean,
+    width: androidx.compose.ui.unit.Dp,
+    normalText: String? = null,
+) {
     when {
         broker.isController -> Row(modifier = Modifier.width(width)) {
             Surface(
@@ -318,7 +325,11 @@ private fun BrokerRoleCell(broker: KafkaBrokerSnapshot, offline: Boolean, width:
             width = width,
             color = MaterialTheme.colorScheme.error,
         )
-        else -> BrokerCell("-", width = width, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        else -> BrokerCell(
+            text = normalText ?: "-",
+            width = width,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
