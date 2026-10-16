@@ -234,6 +234,53 @@ class KafkaScanService(private val context: ServiceContext) {
                 .get(timeoutMs, TimeUnit.MILLISECONDS)
         }
         kafkaLog.info("topic created: connection=$connectionId topic=$name partitions=$partitions replicas=$replicationFactor")
+
+        // 即时可见：createTopics 成功后**单独描述新主题**（一次 RPC），把真实分区明细
+        // 追加进 topics 缓存并广播 OBJECTS_SCANNED —— 列表立即出现新主题，不用等整轮
+        // 慢扫（秒级）也不依赖用户再点刷新；随后的定时慢扫全量替换兜底。
+        // 即时刷新失败不影响创建结果，warn 记日志即可。
+        val cache = ctx.cache
+        if (cache != null) {
+            try {
+                val described = withContext(Dispatchers.IO) {
+                    admin.describeTopics(TopicCollection.ofTopicNames(listOf(name)))
+                        .topicNameValues()[name]
+                        ?.get(timeoutMs, TimeUnit.MILLISECONDS)
+                }
+                if (described != null) {
+                    val snapshot = KafkaTopicSnapshot(
+                        name = name,
+                        internal = described.isInternal,
+                        partitions = described.partitions()
+                            .map { p ->
+                                KafkaPartitionSnapshot(
+                                    id = p.partition(),
+                                    leaderId = p.leader()?.takeIf { it.id() >= 0 }?.id(),
+                                    replicaIds = p.replicas().map { it.id() },
+                                    isrIds = p.isr().map { it.id() },
+                                )
+                            }
+                            .sortedBy { it.id },
+                    )
+                    val existing = cache.getAs<List<KafkaTopicSnapshot>>(KEY_TOPICS) ?: emptyList()
+                    if (existing.none { it.name == name }) {
+                        cache.put(
+                            KEY_TOPICS,
+                            (existing + snapshot).sortedBy { it.name },
+                            ttlMs = objectsTtlMs(ctx),
+                        )
+                    }
+                    context.emit(
+                        name = KafkaEvents.OBJECTS_SCANNED,
+                        payload = mapOf("connectionId" to connectionId, "createdTopic" to name),
+                    )
+                }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Throwable) {
+                kafkaLog.warn("created topic cache sync failed: topic=$name error=${errorMessage(error)}")
+            }
+        }
     }
 
     // ---------------------------------------------------------------- 组详情（实时）

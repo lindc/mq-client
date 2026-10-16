@@ -31,7 +31,7 @@ import kotlinx.coroutines.launch
  * 创建主题对话框（主题列表页「创建主题」/ 空态引导入口）：ObjectDetailDialog 外壳 +
  * 三字段表单（主题名 / 分区数 / 副本因子）。提交走
  * [com.mqclient.kafka.KafkaScanService.createTopic]（AdminClient.createTopics，v1 不带
- * config）；成功后关对话框并触发一轮手动慢扫，列表经 OBJECTS_SCANNED 事件刷新。
+ * config）；成功后服务端把新主题即时写入缓存并广播 OBJECTS_SCANNED，列表立即刷新。
  *
  * 校验：主题名必填；分区数 / 副本因子须为正整数。服务端错误（已存在 / 副本数超
  * broker 数等）解包装后显示在表单内，不闪关。
@@ -85,8 +85,7 @@ fun KafkaCreateTopicDialog(
         scope.launch {
             try {
                 service.createTopic(connectionId, trimmedName, p!!, r!!)
-                // 成功：触发一轮慢扫，列表经 OBJECTS_SCANNED 事件刷新。
-                KafkaModule.scanNow(connectionId)
+                // 成功：服务端已把新主题写入缓存并广播 OBJECTS_SCANNED，列表立即刷新。
                 onDismiss()
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
@@ -134,31 +133,37 @@ fun KafkaCreateTopicDialog(
             }
             Spacer(Modifier.height(12.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp)) {
-                LabeledField(stringResource("kafka_ui_topic_create_field_partitions")) {
-                    OutlinedTextField(
-                        value = partitions,
-                        onValueChange = {
-                            partitions = it
-                            partitionsError = null
-                        },
-                        isError = partitionsError != null,
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    FormFieldError(partitionsError)
+                // weight(1f) 各占一半：LabeledField 自带 fillMaxWidth，但不挂 weight
+                // 会被第一个字段的输入框吃满整行（实测裁切 bug）。
+                Column(modifier = Modifier.weight(1f)) {
+                    LabeledField(stringResource("kafka_ui_topic_create_field_partitions")) {
+                        OutlinedTextField(
+                            value = partitions,
+                            onValueChange = {
+                                partitions = it
+                                partitionsError = null
+                            },
+                            isError = partitionsError != null,
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        FormFieldError(partitionsError)
+                    }
                 }
-                LabeledField(stringResource("kafka_ui_topic_create_field_replicas")) {
-                    OutlinedTextField(
-                        value = replicas,
-                        onValueChange = {
-                            replicas = it
-                            replicasError = null
-                        },
-                        isError = replicasError != null,
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    FormFieldError(replicasError)
+                Column(modifier = Modifier.weight(1f)) {
+                    LabeledField(stringResource("kafka_ui_topic_create_field_replicas")) {
+                        OutlinedTextField(
+                            value = replicas,
+                            onValueChange = {
+                                replicas = it
+                                replicasError = null
+                            },
+                            isError = replicasError != null,
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        FormFieldError(replicasError)
+                    }
                 }
             }
             submitError?.let { error ->
