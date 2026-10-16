@@ -42,6 +42,8 @@ fun TopologyNodeCard(
     name: String,
     type: TopologyNodeType,
     isHovered: Boolean = false,
+    /** 节点正被拖动：悬停级描边 + 选中级投影（提起感）。 */
+    isDragging: Boolean = false,
     isSelected: Boolean = false,
     severity: NodeSeverity = NodeSeverity.NORMAL,
     /** 链路高亮模式下不在选中闭包内：整体压暗，让选中的线路凸显。 */
@@ -66,17 +68,18 @@ fun TopologyNodeCard(
         border = BorderStroke(
             width = when {
                 isSelected -> 2.dp
-                isHovered -> 2.dp
+                isHovered || isDragging -> 2.dp
                 else -> 1.dp
             },
             color = when {
                 isSelected -> accent
+                isDragging -> accent.copy(alpha = 0.9f)
                 isHovered -> accent.copy(alpha = 0.8f)
                 else -> accent.copy(alpha = 0.5f)
             },
         ),
         shadowElevation = when {
-            isSelected -> 8.dp
+            isSelected || isDragging -> 8.dp
             isHovered -> 4.dp
             else -> 1.dp
         },

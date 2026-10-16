@@ -211,6 +211,9 @@ private fun MqTopologyContent(
     TopologyCanvas(
         data = data,
         layoutProvider = columnLayoutProvider,
+        // 节点可拖拽（与 Kafka 拓扑同步启用）：固定列仍是默认布局，拖动只是会话内
+        // 覆盖（kuiver manualPositions，内存态），切走 / 关闭 Tab 即恢复默认布局。
+        nodeDragEnabled = true,
         onRescan = onRescan,
         onNodeDoubleClick = { nodeId ->
             val type = currentTypes[nodeId]?.toMqObjectType()

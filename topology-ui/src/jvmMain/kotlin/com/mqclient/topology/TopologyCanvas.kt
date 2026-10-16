@@ -20,6 +20,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.dk.kuiver.SelectionMode
 import com.dk.kuiver.model.Kuiver
@@ -58,6 +61,7 @@ import com.mqclient.uicommon.ThemedSnackbarHost
  * 图数据变化经 updateKuiver + relayout 换入（updateKuiver 不触发布局，必须跟一次
  * relayout）；viewer state 只建一次，缩放 / 平移在重建间保留。布局落定且画布已测量
  * 后执行一次「适应视图」；[focusName]（列表页焦点带入）在首次出图后选中。
+ * 画布超出视口时由 [TopologyScrollbars] 提供覆盖式滚动条（拖 thumb 平移）。
  */
 @Composable
 fun TopologyCanvas(
@@ -79,6 +83,7 @@ fun TopologyCanvas(
     edgeCustomize: ((edge: KuiverEdge, base: EdgeStyle) -> EdgeStyle)? = null,
     minScale: Float = 0.2f,
     maxScale: Float = 2.0f,
+    /** 节点可拖拽（kuiver 原生手势，touch slop 区分点击；位置仅会话内有效，不持久化）。 */
     nodeDragEnabled: Boolean = false,
 ) {
     val (kuiver, nodeTypes, severities) = data
@@ -182,7 +187,9 @@ fun TopologyCanvas(
             config = KuiverViewerConfig(
                 hoverEnabled = true,
                 selectionMode = SelectionMode.NONE,
-                // 固定列布局本身就是语义位置，禁拖拽防弄乱列序。
+                // 节点拖拽由面板按需启用（Kafka / IBM MQ 拓扑均已开启）：拖动位置走
+                // kuiver 的 manualPositions（KEEP_MANUAL，relayout 后保留），纯会话内
+                // 内存态，不持久化；重置按钮 clearManualPositions 恢复默认布局。
                 nodeDragEnabled = nodeDragEnabled,
                 // 滚轮缩放 / 画布平移是 kuiver 内建手势（无开关），这里只夹量程：
                 // minScale 看全景，maxScale 看细节。
@@ -206,19 +213,28 @@ fun TopologyCanvas(
             },
             nodeContent = { node ->
                 val type = nodeTypes[node.id] ?: fallbackType
-                TopologyNodeCard(
-                    name = displayName(node.id),
-                    type = type,
-                    badge = data.badges[node.id],
-                    isHovered = isHovered,
-                    // 选中高亮双保险：kuiver interaction 的 isSelected（内部状态，插槽
-                    // 作用域可靠失效）+ 本画布 selectedId（焦点选中的直接来源）。
-                    isSelected = isSelected || node.id == selectedId,
-                    // 告警覆盖类型色。
-                    severity = severities[node.id] ?: NodeSeverity.NORMAL,
-                    // 链路高亮模式：闭包外节点压暗，凸显选中线路。
-                    dimmed = highlight != null && node.id !in highlight.nodes,
-                )
+                // grab 光标提示可拖拽（拖拽启用与否由面板决定，卡片本身可点选，Hand 都成立）；
+                // testTag 以节点 id 定位，供 Compose UI 测试（拖拽语义验证）。
+                Box(
+                    Modifier
+                        .pointerHoverIcon(PointerIcon.Hand)
+                        .testTag("topology_node:${node.id}"),
+                ) {
+                    TopologyNodeCard(
+                        name = displayName(node.id),
+                        type = type,
+                        badge = data.badges[node.id],
+                        isHovered = isHovered,
+                        isDragging = isDragging,
+                        // 选中高亮双保险：kuiver interaction 的 isSelected（内部状态，插槽
+                        // 作用域可靠失效）+ 本画布 selectedId（焦点选中的直接来源）。
+                        isSelected = isSelected || node.id == selectedId,
+                        // 告警覆盖类型色。
+                        severity = severities[node.id] ?: NodeSeverity.NORMAL,
+                        // 链路高亮模式：闭包外节点压暗，凸显选中线路。
+                        dimmed = highlight != null && node.id !in highlight.nodes,
+                    )
+                }
             },
             // 贝塞尔曲线边（EdgeShape.CURVED，见 EdgeStyles.kt 的取舍说明）。
             // 链路高亮模式：闭包内边满透明度加粗 + 虚线流动动画，闭包外边淡到近隐。
@@ -240,6 +256,9 @@ fun TopologyCanvas(
                 }
             },
         )
+
+        // 覆盖式滚动条：图超出视口时显示，可拖拽平移（见 TopologyScrollbars）。
+        TopologyScrollbars(viewerState)
 
         // 右上角控件：重新扫描（强制刷新数据）+ 缩放（放大 / 缩小 / 适应视图 / 重置）。
         TopologyZoomControls(

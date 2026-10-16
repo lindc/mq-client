@@ -199,6 +199,9 @@ fun KafkaTopologyPanel(
                 TopologyCanvas(
                     data = current,
                     layoutProvider = kafkaColumnLayoutProvider,
+                    // 节点可拖拽：位置仅会话内有效（kuiver manualPositions，内存态），
+                    // 切走 / 关闭 Tab 随组合销毁恢复默认布局。
+                    nodeDragEnabled = true,
                     // 手动扫描：一轮对象慢扫，扫完经 OBJECTS_SCANNED 事件回到 onObjectsScanned。
                     onRescan = { KafkaModule.scanNow(connectionId) },
                     onNodeDoubleClick = { nodeId ->
