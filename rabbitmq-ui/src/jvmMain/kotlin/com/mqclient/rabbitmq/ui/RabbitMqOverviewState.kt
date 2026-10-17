@@ -1,6 +1,7 @@
 package com.mqclient.rabbitmq.ui
 
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.mqclient.core.ConnectionStatus
@@ -10,14 +11,13 @@ import com.mqclient.rabbitmq.RabbitMqModule
 import com.mqclient.uicommon.i18n.stringResource
 
 /**
- * 概览页的状态（与 RabbitMqQueuesState 同一消费模式：缓存优先、事件驱动）：进页
- * 只读扫描缓存（queues / exchanges / queueStatus / clusterInfo），两类扫描事件任一
- * 完成都重读；「刷新」按钮走 [RabbitMqModule.scanNow]。
+ * 概览页的状态：**Connected 即进入 Success**（页面立刻渲染 Dashboard 骨架，数据位
+ * 先以 "-" 占位），数值随扫描事件经 [refreshTick] 驱动刷新 —— 连接状态分支与队列
+ * 列表页同一消费模式（未连接隐式连接兜底、失败 Error + 重试、断开 Tab 由宿主收走）。
  *
- * **数据就绪判定**：`scannedOnce` 只在「有数据」时置位 —— 对象慢扫到，或快扫的
- * queueStatus 非空（快扫 runOnStart 先到，也能在 ~1s 内出卡片，Loading 窗口不被
- * 慢扫的 5s 起步延迟拖长）。Loading 阶段走 [LoadState.Loading] 全页占位 —— 健康
- * 度 Banner 拿不到数据就不会渲染，杜绝「全 0 数据显示健康」的误报。
+ * **refreshTick 的必要性**：扫描事件回调里 loadState 的赋值是结构相等的
+ * `Success(Unit)`，mutableStateOf 不会触发重组 —— 计数器让每次扫描事件必然带动
+ * 面板重读缓存刷新数字。
  */
 class RabbitMqOverviewState(
     private val connectionId: String,
@@ -25,11 +25,11 @@ class RabbitMqOverviewState(
 
     var loadState by mutableStateOf<LoadState<Unit>>(LoadState.Idle); private set
 
-    /** 至少拿到过一轮数据（慢扫名单或快扫计数）：区分「还在等首扫」与「确认为空」。 */
-    var scannedOnce by mutableStateOf(false); private set
+    /** 扫描事件计数：OBJECTS_SCANNED / STATUS_SCANNED 任一完成即 ++（面板据此重算汇总）。 */
+    var refreshTick by mutableIntStateOf(0); private set
 
     /**
-     * 进 Tab 首次加载（组合期判定一次）：只有这里做隐式连接兜底。显式断开后的
+     * 进 Tab 首次加载（组合期判定一次）：**只有这里做隐式连接兜底**。显式断开后的
      * 状态变化走 [onStatusChanged]，不重连。
      */
     suspend fun load() {
@@ -48,16 +48,13 @@ class RabbitMqOverviewState(
             }
             ConnectionStatus.Connected -> Unit
         }
-        refreshFromCache()
+        loadState = LoadState.Success(Unit)
     }
 
-    /** 连接状态变化的响应（不发起连接）。 */
+    /** 连接状态变化的响应（**不发起连接**）。 */
     fun onStatusChanged(status: ConnectionStatus) {
         when (status) {
-            ConnectionStatus.Connected -> {
-                if (loadState !is LoadState.Success) loadState = LoadState.Loading
-                refreshFromCache()
-            }
+            ConnectionStatus.Connected -> loadState = LoadState.Success(Unit)
             ConnectionStatus.Disconnected ->
                 loadState = LoadState.Error(stringResource("rabbitmq_ui_connect_disconnected"))
             ConnectionStatus.Failed -> loadState = LoadState.Error(reason())
@@ -71,37 +68,19 @@ class RabbitMqOverviewState(
             ?.takeIf(String::isNotBlank)
             ?: stringResource("rabbitmq_ui_connect_failed")
 
-    /** 对象慢扫完成：名单落地即数据就绪。 */
+    /** OBJECTS_SCANNED 事件回调：++ 触发面板重算（慢扫名单变化 / 首次落地）。 */
     fun onObjectsScanned() {
-        scannedOnce = true
-        refreshFromCache()
+        refreshTick++
     }
 
-    /** 状态快扫完成：queueStatus 有内容也算数据就绪（快扫 runOnStart 先到不被浪费）。 */
+    /** STATUS_SCANNED 事件回调：++ 触发面板重算（计数 / badge 刷新）。 */
     fun onStatusScanned() {
-        val status = RabbitMqModule.serviceOrNull()?.cachedQueueStatus(connectionId).orEmpty()
-        if (status.isNotEmpty()) scannedOnce = true
-        refreshFromCache()
+        refreshTick++
     }
 
     /** 「刷新」按钮：触发一轮手动慢扫。 */
     fun requestScan() {
         RabbitMqModule.scanNow(connectionId)
-    }
-
-    private fun refreshFromCache() {
-        val service = RabbitMqModule.serviceOrNull()
-        val queues = service?.cachedQueues(connectionId).orEmpty()
-        val exchanges = service?.cachedExchanges(connectionId).orEmpty()
-        val queueStatus = service?.cachedQueueStatus(connectionId).orEmpty()
-        val dataReady = queues.isNotEmpty() || exchanges.isNotEmpty() || queueStatus.isNotEmpty()
-        if (dataReady) {
-            loadState = LoadState.Success(Unit)
-        } else if (scannedOnce) {
-            // 扫过但 vhost 确实全空：合法空态（指标全 0 + 空队列 Banner）。
-            loadState = LoadState.Success(Unit)
-        }
-        // 两者皆否 → 维持 Loading：健康度 Banner 不渲染，不会误报「健康」。
     }
 
     /** 「重试」：失败态重新发起连接。 */

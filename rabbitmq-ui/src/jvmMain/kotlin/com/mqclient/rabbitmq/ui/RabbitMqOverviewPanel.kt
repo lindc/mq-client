@@ -35,7 +35,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -61,19 +63,33 @@ private val WARNING_ORANGE = Color(0xFFED6C02)
 /** 项目既定的语义健康绿（与 Kafka Controller 徽章同一约定，不随主题翻转）。 */
 private val HEALTH_GREEN = Color(0xFF2E7D32)
 
+/** 一次缓存汇总的结果（纯数据）；null = 数据未到齐（卡片 "-" 占位 + Banner 加载态）。 */
+data class RabbitMqOverviewSummary(
+    val queueCount: Int,
+    val exchangeCount: Int,
+    val totalMessages: Long,
+    val messagesReady: Long,
+    val messagesUnacknowledged: Long,
+    val totalConsumers: Int,
+    val problemCount: Int,
+    val riskCount: Int,
+)
+
 /**
  * 概览页（导航项 `overview` 的 Tab 内容）：Dashboard 式指标卡片布局 ——
  * 顶部 vhost Chip + 集群信息行，4 张指标卡（队列 / 交换机 / 消息 / 消费者）横排，
  * 下方健康度 Banner。数据全部来自扫描缓存（不直查管理 API）。
  *
+ * **加载态（Connected 即渲染骨架）**：summary == null 时卡片数字显示 "-"、Banner
+ * 显示灰色「正在获取集群状态…」—— 不渲染 0 值、不误报「健康 / 没有队列」；
+ * 数据随快扫（~1s）与慢扫（~5s）分步到齐后平滑切换真值。
+ *
  * 健康度判定（基于快扫的 queueStatus 计数，缺计数的队列跳过不误判）：
- *  - **异常队列**：`messages > 0 && consumers == 0`（有堆积但没人消费）→ 橙色 Banner，
- *    文案可点击 → 跳队列 Tab 并自动开启「只看异常队列」过滤；
- *  - **风险队列**：`messages > 阈值 && consumers > 0`（有消费者但积压超限）→ 告警第二行；
+ *  - **异常队列**：`messages > 0 && consumers == 0` → 橙色 Banner（可点击 → 跳队列
+ *    Tab 并自动开启「只看异常队列」过滤）；
+ *  - **风险队列**：`messages > 阈值 && consumers > 0` → 告警第二行；
  *  - vhost 没有任何队列 → 中性灰 Banner（不做消费者判定，防误报）；
  *  - 其余 → 绿色「系统运行健康」。
- * Loading 阶段（两类扫描都还没产出数据）走全页加载占位 —— Banner 不渲染，
- * 杜绝「全 0 数据显示健康」的误报。
  */
 @Composable
 fun RabbitMqOverviewPanel(
@@ -96,44 +112,21 @@ fun RabbitMqOverviewPanel(
         }
     }
 
+    // 缓存汇总（refreshTick 变化 / 连接状态变化时重算；null = 数据未到齐）。
+    var summary by remember(connectionId) { mutableStateOf<RabbitMqOverviewSummary?>(null) }
+    LaunchedEffect(state.loadState, state.refreshTick, connectionId) {
+        summary = computeSummary(connectionId)
+    }
+
     LoadStateContent(
         state = state.loadState,
         onRetry = { state.retry() },
-        loadingMessage =
-            if (connectionStatus == ConnectionStatus.Connecting) {
-                stringResource("rabbitmq_ui_connecting")
-            } else {
-                stringResource("rabbitmq_ui_overview_loading")
-            },
+        loadingMessage = stringResource("rabbitmq_ui_connecting"),
         modifier = modifier.fillMaxSize(),
     ) { _ ->
-        val service = RabbitMqModule.serviceOrNull()
         val config = RabbitMqModule.connectionOrNull(connectionId)?.config
-        val queues = service?.cachedQueues(connectionId).orEmpty()
-        val exchanges = service?.cachedExchanges(connectionId).orEmpty()
-        val status = service?.cachedQueueStatus(connectionId).orEmpty()
-        val clusterInfo = service?.cachedClusterInfo(connectionId)
-        val totalMessages = status.values.sumOf { it.messages }
-        val totalConsumers = status.values.sumOf { it.consumers }
-        val backlog = totalMessages > BACKLOG_THRESHOLD
-
-        // 健康度分类（按队列，基于快扫计数；慢扫名单有但快扫未覆盖的队列不计入）。
-        val problemQueues = status.values.filter { it.messages > 0 && it.consumers == 0 }
-        val riskQueues = status.values.filter { it.messages > BACKLOG_THRESHOLD && it.consumers > 0 }
-        val warnings = buildList {
-            if (problemQueues.isNotEmpty()) {
-                add(
-                    stringResource("rabbitmq_ui_overview_health_backlog_no_consumers")
-                        .withArg(problemQueues.size),
-                )
-            }
-            if (riskQueues.isNotEmpty()) {
-                add(
-                    stringResource("rabbitmq_ui_overview_health_risk")
-                        .withArg(riskQueues.size, BACKLOG_THRESHOLD),
-                )
-            }
-        }
+        val clusterInfo = RabbitMqModule.serviceOrNull()?.cachedClusterInfo(connectionId)
+        val s = summary
 
         Column(
             modifier = Modifier
@@ -141,7 +134,7 @@ fun RabbitMqOverviewPanel(
                 .verticalScroll(rememberScrollState())
                 .padding(20.dp),
         ) {
-            // ---- 顶部：vhost Chip + 集群信息 ----
+            // ---- 顶部：vhost Chip + 集群信息（静态配置，常显）----
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
                     shape = RoundedCornerShape(8.dp),
@@ -174,63 +167,86 @@ fun RabbitMqOverviewPanel(
                 MetricCard(
                     icon = Icons.AutoMirrored.Filled.List,
                     label = stringResource("rabbitmq_ui_overview_queue_count"),
-                    value = queues.size.toString(),
-                    valueColor = metricValueColor(zero = queues.isEmpty()),
+                    value = s?.queueCount?.toString() ?: PLACEHOLDER,
+                    valueColor = metricValueColor(placeholder = s == null, zero = s?.queueCount == 0),
                     onClick = { requestObjectTab(connectionId, "queues") },
                     modifier = Modifier.weight(1f).fillMaxHeight(),
                 )
                 MetricCard(
                     icon = Icons.Default.CallSplit,
                     label = stringResource("rabbitmq_ui_overview_exchange_count"),
-                    value = exchanges.size.toString(),
-                    valueColor = metricValueColor(zero = exchanges.isEmpty()),
+                    value = s?.exchangeCount?.toString() ?: PLACEHOLDER,
+                    valueColor = metricValueColor(placeholder = s == null, zero = s?.exchangeCount == 0),
                     onClick = { requestObjectTab(connectionId, "exchanges") },
                     modifier = Modifier.weight(1f).fillMaxHeight(),
                 )
                 MetricCard(
                     icon = Icons.Default.Email,
                     label = stringResource("rabbitmq_ui_overview_total_messages"),
-                    value = totalMessages.toString(),
+                    value = s?.totalMessages?.toString() ?: PLACEHOLDER,
                     valueColor = metricValueColor(
-                        zero = totalMessages == 0L,
-                        alert = backlog,
+                        placeholder = s == null,
+                        zero = s?.totalMessages == 0L,
+                        alert = (s?.totalMessages ?: 0L) > BACKLOG_THRESHOLD,
                     ),
-                    footer = stringResource("rabbitmq_ui_overview_messages_footer")
-                        .withArg(
-                            status.values.sumOf { it.messagesReady }.toString(),
-                            status.values.sumOf { it.messagesUnacknowledged }.toString(),
-                        ),
+                    footer = s?.let {
+                        stringResource("rabbitmq_ui_overview_messages_footer")
+                            .withArg(it.messagesReady.toString(), it.messagesUnacknowledged.toString())
+                    },
                     modifier = Modifier.weight(1f).fillMaxHeight(),
                 )
                 MetricCard(
                     icon = Icons.Default.Groups,
                     label = stringResource("rabbitmq_ui_overview_total_consumers"),
-                    value = totalConsumers.toString(),
-                    valueColor = metricValueColor(zero = totalConsumers == 0),
+                    value = s?.totalConsumers?.toString() ?: PLACEHOLDER,
+                    valueColor = metricValueColor(placeholder = s == null, zero = s?.totalConsumers == 0),
                     modifier = Modifier.weight(1f).fillMaxHeight(),
                 )
             }
 
-            // ---- 健康度 Banner：异常橙（可点击带过滤）/ 空 vhost 中性灰 / 健康绿 ----
+            // ---- 健康度 Banner：加载灰 / 空 vhost 中性灰 / 异常橙（可点击）/ 健康绿 ----
             Spacer(Modifier.height(24.dp))
             when {
-                queues.isEmpty() -> HealthBanner(
+                s == null -> HealthBanner(
+                    accent = MaterialTheme.colorScheme.onSurfaceVariant,
+                    icon = Icons.Default.Info,
+                    text = stringResource("rabbitmq_ui_overview_status_loading"),
+                    details = emptyList(),
+                    onClick = null,
+                )
+                s.queueCount == 0 -> HealthBanner(
                     accent = MaterialTheme.colorScheme.onSurfaceVariant,
                     icon = Icons.Default.Info,
                     text = stringResource("rabbitmq_ui_overview_health_empty"),
                     details = emptyList(),
                     onClick = null,
                 )
-                warnings.isNotEmpty() -> HealthBanner(
-                    accent = WARNING_ORANGE,
-                    icon = Icons.Default.Warning,
-                    text = warnings.first(),
-                    details = warnings.drop(1),
-                    onClick = {
-                        RabbitMqUiHints.requestProblemQueueFilter(connectionId)
-                        requestObjectTab(connectionId, "queues")
-                    },
-                )
+                s.problemCount > 0 || s.riskCount > 0 -> {
+                    val warnings = buildList {
+                        if (s.problemCount > 0) {
+                            add(
+                                stringResource("rabbitmq_ui_overview_health_backlog_no_consumers")
+                                    .withArg(s.problemCount),
+                            )
+                        }
+                        if (s.riskCount > 0) {
+                            add(
+                                stringResource("rabbitmq_ui_overview_health_risk")
+                                    .withArg(s.riskCount, BACKLOG_THRESHOLD),
+                            )
+                        }
+                    }
+                    HealthBanner(
+                        accent = WARNING_ORANGE,
+                        icon = Icons.Default.Warning,
+                        text = warnings.first(),
+                        details = warnings.drop(1),
+                        onClick = {
+                            RabbitMqUiHints.requestProblemQueueFilter(connectionId)
+                            requestObjectTab(connectionId, "queues")
+                        },
+                    )
+                }
                 else -> HealthBanner(
                     accent = HEALTH_GREEN,
                     icon = Icons.Default.CheckCircle,
@@ -243,11 +259,41 @@ fun RabbitMqOverviewPanel(
     }
 }
 
-/** 指标数字的颜色：告警橙 / 零值标灰 / 默认主题色（图标 tint 同步，视觉成组）。 */
+/** 数据未到齐时指标卡的数字占位符。 */
+private const val PLACEHOLDER = "-"
+
+/**
+ * 从扫描缓存汇总概览指标；缓存全空（快扫/慢扫都还没落地）返回 null。
+ * **队列数 = 慢扫名单 ∪ 快扫计数的并集**：快扫先到时队列数立即出真值，
+ * 不被慢扫的 5s 起步延迟拖成 0。
+ */
+private fun computeSummary(connectionId: String): RabbitMqOverviewSummary? {
+    val service = RabbitMqModule.serviceOrNull()
+    val queues = service?.cachedQueues(connectionId).orEmpty()
+    val exchanges = service?.cachedExchanges(connectionId).orEmpty()
+    val status = service?.cachedQueueStatus(connectionId).orEmpty()
+    if (queues.isEmpty() && exchanges.isEmpty() && status.isEmpty()) return null
+    val problemQueues = status.values.filter { it.messages > 0 && it.consumers == 0 }
+    val riskQueues = status.values.filter { it.messages > BACKLOG_THRESHOLD && it.consumers > 0 }
+    return RabbitMqOverviewSummary(
+        queueCount = (queues.map { it.name }.toSet() + status.keys).size,
+        exchangeCount = exchanges.size,
+        totalMessages = status.values.sumOf { it.messages },
+        messagesReady = status.values.sumOf { it.messagesReady },
+        messagesUnacknowledged = status.values.sumOf { it.messagesUnacknowledged },
+        totalConsumers = status.values.sumOf { it.consumers },
+        problemCount = problemQueues.size,
+        riskCount = riskQueues.size,
+    )
+}
+
+/**
+ * 指标数字的颜色：告警橙 / 占位与零值标灰 / 默认主题色（图标 tint 同步，视觉成组）。
+ */
 @Composable
-private fun metricValueColor(zero: Boolean, alert: Boolean = false): Color = when {
+private fun metricValueColor(placeholder: Boolean, zero: Boolean, alert: Boolean = false): Color = when {
     alert -> WARNING_ORANGE
-    zero -> MaterialTheme.colorScheme.onSurfaceVariant
+    placeholder || zero -> MaterialTheme.colorScheme.onSurfaceVariant
     else -> MaterialTheme.colorScheme.primary
 }
 
@@ -261,7 +307,7 @@ private fun requestObjectTab(connectionId: String, objectType: String) {
 }
 
 /**
- * 健康度状态横幅：accent 决定语义（橙 = 告警可点击、绿 = 健康、灰 = 中性），底色/
+ * 健康度状态横幅：accent 决定语义（橙 = 告警可点击、绿 = 健康、灰 = 中性/加载），底色/
  * 边框为语义色低透明度，与指标卡的告警色同一套约定（不随主题翻转）。
  * [text] 主文案；[details] 为附加行（如风险队列第二条告警）；[onClick] 非空时整条
  * Banner 可点击（hover 边框加深提示）。

@@ -32,6 +32,7 @@
   "rabbitmq_ui_overview_vhost_chip": "vhost: %1$s",
   "rabbitmq_ui_overview_cluster_line": "集群 %1$s · RabbitMQ %2$s",
   "rabbitmq_ui_overview_loading": "正在加载概览…",
+  "rabbitmq_ui_overview_status_loading": "正在获取集群状态…",
   "rabbitmq_ui_overview_queue_count": "队列数",
   "rabbitmq_ui_overview_exchange_count": "交换机数",
   "rabbitmq_ui_overview_total_messages": "消息总数",

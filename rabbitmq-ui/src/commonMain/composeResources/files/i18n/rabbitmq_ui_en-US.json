@@ -32,6 +32,7 @@
   "rabbitmq_ui_overview_vhost_chip": "vhost: %1$s",
   "rabbitmq_ui_overview_cluster_line": "Cluster %1$s · RabbitMQ %2$s",
   "rabbitmq_ui_overview_loading": "Loading overview…",
+  "rabbitmq_ui_overview_status_loading": "Fetching cluster status…",
   "rabbitmq_ui_overview_queue_count": "Queues",
   "rabbitmq_ui_overview_exchange_count": "Exchanges",
   "rabbitmq_ui_overview_total_messages": "Total messages",
