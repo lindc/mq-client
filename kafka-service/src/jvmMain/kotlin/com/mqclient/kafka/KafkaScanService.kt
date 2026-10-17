@@ -338,6 +338,48 @@ class KafkaScanService(private val context: ServiceContext) {
         kafkaLog.info("topic deleted: connection=$connectionId topic=$name")
     }
 
+    /**
+     * 清空 topic 现有消息（admin.deleteRecords）：各分区的 log start offset 推到当前
+     * 末端 —— 已有记录全部不可见（Kafka 无逐条删除，这是官方的「清空」语义），之后
+     * 写入的新消息不受影响；空分区（earliest == latest）跳过。
+     *
+     * 消费组已提交位点多半越过新的 log start —— 消费端按各自 auto.offset.reset 处理
+     * （earliest 回到新起点＝读到空、latest 接新数据），UI 侧确认框负责警示。
+     *
+     * @return 清掉的分区数（空分区不计）。
+     */
+    suspend fun clearTopicRecords(connectionId: String, name: String): Int {
+        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
+        val admin = ctx.adminClient ?: throw IllegalStateException("未连接")
+        val timeoutMs = ctx.config.connectionTimeout * 1_000L
+        val cleared = withContext(Dispatchers.IO) {
+            val partitions = admin.describeTopics(listOf(name))
+                .allTopicNames()
+                .get(timeoutMs, TimeUnit.MILLISECONDS)[name]
+                ?.partitions()
+                ?: throw IllegalStateException("topic '$name' 不存在或无权访问")
+            val tps = partitions.sortedBy { it.partition() }.map { TopicPartition(name, it.partition()) }
+            if (tps.isEmpty()) return@withContext 0
+            val beginning = admin.listOffsets(tps.associateWith { OffsetSpec.earliest() })
+                .all()
+                .get(timeoutMs, TimeUnit.MILLISECONDS)
+                .mapValues { (_, info) -> info.offset() }
+            // 目标 = 各分区当前末端；earliest == latest 的空分区没有可删的记录，跳过。
+            val targets = admin.listOffsets(tps.associateWith { OffsetSpec.latest() })
+                .all()
+                .get(timeoutMs, TimeUnit.MILLISECONDS)
+                .mapValues { (_, info) -> info.offset() }
+                .filter { (tp, end) -> end > (beginning[tp] ?: 0L) }
+                .mapValues { (_, end) -> org.apache.kafka.clients.admin.RecordsToDelete.beforeOffset(end) }
+            if (targets.isEmpty()) return@withContext 0
+            admin.deleteRecords(targets).all()
+                .get(timeoutMs, TimeUnit.MILLISECONDS)
+            targets.size
+        }
+        kafkaLog.info("topic records cleared: connection=$connectionId topic=$name partitions=$cleared")
+        return cleared
+    }
+
     // ---------------------------------------------------------------- 组详情（实时）
 
     /**

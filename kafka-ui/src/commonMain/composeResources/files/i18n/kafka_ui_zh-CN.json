@@ -180,6 +180,11 @@
   "kafka_ui_topic_props_overview_section": "概览",
 
   "kafka_ui_topic_messages": "查看消息",
+  "kafka_ui_topic_clear": "清空消息",
+  "kafka_ui_topic_clear_confirm_title": "清空消息",
+  "kafka_ui_topic_clear_confirm_text": "将删除主题 %1$s 当前已存在的全部消息（各分区位移起点推到末端），不可恢复。消费组已提交的位点不受影响，但消费端可能需要按 auto.offset.reset 重新定位。确定清空？",
+  "kafka_ui_topic_clear_confirm": "确认清空",
+  "kafka_ui_topic_clear_done": "已清空 %1$d 个分区的消息",
   "kafka_ui_messages_title": "Topic 消息：%1$s",
   "kafka_ui_messages_tab_browse": "浏览消息",
   "kafka_ui_messages_tab_send": "发送消息",

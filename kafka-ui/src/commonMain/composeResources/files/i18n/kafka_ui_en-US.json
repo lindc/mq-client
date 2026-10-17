@@ -180,6 +180,11 @@
   "kafka_ui_topic_props_overview_section": "Overview",
 
   "kafka_ui_topic_messages": "Messages",
+  "kafka_ui_topic_clear": "Clear records",
+  "kafka_ui_topic_clear_confirm_title": "Clear records",
+  "kafka_ui_topic_clear_confirm_text": "Delete ALL existing records of topic %1$s (each partition's log start offset moves to its end). This cannot be undone. Committed consumer offsets are untouched, but consumers may need to reposition per auto.offset.reset. Clear now?",
+  "kafka_ui_topic_clear_confirm": "Clear",
+  "kafka_ui_topic_clear_done": "Cleared records of %1$d partitions",
   "kafka_ui_messages_title": "Topic messages: %1$s",
   "kafka_ui_messages_tab_browse": "Browse",
   "kafka_ui_messages_tab_send": "Send",
