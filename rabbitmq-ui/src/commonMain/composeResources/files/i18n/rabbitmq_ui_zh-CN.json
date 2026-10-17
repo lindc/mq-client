@@ -42,6 +42,11 @@
   "rabbitmq_ui_overview_health_backlog_no_consumers": "发现 %1$d 个队列有消息积压且无消费者",
   "rabbitmq_ui_overview_health_risk": "发现 %1$d 个队列消息积压超过 %2$d",
 
+  "rabbitmq_ui_topology_loading": "正在加载拓扑…",
+  "rabbitmq_ui_topology_empty": "当前 vhost 没有可展示的对象",
+  "rabbitmq_ui_topology_toggle_system": "显示系统对象",
+  "rabbitmq_ui_topology_messages_badge": "消息 %1$d",
+
   "rabbitmq_ui_section_basic": "基础",
   "rabbitmq_ui_section_auth": "认证",
   "rabbitmq_ui_section_advanced": "高级",

@@ -18,6 +18,9 @@ kotlin {
             // 对象列表通用组件（ObjectListPanel / ObjectCardData / LoadStateContent /
             // CompactSearchField / ToolbarButton）：队列 / 交换机列表页复用。
             implementation(projects.mqUi)
+            // 拓扑图通用件：模型契约（graph-core 经 topology-ui api 传递）+ 通用渲染
+            // （TopologyCanvas 等）——拓扑页复用。
+            implementation(projects.topologyUi)
             implementation(libs.compose.runtime)
             implementation(libs.compose.foundation)
             implementation(compose.material3)

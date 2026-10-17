@@ -34,6 +34,12 @@ enum class TopologyNodeType {
     BROKER,
     /** Kafka consumer group（消费关系图用）。 */
     CONSUMER_GROUP,
+
+    // ---- RabbitMQ（AMQP 0.9.1 的路由链路：exchange → binding → queue）----
+    /** RabbitMQ 交换机（路由 / 分发角色；含 name="" 的默认交换机）。 */
+    EXCHANGE,
+    /** RabbitMQ 队列（区别于 IBM MQ 的 LOCAL_QUEUE：AMQP 0.9.1 语义）。 */
+    RABBIT_QUEUE,
 }
 
 /**

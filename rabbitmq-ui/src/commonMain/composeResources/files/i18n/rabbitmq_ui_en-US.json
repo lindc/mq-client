@@ -42,6 +42,11 @@
   "rabbitmq_ui_overview_health_backlog_no_consumers": "Found %1$d queue(s) backlogged with no consumers",
   "rabbitmq_ui_overview_health_risk": "Found %1$d queue(s) backlogged above %2$d",
 
+  "rabbitmq_ui_topology_loading": "Loading topology…",
+  "rabbitmq_ui_topology_empty": "No displayable objects in this vhost",
+  "rabbitmq_ui_topology_toggle_system": "Show system objects",
+  "rabbitmq_ui_topology_messages_badge": "messages %1$d",
+
   "rabbitmq_ui_section_basic": "Basic",
   "rabbitmq_ui_section_auth": "Authentication",
   "rabbitmq_ui_section_advanced": "Advanced",

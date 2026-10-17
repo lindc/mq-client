@@ -10,6 +10,7 @@ import androidx.compose.ui.Modifier
 import com.mqclient.core.AdapterUI
 import com.mqclient.core.ModuleI18nTable
 import com.mqclient.rabbitmq.RabbitMqModule
+import com.mqclient.rabbitmq.ui.topology.RabbitMqTopologyPanel
 import com.mqclient.uicommon.i18n.stringResource
 import mq_client.rabbitmq_ui.generated.resources.Res
 
@@ -42,8 +43,8 @@ class RabbitMqUI : AdapterUI {
 
     /**
      * 模块贡献真实内容的导航项：`queues`（队列列表）/ `exchanges`（交换机列表）/
-     * `overview`（概览）。`topology` 第一阶段没有内容区 —— 落到 null 由宿主渲染
-     * 通用「coming soon」占位。模块未初始化（拿不到连接上下文）时同样回落 null。
+     * `overview`（概览）/ `topology`（路由拓扑图）。模块未初始化（拿不到连接上下文）
+     * 时回落 null —— 宿主显示「coming soon」占位页，极端时序下不崩、不破 Tab。
      */
     override fun contentFor(objectType: String, connectionId: String): (@Composable () -> Unit)? {
         val connected = RabbitMqModule.connectionOrNull(connectionId) != null
@@ -74,6 +75,17 @@ class RabbitMqUI : AdapterUI {
                 if (connected) {
                     {
                         RabbitMqOverviewPanel(
+                            connectionId = connectionId,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                } else {
+                    null
+                }
+            "topology" ->
+                if (connected) {
+                    {
+                        RabbitMqTopologyPanel(
                             connectionId = connectionId,
                             modifier = Modifier.fillMaxSize(),
                         )

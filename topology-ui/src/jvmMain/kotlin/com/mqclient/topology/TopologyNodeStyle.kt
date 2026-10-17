@@ -3,6 +3,7 @@ package com.mqclient.topology
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.AltRoute
 import androidx.compose.material.icons.filled.Campaign
+import androidx.compose.material.icons.filled.CallSplit
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Groups
@@ -35,6 +36,9 @@ fun TopologyNodeType.getIcon(): ImageVector = when (this) {
     TopologyNodeType.PARTITION -> Icons.Filled.Layers
     TopologyNodeType.BROKER -> Icons.Filled.Dns
     TopologyNodeType.CONSUMER_GROUP -> Icons.Filled.Groups
+    // RabbitMQ：交换机用 CallSplit（路由分发语义），队列用 Inbox（收件语义）。
+    TopologyNodeType.EXCHANGE -> Icons.Filled.CallSplit
+    TopologyNodeType.RABBIT_QUEUE -> Icons.Filled.Inbox
 }
 
 /**
@@ -61,4 +65,8 @@ fun TopologyNodeType.getColor(): Color = when (this) {
     TopologyNodeType.PARTITION -> Color(0xFF0EA5E9)
     TopologyNodeType.BROKER -> Color(0xFF10B981)
     TopologyNodeType.CONSUMER_GROUP -> Color(0xFFA855F7)
+    // RabbitMQ：交换机青色（路由分发），队列蓝（与 LOCAL_QUEUE 绿、TOPIC 蓝区分，
+    // 取蓝的深阶 1565C0）。
+    TopologyNodeType.EXCHANGE -> Color(0xFF00838F)
+    TopologyNodeType.RABBIT_QUEUE -> Color(0xFF1565C0)
 }
