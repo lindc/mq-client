@@ -124,10 +124,14 @@ class RabbitMqConnectionManager(
         setStatus(ctx, ConnectionStatus.Connecting)
         ctx.lastError = null
         try {
-            val admin = createVerifiedAdmin(ctx.config)
+            val (admin, clusterInfo) = createVerifiedAdmin(ctx.config)
             ctx.admin = admin
             // 缓存与扫描任务只属于活连接（与 kafka / ibm-mq 同一生命周期）。
             ctx.cache = CacheManager()
+            // 集群元信息（clusterName / 版本 / 节点）随建连验证顺带入缓存 —— 概览页
+            // 顶部的集群信息从这里读，不再单独发请求。永不过期（TTL 0）：生命周期
+            // 由整个缓存托管（断开即清）。
+            ctx.cache?.put(KEY_CLUSTER_INFO, clusterInfo, ttlMs = 0L)
             setStatus(ctx, ConnectionStatus.Connected)
             registerScanJobs(ctx)
             context.emit(RabbitMqEvents.CONNECTED, mapOf("connectionId" to connectionId))
@@ -160,7 +164,7 @@ class RabbitMqConnectionManager(
      * 这里建的，丢弃不关等于每次测试泄漏一个客户端。
      */
     suspend fun testConnection(config: RabbitMqConfig) {
-        val admin = createVerifiedAdmin(config)
+        val (admin, _) = createVerifiedAdmin(config)
         try {
             admin.close()
         } catch (error: Throwable) {
@@ -246,19 +250,27 @@ class RabbitMqConnectionManager(
 
     /**
      * 建管理 API 客户端并用 `GET /api/overview` 验证连通性（认证 + 地址 + vhost 一次
-     * 验完）。失败（含取消）时自己把刚建的客户端关掉再抛，成功时把可用的客户端交给
-     * 调用方。错误文案已在 [RabbitMqAdminClient] 里转成人类可读。
+     * 验完）。失败（含取消）时自己把刚建的客户端关掉再抛，成功时把客户端与集群元
+     * 信息（clusterName / 版本 / 节点）一起交给调用方。错误文案已在
+     * [RabbitMqAdminClient] 里转成人类可读。
      */
-    private suspend fun createVerifiedAdmin(config: RabbitMqConfig): RabbitMqAdminClient {
+    private suspend fun createVerifiedAdmin(
+        config: RabbitMqConfig,
+    ): Pair<RabbitMqAdminClient, RabbitMqClusterInfoSnapshot> {
         var client: RabbitMqAdminClient? = null
         try {
             client = withContext(Dispatchers.IO) { RabbitMqAdminClient(config) }
             val overview = withContext(Dispatchers.IO) { client.overview() }
-            rabbitMqLog.info(
-                "management api verified: cluster=${overview.clusterName} " +
-                    "rabbitmq=${overview.rabbitmqVersion} node=${overview.node}",
+            val info = RabbitMqClusterInfoSnapshot(
+                clusterName = overview.clusterName,
+                rabbitmqVersion = overview.rabbitmqVersion,
+                node = overview.node,
             )
-            return client
+            rabbitMqLog.info(
+                "management api verified: cluster=${info.clusterName} " +
+                    "rabbitmq=${info.rabbitmqVersion} node=${info.node}",
+            )
+            return client to info
         } catch (error: Throwable) {
             runCatching { client?.close() }
             throw error

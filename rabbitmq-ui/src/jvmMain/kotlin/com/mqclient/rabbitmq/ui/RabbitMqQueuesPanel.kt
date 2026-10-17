@@ -10,9 +10,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
@@ -75,6 +77,13 @@ fun RabbitMqQueuesPanel(
                     onValueChange = { state.search = it },
                     placeholder = stringResource("rabbitmq_ui_queue_search"),
                     modifier = Modifier.weight(1f),
+                )
+                // 「只看异常队列」过滤 chip：概览健康度 Banner 点击跳转时自动开启。
+                FilterChip(
+                    selected = state.problemOnly,
+                    onClick = { state.problemOnly = !state.problemOnly },
+                    enabled = state.hasProblemQueues || state.problemOnly,
+                    label = { Text(stringResource("rabbitmq_ui_queue_problem_chip")) },
                 )
                 ToolbarButton(
                     icon = Icons.Default.Refresh,

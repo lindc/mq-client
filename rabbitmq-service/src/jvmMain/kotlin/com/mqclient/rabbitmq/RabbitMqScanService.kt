@@ -32,6 +32,11 @@ import kotlinx.coroutines.withContext
  * 事件：完成 / 失败都发（RabbitMqEvents.OBJECTS_SCANNED 等），订阅方（UI）读缓存
  * 刷新。全程不碰 UI 线程（HTTP 调用在 Dispatchers.IO）。
  */
+
+/** 缓存 key：集群元信息（建连时 overview 的投影，永不过期、断开随缓存清空）。
+ *  文件级 internal：RabbitMqConnectionManager 建连时也要写它。 */
+internal const val KEY_CLUSTER_INFO = "clusterInfo"
+
 class RabbitMqScanService(private val context: ServiceContext) {
 
     private companion object {
@@ -190,6 +195,10 @@ class RabbitMqScanService(private val context: ServiceContext) {
     /** 队列状态（快扫快照，按队列名索引）。 */
     fun cachedQueueStatus(connectionId: String): Map<String, RabbitMqQueueStatusSnapshot> =
         cacheOf(connectionId)?.getAs(KEY_QUEUE_STATUS) ?: emptyMap()
+
+    /** 集群元信息（建连时入缓存）；未就绪为 null。 */
+    fun cachedClusterInfo(connectionId: String): RabbitMqClusterInfoSnapshot? =
+        cacheOf(connectionId)?.getAs(KEY_CLUSTER_INFO)
 
     // ---------------------------------------------------------------- 内部
 

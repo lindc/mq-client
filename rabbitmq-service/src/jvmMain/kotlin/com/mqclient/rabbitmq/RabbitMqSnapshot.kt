@@ -1,5 +1,18 @@
 package com.mqclient.rabbitmq
 
+/**
+ * 集群元信息（建连时 `GET /api/overview` 的投影）：验证通过后由
+ * [RabbitMqConnectionManager] 写进连接缓存（key 见 RabbitMqScanService 的
+ * KEY_CLUSTER_INFO），概览页顶部的集群名 / 版本从这里读。
+ */
+data class RabbitMqClusterInfoSnapshot(
+    val clusterName: String,
+    /** RabbitMQ broker 版本（如 4.3.6）。 */
+    val rabbitmqVersion: String,
+    /** 验证时命中的节点（如 rabbit@rabbit1）。 */
+    val node: String,
+)
+
 /** 一条队列的慢扫快照：静态属性（布局 / 持久化），计数另走快扫的 [RabbitMqQueueStatusSnapshot]。 */
 data class RabbitMqQueueSnapshot(
     val name: String,

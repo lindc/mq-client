@@ -58,6 +58,7 @@ import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.CoreModule
 import com.mqclient.core.ModuleRegistry
+import com.mqclient.core.event.EventNames
 import com.mqclient.core.event.getBoolean
 import com.mqclient.core.event.getLong
 import com.mqclient.core.event.getString
@@ -234,6 +235,18 @@ fun MainWindow(
     LaunchedEffect(Unit) {
         TopologyFocusHolder.openRequests.collect { req ->
             val sel = NavSelection(req.connectionId, "topology")
+            onSelect(sel)
+            openTab(sel)
+        }
+    }
+
+    // 模块面板的「反向导航」请求（概览指标卡点击跳队列 / 交换机列表这类）：与拓扑
+    // 跳转同一套处理 —— onSelect + openTab 都要调。payload 见 EventNames 的文档。
+    LaunchedEffect(Unit) {
+        CoreModule.eventBus.on(EventNames.OBJECT_TAB_OPEN_REQUESTED, scope = this) { event ->
+            val connectionId = event.getString("connectionId") ?: return@on
+            val objectType = event.getString("objectType") ?: return@on
+            val sel = NavSelection(connectionId, objectType)
             onSelect(sel)
             openTab(sel)
         }

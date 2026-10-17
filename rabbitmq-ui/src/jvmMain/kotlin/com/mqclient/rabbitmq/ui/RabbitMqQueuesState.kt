@@ -35,6 +35,10 @@ data class RabbitMqQueueCardInfo(
  *
  * 连接状态分支与 Kafka 一致：未连接自动隐式连接（Loading 等状态翻转）、失败显示
  * 原因 + 重试。加载态保持到首个非空缓存。
+ *
+ * [problemOnly]：「只看异常队列」过滤（概览健康度 Banner 点击跳转时经
+ * [RabbitMqUiHints.consumeProblemQueueFilter] 自动开启，chip 可手动关闭）——
+ * 异常 = 有消息堆积且无消费者（与概览 Banner 的判定同口径）。
  */
 class RabbitMqQueuesState(
     private val connectionId: String,
@@ -43,16 +47,33 @@ class RabbitMqQueuesState(
     var loadState by mutableStateOf<LoadState<List<RabbitMqQueueCardInfo>>>(LoadState.Idle); private set
     var search by mutableStateOf("")
 
+    /** 「只看异常队列」过滤开关（messages > 0 && consumers == 0）。 */
+    var problemOnly by mutableStateOf(false)
+
     /** 至少完成过一轮对象扫描：区分「还在等首扫」与「扫完了但确实没有对象」。 */
     var scannedOnce by mutableStateOf(false); private set
 
-    /** 搜索过滤后的列表（按名称包含匹配，忽略大小写）。 */
+    /** 当前数据里是否存在异常队列（有堆积无消费者）：过滤 chip 的可用性依据。 */
+    val hasProblemQueues: Boolean
+        get() = when (val s = loadState) {
+            is LoadState.Success -> s.data.any { isProblem(it) }
+            else -> false
+        }
+
+    /** 搜索过滤后的列表（按名称包含匹配，忽略大小写；叠加 [problemOnly] 过滤）。 */
     val filtered: List<RabbitMqQueueCardInfo>
         get() = when (val s = loadState) {
             is LoadState.Success -> s.data
+                .asSequence()
                 .filter { search.isBlank() || it.name.contains(search.trim(), ignoreCase = true) }
+                .filter { !problemOnly || isProblem(it) }
+                .toList()
             else -> emptyList()
         }
+
+    /** 异常队列判定：有消息堆积且无消费者（与概览 Banner 同口径；计数未知的跳过）。 */
+    private fun isProblem(info: RabbitMqQueueCardInfo): Boolean =
+        (info.messages ?: 0L) > 0 && (info.consumers ?: 0) == 0
 
     /**
      * 进 Tab 首次加载（组合期判定一次）：**只有这里做隐式连接兜底**。显式断开后的
@@ -60,6 +81,7 @@ class RabbitMqQueuesState(
      */
     suspend fun load() {
         loadState = LoadState.Loading
+        consumeProblemFilterHint()
         val status = ConnectionStore.connections.value
             .firstOrNull { it.id == connectionId }?.status ?: ConnectionStatus.Disconnected
         when (status) {
@@ -81,6 +103,7 @@ class RabbitMqQueuesState(
     fun onStatusChanged(status: ConnectionStatus) {
         when (status) {
             ConnectionStatus.Connected -> {
+                consumeProblemFilterHint()
                 if (loadState !is LoadState.Success) loadState = LoadState.Loading
                 refreshFromCache()
             }
@@ -145,5 +168,12 @@ class RabbitMqQueuesState(
         val status = ConnectionStore.connections.value
             .firstOrNull { it.id == connectionId }?.status ?: ConnectionStatus.Disconnected
         ensureRabbitMqConnecting(connectionId, status)
+    }
+
+    /** 概览 Banner 跳转时留下的过滤提示：消费一次，自动开启「只看异常队列」。 */
+    private fun consumeProblemFilterHint() {
+        if (RabbitMqUiHints.consumeProblemQueueFilter(connectionId)) {
+            problemOnly = true
+        }
     }
 }

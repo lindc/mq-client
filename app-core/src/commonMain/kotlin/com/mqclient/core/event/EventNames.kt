@@ -97,6 +97,15 @@ object EventNames {
      */
     const val MQ_COMMAND_EXECUTED = "core.mq.command.executed"
 
+    /**
+     * 模块请求宿主打开某个对象的导航 Tab（概览指标卡点击跳转这类「面板内反向导航」）。
+     * 发出方是各模块的面板（经 CoreModule.eventBusOrNull），订阅方是宿主 app-ui 的
+     * MainWindow —— 收到后 onSelect + openTab（两个都要调，见 MainWindow 的拓扑跳转
+     * 注释：只调其一会出现 Tab 与内容脱节）。
+     * payload: `connectionId` / `objectType`（该模块 navigationItems 里的 id）。
+     */
+    const val OBJECT_TAB_OPEN_REQUESTED = "core.ui.object_tab.requested"
+
     // AI 事件（`ai.*`）不在这里：契约常量跟着发出方走，现在在 ai-service 的
     // `AiEvents`（事件名）与 `AiPayloadKeys`（payload key）里 —— core 不再持有任何 AI 名字。
     // 原 MQ_AI_CONVERSATION_COMPLETED（对象维度 AI 问答审计事件）已删除：
