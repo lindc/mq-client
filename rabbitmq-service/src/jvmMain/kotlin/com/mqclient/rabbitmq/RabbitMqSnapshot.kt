@@ -73,3 +73,23 @@ data class RabbitMqQueueStatusSnapshot(
     val messagesUnacknowledged: Long,
     val consumers: Int,
 )
+
+/**
+ * 一个集群节点的慢扫快照（`GET /api/nodes` 的投影）：概览页节点区块用。
+ * 健康判定三层：`!running` → 异常；[memAlarm] / [diskFreeAlarm] 任一触发 → 告警
+ * （RabbitMQ 会阻塞发布者）；其余 → 健康。
+ */
+data class RabbitMqNodeSnapshot(
+    val name: String,
+    /** disc（磁盘节点）/ ram（内存节点）。 */
+    val type: String,
+    val running: Boolean,
+    /** 节点运行时长（毫秒），Tooltip 展示。 */
+    val uptime: Long,
+    /** 当前内存占用（字节），Tooltip 展示。 */
+    val memUsed: Long,
+    /** 内存高水位上限（字节），Tooltip 展示。 */
+    val memLimit: Long,
+    val memAlarm: Boolean,
+    val diskFreeAlarm: Boolean,
+)

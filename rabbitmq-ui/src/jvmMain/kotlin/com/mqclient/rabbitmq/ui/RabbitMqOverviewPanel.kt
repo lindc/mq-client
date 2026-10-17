@@ -1,12 +1,20 @@
+@file:OptIn(
+    androidx.compose.foundation.ExperimentalFoundationApi::class,
+)
+
 package com.mqclient.rabbitmq.ui
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.TooltipArea
+import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -18,12 +26,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.CallSplit
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Info
@@ -51,8 +61,10 @@ import com.mqclient.mqui.metric.MetricCard
 import com.mqclient.mqui.state.LoadStateContent
 import com.mqclient.rabbitmq.RabbitMqEvents
 import com.mqclient.rabbitmq.RabbitMqModule
+import com.mqclient.rabbitmq.RabbitMqNodeSnapshot
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
+import java.util.Locale
 
 /** 风险队列的积压阈值（条）：有消费者但积压超限 → 健康度 Banner 风险告警项。 */
 internal const val BACKLOG_THRESHOLD = 1_000L
@@ -62,6 +74,9 @@ private val WARNING_ORANGE = Color(0xFFED6C02)
 
 /** 项目既定的语义健康绿（与 Kafka Controller 徽章同一约定，不随主题翻转）。 */
 private val HEALTH_GREEN = Color(0xFF2E7D32)
+
+/** 项目既定的语义异常红（节点未运行，与上面两个同一套约定，不随主题翻转）。 */
+private val NODE_DOWN_RED = Color(0xFFD32F2F)
 
 /** 一次缓存汇总的结果（纯数据）；null = 数据未到齐（卡片 "-" 占位 + Banner 加载态）。 */
 data class RabbitMqOverviewSummary(
@@ -255,6 +270,13 @@ fun RabbitMqOverviewPanel(
                     onClick = null,
                 )
             }
+
+            // ---- 集群节点区块（慢扫数据，随 OBJECTS_SCANNED 刷新；未就绪不占位）----
+            val nodes = RabbitMqModule.serviceOrNull()?.cachedNodes(connectionId).orEmpty()
+            if (nodes.isNotEmpty()) {
+                Spacer(Modifier.height(24.dp))
+                NodesSection(nodes)
+            }
         }
     }
 }
@@ -362,4 +384,210 @@ private fun HealthBanner(
             }
         }
     }
+}
+
+/**
+ * 集群节点区块：横向平铺的节点状态小卡片（与上方指标卡同一套视觉语言）。
+ * 布局：FlowRow 每行最多 4 张、weight(1f) 等宽，节点多时自动换行。
+ * 健康判定（优先级从高到低，与 Snapshot 的 KDoc 约定一致）：
+ *  - `!running` → 红 ⚠「未运行」；
+ *  - `memAlarm / diskFreeAlarm` → 橙 ⚠「内存 / 磁盘告警」（RabbitMQ 会阻塞发布者）；
+ *  - 其余 → 绿点「健康」。
+ * 悬停（Tooltip）显示 Uptime 与内存占用 —— 开发人员够用即可，不做节点详情页。
+ */
+@Composable
+private fun NodesSection(nodes: List<RabbitMqNodeSnapshot>) {
+    Column {
+        Text(
+            text = stringResource("rabbitmq_ui_overview_nodes_title").withArg(nodes.size),
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(8.dp))
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            maxItemsInEachRow = 4,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            nodes.forEach { node ->
+                TooltipArea(tooltip = { NodeTooltip(node) }, delayMillis = 400) {
+                    NodeCard(node, Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+/** 节点健康色：未运行红 / 资源告警橙 / 健康绿（语义色不随主题翻转，同文件约定）。 */
+private fun nodeStatusColor(node: RabbitMqNodeSnapshot): Color = when {
+    !node.running -> NODE_DOWN_RED
+    node.memAlarm || node.diskFreeAlarm -> WARNING_ORANGE
+    else -> HEALTH_GREEN
+}
+
+/**
+ * 单个节点卡片：第一行 Dns 图标 + 节点名（加粗）；第二行 Disc/Ram Tag + 健康状态。
+ * 容器对齐 MetricCard（12dp 圆角 + surface 底 + outlineVariant 细边框），但不可点击
+ * 故无 hover 抬升；内边距 12dp。
+ */
+@Composable
+private fun NodeCard(node: RabbitMqNodeSnapshot, modifier: Modifier = Modifier) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        modifier = modifier,
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Dns,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(16.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = node.name,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                )
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                ) {
+                    Text(
+                        text = node.type.replaceFirstChar { it.uppercaseChar() },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+                NodeStatus(node)
+            }
+        }
+    }
+}
+
+/** 第二行右侧的健康状态：绿点「健康」/ 橙 ⚠「内存·磁盘告警」/ 红 ⚠「未运行」。 */
+@Composable
+private fun NodeStatus(node: RabbitMqNodeSnapshot) {
+    val color = nodeStatusColor(node)
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        when {
+            !node.running -> {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = null,
+                    tint = color,
+                    modifier = Modifier.size(14.dp),
+                )
+                NodeStatusText(stringResource("rabbitmq_ui_overview_node_status_down"), color)
+            }
+            node.memAlarm || node.diskFreeAlarm -> {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = null,
+                    tint = color,
+                    modifier = Modifier.size(14.dp),
+                )
+                NodeStatusText(
+                    text = when {
+                        node.memAlarm && node.diskFreeAlarm ->
+                            stringResource("rabbitmq_ui_overview_node_alarm_both")
+                        node.memAlarm -> stringResource("rabbitmq_ui_overview_node_alarm_mem")
+                        else -> stringResource("rabbitmq_ui_overview_node_alarm_disk")
+                    },
+                    color = color,
+                )
+            }
+            else -> {
+                Box(Modifier.size(8.dp).background(color, CircleShape))
+                NodeStatusText(stringResource("rabbitmq_ui_overview_node_status_ok"), color)
+            }
+        }
+    }
+}
+
+/** 状态小字（labelSmall，语义色，单行截断防挤压 Tag）。 */
+@Composable
+private fun NodeStatusText(text: String, color: Color) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelSmall,
+        color = color,
+        maxLines = 1,
+    )
+}
+
+/** 悬停提示：Uptime + 内存占用（memLimit 未知时省略内存行）+ 告警补充说明。 */
+@Composable
+private fun NodeTooltip(node: RabbitMqNodeSnapshot) {
+    Surface(
+        shape = RoundedCornerShape(6.dp),
+        color = MaterialTheme.colorScheme.inverseSurface,
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+            Text(
+                text = stringResource("rabbitmq_ui_overview_node_tooltip_uptime")
+                    .withArg(formatUptime(node.uptime)),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.inverseOnSurface,
+            )
+            if (node.memLimit > 0) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = stringResource("rabbitmq_ui_overview_node_tooltip_memory")
+                        .withArg(formatBytes(node.memUsed), formatBytes(node.memLimit)),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.inverseOnSurface,
+                )
+            }
+            if (node.memAlarm || node.diskFreeAlarm) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = stringResource("rabbitmq_ui_overview_node_alarm"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = WARNING_ORANGE,
+                )
+            }
+        }
+    }
+}
+
+/** 毫秒运行时长 → "3d 4h 5m"（天数/小时为 0 时省略对应段）。 */
+private fun formatUptime(ms: Long): String {
+    val minutes = ms / 60_000
+    val days = minutes / (24 * 60)
+    val hours = minutes % (24 * 60) / 60
+    val mins = minutes % 60
+    return buildString {
+        if (days > 0) append("${days}d ")
+        if (days > 0 || hours > 0) append("${hours}h ")
+        append("${mins}m")
+    }.trim()
+}
+
+/** 字节 → 人类可读（GB / MB / KB，Locale.ROOT 保证小数点不随系统语言漂移）。 */
+private fun formatBytes(bytes: Long): String = when {
+    bytes >= (1L shl 30) -> String.format(Locale.ROOT, "%.1f GB", bytes / (1024.0 * 1024 * 1024))
+    bytes >= (1L shl 20) -> String.format(Locale.ROOT, "%.1f MB", bytes / (1024.0 * 1024))
+    bytes >= (1L shl 10) -> String.format(Locale.ROOT, "%.1f KB", bytes / 1024.0)
+    else -> "$bytes B"
 }

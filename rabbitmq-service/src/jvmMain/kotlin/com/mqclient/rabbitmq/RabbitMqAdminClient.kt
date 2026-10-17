@@ -96,6 +96,27 @@ data class RabbitMqBindingDto(
     @SerialName("properties_key") val propertiesKey: String? = null,
 )
 
+/**
+ * 集群节点条目（`GET /api/nodes`）：概览页节点区块的投影 —— 只取名称 / 类型 /
+ * 运行状态与资源告警水位。管理端点实际返回几十个字段（fsu / sockets / gc 相关等），
+ * ignoreUnknownKeys 全部忽略。
+ */
+@Serializable
+data class RabbitMqNodeDto(
+    val name: String = "",
+    /** disc（磁盘节点）/ ram（内存节点）。 */
+    val type: String = "disc",
+    val running: Boolean = false,
+    /** 节点运行时长（毫秒）。 */
+    val uptime: Long = 0,
+    @SerialName("mem_used") val memUsed: Long = 0,
+    @SerialName("mem_limit") val memLimit: Long = 0,
+    /** 内存告警：触发后集群会阻塞发布连接。 */
+    @SerialName("mem_alarm") val memAlarm: Boolean = false,
+    /** 磁盘剩余空间告警：同上。 */
+    @SerialName("disk_free_alarm") val diskFreeAlarm: Boolean = false,
+)
+
 // ---------------------------------------------------------------------------
 // 客户端本体
 // ---------------------------------------------------------------------------
@@ -210,7 +231,7 @@ class RabbitMqAdminClient(private val config: RabbitMqConfig) : AutoCloseable {
     private fun friendlyConnectError(): String =
         "无法连接 ${config.host}:${config.managementPort}：检查地址与管理端口（默认 15672）"
 
-    // ---- 四个管理端点（连接验证 / 扫描共用）----
+    // ---- 五个管理端点（连接验证 / 扫描共用）----
 
     /** `GET /api/overview`：连接验证用（拿版本 + 集群名记日志）。 */
     suspend fun overview(): RabbitMqOverviewDto =
@@ -224,6 +245,10 @@ class RabbitMqAdminClient(private val config: RabbitMqConfig) : AutoCloseable {
 
     suspend fun bindings(): List<RabbitMqBindingDto> =
         json.decodeFromString(ListSerializer(RabbitMqBindingDto.serializer()), getJson("bindings", vhostSegment()))
+
+    /** `GET /api/nodes`：集群节点列表（概览页节点区块，慢扫拉取）。 */
+    suspend fun nodes(): List<RabbitMqNodeDto> =
+        json.decodeFromString(ListSerializer(RabbitMqNodeDto.serializer()), getJson("nodes"))
 
     // ---- 写操作与细粒度查询（交换机管理）----
 

@@ -17,16 +17,16 @@ import kotlinx.coroutines.withContext
  * KafkaScanService 同一套模式（write-through 缓存、事件驱动 UI、失败分级）。
  *
  *  - **对象慢扫** [scanObjects]（默认 5min）：exchanges / queues（静态属性）/
- *    bindings 三类**并发**查询，全量替换写缓存 —— 全量替换的语义即「顺带清理
- *    已删除的对象」。任一类失败整轮失败（管理 API 是同一个端口的同一套权限，
- *    单类失败大概率意味着连接已断或权限缺口）。
+ *    bindings / nodes 四类查询（前三类**并发**），全量替换写缓存 —— 全量替换的语义
+ *    即「顺带清理已删除的对象」。任一类失败整轮失败（管理 API 是同一个端口的同一套
+ *    权限，单类失败大概率意味着连接已断或权限缺口）。
  *  - **状态快扫** [scanStatus]（默认 10s）：`GET /api/queues` 的计数字段全量替换
  *    进 `queueStatus`，发事件通知 UI 刷新队列卡片。跑通 → reportStatus(Connected)
  *    保活（与 Kafka 的 lag 心跳同款）。
  *
  * 缓存：该连接专属的 [com.mqclient.core.cache.CacheManager]（挂
  * [RabbitMqConnectionContext.cache]，连接成功创建、断开清空）。key 约定：
- * `exchanges` / `queues` / `bindings` / `queueStatus`。读口 [cachedQueues] 等
+ * `exchanges` / `queues` / `bindings` / `queueStatus` / `nodes`。读口 [cachedQueues] 等
  * 只查缓存、不碰 HTTP、不挂起。
  *
  * 事件：完成 / 失败都发（RabbitMqEvents.OBJECTS_SCANNED 等），订阅方（UI）读缓存
@@ -51,6 +51,9 @@ class RabbitMqScanService(private val context: ServiceContext) {
 
         /** 缓存 key：队列状态（快扫，Map<队列名, 状态快照>）。 */
         const val KEY_QUEUE_STATUS = "queueStatus"
+
+        /** 缓存 key：集群节点列表（慢扫，概览页节点区块）。 */
+        const val KEY_NODES = "nodes"
 
         /** 慢扫数据的 TTL 倍率：慢扫间隔 × 1.5 —— 失联后数据别永远烂在缓存里的兜底。 */
         const val OBJECTS_TTL_FACTOR = 1.5f
@@ -82,6 +85,8 @@ class RabbitMqScanService(private val context: ServiceContext) {
                 }
             }
 
+            val nodeDtos = withContext(Dispatchers.IO) { admin.nodes() }
+
             val exchangeSnapshots = exchangeDtos
                 .map { RabbitMqExchangeSnapshot(it.name, it.type, it.durable, it.autoDelete, it.internal) }
                 .sortedBy { it.name }
@@ -100,11 +105,26 @@ class RabbitMqScanService(private val context: ServiceContext) {
                     )
                 }
                 .sortedWith(compareBy({ it.source }, { it.destination }, { it.routingKey }))
+            val nodeSnapshots = nodeDtos
+                .map {
+                    RabbitMqNodeSnapshot(
+                        name = it.name,
+                        type = it.type,
+                        running = it.running,
+                        uptime = it.uptime,
+                        memUsed = it.memUsed,
+                        memLimit = it.memLimit,
+                        memAlarm = it.memAlarm,
+                        diskFreeAlarm = it.diskFreeAlarm,
+                    )
+                }
+                .sortedBy { it.name }
 
             val cache = ctx.cache
             cache?.put(KEY_EXCHANGES, exchangeSnapshots, ttlMs = objectsTtl)
             cache?.put(KEY_QUEUES, queueSnapshots, ttlMs = objectsTtl)
             cache?.put(KEY_BINDINGS, bindingSnapshots, ttlMs = objectsTtl)
+            cache?.put(KEY_NODES, nodeSnapshots, ttlMs = objectsTtl)
 
             context.emit(
                 name = RabbitMqEvents.OBJECTS_SCANNED,
@@ -113,11 +133,13 @@ class RabbitMqScanService(private val context: ServiceContext) {
                     "exchangeCount" to exchangeSnapshots.size,
                     "queueCount" to queueSnapshots.size,
                     "bindingCount" to bindingSnapshots.size,
+                    "nodeCount" to nodeSnapshots.size,
                 ),
             )
             rabbitMqLog.info(
                 "objects scanned: connection=$connectionId exchanges=${exchangeSnapshots.size} " +
-                    "queues=${queueSnapshots.size} bindings=${bindingSnapshots.size}",
+                    "queues=${queueSnapshots.size} bindings=${bindingSnapshots.size} " +
+                    "nodes=${nodeSnapshots.size}",
             )
         } catch (cancellation: CancellationException) {
             throw cancellation
@@ -206,6 +228,10 @@ class RabbitMqScanService(private val context: ServiceContext) {
     /** 集群元信息（建连时入缓存）；未就绪为 null。 */
     fun cachedClusterInfo(connectionId: String): RabbitMqClusterInfoSnapshot? =
         cacheOf(connectionId)?.getAs(KEY_CLUSTER_INFO)
+
+    /** 集群节点列表（慢扫快照）；缓存未就绪 / 过期返回空表。 */
+    fun cachedNodes(connectionId: String): List<RabbitMqNodeSnapshot> =
+        cacheOf(connectionId)?.getAs(KEY_NODES) ?: emptyList()
 
     // ---------------------------------------------------------------- 交换机管理（实时写）
 
