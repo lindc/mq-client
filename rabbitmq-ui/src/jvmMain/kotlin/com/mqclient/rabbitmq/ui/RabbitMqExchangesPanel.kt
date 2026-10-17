@@ -12,7 +12,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CallSplit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.FilterChip
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
@@ -85,11 +86,12 @@ fun RabbitMqExchangesPanel(
                     placeholder = stringResource("rabbitmq_ui_exchange_search"),
                     modifier = Modifier.weight(1f),
                 )
-                // 「显示系统对象」开关：默认交换机与 amq.* 的显隐总闸（默认关）。
-                FilterChip(
-                    selected = state.showSystemObjects,
+                // 「显示系统对象」开关：默认交换机与 amq.* 的显隐总闸（默认关），
+                // 眼睛图标随状态切换（与添加 / 刷新同为扁平工具栏按钮）。
+                ToolbarButton(
+                    icon = if (state.showSystemObjects) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                    text = stringResource("rabbitmq_ui_exchange_toggle_system"),
                     onClick = { state.showSystemObjects = !state.showSystemObjects },
-                    label = { Text(stringResource("rabbitmq_ui_exchange_toggle_system")) },
                 )
                 ToolbarButton(
                     icon = Icons.Default.Add,

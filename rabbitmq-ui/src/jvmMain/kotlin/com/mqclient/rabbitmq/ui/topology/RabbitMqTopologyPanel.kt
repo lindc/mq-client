@@ -7,8 +7,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
@@ -28,6 +30,7 @@ import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.CoreModule
 import com.mqclient.graph.TopologyData
 import com.mqclient.graph.TopologyNodeType
+import com.mqclient.mqui.command.ToolbarButton
 import com.mqclient.mqui.state.LoadState
 import com.mqclient.rabbitmq.RabbitMqEvents
 import com.mqclient.rabbitmq.RabbitMqExchangeSnapshot
@@ -154,10 +157,12 @@ fun RabbitMqTopologyPanel(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    FilterChip(
-                        selected = showSystemObjects,
+                    // 「显示系统对象」开关：与交换机列表页同一扁平工具栏按钮，
+                    // 眼睛图标随状态切换。
+                    ToolbarButton(
+                        icon = if (showSystemObjects) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                        text = stringResource("rabbitmq_ui_exchange_toggle_system"),
                         onClick = { showSystemObjects = !showSystemObjects },
-                        label = { Text(stringResource("rabbitmq_ui_topology_toggle_system")) },
                     )
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
