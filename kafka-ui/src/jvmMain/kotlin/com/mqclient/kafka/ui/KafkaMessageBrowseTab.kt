@@ -214,7 +214,8 @@ private sealed interface BrowseUiState {
  * 任何消费组进度）；搜索只做已加载列表的本地过滤，不重新读。
  *
  * 打开即按默认条件（全部分区 + 最新往前 50 条）读首页；改条件不自动重读，点「读取」
- * 才生效（时间戳 / offset 的半成品输入不触发半吊子请求）。
+ * 才生效（时间戳 / offset 的半成品输入不触发半吊子请求）。时间起点模式读空时给专属
+ * 提示「该时间点之后无数据」（offsetsForTimes 全查不到的典型场景）。
  */
 @Composable
 internal fun KafkaMessageBrowseTab(
@@ -406,7 +407,17 @@ internal fun KafkaMessageBrowseTab(
                 )
                 is BrowseUiState.Ready -> when {
                     state.messages.isEmpty() ->
-                        ObjectListEmptyState(message = stringResource("kafka_ui_msg_browse_empty"))
+                        // 时间模式专属空态：offsetsForTimes 全部查不到（该时刻之后无数据）时，
+                        // 比通用「没有符合条件的数据」更能指明原因。
+                        ObjectListEmptyState(
+                            message = stringResource(
+                                if (startMode == StartMode.TIMESTAMP) {
+                                    "kafka_ui_msg_browse_timestamp_empty"
+                                } else {
+                                    "kafka_ui_msg_browse_empty"
+                                },
+                            ),
+                        )
                     filtered.isEmpty() ->
                         ObjectListEmptyState(message = stringResource("kafka_ui_msg_browse_filtered_empty"))
                     else -> MessageTable(

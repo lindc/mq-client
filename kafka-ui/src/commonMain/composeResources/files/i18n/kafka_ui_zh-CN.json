@@ -201,6 +201,7 @@
   "kafka_ui_msg_browse_loading": "正在读取消息…",
   "kafka_ui_msg_browse_failed": "读取失败：%1$s",
   "kafka_ui_msg_browse_empty": "没有符合条件的数据",
+  "kafka_ui_msg_browse_timestamp_empty": "该时间点之后无数据",
   "kafka_ui_msg_browse_filtered_empty": "没有匹配的消息",
   "kafka_ui_msg_browse_search": "搜索 Key / Value / Timestamp",
 
