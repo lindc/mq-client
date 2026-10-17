@@ -22,7 +22,10 @@ data class RabbitMqExchangeCardInfo(
 /**
  * 交换机列表页的状态：**缓存优先、事件驱动** —— 与 RabbitMqQueuesState 同一消费
  * 模式，数据只来自对象慢扫（exchanges 无计数字段，快扫事件不驱动本页）。
- * name="" 的默认交换机在卡片上显示为「(AMQP default)」。
+ * name="" 的默认交换机在卡片上显示为「(AMQP default)」且置顶。
+ *
+ * [showSystemObjects]：「显示系统对象」开关（默认关）—— 关闭时默认交换机与
+ * `amq.*` 不进列表；开启后默认交换机置顶（仅属性可看，无删除动作）。
  */
 class RabbitMqExchangesState(
     private val connectionId: String,
@@ -31,13 +34,20 @@ class RabbitMqExchangesState(
     var loadState by mutableStateOf<LoadState<List<RabbitMqExchangeCardInfo>>>(LoadState.Idle); private set
     var search by mutableStateOf("")
 
+    /** 「显示系统对象」开关：默认交换机（name=""）与 amq.* 的显隐总闸。 */
+    var showSystemObjects by mutableStateOf(false)
+
     /** 至少完成过一轮对象扫描。 */
     var scannedOnce by mutableStateOf(false); private set
 
-    /** 搜索过滤后的列表（按名称包含匹配，忽略大小写）。 */
+    /** 系统交换机判定（与概览 / 服务层守卫同一口径）。 */
+    private fun isSystem(name: String): Boolean = name.isEmpty() || name.startsWith("amq.")
+
+    /** 搜索过滤后的列表（按显示名包含匹配，忽略大小写；叠加系统对象开关）。 */
     val filtered: List<RabbitMqExchangeCardInfo>
         get() = when (val s = loadState) {
             is LoadState.Success -> s.data
+                .filter { showSystemObjects || !isSystem(it.name) }
                 .filter { search.isBlank() || displayName(it).contains(search.trim(), ignoreCase = true) }
             else -> emptyList()
         }
@@ -45,6 +55,9 @@ class RabbitMqExchangesState(
     /** 卡片标题：默认交换机（name=""）给可读名。 */
     fun displayName(info: RabbitMqExchangeCardInfo): String =
         if (info.name.isEmpty()) stringResource("rabbitmq_ui_exchange_default") else info.name
+
+    /** 是否系统 / 默认交换机（面板据此不给删除动作）。 */
+    fun isSystemExchange(info: RabbitMqExchangeCardInfo): Boolean = isSystem(info.name)
 
     /** 进 Tab 首次加载（组合期判定一次）：只有这里做隐式连接兜底。 */
     suspend fun load() {

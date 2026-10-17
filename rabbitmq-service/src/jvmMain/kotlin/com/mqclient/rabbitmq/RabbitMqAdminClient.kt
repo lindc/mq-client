@@ -7,9 +7,14 @@ import io.ktor.client.network.sockets.SocketTimeoutException
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.get
 import io.ktor.client.request.header
+import io.ktor.client.request.request
+import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpMethod
+import io.ktor.http.contentType
 import java.net.ConnectException
 import java.net.UnknownHostException
 import java.util.Base64
@@ -21,6 +26,8 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 // ---------------------------------------------------------------------------
 // 管理 API 响应 DTO（kotlinx.serialization，ignoreUnknownKeys —— 管理端点返回的字段
@@ -77,13 +84,14 @@ data class RabbitMqExchangeDto(
     val internal: Boolean = false,
 )
 
-/** 绑定条目（`GET /api/bindings/{vhost}`；拓扑图的关系来源）。 */
+/** 绑定条目（`GET /api/bindings/{vhost}` 与 `GET /api/exchanges/{vhost}/{name}/bindings/source`）。 */
 @Serializable
 data class RabbitMqBindingDto(
     val source: String = "",
     val destination: String = "",
     @SerialName("destination_type") val destinationType: String = "queue",
     @SerialName("routing_key") val routingKey: String = "",
+    val arguments: Map<String, JsonElement> = emptyMap(),
 )
 
 // ---------------------------------------------------------------------------
@@ -119,9 +127,12 @@ class RabbitMqAdminClient(private val config: RabbitMqConfig) : AutoCloseable {
         "Basic " + Base64.getEncoder()
             .encodeToString("${config.username}:${config.password}".toByteArray(Charsets.UTF_8))
 
-    /** vhost → 路径段："/" → %2F；空格矫正（URLEncoder 是 form 语义，+ 号在路径里非法）。 */
-    internal fun vhostSegment(): String =
-        java.net.URLEncoder.encode(config.vhost, Charsets.UTF_8).replace("+", "%20")
+    /** 路径段编码（vhost 与对象名共用）："/" → %2F；空格矫正（URLEncoder 是 form 语义，+ 号在路径里非法）。 */
+    internal fun pathSegment(raw: String): String =
+        java.net.URLEncoder.encode(raw, Charsets.UTF_8).replace("+", "%20")
+
+    /** vhost 段（出现频率高，语义化别名）。 */
+    internal fun vhostSegment(): String = pathSegment(config.vhost)
 
     private fun apiUrl(vararg segments: String): String = buildString {
         append(if (config.useTls) "https" else "http")
@@ -132,33 +143,65 @@ class RabbitMqAdminClient(private val config: RabbitMqConfig) : AutoCloseable {
         }
     }
 
+    /** 连接类异常 → 统一人类可读文案（GET / PUT / DELETE 共用）。 */
+    private fun mapConnectionError(e: Throwable): Exception = when (e) {
+        is ConnectException -> IllegalStateException(friendlyConnectError(), e)
+        is UnknownHostException -> IllegalStateException("无法解析主机「${config.host}」：检查地址拼写与 DNS", e)
+        is ConnectTimeoutException -> IllegalStateException(
+            "连接超时（${config.connectionTimeout}s）：管理 API ${config.host}:${config.managementPort} 无响应",
+            e,
+        )
+        is SocketTimeoutException -> IllegalStateException(
+            "请求超时（${config.connectionTimeout}s）：管理 API 响应过慢",
+            e,
+        )
+        else -> IllegalStateException(e.message ?: e::class.simpleName ?: "unknown", e)
+    }
+
+    /** 状态码 → 统一错误映射；2xx 原样放行。 */
+    private fun checkStatus(status: Int) {
+        when (status) {
+            in 200..299 -> Unit
+            401 -> throw IllegalStateException("认证失败（401）：检查用户名 / 密码")
+            403 -> throw IllegalStateException("授权失败（403）：账号权限不足")
+            404 -> throw IllegalStateException("未找到（404）：检查管理端口与 vhost 是否正确")
+            else -> throw IllegalStateException("管理 API 返回 HTTP $status")
+        }
+    }
+
     private suspend fun getJson(vararg segments: String): String {
         val response: HttpResponse = try {
             http.get(apiUrl(*segments)) { header(HttpHeaders.Authorization, authHeader) }
         } catch (e: CancellationException) {
             throw e
-        } catch (e: ConnectException) {
-            throw IllegalStateException(friendlyConnectError(), e)
-        } catch (e: UnknownHostException) {
-            throw IllegalStateException("无法解析主机「${config.host}」：检查地址拼写与 DNS", e)
-        } catch (e: ConnectTimeoutException) {
-            throw IllegalStateException(
-                "连接超时（${config.connectionTimeout}s）：管理 API ${config.host}:${config.managementPort} 无响应",
-                e,
-            )
-        } catch (e: SocketTimeoutException) {
-            throw IllegalStateException(
-                "请求超时（${config.connectionTimeout}s）：管理 API 响应过慢",
-                e,
-            )
+        } catch (e: Exception) {
+            throw mapConnectionError(e)
         }
-        return when (response.status.value) {
-            200 -> response.bodyAsText()
-            401 -> throw IllegalStateException("认证失败（401）：检查用户名 / 密码")
-            403 -> throw IllegalStateException("授权失败（403）：账号权限不足")
-            404 -> throw IllegalStateException("未找到（404）：检查管理端口与 vhost 是否正确")
-            else -> throw IllegalStateException("管理 API 返回 HTTP ${response.status.value}")
+        checkStatus(response.status.value)
+        return response.bodyAsText()
+    }
+
+    /** 写请求（PUT / DELETE）：2xx 视为成功，其余走统一错误映射。 */
+    private suspend fun mutatingRequest(
+        method: HttpMethod,
+        body: String?,
+        vararg segments: String,
+    ) {
+        val response: HttpResponse = try {
+            http.request(apiUrl(*segments)) {
+                this.method = method
+                header(HttpHeaders.Authorization, authHeader)
+                body?.let {
+                    contentType(ContentType.Application.Json)
+                    setBody(it)
+                }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            throw mapConnectionError(e)
         }
+        checkStatus(response.status.value)
     }
 
     /** 连接类错误的统一文案（host:port 指向管理 API）。 */
@@ -179,6 +222,38 @@ class RabbitMqAdminClient(private val config: RabbitMqConfig) : AutoCloseable {
 
     suspend fun bindings(): List<RabbitMqBindingDto> =
         json.decodeFromString(ListSerializer(RabbitMqBindingDto.serializer()), getJson("bindings", vhostSegment()))
+
+    // ---- 写操作与细粒度查询（交换机管理）----
+
+    /**
+     * 创建交换机：`PUT /api/exchanges/{vhost}/{name}`。成功 201 / 204。
+     * internal 恒 false（内部交换机是 amq.* 系统物件，不提供创建入口）。
+     */
+    suspend fun createExchange(name: String, type: String, durable: Boolean, autoDelete: Boolean) {
+        val body = buildJsonObject {
+            put("type", type)
+            put("durable", durable)
+            put("auto_delete", autoDelete)
+            put("internal", false)
+        }.toString()
+        mutatingRequest(HttpMethod.Put, body, "exchanges", vhostSegment(), pathSegment(name))
+    }
+
+    /**
+     * 删除交换机：`DELETE /api/exchanges/{vhost}/{name}`。成功 204。
+     * 默认交换机（name=""）与 amq.* 由调用方守卫 —— 服务端也会拒绝，但语义更清晰的是
+     * 在进入 API 前拦截。
+     */
+    suspend fun deleteExchange(name: String) {
+        mutatingRequest(HttpMethod.Delete, null, "exchanges", vhostSegment(), pathSegment(name))
+    }
+
+    /** 指定交换机的绑定（以它为 source）：属性对话框的 Bindings 表实时数据源。 */
+    suspend fun exchangeBindings(name: String): List<RabbitMqBindingDto> =
+        json.decodeFromString(
+            ListSerializer(RabbitMqBindingDto.serializer()),
+            getJson("exchanges", vhostSegment(), pathSegment(name), "bindings", "source"),
+        )
 
     override fun close() {
         http.close()

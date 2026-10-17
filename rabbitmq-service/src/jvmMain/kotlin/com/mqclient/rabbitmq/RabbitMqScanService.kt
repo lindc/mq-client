@@ -90,7 +90,13 @@ class RabbitMqScanService(private val context: ServiceContext) {
                 .sortedBy { it.name }
             val bindingSnapshots = bindingDtos
                 .map {
-                    RabbitMqBindingSnapshot(it.source, it.destination, it.destinationType, it.routingKey)
+                    RabbitMqBindingSnapshot(
+                        source = it.source,
+                        destination = it.destination,
+                        destinationType = it.destinationType,
+                        routingKey = it.routingKey,
+                        arguments = it.arguments,
+                    )
                 }
                 .sortedWith(compareBy({ it.source }, { it.destination }, { it.routingKey }))
 
@@ -199,6 +205,87 @@ class RabbitMqScanService(private val context: ServiceContext) {
     /** 集群元信息（建连时入缓存）；未就绪为 null。 */
     fun cachedClusterInfo(connectionId: String): RabbitMqClusterInfoSnapshot? =
         cacheOf(connectionId)?.getAs(KEY_CLUSTER_INFO)
+
+    // ---------------------------------------------------------------- 交换机管理（实时写）
+
+    /**
+     * 创建交换机：admin PUT → 成功后同步把新交换机补进缓存（不等 5min 慢扫）→
+     * 发 OBJECTS_SCANNED 驱动 UI 刷新。
+     */
+    suspend fun createExchange(
+        connectionId: String,
+        name: String,
+        type: String,
+        durable: Boolean,
+        autoDelete: Boolean,
+    ) {
+        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
+        val admin = ctx.admin ?: throw IllegalStateException("未连接")
+        withContext(Dispatchers.IO) { admin.createExchange(name, type, durable, autoDelete) }
+        // 同步补缓存：新交换机立即出现在列表（OBJECTS_SCANNED 事件驱动 UI 重读）。
+        ctx.cache?.let { cache ->
+            val current = cache.getAs<List<RabbitMqExchangeSnapshot>>(KEY_EXCHANGES).orEmpty()
+                .filter { it.name != name }
+            cache.put(
+                KEY_EXCHANGES,
+                (current + RabbitMqExchangeSnapshot(name, type, durable, autoDelete, internal = false))
+                    .sortedBy { it.name },
+                ttlMs = objectsTtlMs(ctx),
+            )
+        }
+        context.emit(
+            name = RabbitMqEvents.OBJECTS_SCANNED,
+            payload = mapOf("connectionId" to connectionId),
+        )
+        rabbitMqLog.info("exchange created: connection=$connectionId name=$name type=$type")
+    }
+
+    /**
+     * 删除交换机：默认交换机与 amq.* 在这里守卫（UI 侧动作也不显示，双保险）；成功后
+     * 同步剪掉缓存里的交换机与其绑定的边 → 发 OBJECTS_SCANNED 驱动 UI 刷新。
+     */
+    suspend fun deleteExchange(connectionId: String, name: String) {
+        require(name.isNotEmpty() && !name.startsWith("amq.")) {
+            "默认交换机与系统交换机（amq.*）不可删除"
+        }
+        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
+        val admin = ctx.admin ?: throw IllegalStateException("未连接")
+        withContext(Dispatchers.IO) { admin.deleteExchange(name) }
+        ctx.cache?.let { cache ->
+            cache.getAs<List<RabbitMqExchangeSnapshot>>(KEY_EXCHANGES).orEmpty()
+                .filter { it.name != name }
+                .let { cache.put(KEY_EXCHANGES, it, ttlMs = objectsTtlMs(ctx)) }
+            cache.getAs<List<RabbitMqBindingSnapshot>>(KEY_BINDINGS).orEmpty()
+                .filter { it.source != name }
+                .let { cache.put(KEY_BINDINGS, it, ttlMs = objectsTtlMs(ctx)) }
+            // queues / queueStatus 不受交换机删除影响（队列对象本身还在）。
+        }
+        context.emit(
+            name = RabbitMqEvents.OBJECTS_SCANNED,
+            payload = mapOf("connectionId" to connectionId),
+        )
+        rabbitMqLog.info("exchange deleted: connection=$connectionId name=$name")
+    }
+
+    /**
+     * 指定交换机的绑定（实时查询，不走缓存 —— 属性对话框要新鲜数据，与
+     * getGroupDetail 同一哲学）。
+     */
+    suspend fun exchangeBindings(connectionId: String, name: String): List<RabbitMqBindingSnapshot> {
+        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
+        val admin = ctx.admin ?: throw IllegalStateException("未连接")
+        return withContext(Dispatchers.IO) {
+            admin.exchangeBindings(name).map {
+                RabbitMqBindingSnapshot(
+                    source = it.source,
+                    destination = it.destination,
+                    destinationType = it.destinationType,
+                    routingKey = it.routingKey,
+                    arguments = it.arguments,
+                )
+            }
+        }
+    }
 
     // ---------------------------------------------------------------- 内部
 

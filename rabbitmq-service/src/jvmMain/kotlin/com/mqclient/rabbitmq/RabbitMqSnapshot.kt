@@ -1,5 +1,8 @@
 package com.mqclient.rabbitmq
 
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
+
 /**
  * 集群元信息（建连时 `GET /api/overview` 的投影）：验证通过后由
  * [RabbitMqConnectionManager] 写进连接缓存（key 见 RabbitMqScanService 的
@@ -12,6 +15,17 @@ data class RabbitMqClusterInfoSnapshot(
     /** 验证时命中的节点（如 rabbit@rabbit1）。 */
     val node: String,
 )
+
+/** 绑定 arguments 的展示文本：空 map → "-"；否则 k=v 逗号拼接（JsonPrimitive 取 content）。 */
+internal fun formatBindingArguments(arguments: Map<String, JsonElement>): String =
+    if (arguments.isEmpty()) {
+        "-"
+    } else {
+        arguments.entries.joinToString(", ") { (key, value) ->
+            val text = (value as? JsonPrimitive)?.content ?: value.toString()
+            "$key=$text"
+        }
+    }
 
 /** 一条队列的慢扫快照：静态属性（布局 / 持久化），计数另走快扫的 [RabbitMqQueueStatusSnapshot]。 */
 data class RabbitMqQueueSnapshot(
@@ -41,7 +55,12 @@ data class RabbitMqBindingSnapshot(
     /** queue / exchange。 */
     val destinationType: String,
     val routingKey: String,
-)
+    /** x-arguments（如备选交换机等）；空 = 无自定义参数。 */
+    val arguments: Map<String, JsonElement> = emptyMap(),
+) {
+    /** arguments 的展示文本（属性对话框 Bindings 表用）。 */
+    val argumentsText: String get() = formatBindingArguments(arguments)
+}
 
 /** 一条队列的状态快照（快扫产物，全量替换）：消息堆积与消费者的新鲜计数。 */
 data class RabbitMqQueueStatusSnapshot(

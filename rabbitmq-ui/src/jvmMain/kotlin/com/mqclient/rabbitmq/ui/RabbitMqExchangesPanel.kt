@@ -8,14 +8,23 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CallSplit
+import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -23,14 +32,18 @@ import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.CoreModule
 import com.mqclient.mqui.command.ToolbarButton
 import com.mqclient.mqui.common.CompactSearchField
+import com.mqclient.mqui.objectlist.CardAction
 import com.mqclient.mqui.objectlist.ObjectCardData
 import com.mqclient.mqui.objectlist.ObjectListEmptyState
 import com.mqclient.mqui.objectlist.ObjectListPanel
 import com.mqclient.mqui.state.LoadStateContent
 import com.mqclient.rabbitmq.RabbitMqEvents
+import com.mqclient.rabbitmq.RabbitMqModule
+import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
+import kotlinx.coroutines.launch
 
 /**
  * 交换机列表页（导航项 `exchanges` 的 Tab 内容）：与 RabbitMqQueuesPanel 同构，
@@ -44,12 +57,33 @@ fun RabbitMqExchangesPanel(
 ) {
     val state = remember(connectionId) { RabbitMqExchangesState(connectionId) }
     val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
     val connectionStatus = rememberRabbitMqConnectionStatus(connectionId)
     LaunchedEffect(connectionId) { state.load() }
     LaunchedEffect(connectionId, connectionStatus) { state.onStatusChanged(connectionStatus) }
     LaunchedEffect(connectionId) {
         CoreModule.eventBusOrNull?.on(RabbitMqEvents.OBJECTS_SCANNED, scope = this) { event ->
             if (event.payload["connectionId"] as? String == connectionId) state.onObjectsScanned()
+        }
+    }
+
+    // 创建 / 删除 / 属性三个对话框与确认状态。
+    var showCreate by remember(connectionId) { mutableStateOf(false) }
+    var propsExchange by remember(connectionId) { mutableStateOf<RabbitMqExchangeCardInfo?>(null) }
+    var deleteConfirm by remember(connectionId) { mutableStateOf<RabbitMqExchangeCardInfo?>(null) }
+
+    /** 删除（danger 确认后调用）：成功 Snackbar，失败显示根因。 */
+    fun deleteExchange(info: RabbitMqExchangeCardInfo) {
+        scope.launch {
+            runCatching {
+                RabbitMqModule.serviceOrNull()?.deleteExchange(connectionId, info.name)
+                    ?: error("服务未初始化")
+            }.onSuccess {
+                snackbarHostState.showSnackbar(stringResource("rabbitmq_ui_exchange_delete_done").withArg(info.name))
+            }.onFailure { error ->
+                val cause = (error as? java.util.concurrent.ExecutionException)?.cause ?: error
+                snackbarHostState.showSnackbar(cause.message ?: error::class.simpleName ?: "unknown")
+            }
         }
     }
 
@@ -68,6 +102,17 @@ fun RabbitMqExchangesPanel(
                     onValueChange = { state.search = it },
                     placeholder = stringResource("rabbitmq_ui_exchange_search"),
                     modifier = Modifier.weight(1f),
+                )
+                // 「显示系统对象」开关：默认交换机与 amq.* 的显隐总闸（默认关）。
+                FilterChip(
+                    selected = state.showSystemObjects,
+                    onClick = { state.showSystemObjects = !state.showSystemObjects },
+                    label = { Text(stringResource("rabbitmq_ui_exchange_toggle_system")) },
+                )
+                ToolbarButton(
+                    icon = Icons.Default.Add,
+                    text = stringResource("rabbitmq_ui_exchange_create"),
+                    onClick = { showCreate = true },
                 )
                 ToolbarButton(
                     icon = Icons.Default.Refresh,
@@ -107,7 +152,29 @@ fun RabbitMqExchangesPanel(
                                         if (info.internal) stringResource("rabbitmq_ui_exchange_field_internal") else null,
                                     ).filterNotNull()
                                         .joinToString(" · "),
-                                actions = emptyList(),
+                                actions =
+                                    buildList {
+                                        // 属性：所有交换机可看（默认交换机的绑定也能查）。
+                                        add(
+                                            CardAction(
+                                                id = "properties",
+                                                icon = Icons.Default.Info,
+                                                tooltip = "rabbitmq_ui_exchange_props_action",
+                                                onClick = { propsExchange = info },
+                                            ),
+                                        )
+                                        // 删除：仅业务交换机（默认 / amq.* 是系统物件，不给动作）。
+                                        if (!state.isSystemExchange(info)) {
+                                            add(
+                                                CardAction(
+                                                    id = "delete",
+                                                    icon = Icons.Default.DeleteSweep,
+                                                    tooltip = "rabbitmq_ui_exchange_delete",
+                                                    onClick = { deleteConfirm = info },
+                                                ),
+                                            )
+                                        }
+                                    },
                             )
                         },
                     onCardClick = {},
@@ -119,6 +186,55 @@ fun RabbitMqExchangesPanel(
         ThemedSnackbarHost(
             hostState = snackbarHostState,
             modifier = Modifier.align(Alignment.BottomCenter),
+        )
+    }
+
+    if (showCreate) {
+        RabbitMqCreateExchangeDialog(
+            connectionId = connectionId,
+            onDismiss = { showCreate = false },
+        )
+    }
+
+    propsExchange?.let { info ->
+        RabbitMqExchangePropertiesDialog(
+            connectionId = connectionId,
+            exchangeName = info.name,
+            displayName = state.displayName(info),
+            type = info.type,
+            durable = info.durable,
+            autoDelete = info.autoDelete,
+            internal = info.internal,
+            onDismiss = { propsExchange = null },
+        )
+    }
+
+    deleteConfirm?.let { info ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { deleteConfirm = null },
+            title = { Text(stringResource("rabbitmq_ui_exchange_delete_confirm_title")) },
+            text = {
+                Text(
+                    text = stringResource("rabbitmq_ui_exchange_delete_confirm_text").withArg(info.name),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            },
+            confirmButton = {
+                PressableButton(
+                    onClick = {
+                        deleteConfirm = null
+                        deleteExchange(info)
+                    },
+                    danger = true,
+                ) { Text(stringResource("rabbitmq_ui_exchange_delete_confirm")) }
+            },
+            dismissButton = {
+                PressableButton(
+                    onClick = { deleteConfirm = null },
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                ) { Text(stringResource("common_cancel")) }
+            },
         )
     }
 }
