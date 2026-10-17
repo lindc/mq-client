@@ -49,8 +49,6 @@ kotlin {
             implementation(projects.kafkaUi)
             implementation(projects.pulsarService)
             implementation(projects.pulsarUi)
-            implementation(projects.artemisService)
-            implementation(projects.artemisUi)
             implementation(projects.rabbitmqService)
             implementation(projects.rabbitmqUi)
             implementation(projects.rocketmqService)

@@ -71,7 +71,7 @@ class MockChatService(
                 收到。我可以帮你:
 
                 - 排查消息堆积、消费滞后、连接失败等常见问题。
-                - 解释 Kafka / RabbitMQ / IBM MQ / RocketMQ / Artemis 的概念差异。
+                - 解释 Kafka / RabbitMQ / IBM MQ / RocketMQ 的概念差异。
                 - 生成安全的运维命令(创建队列、调优参数、查看统计)。
 
                 描述一下你看到的现象,或者贴一段日志/指标,我来给你定位思路。
