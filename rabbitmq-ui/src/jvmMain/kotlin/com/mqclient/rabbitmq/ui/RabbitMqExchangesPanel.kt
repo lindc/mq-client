@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CallSplit
-import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.FilterChip
@@ -39,7 +38,6 @@ import com.mqclient.mqui.objectlist.ObjectListPanel
 import com.mqclient.mqui.state.LoadStateContent
 import com.mqclient.rabbitmq.RabbitMqEvents
 import com.mqclient.rabbitmq.RabbitMqModule
-import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
@@ -67,25 +65,9 @@ fun RabbitMqExchangesPanel(
         }
     }
 
-    // 创建 / 删除 / 属性三个对话框与确认状态。
+    // 创建 / 属性两个对话框。
     var showCreate by remember(connectionId) { mutableStateOf(false) }
     var propsExchange by remember(connectionId) { mutableStateOf<RabbitMqExchangeCardInfo?>(null) }
-    var deleteConfirm by remember(connectionId) { mutableStateOf<RabbitMqExchangeCardInfo?>(null) }
-
-    /** 删除（danger 确认后调用）：成功 Snackbar，失败显示根因。 */
-    fun deleteExchange(info: RabbitMqExchangeCardInfo) {
-        scope.launch {
-            runCatching {
-                RabbitMqModule.serviceOrNull()?.deleteExchange(connectionId, info.name)
-                    ?: error("服务未初始化")
-            }.onSuccess {
-                snackbarHostState.showSnackbar(stringResource("rabbitmq_ui_exchange_delete_done").withArg(info.name))
-            }.onFailure { error ->
-                val cause = (error as? java.util.concurrent.ExecutionException)?.cause ?: error
-                snackbarHostState.showSnackbar(cause.message ?: error::class.simpleName ?: "unknown")
-            }
-        }
-    }
 
     Box(modifier.fillMaxSize()) {
         Column(modifier.fillMaxSize()) {
@@ -154,7 +136,8 @@ fun RabbitMqExchangesPanel(
                                         .joinToString(" · "),
                                 actions =
                                     buildList {
-                                        // 属性：所有交换机可看（默认交换机的绑定也能查）。
+                                        // 属性：所有交换机可看（含 Bindings 表与删除入口）。
+                                        // 删除统一收拢在属性对话框 footer（默认 / amq.* 隐藏）。
                                         add(
                                             CardAction(
                                                 id = "properties",
@@ -163,17 +146,6 @@ fun RabbitMqExchangesPanel(
                                                 onClick = { propsExchange = info },
                                             ),
                                         )
-                                        // 删除：仅业务交换机（默认 / amq.* 是系统物件，不给动作）。
-                                        if (!state.isSystemExchange(info)) {
-                                            add(
-                                                CardAction(
-                                                    id = "delete",
-                                                    icon = Icons.Default.DeleteSweep,
-                                                    tooltip = "rabbitmq_ui_exchange_delete",
-                                                    onClick = { deleteConfirm = info },
-                                                ),
-                                            )
-                                        }
                                     },
                             )
                         },
@@ -206,34 +178,12 @@ fun RabbitMqExchangesPanel(
             autoDelete = info.autoDelete,
             internal = info.internal,
             onDismiss = { propsExchange = null },
-        )
-    }
-
-    deleteConfirm?.let { info ->
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { deleteConfirm = null },
-            title = { Text(stringResource("rabbitmq_ui_exchange_delete_confirm_title")) },
-            text = {
-                Text(
-                    text = stringResource("rabbitmq_ui_exchange_delete_confirm_text").withArg(info.name),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            },
-            confirmButton = {
-                PressableButton(
-                    onClick = {
-                        deleteConfirm = null
-                        deleteExchange(info)
-                    },
-                    danger = true,
-                ) { Text(stringResource("rabbitmq_ui_exchange_delete_confirm")) }
-            },
-            dismissButton = {
-                PressableButton(
-                    onClick = { deleteConfirm = null },
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                ) { Text(stringResource("common_cancel")) }
+            onDeleted = {
+                scope.launch {
+                    snackbarHostState.showSnackbar(
+                        stringResource("rabbitmq_ui_exchange_delete_done").withArg(info.name),
+                    )
+                }
             },
         )
     }

@@ -30,7 +30,9 @@ import com.mqclient.graph.TopologyData
 import com.mqclient.graph.TopologyNodeType
 import com.mqclient.mqui.state.LoadState
 import com.mqclient.rabbitmq.RabbitMqEvents
+import com.mqclient.rabbitmq.RabbitMqExchangeSnapshot
 import com.mqclient.rabbitmq.RabbitMqModule
+import com.mqclient.rabbitmq.ui.RabbitMqExchangePropertiesDialog
 import com.mqclient.rabbitmq.ui.ensureRabbitMqConnecting
 import com.mqclient.rabbitmq.ui.rememberRabbitMqConnectionStatus
 import com.mqclient.topology.TopologyCanvas
@@ -130,6 +132,7 @@ fun RabbitMqTopologyPanel(
         }
         is LoadState.Success -> {
             val current = data
+            val snapshot = (state.loadState as? LoadState.Success)?.data
             if (current == null || current.kuiver.nodes.isEmpty()) {
                 Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
@@ -140,6 +143,8 @@ fun RabbitMqTopologyPanel(
                 }
                 return
             }
+            // 双击 exchange 节点 → 打开属性对话框（含 Bindings 表与删除入口）。
+            var propsExchange by remember(connectionId) { mutableStateOf<RabbitMqExchangeSnapshot?>(null) }
             Column(modifier.fillMaxSize()) {
                 // 顶部开关行：系统对象（默认交换机 / amq.*）是否进图。
                 Row(
@@ -164,8 +169,21 @@ fun RabbitMqTopologyPanel(
                     nodeDragEnabled = true,
                     // 手动扫描：一轮对象慢扫，扫完经 OBJECTS_SCANNED 事件回到 onObjectsScanned。
                     onRescan = { RabbitMqModule.scanNow(connectionId) },
-                    onNodeDoubleClick = { _ ->
-                        // 第一阶段无展开语义（无分区 / 子对象）。
+                    onNodeDoubleClick = { nodeId ->
+                        when (current.nodeTypes[nodeId]) {
+                            TopologyNodeType.EXCHANGE -> {
+                                val name = nodeId.removePrefix("x:")
+                                snapshot?.exchanges?.firstOrNull { it.name == name }?.let {
+                                    propsExchange = it
+                                }
+                            }
+                            // queue 节点的属性对话框未实现，双击出提示。
+                            else -> scope.launch {
+                                snackbarHostState.showSnackbar(
+                                    stringResource("rabbitmq_ui_topology_queue_props_todo"),
+                                )
+                            }
+                        }
                     },
                     modifier = Modifier
                         .weight(1f)
@@ -175,6 +193,20 @@ fun RabbitMqTopologyPanel(
                     // TopologyCanvas 保证主线程相邻（时序不变量见 TopologyCanvas 文档）。
                     onBeforeLayout = { rabbitMqTopologyNodeTypes = it.nodeTypes },
                     snackbarHostState = snackbarHostState,
+                )
+            }
+
+            // 属性对话框（双击 exchange 打开；删除成功后经 OBJECTS_SCANNED 事件刷新图）。
+            propsExchange?.let { exchange ->
+                RabbitMqExchangePropertiesDialog(
+                    connectionId = connectionId,
+                    exchangeName = exchange.name,
+                    displayName = exchange.name.ifEmpty { stringResource("rabbitmq_ui_exchange_default") },
+                    type = exchange.type,
+                    durable = exchange.durable,
+                    autoDelete = exchange.autoDelete,
+                    internal = exchange.internal,
+                    onDismiss = { propsExchange = null },
                 )
             }
         }

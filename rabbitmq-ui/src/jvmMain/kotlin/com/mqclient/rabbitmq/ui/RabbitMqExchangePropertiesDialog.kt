@@ -9,9 +9,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -19,6 +22,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -29,15 +33,25 @@ import androidx.compose.ui.unit.dp
 import com.mqclient.mqui.state.LoadState
 import com.mqclient.rabbitmq.RabbitMqBindingSnapshot
 import com.mqclient.rabbitmq.RabbitMqModule
+import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 
 /**
  * 交换机属性对话框：概览（类型 / 持久化 / 自动删除 / 内部）+ **Bindings 表
  * （Destination / Routing Key / Arguments）** —— 绑定走**实时查询**
  * （[com.mqclient.rabbitmq.RabbitMqScanService.exchangeBindings]，不走慢扫缓存：
  * 路由关系是排障时要新鲜数据的地方，与 kafka 的组详情同一哲学）。
+ *
+ * 删除：底部 danger 按钮（**默认交换机 / amq.* / internal 直接隐藏**，与 Kafka
+ * 内部主题隐藏同一约定）→ AlertDialog 二次确认（**必须声明在本外壳 content lambda
+ * 内** —— compose Dialog 窗口归属随声明组合走）→ 成功关对话框 + [onDeleted] 回调；
+ * 失败走对话框内 Snackbar。
+ *
+ * @param onDeleted 删除成功后回调（宿主刷新列表 / 关对话框 + Snackbar 提示）。
  */
 @Composable
 fun RabbitMqExchangePropertiesDialog(
@@ -49,13 +63,39 @@ fun RabbitMqExchangePropertiesDialog(
     autoDelete: Boolean,
     internal: Boolean,
     onDismiss: () -> Unit,
+    onDeleted: () -> Unit = {},
 ) {
+    val scope = rememberCoroutineScope()
+    val snackbar = remember { SnackbarHostState() }
+    val systemExchange = exchangeName.isEmpty() || exchangeName.startsWith("amq.")
     var bindingsState by remember(exchangeName) {
         mutableStateOf<LoadState<List<RabbitMqBindingSnapshot>>>(LoadState.Idle)
     }
+    var deleteConfirm by remember(exchangeName) { mutableStateOf(false) }
+    var deleting by remember(exchangeName) { mutableStateOf(false) }
 
     fun load() {
         bindingsState = LoadState.Loading
+    }
+
+    fun delete() {
+        scope.launch {
+            val service = RabbitMqModule.serviceOrNull() ?: error("服务未初始化")
+            deleting = true
+            try {
+                service.deleteExchange(connectionId, exchangeName)
+                deleting = false
+                onDismiss()
+                onDeleted()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                deleting = false
+                snackbar.showSnackbar(
+                    stringResource("rabbitmq_ui_exchange_delete_failed").withArg(failureText(e)),
+                )
+            }
+        }
     }
 
     LaunchedEffect(connectionId, exchangeName) {
@@ -71,6 +111,20 @@ fun RabbitMqExchangePropertiesDialog(
         onDismiss = onDismiss,
         minWidth = 640.dp,
         minHeight = 420.dp,
+        footerActions = {
+            // 默认交换机 / amq.* / internal 禁止删除：按钮直接隐藏（与 Kafka 内部主题同一约定）。
+            if (!systemExchange && !internal) {
+                PressableButton(onClick = { deleteConfirm = true }, danger = true) {
+                    Text(stringResource("rabbitmq_ui_exchange_props_delete"))
+                }
+            }
+            Spacer(Modifier.weight(1f))
+            PressableButton(
+                onClick = onDismiss,
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            ) { Text(stringResource("common_close")) }
+        },
     ) {
         Column(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp)) {
             // ---- 概览行 ----
@@ -126,6 +180,47 @@ fun RabbitMqExchangePropertiesDialog(
                     }
                 }
             }
+            SnackbarHost(hostState = snackbar)
+        }
+
+        // ---- 删除二次确认：**必须声明在本外壳 content lambda 内** —— compose Dialog
+        // 的窗口归属随声明组合走，声明在外层会挂到主窗口、被本对话框压住（实测坑，
+        // 见外壳 KDoc）。----
+        if (deleteConfirm) {
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { deleteConfirm = false },
+                title = { Text(stringResource("rabbitmq_ui_exchange_delete_confirm_title")) },
+                text = {
+                    Text(
+                        text = stringResource("rabbitmq_ui_exchange_delete_confirm_text")
+                            .withArg(exchangeName),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                },
+                confirmButton = {
+                    PressableButton(
+                        onClick = {
+                            deleteConfirm = false
+                            delete()
+                        },
+                        enabled = !deleting,
+                        danger = true,
+                    ) {
+                        Text(
+                            text = stringResource(
+                                if (deleting) "rabbitmq_ui_exchange_deleting" else "rabbitmq_ui_exchange_delete_confirm",
+                            ),
+                        )
+                    }
+                },
+                dismissButton = {
+                    PressableButton(
+                        onClick = { deleteConfirm = false },
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    ) { Text(stringResource("common_cancel")) }
+                },
+            )
         }
     }
 }
