@@ -11,11 +11,25 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             implementation(projects.appCore)
+            // RabbitMqConfig / toOptions / fromOptions：表单草稿与 options 的转换在
+            // rabbitmq-service，表单只做 UI 与落盘调用。RabbitMqModule（连接上下文
+            // 入口）同源。
+            implementation(projects.rabbitmqService)
+            // 对象列表通用组件（ObjectListPanel / ObjectCardData / LoadStateContent /
+            // CompactSearchField / ToolbarButton）：队列 / 交换机列表页复用。
+            implementation(projects.mqUi)
             implementation(libs.compose.runtime)
             implementation(libs.compose.foundation)
             implementation(compose.material3)
-            // composeResources（品牌图标 drawable）需要资源 API 才能生成访问器。
+            // Material Icons Extended：密码可见性切换等小图标，跨平台（Linux 无 Emoji 字体）一致。
+            implementation(compose.materialIconsExtended)
+            // composeResources（品牌图标 drawable + i18n JSON）需要资源 API 才能生成访问器。
             implementation(compose.components.resources)
+            // stringResource（i18n 查表）来自 ui-common 的 LanguageResources。
+            implementation(projects.uiCommon)
+        }
+        jvmTest.dependencies {
+            implementation(kotlin("test"))
         }
     }
 }
