@@ -8,10 +8,16 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -30,6 +36,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.mqclient.uicommon.command.ToolbarButton
 import com.mqclient.mqui.state.LoadState
 import com.mqclient.rabbitmq.RabbitMqBindingSnapshot
 import com.mqclient.rabbitmq.RabbitMqModule
@@ -71,14 +78,48 @@ fun RabbitMqExchangePropertiesDialog(
     var bindingsState by remember(exchangeName) {
         mutableStateOf<LoadState<List<RabbitMqBindingSnapshot>>>(LoadState.Idle)
     }
-    var deleteConfirm by remember(exchangeName) { mutableStateOf(false) }
+    var deleteConfirm by remember(exchangeName) { mutableStateOf<RabbitMqBindingSnapshot?>(null) }
     var deleting by remember(exchangeName) { mutableStateOf(false) }
+    // 交换机本体删除（footer danger 按钮）的确认状态，与绑定删除互不相干。
+    var exchangeDeleteConfirm by remember(exchangeName) { mutableStateOf(false) }
+    var showAddBinding by remember(exchangeName) { mutableStateOf(false) }
+    // 绑定增删成功后的本地重载触发器（实时列表不等慢扫缓存）。
+    var bindingsReload by remember(exchangeName) { mutableStateOf(0) }
 
     fun load() {
         bindingsState = LoadState.Loading
     }
 
-    fun delete() {
+    fun reload() {
+        bindingsReload++
+    }
+
+    /** 删除绑定（danger 确认后调用）：成功重载本表 + 触发 scanNow 同步慢扫缓存。 */
+    fun deleteBinding(binding: RabbitMqBindingSnapshot) {
+        scope.launch {
+            val service = RabbitMqModule.serviceOrNull() ?: error("服务未初始化")
+            deleting = true
+            try {
+                val propertiesKey = binding.propertiesKey ?: error("缺少删除凭据（properties_key）")
+                service.deleteBinding(connectionId, exchangeName, binding.destination, propertiesKey)
+                deleting = false
+                deleteConfirm = null
+                bindingsReload++
+                RabbitMqModule.scanNow(connectionId)
+                snackbar.showSnackbar(stringResource("rabbitmq_ui_binding_deleted"))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                deleting = false
+                snackbar.showSnackbar(
+                    stringResource("rabbitmq_ui_exchange_delete_failed").withArg(failureText(e)),
+                )
+            }
+        }
+    }
+
+    /** 删除交换机（footer danger 按钮）：成功关对话框 + onDeleted 回调。 */
+    fun deleteExchangeEntry() {
         scope.launch {
             val service = RabbitMqModule.serviceOrNull() ?: error("服务未初始化")
             deleting = true
@@ -98,7 +139,7 @@ fun RabbitMqExchangePropertiesDialog(
         }
     }
 
-    LaunchedEffect(connectionId, exchangeName) {
+    LaunchedEffect(connectionId, exchangeName, bindingsReload) {
         bindingsState = LoadState.Loading
         bindingsState = runCatching {
             val service = RabbitMqModule.serviceOrNull() ?: error("服务未初始化")
@@ -114,7 +155,7 @@ fun RabbitMqExchangePropertiesDialog(
         footerActions = {
             // 默认交换机 / amq.* / internal 禁止删除：按钮直接隐藏（与 Kafka 内部主题同一约定）。
             if (!systemExchange && !internal) {
-                PressableButton(onClick = { deleteConfirm = true }, danger = true) {
+                PressableButton(onClick = { exchangeDeleteConfirm = true }, danger = true) {
                     Text(stringResource("rabbitmq_ui_exchange_props_delete"))
                 }
             }
@@ -150,6 +191,28 @@ fun RabbitMqExchangePropertiesDialog(
             )
             Spacer(Modifier.height(8.dp))
 
+            // ---- Bindings 区：头部行（计数 + 添加）+ 表格（实时，系统交换机禁写）----
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = stringResource("rabbitmq_ui_exchange_props_bindings_count")
+                        .withArg((bindingsState as? LoadState.Success)?.data?.size ?: 0),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.weight(1f),
+                )
+                if (!systemExchange) {
+                    ToolbarButton(
+                        icon = Icons.Default.Add,
+                        text = stringResource("rabbitmq_ui_exchange_bindings_add"),
+                        onClick = { showAddBinding = true },
+                    )
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+
             // ---- Bindings 表（实时）----
             when (val s = bindingsState) {
                 is LoadState.Idle, is LoadState.Loading -> {
@@ -176,19 +239,22 @@ fun RabbitMqExchangePropertiesDialog(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     } else {
-                        BindingsTable(bindings)
+                        BindingsTable(
+                            bindings = bindings,
+                            onDelete = if (systemExchange) null else { binding -> deleteConfirm = binding },
+                        )
                     }
                 }
             }
             SnackbarHost(hostState = snackbar)
         }
 
-        // ---- 删除二次确认：**必须声明在本外壳 content lambda 内** —— compose Dialog
-        // 的窗口归属随声明组合走，声明在外层会挂到主窗口、被本对话框压住（实测坑，
-        // 见外壳 KDoc）。----
-        if (deleteConfirm) {
+        // ---- 删除交换机二次确认：**必须声明在本外壳 content lambda 内** —— compose
+        // Dialog 的窗口归属随声明组合走，声明在外层会挂到主窗口、被本对话框压住
+        // （实测坑，见外壳 KDoc）。----
+        if (exchangeDeleteConfirm) {
             androidx.compose.material3.AlertDialog(
-                onDismissRequest = { deleteConfirm = false },
+                onDismissRequest = { exchangeDeleteConfirm = false },
                 title = { Text(stringResource("rabbitmq_ui_exchange_delete_confirm_title")) },
                 text = {
                     Text(
@@ -200,8 +266,8 @@ fun RabbitMqExchangePropertiesDialog(
                 confirmButton = {
                     PressableButton(
                         onClick = {
-                            deleteConfirm = false
-                            delete()
+                            exchangeDeleteConfirm = false
+                            deleteExchangeEntry()
                         },
                         enabled = !deleting,
                         danger = true,
@@ -215,10 +281,54 @@ fun RabbitMqExchangePropertiesDialog(
                 },
                 dismissButton = {
                     PressableButton(
-                        onClick = { deleteConfirm = false },
+                        onClick = { exchangeDeleteConfirm = false },
                         containerColor = MaterialTheme.colorScheme.surfaceVariant,
                         contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     ) { Text(stringResource("common_cancel")) }
+                },
+            )
+        }
+
+        // ---- 删除绑定二次确认（行内垃圾桶触发）----
+        deleteConfirm?.let { binding ->
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { deleteConfirm = null },
+                title = { Text(stringResource("rabbitmq_ui_binding_delete_confirm_title")) },
+                text = {
+                    Text(
+                        text = stringResource("rabbitmq_ui_binding_delete_confirm_text")
+                            .withArg(exchangeName, binding.destination),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                },
+                confirmButton = {
+                    PressableButton(
+                        onClick = { deleteBinding(binding) },
+                        enabled = !deleting,
+                        danger = true,
+                    ) { Text(stringResource("rabbitmq_ui_exchange_delete_confirm")) }
+                },
+                dismissButton = {
+                    PressableButton(
+                        onClick = { deleteConfirm = null },
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    ) { Text(stringResource("common_cancel")) }
+                },
+            )
+        }
+
+        // ---- 添加绑定弹窗（嵌套声明在本外壳 content lambda 内）----
+        if (showAddBinding) {
+            RabbitMqAddBindingDialog(
+                connectionId = connectionId,
+                exchangeName = exchangeName,
+                exchangeType = type,
+                onDismiss = { showAddBinding = false },
+                onCreated = {
+                    showAddBinding = false
+                    bindingsReload++
+                    RabbitMqModule.scanNow(connectionId)
                 },
             )
         }
@@ -243,14 +353,20 @@ private fun PropertyLine(label: String, value: String) {
     }
 }
 
-/** Bindings 表：Destination / Routing Key / Arguments 三列。 */
+/** Bindings 表：Destination / Routing Key / Arguments / 操作 四列；onDelete 为空时无操作列。 */
 @Composable
-private fun BindingsTable(bindings: List<RabbitMqBindingSnapshot>) {
+private fun BindingsTable(
+    bindings: List<RabbitMqBindingSnapshot>,
+    onDelete: ((RabbitMqBindingSnapshot) -> Unit)?,
+) {
     Column(modifier = Modifier.fillMaxSize()) {
         Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
             TableHeader(stringResource("rabbitmq_ui_exchange_props_col_destination"), Modifier.weight(1.4f))
             TableHeader(stringResource("rabbitmq_ui_exchange_props_col_routing_key"), Modifier.weight(1.2f))
             TableHeader(stringResource("rabbitmq_ui_exchange_props_col_arguments"), Modifier.weight(1f))
+            if (onDelete != null) {
+                TableHeader(stringResource("rabbitmq_ui_exchange_props_col_actions"), Modifier.width(56.dp))
+            }
         }
         HorizontalDivider()
         Column(modifier = Modifier.weight(1f)) {
@@ -262,6 +378,18 @@ private fun BindingsTable(bindings: List<RabbitMqBindingSnapshot>) {
                     TableCell(binding.destination, Modifier.weight(1.4f))
                     TableCell(binding.routingKey.ifEmpty { "-" }, Modifier.weight(1.2f))
                     TableCell(binding.argumentsText, Modifier.weight(1f))
+                    if (onDelete != null) {
+                        Box(modifier = Modifier.width(56.dp), contentAlignment = Alignment.CenterStart) {
+                            IconButton(onClick = { onDelete(binding) }, modifier = Modifier.size(24.dp)) {
+                                Icon(
+                                    imageVector = Icons.Default.DeleteSweep,
+                                    contentDescription = stringResource("rabbitmq_ui_exchange_props_binding_delete"),
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                            }
+                        }
+                    }
                 }
                 HorizontalDivider(thickness = 0.5.dp)
             }

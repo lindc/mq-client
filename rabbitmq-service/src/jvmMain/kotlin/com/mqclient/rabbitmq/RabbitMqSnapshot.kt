@@ -57,6 +57,8 @@ data class RabbitMqBindingSnapshot(
     val routingKey: String,
     /** x-arguments（如备选交换机等）；空 = 无自定义参数。 */
     val arguments: Map<String, JsonElement> = emptyMap(),
+    /** 删除绑定的路径参数（服务端生成）；实时查询才有，慢扫投影可空。 */
+    val propertiesKey: String? = null,
 ) {
     /** arguments 的展示文本（属性对话框 Bindings 表用）。 */
     val argumentsText: String get() = formatBindingArguments(arguments)

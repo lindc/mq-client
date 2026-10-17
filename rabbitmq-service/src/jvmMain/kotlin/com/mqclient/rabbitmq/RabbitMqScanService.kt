@@ -96,6 +96,7 @@ class RabbitMqScanService(private val context: ServiceContext) {
                         destinationType = it.destinationType,
                         routingKey = it.routingKey,
                         arguments = it.arguments,
+                        propertiesKey = it.propertiesKey,
                     )
                 }
                 .sortedWith(compareBy({ it.source }, { it.destination }, { it.routingKey }))
@@ -282,9 +283,32 @@ class RabbitMqScanService(private val context: ServiceContext) {
                     destinationType = it.destinationType,
                     routingKey = it.routingKey,
                     arguments = it.arguments,
+                    propertiesKey = it.propertiesKey,
                 )
             }
         }
+    }
+
+    /**
+     * 添加绑定（实时操作，不改缓存）：POST bindings 端点；成功后由调用方重载
+     * 实时列表并触发 scanNow 同步慢扫缓存。
+     */
+    suspend fun createBinding(connectionId: String, exchange: String, queue: String, routingKey: String) {
+        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
+        val admin = ctx.admin ?: throw IllegalStateException("未连接")
+        withContext(Dispatchers.IO) { admin.createBinding(exchange, queue, routingKey) }
+        rabbitMqLog.info("binding created: connection=$connectionId exchange=$exchange queue=$queue routingKey=$routingKey")
+    }
+
+    /**
+     * 删除绑定（实时操作，不改缓存）：DELETE bindings 端点（propertiesKey 随列表
+     * 下发）；成功后由调用方重载实时列表并触发 scanNow 同步慢扫缓存。
+     */
+    suspend fun deleteBinding(connectionId: String, exchange: String, queue: String, propertiesKey: String) {
+        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
+        val admin = ctx.admin ?: throw IllegalStateException("未连接")
+        withContext(Dispatchers.IO) { admin.deleteBinding(exchange, queue, propertiesKey) }
+        rabbitMqLog.info("binding deleted: connection=$connectionId exchange=$exchange queue=$queue")
     }
 
     // ---------------------------------------------------------------- 内部

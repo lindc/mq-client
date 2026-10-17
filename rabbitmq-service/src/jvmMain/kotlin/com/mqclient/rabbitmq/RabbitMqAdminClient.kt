@@ -92,6 +92,8 @@ data class RabbitMqBindingDto(
     @SerialName("destination_type") val destinationType: String = "queue",
     @SerialName("routing_key") val routingKey: String = "",
     val arguments: Map<String, JsonElement> = emptyMap(),
+    /** 删除绑定的路径参数（`DELETE /api/bindings/.../{properties_key}`）；服务端生成。 */
+    @SerialName("properties_key") val propertiesKey: String? = null,
 )
 
 // ---------------------------------------------------------------------------
@@ -254,6 +256,46 @@ class RabbitMqAdminClient(private val config: RabbitMqConfig) : AutoCloseable {
             ListSerializer(RabbitMqBindingDto.serializer()),
             getJson("exchanges", vhostSegment(), pathSegment(name), "bindings", "source"),
         )
+
+    /**
+     * 添加绑定：`POST /api/bindings/{vhost}/e/{exchange}/q/{queue}`，body =
+     * `{"routing_key","arguments"}`（arguments 第一版固定 `{}`）。成功 201。
+     */
+    suspend fun createBinding(exchange: String, queue: String, routingKey: String) {
+        val body = buildJsonObject {
+            put("routing_key", routingKey)
+            put("arguments", buildJsonObject { })
+        }.toString()
+        mutatingRequest(
+            HttpMethod.Post,
+            body,
+            "bindings",
+            vhostSegment(),
+            "e",
+            pathSegment(exchange),
+            "q",
+            pathSegment(queue),
+        )
+    }
+
+    /**
+     * 删除绑定：`DELETE /api/bindings/{vhost}/e/{exchange}/q/{queue}/{properties_key}`。
+     * propertiesKey 来自绑定列表响应（服务端生成的路径转义键，随 routing_key /
+     * arguments 变化）。
+     */
+    suspend fun deleteBinding(exchange: String, queue: String, propertiesKey: String) {
+        mutatingRequest(
+            HttpMethod.Delete,
+            null,
+            "bindings",
+            vhostSegment(),
+            "e",
+            pathSegment(exchange),
+            "q",
+            pathSegment(queue),
+            pathSegment(propertiesKey),
+        )
+    }
 
     override fun close() {
         http.close()
