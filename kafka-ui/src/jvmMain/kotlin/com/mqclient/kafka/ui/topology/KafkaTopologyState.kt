@@ -42,6 +42,8 @@ data class KafkaTopicTopologyInfo(
 data class KafkaTopologySnapshot(
     val brokers: List<KafkaBrokerInfo>,
     val topics: List<KafkaTopicTopologyInfo>,
+    /** 当前 controller 的 broker id（broker 详情对话框的 controller 徽标用）。 */
+    val controllerId: Int? = null,
 ) {
     val isEmpty: Boolean get() = brokers.isEmpty() && topics.isEmpty()
 }
@@ -130,10 +132,13 @@ class KafkaTopologyState(
                 KafkaTopologySnapshot(
                     brokers = brokers.map(KafkaBrokerSnapshot::toBrokerInfo),
                     topics = topics.map(KafkaTopicSnapshot::toTopologyInfo),
+                    controllerId = service?.cachedCluster(connectionId)?.controllerId,
                 ),
             )
         } else if (scannedOnce) {
-            loadState = LoadState.Success(KafkaTopologySnapshot(emptyList(), emptyList()))
+            loadState = LoadState.Success(
+                KafkaTopologySnapshot(emptyList(), emptyList(), controllerId = null),
+            )
         }
     }
 

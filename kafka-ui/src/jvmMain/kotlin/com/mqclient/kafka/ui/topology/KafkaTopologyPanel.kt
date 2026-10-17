@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CallSplit
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -32,8 +31,12 @@ import com.mqclient.core.CoreModule
 import com.mqclient.core.log.Log
 import com.mqclient.graph.TopologyData
 import com.mqclient.graph.TopologyNodeType
+import com.mqclient.kafka.KafkaBrokerSnapshot
 import com.mqclient.kafka.KafkaEvents
 import com.mqclient.kafka.KafkaModule
+import com.mqclient.kafka.KafkaTopicSnapshot
+import com.mqclient.kafka.ui.KafkaBrokerDetailDialog
+import com.mqclient.kafka.ui.KafkaTopicPropertiesDialog
 import com.mqclient.kafka.ui.rememberKafkaConnectionStatus
 import com.mqclient.mqui.state.LoadState
 import com.mqclient.uicommon.command.ToolbarButton
@@ -43,16 +46,22 @@ import com.mqclient.uicommon.i18n.withArg
 import kotlinx.coroutines.launch
 
 /**
- * Kafka 拓扑面板（导航项 `topology` 的 Tab 内容）：Topic → Partition → Broker。
+ * Kafka 拓扑面板（导航项 `topology` 的 Tab 内容）：Topic → Broker 两列路由链路。
  *
  * 数据口径：进入 Tab 经 AdminClient 直连实时查询（describeCluster + describeTopics，
  * 见 [KafkaTopologyState]），无缓存无定时扫描，右上角「重新扫描」重拉 —— 与 Kafka
  * 既有列表页同口径。连接分支语义与列表页一致：未连接自动隐式连接，失败展示原因 + 重试。
  *
- * 规模控制（聚合 + 按需展开）：默认每个 topic 一个节点（badge = 分区数）、分区折叠；
- * **双击 topic** 展开 / 收回它的分区节点（partition badge = leader broker id）；
- * 内部主题与副本虚线边走顶部开关，默认都关。双击 partition / broker 弹 Snackbar 提示
- * （Kafka v1 无对象属性面板）。
+ * 结构：**聚合视图**——每个 topic 一个节点（badge = 分区数）；topic → broker 一条边
+ * 代表「该 broker 承载此 topic 的 ≥1 个 leader 分区」；内部主题默认不进图（顶部开关）。
+ * 分区级明细在主题属性对话框的「分区」Tab 查看（分区展开视图已移除）。
+ *
+ * **双击分派**（照 ibm-mq 拓扑先例，面板内 setState）：
+ *  - TOPIC → 主题属性对话框（概览 / 配置 / 分区 Tab）；
+ *  - BROKER → broker 详情对话框（controller 徽标经快照的 controllerId 判定）；
+ *  - 未知节点 → Snackbar「无属性」提示。
+ * 双击检测用 topology-ui 的 NodeDoubleClick（400ms 同节点窗口），单击选中不受影响，
+ * 拖拽由 kuiver touch slop 区分——面板只装配分派逻辑。
  *
  * 画布组装复用 topology-ui 的 [TopologyCanvas]（选中链路高亮、流动动画、缩放控件、
  * 详情卡），本面板只装配数据与业务行为。
@@ -78,57 +87,41 @@ fun KafkaTopologyPanel(
     }
 
     var showInternal by remember { mutableStateOf(false) }
-    var showReplicaEdges by remember { mutableStateOf(false) }
-    var expandedTopic by remember { mutableStateOf<String?>(null) }
 
     var data by remember(connectionId) { mutableStateOf<TopologyData?>(null) }
-    // 副本边集合（from to to）：TopologyCanvas 的 edgeCustomize 据此虚线化。
-    var replicaEdges by remember(connectionId) {
-        mutableStateOf<Set<Pair<String, String>>>(emptySet())
-    }
+
+    // 双击打开的属性对话框目标（topic 名 / broker id）。
+    var propsTopic by remember(connectionId) { mutableStateOf<String?>(null) }
+    var propsBrokerId by remember(connectionId) { mutableStateOf<Int?>(null) }
 
     val snackbarHostState = remember { SnackbarHostState() }
     val noPropertiesHint = stringResource("kafka_ui_topology_no_properties")
-    // 副本边定制色（edgeCustomize 是普通 lambda，组合期先解析好）。
-    val replicaEdgeColor = MaterialTheme.colorScheme.outline
 
     // badge 文案模板（builder 在组合外执行，模板在此解析、builder 里替换参数）。
     val partitionsTemplate = stringResource("kafka_ui_topic_partitions")
-    val leaderTemplate = stringResource("kafka_ui_topology_partition_badge")
-    val noLeaderBadge = stringResource("kafka_ui_topology_partition_offline")
     val internalLabel = stringResource("kafka_ui_topic_internal")
-    val strings = remember(partitionsTemplate, leaderTemplate, noLeaderBadge, internalLabel) {
+    val strings = remember(partitionsTemplate, internalLabel) {
         KafkaTopologyStrings(
             partitionsBadge = { partitionsTemplate.withArg(it) },
-            leaderBadge = { leaderTemplate.withArg(it) },
-            noLeaderBadge = noLeaderBadge,
             internalLabel = internalLabel,
         )
     }
 
-    // 重建图（纯内存计算）：快照 / 开关 / 展开目标任一变化都重算。
+    // 重建图（纯内存计算）：快照 / 开关任一变化都重算。
     // 空图不落地：刷新空结果不覆盖旧图（与 IBM MQ 拓扑同一语义）。
-    LaunchedEffect(state.loadState, showInternal, showReplicaEdges, expandedTopic, strings) {
+    LaunchedEffect(state.loadState, showInternal, strings) {
         val snapshot = (state.loadState as? LoadState.Success)?.data ?: return@LaunchedEffect
-        // 展开目标被过滤（内部主题关掉等）时自动收回。
-        val expansion = snapshot.topics
-            .firstOrNull { it.name == expandedTopic && (showInternal || !it.internal) }
-            ?.name
-        if (expansion != expandedTopic) expandedTopic = expansion
         val next = buildKuiverFromSnapshot(
             snapshot = snapshot,
             strings = strings,
-            expandedTopic = expansion,
             showInternalTopics = showInternal,
-            showReplicaEdges = showReplicaEdges,
         )
         if (next.kuiver.nodes.isNotEmpty()) {
-            replicaEdges = replicaEdgeIds(snapshot, expansion, showInternal)
             data = next
             Log.debug(
                 TOPOLOGY_LOG_TAG,
-                "topology rebuilt: showInternal=$showInternal replicas=$showReplicaEdges " +
-                    "expanded=$expansion nodes=${next.kuiver.nodes.size} edges=${next.kuiver.edges.size}",
+                "topology rebuilt: showInternal=$showInternal " +
+                    "nodes=${next.kuiver.nodes.size} edges=${next.kuiver.edges.size}",
             )
         } else if (data == null) {
             data = next // 首帧就空：落空图让下方渲染「无对象」文案
@@ -168,6 +161,7 @@ fun KafkaTopologyPanel(
         }
         is LoadState.Success -> {
             val current = data
+            val snapshot = (state.loadState as? LoadState.Success)?.data
             if (current == null || current.kuiver.nodes.isEmpty()) {
                 Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
@@ -179,7 +173,7 @@ fun KafkaTopologyPanel(
                 return
             }
             Column(modifier.fillMaxSize()) {
-                // 顶部开关行：内部主题 / 副本边（与列表页工具栏同一视觉层级）。
+                // 顶部开关行：内部主题是否进图。
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -193,12 +187,6 @@ fun KafkaTopologyPanel(
                         isActive = showInternal,
                         onClick = { showInternal = !showInternal },
                     )
-                    ToolbarButton(
-                        icon = Icons.Default.CallSplit,
-                        text = stringResource("kafka_ui_topology_toggle_replicas"),
-                        isActive = showReplicaEdges,
-                        onClick = { showReplicaEdges = !showReplicaEdges },
-                    )
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
@@ -210,10 +198,13 @@ fun KafkaTopologyPanel(
                     nodeDragEnabled = true,
                     // 手动扫描：一轮对象慢扫，扫完经 OBJECTS_SCANNED 事件回到 onObjectsScanned。
                     onRescan = { KafkaModule.scanNow(connectionId) },
+                    // 双击分派（照 ibm-mq 拓扑先例，面板内 setState；拖拽由 kuiver
+                    // touch slop 区分，无双击误触）。
                     onNodeDoubleClick = { nodeId ->
                         when (current.nodeTypes[nodeId]) {
-                            TopologyNodeType.TOPIC ->
-                                expandedTopic = if (expandedTopic == nodeId) null else nodeId
+                            TopologyNodeType.TOPIC -> propsTopic = nodeId
+                            TopologyNodeType.BROKER ->
+                                propsBrokerId = nodeId.removePrefix(BROKER_ID_PREFIX).toIntOrNull()
                             else -> scope.launch { snackbarHostState.showSnackbar(noPropertiesHint) }
                         }
                     },
@@ -225,21 +216,44 @@ fun KafkaTopologyPanel(
                     // TopologyCanvas 保证主线程相邻（时序不变量见 TopologyCanvas 文档）。
                     onBeforeLayout = { kafkaTopologyNodeTypes = it.nodeTypes },
                     snackbarHostState = snackbarHostState,
-                    // 副本边虚线化（主题 outline 色 + 短虚线），与实线 leader 边区分。
-                    edgeCustomize = { edge, base ->
-                        if (edge.fromId to edge.toId in replicaEdges) {
-                            base.copy(
-                                color = replicaEdgeColor,
-                                dashed = true,
-                                dashLength = 6.dp,
-                                gapLength = 6.dp,
-                            )
-                        } else {
-                            base
-                        }
-                    },
                 )
+            }
+
+            // ---- 双击打开的属性对话框（声明在本 Tab 内容内，随 Tab 销毁）----
+            propsTopic?.let { topicName ->
+                KafkaTopicPropertiesDialog(
+                    connectionId = connectionId,
+                    topicName = topicName,
+                    onDismiss = { propsTopic = null },
+                    // 删除成功 → 触发一轮慢扫，拓扑图经 OBJECTS_SCANNED 事件自动更新。
+                    onDeleted = { KafkaModule.scanNow(connectionId) },
+                )
+            }
+
+            propsBrokerId?.let { brokerId ->
+                val service = KafkaModule.serviceOrNull()
+                val broker = service?.cachedBrokers(connectionId)?.firstOrNull { it.brokerId == brokerId }
+                val topics = service?.cachedTopics(connectionId).orEmpty()
+                val isController = snapshot?.controllerId == brokerId
+                if (broker != null) {
+                    KafkaBrokerDetailDialog(
+                        broker = broker,
+                        topics = topics,
+                        isController = isController,
+                        offline = false,
+                        onDismiss = { propsBrokerId = null },
+                    )
+                } else {
+                    // broker 已不在缓存（重扫窗口期）：关闭并提示。
+                    LaunchedEffect(brokerId) {
+                        propsBrokerId = null
+                        snackbarHostState.showSnackbar(noPropertiesHint)
+                    }
+                }
             }
         }
     }
 }
+
+/** broker 节点 id 的前缀（与 KafkaTopologyGraphBuilder 的 id 约定同源）。 */
+private const val BROKER_ID_PREFIX = "b:"

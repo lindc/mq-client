@@ -4,19 +4,17 @@ import com.mqclient.graph.NodeSeverity
 import com.mqclient.graph.TopologyNodeType
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * [buildKuiverFromSnapshot] 的纯函数测试：聚合 / 展开 / 过滤 / 副本边开关四种形态下的
- * 节点、边与告警级别断言（不需要真实集群 —— builder 只吃 [KafkaTopologySnapshot]）。
+ * [buildKuiverFromSnapshot] 的纯函数测试：聚合视图 / 内部主题过滤 / 告警级别 / 空快照
+ * 的节点、边与 badge 断言（不需要真实集群 —— builder 只吃 [KafkaTopologySnapshot]）。
+ * 分区展开视图已移除（分区明细在主题属性对话框的「分区」Tab）。
  */
 class KafkaTopologyGraphBuilderTest {
 
     private val strings = KafkaTopologyStrings(
         partitionsBadge = { "$it 分区" },
-        leaderBadge = { "leader $it" },
-        noLeaderBadge = "无 leader",
         internalLabel = "内部主题",
     )
 
@@ -45,6 +43,7 @@ class KafkaTopologyGraphBuilderTest {
                 ),
             ),
         ),
+        controllerId = 0,
     )
 
     private fun edgeSet(data: com.mqclient.graph.TopologyData) =
@@ -54,7 +53,7 @@ class KafkaTopologyGraphBuilderTest {
     fun `聚合视图 - 无分区节点 - topic 直连 leader broker - badge 为分区数`() {
         val data = buildKuiverFromSnapshot(snapshot(), strings)
 
-        // 内部主题默认过滤：节点只有 t1 + 3 brokers。
+        // 内部主题默认过滤：节点只有 t1 + 3 brokers，无 PARTITION 节点。
         assertEquals(
             mapOf(
                 "b:0" to TopologyNodeType.BROKER,
@@ -70,24 +69,6 @@ class KafkaTopologyGraphBuilderTest {
     }
 
     @Test
-    fun `展开视图 - 插入分区节点 - 其余 topic 保持聚合`() {
-        val data = buildKuiverFromSnapshot(snapshot(), strings, expandedTopic = "t1")
-
-        assertEquals(TopologyNodeType.PARTITION, data.nodeTypes["p:t1:0"])
-        assertEquals("leader 0", data.badges["p:t1:0"])
-        val edges = edgeSet(data)
-        assertTrue("t1" to "p:t1:0" in edges)
-        assertTrue("p:t1:0" to "b:0" in edges)
-        assertTrue("p:t1:1" to "b:1" in edges)
-        // p2 无 leader：只有 belongs_to 边，没有 led_by 边。
-        assertFalse(edges.any { it.first == "p:t1:2" && it.second.startsWith("b:") })
-        // 副本边默认关。
-        assertFalse("p:t1:0" to "b:1" in edges)
-        // 其他 topic（这里无第二个可见 topic）不参与；内部主题仍被过滤。
-        assertFalse("__internal" to "b:2" in edges)
-    }
-
-    @Test
     fun `内部主题开关 - 开启后进图并产生聚合边 - badge 带内部标记`() {
         val data = buildKuiverFromSnapshot(snapshot(), strings, showInternalTopics = true)
 
@@ -97,42 +78,12 @@ class KafkaTopologyGraphBuilderTest {
     }
 
     @Test
-    fun `副本边开关 - 展开且开启时补 partition 到非 leader 副本的边`() {
-        val data = buildKuiverFromSnapshot(
-            snapshot(),
-            strings,
-            expandedTopic = "t1",
-            showReplicaEdges = true,
-        )
-        val edges = edgeSet(data)
-        // p0 副本 {0,1}，leader 0 → 副本边 p0→b1。
-        assertTrue("p:t1:0" to "b:1" in edges)
-        // p1 副本 {1,2}，leader 1 → 副本边 p1→b2。
-        assertTrue("p:t1:1" to "b:2" in edges)
-        // p2 无 leader：副本 {0,1} 全部按副本边画。
-        assertTrue("p:t1:2" to "b:0" in edges)
-        assertTrue("p:t1:2" to "b:1" in edges)
-        // replicaEdgeIds 与 builder 的副本边完全一致（面板虚线化用）。
-        assertEquals(
-            setOf(
-                "p:t1:0" to "b:1",
-                "p:t1:1" to "b:2",
-                "p:t1:2" to "b:0",
-                "p:t1:2" to "b:1",
-            ),
-            replicaEdgeIds(snapshot(), "t1"),
-        )
-    }
-
-    @Test
     fun `告警级别 - 无 leader ERROR - 欠副本 WARNING - topic 取最差`() {
-        val data = buildKuiverFromSnapshot(snapshot(), strings, expandedTopic = "t1")
+        val data = buildKuiverFromSnapshot(snapshot(), strings)
 
-        assertEquals(NodeSeverity.ERROR, data.severities["p:t1:2"])
-        assertEquals(NodeSeverity.WARNING, data.severities["p:t1:1"])
-        assertEquals(NodeSeverity.NORMAL, data.severities["p:t1:0"])
-        // t1 含离线分区 → ERROR。
+        // t1 含离线分区（无 leader）→ ERROR；欠副本分区在 topic 级聚合下同样体现。
         assertEquals(NodeSeverity.ERROR, data.severities["t1"])
+        assertEquals(NodeSeverity.NORMAL, data.severities["b:0"])
     }
 
     @Test
@@ -143,12 +94,5 @@ class KafkaTopologyGraphBuilderTest {
         )
         assertTrue(data.kuiver.nodes.isEmpty())
         assertTrue(data.nodeTypes.isEmpty())
-    }
-
-    @Test
-    fun `partition 节点 id 解析 - 反解所属 topic`() {
-        assertEquals("t1", partitionNodeTopic(partitionNodeId("t1", 3)))
-        // topic 名里的点 / 下划线 / 连字符不影响解析（`:` 才是分隔符）。
-        assertEquals("a.b-c_d", partitionNodeTopic(partitionNodeId("a.b-c_d", 0)))
     }
 }
