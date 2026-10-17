@@ -11,12 +11,17 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.SnackbarHostState
@@ -40,18 +45,24 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mqclient.kafka.KafkaGroupDetailSnapshot
+import com.mqclient.kafka.KafkaGroupResetTo
 import com.mqclient.kafka.KafkaModule
 import com.mqclient.mqui.state.LoadState
 import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.dialog.DateTimePickerDialog
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
+import java.time.LocalDateTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.launch
 
 /**
  * 消费组详情对话框（复用 [ObjectDetailDialog] 底座）：概览行 + 成员 / 位移两个 Tab，
- * 底部操作 = 重置位移（earliest / latest 二选一确认）+ 删除消费组（仅空组可用）+ 关闭。
+ * 底部操作 = 重置位移（earliest / latest / 指定时间点三选一确认）+ 删除消费组
+ * （仅空组可用）+ 关闭。
  *
  * 数据**实时查询**（[com.mqclient.kafka.KafkaScanService.getGroupDetail]，与 MQ 集群
  * 关系面板同一哲学 —— 详情要新鲜数据）；重置 / 删除成功后重拉详情或关闭并触发一轮
@@ -67,8 +78,8 @@ fun KafkaGroupDetailDialog(
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     var tab by remember { mutableIntStateOf(0) }
-    // 重置确认框：null 关闭；否则为确认框当前选择的档位（true = earliest）。
-    var resetChoice by remember { mutableStateOf<Boolean?>(null) }
+    // 重置确认框：只管开关；档位与时间输入是弹窗自己的临时状态（每次打开重置）。
+    var resetOpen by remember { mutableStateOf(false) }
     var deleteConfirm by remember { mutableStateOf(false) }
 
     fun load() {
@@ -82,12 +93,17 @@ fun KafkaGroupDetailDialog(
     }
     LaunchedEffect(connectionId, groupId) { load() }
 
-    fun reset(toEarliest: Boolean) {
+    fun reset(to: KafkaGroupResetTo) {
         scope.launch {
             val service = KafkaModule.serviceOrNull() ?: error("服务未初始化")
-            runCatching { service.resetGroupOffsets(connectionId, groupId, toEarliest) }
+            runCatching { service.resetGroupOffsets(connectionId, groupId, to) }
                 .onSuccess { count ->
-                    snackbar.showSnackbar(stringResource("kafka_ui_group_detail_reset_done").withArg(count))
+                    val doneKey = if (to is KafkaGroupResetTo.AtTimestamp) {
+                        "kafka_ui_group_detail_reset_done_timestamp"
+                    } else {
+                        "kafka_ui_group_detail_reset_done"
+                    }
+                    snackbar.showSnackbar(stringResource(doneKey).withArg(count))
                     load()
                 }
                 .onFailure { snackbar.showSnackbar(failureText(it)) }
@@ -116,8 +132,13 @@ fun KafkaGroupDetailDialog(
         footerActions = {
             // MQ 约定：操作按钮在左，弹性 Spacer 占位，「关闭」独占右侧。
             val ready = (detail as? LoadState.Success)?.data
-            // 主操作（主色）：比关闭突出。
-            PressableButton(onClick = { resetChoice = false }) {
+            // 主操作（主色）：比关闭突出。重置要求组无活跃成员（EMPTY/DEAD）—— 与
+            // 服务端前置检查双保险（活跃消费者会重新提交位移覆盖重置结果）。
+            PressableButton(
+                onClick = { resetOpen = true },
+                enabled = ready != null &&
+                    (ready.state.equals("EMPTY", ignoreCase = true) || ready.state.equals("DEAD", ignoreCase = true)),
+            ) {
                 Text(stringResource("kafka_ui_group_detail_action_reset"))
             }
             // 危险操作：与删除连接 / 危险命令同一 danger 档（error 底 + onError 字）。
@@ -200,10 +221,19 @@ fun KafkaGroupDetailDialog(
             ThemedSnackbarHost(hostState = snackbar, modifier = Modifier.align(Alignment.BottomCenter))
         }
 
-        // ---- 重置位移确认：earliest / latest 单选 + 警示（活跃消费者会覆盖）----
-        resetChoice?.let { choice ->
+        // ---- 重置位移确认：earliest / latest / 指定时间点单选 + 警示 ----
+        if (resetOpen) {
+            // 弹窗临时状态：每次打开重新开始（默认 latest，与旧行为一致）。
+            var mode by remember { mutableStateOf(ResetMode.LATEST) }
+            // 时间档选中的时刻：默认当前时间（分钟粒度），可清除（null = 确认键禁用）。
+            var pickedTime by remember {
+                mutableStateOf<LocalDateTime?>(
+                    LocalDateTime.now().truncatedTo(java.time.temporal.ChronoUnit.MINUTES),
+                )
+            }
+            var showTimePicker by remember { mutableStateOf(false) }
             AlertDialog(
-                onDismissRequest = { resetChoice = null },
+                onDismissRequest = { resetOpen = false },
                 title = { Text(stringResource("kafka_ui_group_detail_action_reset")) },
                 text = {
                     Column {
@@ -214,34 +244,103 @@ fun KafkaGroupDetailDialog(
                         Spacer(Modifier.height(12.dp))
                         ResetOptionRow(
                             label = stringResource("kafka_ui_group_detail_reset_to_earliest"),
-                            selected = choice == true,
-                            onSelect = { resetChoice = true },
+                            selected = mode == ResetMode.EARLIEST,
+                            onSelect = { mode = ResetMode.EARLIEST },
                         )
                         ResetOptionRow(
                             label = stringResource("kafka_ui_group_detail_reset_to_latest"),
-                            selected = choice == false,
-                            onSelect = { resetChoice = false },
+                            selected = mode == ResetMode.LATEST,
+                            onSelect = { mode = ResetMode.LATEST },
                         )
+                        ResetOptionRow(
+                            label = stringResource("kafka_ui_group_detail_reset_to_timestamp"),
+                            selected = mode == ResetMode.TIMESTAMP,
+                            onSelect = { mode = ResetMode.TIMESTAMP },
+                        )
+                        // 时间档的回显行：仅选中时出现；点击弹两步选择器（MQ 浏览同款）。
+                        if (mode == ResetMode.TIMESTAMP) {
+                            Spacer(Modifier.height(4.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                PressableButton(
+                                    onClick = { showTimePicker = true },
+                                    standardMinWidth = false,
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                ) {
+                                    Text(
+                                        text = pickedTime?.format(RESET_TIME_DISPLAY_FORMATTER)
+                                            ?: stringResource("kafka_ui_group_detail_reset_time_not_set"),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                    )
+                                }
+                                if (pickedTime != null) {
+                                    Spacer(Modifier.width(4.dp))
+                                    IconButton(
+                                        onClick = { pickedTime = null },
+                                        modifier = Modifier.size(28.dp),
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Close,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp),
+                                        )
+                                    }
+                                }
+                            }
+                            // 未来时间不拦截：该时刻之后无数据的分区由 service 的 -1
+                            // 兜底重置到 latest（diag 实测），这里只做轻提示。
+                            Text(
+                                text = stringResource("kafka_ui_group_detail_reset_time_future_hint"),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 },
                 confirmButton = {
                     // 重置会覆盖位点：确认键走 danger 档（同 MQ ChannelResetSeqnumDialog）。
                     PressableButton(
                         onClick = {
-                            resetChoice?.let { reset(it) }
-                            resetChoice = null
+                            resetOpen = false
+                            when (mode) {
+                                ResetMode.EARLIEST -> reset(KafkaGroupResetTo.Earliest)
+                                ResetMode.LATEST -> reset(KafkaGroupResetTo.Latest)
+                                ResetMode.TIMESTAMP -> pickedTime?.let {
+                                    // 本地时区 → epoch millis（与浏览 Tab 的时间起点同款换算）。
+                                    reset(
+                                        KafkaGroupResetTo.AtTimestamp(
+                                            it.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(),
+                                        ),
+                                    )
+                                }
+                            }
                         },
                         danger = true,
+                        enabled = mode != ResetMode.TIMESTAMP || pickedTime != null,
                     ) { Text(stringResource("kafka_ui_group_detail_reset_confirm")) }
                 },
                 dismissButton = {
                     PressableButton(
-                        onClick = { resetChoice = null },
+                        onClick = { resetOpen = false },
                         containerColor = MaterialTheme.colorScheme.surfaceVariant,
                         contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     ) { Text(stringResource("common_cancel")) }
                 },
             )
+
+            // 时间选择器：与重置确认框同为兄弟节点声明的 AlertDialog（窗口归属随
+            // 所在组合走，见 KafkaMessagesDialog 的 KDoc 规范），叠在其上。
+            if (showTimePicker) {
+                DateTimePickerDialog(
+                    title = stringResource("kafka_ui_group_detail_reset_to_timestamp"),
+                    initial = pickedTime,
+                    onConfirm = {
+                        pickedTime = it
+                        showTimePicker = false
+                    },
+                    onDismiss = { showTimePicker = false },
+                )
+            }
         }
 
         // ---- 删除确认 ----
@@ -458,6 +557,13 @@ private fun ResetOptionRow(label: String, selected: Boolean, onSelect: () -> Uni
         Text(label, style = MaterialTheme.typography.bodyMedium)
     }
 }
+
+/** 重置确认框的档位三选（service 侧 [KafkaGroupResetTo] 的 UI 投影）。 */
+private enum class ResetMode { EARLIEST, LATEST, TIMESTAMP }
+
+/** 时间档回显格式（选择器粒度到分钟，与浏览 Tab 的起点时间同款）。 */
+private val RESET_TIME_DISPLAY_FORMATTER: DateTimeFormatter =
+    DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
 
 /** 失败原因：解 ExecutionException 包装（与表单 failureMessage 同思路的简化版）。 */
 private fun failureText(error: Throwable): String =

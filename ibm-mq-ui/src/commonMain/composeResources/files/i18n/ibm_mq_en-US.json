@@ -54,8 +54,6 @@
   "ibm_mq_msg_time_end": "End time",
   "ibm_mq_msg_time_not_set": "Not set",
   "ibm_mq_msg_time_blank_hint": "Leave unset for no limit",
-  "ibm_mq_msg_time_next": "Next",
-  "ibm_mq_msg_time_back": "Back",
   "ibm_mq_msg_send_pick_file": "Choose Files",
   "ibm_mq_msg_send_pick_title": "Select files to send",
   "ibm_mq_msg_send_files_selected": "%s file(s) selected",

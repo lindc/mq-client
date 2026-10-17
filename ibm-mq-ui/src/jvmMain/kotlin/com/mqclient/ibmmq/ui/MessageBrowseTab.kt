@@ -75,6 +75,7 @@ import com.mqclient.mqui.common.CompactSearchField
 import com.mqclient.mqui.objectlist.ObjectListEmptyState
 import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.ThemedSnackbarHost
+import com.mqclient.uicommon.dialog.DateTimePickerDialog
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.file.saveFileBytes
 import com.mqclient.uicommon.i18n.LanguageResources
@@ -926,76 +927,6 @@ private fun TimeRangeRow(
         }
     }
 }
-
-/** 日期 + 时间选择弹窗：分两步（先日期后时间）——M3 DatePicker 在桌面上的绘制
- * 宽度会超出测量宽度（压到旁边组件），竖排又超出对话框高度，并排 / 滚动都不可靠。 */
-@Composable
-private fun DateTimePickerDialog(
-    title: String,
-    initial: LocalDateTime?,
-    onConfirm: (LocalDateTime) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    // material3 内置文案（月份 / 星期 / Select date…）经 PlatformLocaleDelegate 读
-    // JVM 默认 locale，不认项目自己的 i18n 表 —— 这里对齐应用语言，缺翻译的键回落英文。
-    val appLanguage = LanguageResources.currentLanguage() ?: LanguageResources.LANGUAGE_ZH_CN
-    remember(appLanguage) {
-        java.util.Locale.setDefault(java.util.Locale.forLanguageTag(appLanguage))
-        true
-    }
-    // DatePicker 的毫秒值是 UTC 零点；经 epochDay 换算避免时区偏移差一天。
-    val dateState = rememberDatePickerState(
-        initialSelectedDateMillis = initial?.toLocalDate()?.toEpochDay()?.times(86_400_000L),
-    )
-    val timeState = rememberTimePickerState(
-        initialHour = initial?.hour ?: 0,
-        initialMinute = initial?.minute ?: 0,
-        is24Hour = true,
-    )
-    var phase by remember { mutableStateOf(PickerPhase.DATE) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = {
-            when (phase) {
-                PickerPhase.DATE -> DatePicker(state = dateState, showModeToggle = false)
-                PickerPhase.TIME -> TimePicker(state = timeState)
-            }
-        },
-        confirmButton = {
-            when (phase) {
-                PickerPhase.DATE -> PressableButton(
-                    onClick = { phase = PickerPhase.TIME },
-                    enabled = dateState.selectedDateMillis != null,
-                ) { Text(stringResource("ibm_mq_msg_time_next")) }
-                PickerPhase.TIME -> PressableButton(onClick = {
-                    val millis = dateState.selectedDateMillis ?: return@PressableButton
-                    val date = Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate()
-                    onConfirm(LocalDateTime.of(date, LocalTime.of(timeState.hour, timeState.minute)))
-                }) { Text(stringResource("common_ok")) }
-            }
-        },
-        dismissButton = {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                // 时间步可退回改日期；日期步只有取消。
-                if (phase == PickerPhase.TIME) {
-                    PressableButton(
-                        onClick = { phase = PickerPhase.DATE },
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    ) { Text(stringResource("ibm_mq_msg_time_back")) }
-                }
-                PressableButton(
-                    onClick = onDismiss,
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                ) { Text(stringResource("common_cancel")) }
-            }
-        },
-    )
-}
-
-private enum class PickerPhase { DATE, TIME }
 
 /* ------------------------------- 纯函数 ------------------------------- */
 

@@ -54,8 +54,6 @@
   "ibm_mq_msg_time_end": "结束时间",
   "ibm_mq_msg_time_not_set": "不限",
   "ibm_mq_msg_time_blank_hint": "不选表示不限制",
-  "ibm_mq_msg_time_next": "下一步",
-  "ibm_mq_msg_time_back": "上一步",
   "ibm_mq_msg_send_pick_file": "选择文件",
   "ibm_mq_msg_send_pick_title": "选择要发送的文件",
   "ibm_mq_msg_send_files_selected": "已选择 %s 个文件",

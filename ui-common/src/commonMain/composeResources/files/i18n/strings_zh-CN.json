@@ -35,6 +35,7 @@
   "common_save_confirm_text": "是否仍要保存此连接配置？",
   "common_finish": "完成",
   "common_back": "上一步",
+  "common_next": "下一步",
   "settings_general_language": "语言",
   "language_simplified_chinese": "简体中文",
   "language_english": "English",

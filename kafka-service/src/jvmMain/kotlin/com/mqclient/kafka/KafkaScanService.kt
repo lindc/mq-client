@@ -419,40 +419,99 @@ class KafkaScanService(private val context: ServiceContext) {
     }
 
     /**
-     * 重置位移：该组**已提交**分区的位移全部重置到 earliest / latest（第一版只支持
-     * 两档）。没有已提交位移的组无法重置（Kafka 语义：alterConsumerGroupOffsets 要
-     * 指定分区）—— 抛 IllegalStateException 由 UI 提示。活跃消费者会立刻重新提交
-     * 覆盖重置结果，UI 侧负责警示。
+     * 重置位移：该组**已提交**分区的位移重置到 earliest / latest / 指定时间点。
+     * 没有已提交位移的组无法重置（Kafka 语义：alterConsumerGroupOffsets 要指定分区）
+     * —— 抛 IllegalStateException 由 UI 提示。
+     *
+     * **前置状态检查**：组必须 Empty / Dead（无活跃成员）才允许重置 —— 活跃消费者
+     * 会立刻重新提交位移覆盖重置结果。UI 侧按钮同样按状态门禁（双保险）。
+     *
+     * [KafkaGroupResetTo.AtTimestamp]：forTimestamp 语义 —— 该时刻之后**有**消息的
+     * 分区重置到第一条记录的 offset；返回 -1（该时刻之后无新消息）的分区兜底重置到
+     * latest（消费从末端开始，不会落在非法位上）。
      *
      * @return 重置的分区数。
      */
     suspend fun resetGroupOffsets(
         connectionId: String,
         groupId: String,
-        toEarliest: Boolean,
+        to: KafkaGroupResetTo,
     ): Int {
         val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
         val admin = ctx.adminClient ?: throw IllegalStateException("未连接")
-        val timeoutMs = ctx.config.connectionTimeout * 1_000L
-        return withContext(Dispatchers.IO) {
+        return resetGroupOffsets(admin, groupId, to, ctx.config.connectionTimeout * 1_000L)
+    }
+
+    /**
+     * [resetGroupOffsets] 的实现体：按传入的 [AdminClient] 直调（diag 测试不经模块
+     * 连接守卫也能走到同一条代码路径，同 [KafkaMessageService] 的拆分理由）。
+     */
+    internal suspend fun resetGroupOffsets(
+        admin: AdminClient,
+        groupId: String,
+        to: KafkaGroupResetTo,
+        timeoutMs: Long,
+    ): Int = withContext(Dispatchers.IO) {
+            // 状态检查：活跃成员会重新提交位移覆盖重置结果，必须先停掉消费者。
+            val described = admin.describeConsumerGroups(
+                listOf(groupId),
+                org.apache.kafka.clients.admin.DescribeConsumerGroupsOptions().timeoutMs(timeoutMs.toInt()),
+            ).describedGroups()[groupId]
+                ?.get(timeoutMs, TimeUnit.MILLISECONDS)
+                ?: throw IllegalStateException("消费组不存在: $groupId")
+            val state = described.state().toString().uppercase()
+            if (state != "EMPTY" && state != "DEAD") {
+                throw IllegalStateException(
+                    "消费组仍有活跃成员（状态 $state），请先停掉所有消费者再重置位移",
+                )
+            }
             val committed = admin.listConsumerGroupOffsets(groupId)
                 .partitionsToOffsetAndMetadata()
                 .get(timeoutMs, TimeUnit.MILLISECONDS)
             if (committed.isEmpty()) {
                 throw IllegalStateException("该组没有已提交位移，无法重置")
             }
-            val spec = if (toEarliest) OffsetSpec.earliest() else OffsetSpec.latest()
-            val targets = admin.listOffsets(committed.keys.associateWith { spec })
-                .all()
-                .get(timeoutMs, TimeUnit.MILLISECONDS)
-                .mapValues { (_, info) -> info.offset() }
+            val targets: Map<TopicPartition, Long> = when (to) {
+                is KafkaGroupResetTo.Earliest ->
+                    listOffsetTargets(admin, committed.keys, OffsetSpec.earliest(), timeoutMs)
+                is KafkaGroupResetTo.Latest ->
+                    listOffsetTargets(admin, committed.keys, OffsetSpec.latest(), timeoutMs)
+                is KafkaGroupResetTo.AtTimestamp -> {
+                    val found = admin
+                        .listOffsets(committed.keys.associateWith { OffsetSpec.forTimestamp(to.epochMillis) })
+                        .all()
+                        .get(timeoutMs, TimeUnit.MILLISECONDS)
+                    // -1（UNKNOWN_OFFSET）= 该时刻之后无消息：这批分区兜底到 latest。
+                    val missing = found.filterValues { it.offset() < 0 }.keys
+                    val fallback = if (missing.isEmpty()) {
+                        emptyMap()
+                    } else {
+                        listOffsetTargets(admin, missing, OffsetSpec.latest(), timeoutMs)
+                    }
+                    found.mapValues { (_, info) -> info.offset() } + fallback
+                }
+            }
             admin.alterConsumerGroupOffsets(
                 groupId,
                 targets.mapValues { (_, offset) -> OffsetAndMetadata(offset) },
             ).all().get(timeoutMs, TimeUnit.MILLISECONDS)
+            kafkaLog.info(
+                "group offsets reset: group=$groupId mode=${to::class.simpleName} partitions=${targets.size}",
+            )
             targets.size
         }
-    }
+
+    /** listOffsets 批量取各分区 offset（earliest / latest / -1 兜底共用）。 */
+    private fun listOffsetTargets(
+        admin: AdminClient,
+        tps: Set<TopicPartition>,
+        spec: OffsetSpec,
+        timeoutMs: Long,
+    ): Map<TopicPartition, Long> =
+        admin.listOffsets(tps.associateWith { spec })
+            .all()
+            .get(timeoutMs, TimeUnit.MILLISECONDS)
+            .mapValues { (_, info) -> info.offset() }
 
     /**
      * 删除消费组（admin.deleteConsumerGroups）：组内有成员 / 有活跃提交时 Kafka 侧
@@ -742,4 +801,17 @@ class KafkaScanService(private val context: ServiceContext) {
             ?: error.message
             ?: error::class.simpleName
             ?: "unknown"
+}
+
+/**
+ * 消费组重置位移的档位（[KafkaScanService.resetGroupOffsets] 入参，UI 三选的
+ * service 投影；对标消息域 [KafkaReadStart] 的 sealed interface 模式）：
+ *  - [Earliest] / [Latest]：各分区重置到最早 / 最新；
+ *  - [AtTimestamp]：重置到该时刻之后第一条记录；查不到（该时刻后无消息）的分区
+ *    兜底到 latest。
+ */
+sealed interface KafkaGroupResetTo {
+    data object Earliest : KafkaGroupResetTo
+    data object Latest : KafkaGroupResetTo
+    data class AtTimestamp(val epochMillis: Long) : KafkaGroupResetTo
 }
