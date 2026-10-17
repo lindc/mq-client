@@ -7,8 +7,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CallSplit
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
@@ -33,6 +36,7 @@ import com.mqclient.kafka.KafkaEvents
 import com.mqclient.kafka.KafkaModule
 import com.mqclient.kafka.ui.rememberKafkaConnectionStatus
 import com.mqclient.mqui.state.LoadState
+import com.mqclient.uicommon.command.ToolbarButton
 import com.mqclient.topology.TopologyCanvas
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
@@ -183,15 +187,17 @@ fun KafkaTopologyPanel(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    FilterChip(
-                        selected = showInternal,
+                    ToolbarButton(
+                        icon = if (showInternal) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                        text = stringResource("kafka_ui_topology_toggle_internal"),
+                        isActive = showInternal,
                         onClick = { showInternal = !showInternal },
-                        label = { Text(stringResource("kafka_ui_topology_toggle_internal")) },
                     )
-                    FilterChip(
-                        selected = showReplicaEdges,
+                    ToolbarButton(
+                        icon = Icons.Default.CallSplit,
+                        text = stringResource("kafka_ui_topology_toggle_replicas"),
+                        isActive = showReplicaEdges,
                         onClick = { showReplicaEdges = !showReplicaEdges },
-                        label = { Text(stringResource("kafka_ui_topology_toggle_replicas")) },
                     )
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))

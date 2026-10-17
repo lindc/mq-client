@@ -8,9 +8,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
@@ -23,7 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.CoreModule
-import com.mqclient.mqui.command.ToolbarButton
+import com.mqclient.uicommon.command.ToolbarButton
 import com.mqclient.mqui.common.CompactSearchField
 import com.mqclient.mqui.objectlist.ObjectCardData
 import com.mqclient.mqui.objectlist.ObjectListEmptyState
@@ -79,11 +79,12 @@ fun RabbitMqQueuesPanel(
                     modifier = Modifier.weight(1f),
                 )
                 // 「只看异常队列」过滤 chip：概览健康度 Banner 点击跳转时自动开启。
-                FilterChip(
-                    selected = state.problemOnly,
-                    onClick = { state.problemOnly = !state.problemOnly },
+                ToolbarButton(
+                    icon = Icons.Default.FilterList,
+                    text = stringResource("rabbitmq_ui_queue_problem_chip"),
+                    isActive = state.problemOnly,
                     enabled = state.hasProblemQueues || state.problemOnly,
-                    label = { Text(stringResource("rabbitmq_ui_queue_problem_chip")) },
+                    onClick = { state.problemOnly = !state.problemOnly },
                 )
                 ToolbarButton(
                     icon = Icons.Default.Refresh,

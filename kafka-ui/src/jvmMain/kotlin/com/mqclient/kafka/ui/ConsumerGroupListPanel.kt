@@ -22,7 +22,7 @@ import androidx.compose.ui.unit.dp
 import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.CoreModule
 import com.mqclient.kafka.KafkaEvents
-import com.mqclient.mqui.command.ToolbarButton
+import com.mqclient.uicommon.command.ToolbarButton
 import com.mqclient.mqui.common.CompactSearchField
 import com.mqclient.mqui.objectlist.CardAction
 import com.mqclient.mqui.objectlist.ObjectCardData

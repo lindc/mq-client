@@ -36,7 +36,7 @@ import com.mqclient.kafka.KafkaEvents
 import com.mqclient.kafka.KafkaModule
 import com.mqclient.kafka.ui.ai.KafkaAiChainBuilder
 import com.mqclient.kafka.ui.ai.askAiCardAction
-import com.mqclient.mqui.command.ToolbarButton
+import com.mqclient.uicommon.command.ToolbarButton
 import com.mqclient.mqui.common.CompactSearchField
 import com.mqclient.mqui.objectlist.CardAction
 import com.mqclient.mqui.objectlist.ObjectCardData

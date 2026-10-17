@@ -14,7 +14,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.mqclient.mqui.command.ToolbarButton
+import com.mqclient.uicommon.command.ToolbarButton
 import com.mqclient.mqui.common.CompactSearchField
 import com.mqclient.uicommon.i18n.stringResource
 

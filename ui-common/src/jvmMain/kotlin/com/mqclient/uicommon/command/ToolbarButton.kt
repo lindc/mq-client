@@ -1,4 +1,4 @@
-package com.mqclient.mqui.command
+package com.mqclient.uicommon.command
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -36,6 +36,9 @@ import java.awt.Cursor
  * DBeaver 风格的扁平工具栏按钮：默认透明底，悬停浅色底，紧凑（图标 16dp +
  * 13sp 文字）。禁用态整体降透明。hover 用 interactionSource（与 ModuleSidebar
  * 同一套手法），光标用系统手型。
+ *
+ * [isActive] 用于开关类按钮（「显示系统对象」「只看异常队列」等）的选中态高亮：
+ * 激活时文字 / 图标变主题主色，与默认的次要色区分。
  */
 @Composable
 fun ToolbarButton(
@@ -45,6 +48,7 @@ fun ToolbarButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     isDangerous: Boolean = false,
+    isActive: Boolean = false,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val hovered by interactionSource.collectIsHoveredAsState()
@@ -81,6 +85,7 @@ fun ToolbarButton(
         val contentColor = when {
             !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
             isDangerous -> MaterialTheme.colorScheme.error
+            isActive -> MaterialTheme.colorScheme.primary
             else -> MaterialTheme.colorScheme.onSurfaceVariant
         }
         Icon(

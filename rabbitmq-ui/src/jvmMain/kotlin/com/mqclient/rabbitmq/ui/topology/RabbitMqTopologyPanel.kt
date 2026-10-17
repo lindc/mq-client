@@ -30,7 +30,7 @@ import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.CoreModule
 import com.mqclient.graph.TopologyData
 import com.mqclient.graph.TopologyNodeType
-import com.mqclient.mqui.command.ToolbarButton
+import com.mqclient.uicommon.command.ToolbarButton
 import com.mqclient.mqui.state.LoadState
 import com.mqclient.rabbitmq.RabbitMqEvents
 import com.mqclient.rabbitmq.RabbitMqExchangeSnapshot
