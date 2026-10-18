@@ -46,6 +46,7 @@ import com.dk.kuiver.renderer.KuiverInteractionCallbacks
 import com.dk.kuiver.renderer.KuiverViewer
 import com.dk.kuiver.renderer.KuiverViewerConfig
 import com.mqclient.topology.topologyEdgeStyle
+import com.mqclient.topology.TopologyScrollbars
 import com.mqclient.topology.TopologyZoomControls
 import com.mqclient.topology.TopologyNodeCard
 import com.mqclient.topology.NodeDoubleClick
@@ -352,6 +353,10 @@ private fun ClusterCanvas(
                 }
             },
         )
+
+        // 覆盖式滚动条：与 TopologyCanvas 同一实现——内容超出视口才出现（fit 后自动
+        // 隐藏），空白区事件穿透给下面的 KuiverViewer，不影响节点点击 / 画布平移。
+        TopologyScrollbars(viewerState)
 
         TopologyZoomControls(
             onRescan = onRescan,
