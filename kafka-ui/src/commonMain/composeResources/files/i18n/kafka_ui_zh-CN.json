@@ -1,6 +1,5 @@
 {
   "kafka_ui_page_placeholder": "选中左侧连接，从导航进入功能面板",
-
   "kafka_ui_section_basic": "基本",
   "kafka_ui_section_auth": "认证",
   "kafka_ui_section_tls": "TLS 信任库",
@@ -32,7 +31,6 @@
   "kafka_ui_error_timeout_range": "连接超时须为 5-300 之间的整数",
   "kafka_ui_error_object_scan_range": "对象扫描间隔须为 1-1440 之间的整数",
   "kafka_ui_error_lag_scan_range": "Lag 扫描间隔须为 10-3600 之间的整数",
-
   "kafka_action_ask_ai": "询问 AI",
   "kafka_ui_search_placeholder": "搜索主题",
   "kafka_ui_refresh": "刷新",
@@ -43,7 +41,6 @@
   "kafka_ui_connecting": "正在连接…",
   "kafka_ui_connect_failed": "连接失败",
   "kafka_ui_connect_disconnected": "连接已断开",
-
   "kafka_ui_nav_topics": "主题",
   "kafka_ui_nav_groups": "消费组",
   "kafka_ui_nav_topology": "拓扑图",
@@ -53,7 +50,6 @@
   "kafka_ui_group_members": "%1$d 成员",
   "kafka_ui_group_simple": "简单组",
   "kafka_ui_group_skipped": "%1$d 个消费组因权限未显示",
-
   "kafka_ui_topology_loading": "正在加载拓扑数据…",
   "kafka_ui_topology_empty": "没有可展示的 Topic 或 Broker",
   "kafka_ui_topology_toggle_internal": "内部主题",
@@ -77,7 +73,6 @@
   "kafka_ui_cluster_col_role": "角色",
   "kafka_ui_cluster_role_controller": "Controller",
   "kafka_ui_cluster_offline": "离线（推断）",
-  "kafka_ui_cluster_detail_unavailable": "Broker 详情将在后续版本提供",
   "kafka_ui_group_state_stable": "稳定",
   "kafka_ui_group_state_empty": "空组",
   "kafka_ui_group_state_dead": "已死",
@@ -178,7 +173,6 @@
   "kafka_ui_topic_props_delete_failed": "删除失败：%1$s",
   "kafka_ui_topic_props_not_in_cache": "该主题不在扫描缓存中，请刷新列表后重试",
   "kafka_ui_topic_props_overview_section": "概览",
-
   "kafka_ui_topic_messages": "查看消息",
   "kafka_ui_topic_clear": "清空消息",
   "kafka_ui_topic_clear_confirm_title": "清空消息",
@@ -188,7 +182,6 @@
   "kafka_ui_messages_title": "Topic 消息：%1$s",
   "kafka_ui_messages_tab_browse": "浏览消息",
   "kafka_ui_messages_tab_send": "发送消息",
-
   "kafka_ui_msg_browse_partition_all": "全部分区",
   "kafka_ui_msg_browse_start_label": "起点",
   "kafka_ui_msg_browse_start_latest": "最新往前",
@@ -213,11 +206,8 @@
   "kafka_ui_msg_browse_timestamp_empty": "该时间点之后无数据",
   "kafka_ui_msg_browse_filtered_empty": "没有匹配的消息",
   "kafka_ui_msg_browse_search": "搜索 Key / Value / Timestamp",
-
   "kafka_ui_msg_detail_title": "消息详情：Partition %1$d · Offset %2$d",
   "kafka_ui_msg_detail_download": "下载",
-  "kafka_ui_msg_detail_tab_content": "正文",
-  "kafka_ui_msg_detail_tab_header": "Header",
   "kafka_ui_msg_detail_h_topic": "Topic",
   "kafka_ui_msg_detail_h_partition": "Partition",
   "kafka_ui_msg_detail_h_offset": "Offset",
@@ -228,18 +218,9 @@
   "kafka_ui_msg_detail_h_value_size": "Value 大小（字节）",
   "kafka_ui_msg_detail_h_message_headers": "消息 Headers（%1$d）",
   "kafka_ui_msg_detail_headers_empty": "该消息没有 Headers",
-  "kafka_ui_msg_detail_empty_body": "消息体为空",
-  "kafka_ui_msg_detail_binary": "疑似二进制内容",
-  "kafka_ui_msg_detail_expand": "展开全部",
-  "kafka_ui_msg_detail_collapse": "收起",
-  "kafka_ui_msg_detail_interpreter": "解释器",
-  "kafka_ui_msg_detail_no_params": "该解释器没有参数",
-  "kafka_ui_msg_detail_interpreter_error": "解析失败：%1$s",
-  "kafka_ui_msg_detail_copy_body": "复制正文",
   "kafka_ui_msg_saved": "已保存：%1$s",
   "kafka_ui_msg_save_failed": "保存失败：%1$s",
   "kafka_ui_msg_copied": "已复制",
-
   "kafka_ui_send_topic": "Topic",
   "kafka_ui_send_partition": "Partition",
   "kafka_ui_send_partition_hint": "留空 = 按 Key 哈希或轮询",
@@ -277,5 +258,14 @@
   "kafka_ui_send_summary": "共 %1$d 条，成功 %2$d，失败 %3$d",
   "kafka_ui_send_close_confirm_text": "还有消息正在发送，关闭将中断剩余任务。确定关闭？",
   "kafka_ui_send_close_confirm_ok": "关闭",
-  "kafka_ui_send_service_not_ready": "服务未初始化"
+  "kafka_ui_send_service_not_ready": "服务未初始化",
+  "kafka_ui_msg_detail_tab_content": "正文",
+  "kafka_ui_msg_detail_tab_header": "Header",
+  "kafka_ui_msg_detail_empty_body": "消息体为空",
+  "kafka_ui_msg_detail_binary": "疑似二进制内容",
+  "kafka_ui_msg_detail_expand": "展开全部",
+  "kafka_ui_msg_detail_collapse": "收起",
+  "kafka_ui_msg_detail_interpreter": "解释器",
+  "kafka_ui_msg_detail_no_params": "该解释器没有参数",
+  "kafka_ui_msg_detail_copy_body": "复制正文"
 }

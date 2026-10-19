@@ -175,5 +175,18 @@
   "topology_action_zoom_out": "Zoom out",
   "topology_action_fit": "Fit to view",
   "topology_action_reset": "Reset",
-  "ai_chain_analysis_system_prompt": "You are an IBM MQ operations assistant. Below is the context of the current MQ object chain, provided as JSON.\n\nEach node in chain represents an MQ object; the one with isTarget set to true is the object the user is currently focused on.\n\nrelationToNext describes the message-flow relation between a node and the next one.\n\nAnswer the user's question based on the following data:\n- Focus on the object whose isTarget is true\n- Judge the cause of the problem in combination with the states of upstream and downstream nodes\n- If the evidence is insufficient, state what additional information is needed\n- Do not fabricate information that is not present in the data\n- Be specific in your answer, pointing to concrete objects and fields"
+  "ai_chain_analysis_system_prompt": "You are an IBM MQ operations assistant. Below is the context of the current MQ object chain, provided as JSON.\n\nEach node in chain represents an MQ object; the one with isTarget set to true is the object the user is currently focused on.\n\nrelationToNext describes the message-flow relation between a node and the next one.\n\nAnswer the user's question based on the following data:\n- Focus on the object whose isTarget is true\n- Judge the cause of the problem in combination with the states of upstream and downstream nodes\n- If the evidence is insufficient, state what additional information is needed\n- Do not fabricate information that is not present in the data\n- Be specific in your answer, pointing to concrete objects and fields",
+  "msg_detail_tab_content": "Content",
+  "msg_detail_tab_headers": "Header",
+  "msg_detail_empty_body": "Message body is empty",
+  "msg_detail_binary_notice": "Binary content — shown as hex preview (switch to the Hex interpreter on the right)",
+  "msg_detail_parse_failed": "Parse failed: %1$s (raw content shown instead)",
+  "msg_detail_expand": "Expand all",
+  "msg_detail_collapse": "Collapse",
+  "msg_detail_copy_body": "Copy body",
+  "msg_detail_copied": "Copied",
+  "msg_detail_copy_value": "Copy value",
+  "msg_detail_interpreter": "Interpreter",
+  "msg_detail_no_params": "This interpreter needs no parameters",
+  "msg_detail_load_failed": "Failed to load: %1$s"
 }

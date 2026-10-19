@@ -59,5 +59,6 @@ include(
     ":message-interpreter-text",
     ":message-interpreter-xml",
     ":message-interpreter-idoc",
+    ":message-interpreter-hex",
     ":message-interpreter-registry",
 )

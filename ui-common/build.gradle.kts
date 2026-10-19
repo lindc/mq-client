@@ -33,6 +33,10 @@ kotlin {
             // FileKit 文件选择器（uicommon.file.FilePickerUtil 的 actual：证书路径 /
             // 消息体导入导出等共用）。expect 侧只用 stdlib 类型，依赖只需给 actual。
             implementation(libs.filekit.dialogs)
+            // 消息详情对话框（MessageDetailDialog）：解释器选择区 + 正文渲染管线。
+            // registry 以 api() 传递契约（MessageInterpreter/ParamDef），实现经
+            // runtimeOnly 聚合进运行时 classpath（ServiceLoader 发现）。
+            implementation(projects.messageInterpreterRegistry)
         }
         // jvmTest: kotlin.test + JUnit4 runner for the i18n behaviour tests.
         jvmTest.dependencies {

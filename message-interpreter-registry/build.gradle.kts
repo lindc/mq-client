@@ -21,6 +21,7 @@ kotlin {
             runtimeOnly(projects.messageInterpreterXml)
             runtimeOnly(projects.messageInterpreterBase64)
             runtimeOnly(projects.messageInterpreterIdoc)
+            runtimeOnly(projects.messageInterpreterHex)
         }
         jvmTest.dependencies {
             implementation(kotlin("test"))

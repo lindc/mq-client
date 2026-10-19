@@ -11,9 +11,9 @@ import kotlin.test.assertTrue
 class MessageInterpretersTest {
 
     @Test
-    fun `loads all five built-in interpreters`() {
+    fun `loads all six built-in interpreters`() {
         val ids = MessageInterpreters.loadAll().map { it.id }
-        assertEquals(listOf("text", "json", "xml", "base64", "idoc"), ids)
+        assertEquals(listOf("text", "json", "xml", "base64", "idoc", "hex"), ids)
     }
 
     @Test
@@ -36,7 +36,7 @@ class MessageInterpretersTest {
     fun `every built-in interpreter ships i18n resources for both languages`() = kotlinx.coroutines.runBlocking {
         val tables = MessageInterpreters.i18nTables
         assertEquals(
-            listOf("msg_interp_text", "msg_interp_json", "msg_interp_xml", "msg_interp_base64", "msg_interp_idoc"),
+            listOf("msg_interp_text", "msg_interp_json", "msg_interp_xml", "msg_interp_base64", "msg_interp_idoc", "msg_interp_hex"),
             tables.map { it.base },
         )
         for (table in tables) {
