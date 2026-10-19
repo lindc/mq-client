@@ -162,6 +162,21 @@ class RabbitMqTopologyGraphBuilderTest {
     }
 
     @Test
+    fun flowQueueIsErrorEvenWithoutStatus() {
+        val data = buildKuiverFromSnapshot(
+            snapshot(
+                exchanges = listOf(exchange("app.orders")),
+                queues = listOf(queue("blocked.q", state = "flow")),
+                bindings = emptyList(),
+            ),
+            strings,
+        )
+        // flow = 内存/磁盘告警被阻塞，与 down 同级（队列卡片红点同口径）。
+        assertEquals(NodeSeverity.ERROR, data.severities["q:blocked.q"])
+        assertNull(data.badges["q:blocked.q"])
+    }
+
+    @Test
     fun emptySnapshotYieldsEmptyGraph() {
         val data = buildKuiverFromSnapshot(snapshot(emptyList(), emptyList(), emptyList()), strings)
         assertTrue(data.kuiver.nodes.isEmpty())

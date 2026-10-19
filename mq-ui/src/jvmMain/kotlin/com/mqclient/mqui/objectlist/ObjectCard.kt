@@ -57,7 +57,8 @@ private val CardPaddingVertical = 10.dp
  *
  * 第 1 行：类型图标（可选）+ 对象名（单行省略）+ 数值（可选，右上角 badge 位，
  * 如队列深度/监听端口）；第 2 行：状态图标（可选，16dp 与操作按钮同尺寸）+
- * 状态文字（可选，左侧）+ 操作按钮（[ObjectCardData.actions]，图标 + Tooltip，
+ * 状态文字（可选，左侧）+ 纯展示指标（可选，[ObjectCardData.indicators]，icon + 数字）+
+ * 操作按钮（[ObjectCardData.actions]，图标 + Tooltip，
  * 由各 MQ 模块提供，右侧）。左读状态、右做操作，操作按钮不挤压对象名。
  *
  * 交互：单击 [onClick]、双击 [onDoubleClick]（整卡可点，操作按钮除外）；
@@ -93,13 +94,14 @@ fun ObjectCard(
         animationSpec = tween(HOVER_ANIM_MS),
         label = "objectCardElevation",
     )
-    // 边框颜色：按下实色 primary、悬停半透明 primary、默认 outlineVariant。
+    // 边框颜色：按下实色 primary；悬停半透明 primary；默认 outlineVariant。
+    // alertTint 非空时覆盖默认与悬停两态（告警边框悬停保留，交互反馈靠阴影抬升）。
     val borderColor by animateColorAsState(
         targetValue =
             when {
                 isPressed -> MaterialTheme.colorScheme.primary
-                isHovered -> MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-                else -> MaterialTheme.colorScheme.outlineVariant
+                isHovered -> data.alertTint ?: MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                else -> data.alertTint ?: MaterialTheme.colorScheme.outlineVariant
             },
         animationSpec = tween(HOVER_ANIM_MS),
         label = "objectCardBorder",
@@ -226,7 +228,28 @@ fun ObjectCard(
                     }
                 }
                 Spacer(Modifier.weight(1f))
-                // 右侧：操作按钮（左读状态、右做操作，按钮不挤压对象名）。
+                // 右侧：纯展示指标（icon + 数字，不可点）→ 操作按钮。
+                // 左读状态、右做操作，都不挤压对象名。
+                data.indicators.forEach { indicator ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        Icon(
+                            imageVector = indicator.icon,
+                            contentDescription = indicator.label,
+                            modifier = Modifier.size(14.dp),
+                            tint = indicator.tint ?: MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            text = indicator.label,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontSize = 12.sp,
+                            color = indicator.tint ?: MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                }
                 data.actions.forEach { action ->
                     ActionIconButton(action, executing = action.id in data.executingActionIds)
                 }

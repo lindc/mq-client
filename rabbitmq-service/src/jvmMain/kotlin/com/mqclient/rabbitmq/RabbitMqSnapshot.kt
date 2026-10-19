@@ -37,6 +37,25 @@ data class RabbitMqQueueSnapshot(
     val exclusive: Boolean,
 )
 
+/**
+ * 队列详情快照（GET /api/queues/{vhost}/{name} 详情端点的 UI 投影）：慢扫快照没有
+ * arguments 与 queue_type，属性对话框实时拉取。arguments 已在 service 层渲染成
+ * 纯文本（标量取原值，数组/对象 toString）—— UI 模块不依赖 kotlinx.serialization。
+ */
+data class RabbitMqQueueDetailSnapshot(
+    val name: String,
+    val state: String?,
+    val queueType: String,
+    val durable: Boolean,
+    val autoDelete: Boolean,
+    val exclusive: Boolean,
+    val arguments: Map<String, String>,
+    val messages: Long,
+    val messagesReady: Long,
+    val messagesUnacknowledged: Long,
+    val consumers: Int,
+)
+
 /** 一条交换机的慢扫快照。name="" 是各 vhost 都有的默认交换机（UI 按「(AMQP default)」展示）。 */
 data class RabbitMqExchangeSnapshot(
     val name: String,

@@ -73,6 +73,35 @@ data class RabbitMqQueueDto(
         }
 }
 
+/**
+ * 队列详情（`GET /api/queues/{vhost}/{name}`）：队列属性对话框的实时数据源 ——
+ * 慢扫快照不含 arguments 与 queue_type，只有详情端点有；计数与快扫同字段。
+ */
+@Serializable
+data class RabbitMqQueueDetailDto(
+    val name: String = "",
+    val vhost: String = "/",
+    val state: JsonElement? = null,
+    /** classic（默认）/ quorum —— 详情端点才有，慢扫 DTO 没这字段。 */
+    @SerialName("queue_type") val queueType: String = "classic",
+    val durable: Boolean = false,
+    @SerialName("auto_delete") val autoDelete: Boolean = false,
+    val exclusive: Boolean = false,
+    val arguments: Map<String, JsonElement> = emptyMap(),
+    val messages: Long = 0,
+    @SerialName("messages_ready") val messagesReady: Long = 0,
+    @SerialName("messages_unacknowledged") val messagesUnacknowledged: Long = 0,
+    val consumers: Int = 0,
+) {
+    /** state 的字符串投影：字符串原样；数组（多节点各报各的状态）取首个元素。 */
+    val stateText: String?
+        get() = when (val s = state) {
+            is JsonPrimitive -> s.content
+            is JsonArray -> (s.firstOrNull() as? JsonPrimitive)?.content
+            else -> null
+        }
+}
+
 /** 交换机条目（`GET /api/exchanges/{vhost}`；含 name="" 的默认交换机）。 */
 @Serializable
 data class RabbitMqExchangeDto(
@@ -187,14 +216,29 @@ class RabbitMqAdminClient(private val config: RabbitMqConfig) : AutoCloseable {
         else -> IllegalStateException(e.message ?: e::class.simpleName ?: "unknown", e)
     }
 
-    /** 状态码 → 统一错误映射；2xx 原样放行。 */
-    private fun checkStatus(status: Int) {
+    /** 状态码 → 统一错误映射；2xx 原样放行。[body] 是响应体，非 2xx 时提取 reason 带进文案。 */
+    private fun checkStatus(status: Int, body: String? = null) {
+        val reason = reasonOf(body)
         when (status) {
             in 200..299 -> Unit
-            401 -> throw IllegalStateException("认证失败（401）：检查用户名 / 密码")
-            403 -> throw IllegalStateException("授权失败（403）：账号权限不足")
-            404 -> throw IllegalStateException("未找到（404）：检查管理端口与 vhost 是否正确")
-            else -> throw IllegalStateException("管理 API 返回 HTTP $status")
+            401 -> throw IllegalStateException("认证失败（401）：检查用户名 / 密码$reason")
+            403 -> throw IllegalStateException("授权失败（403）：账号权限不足$reason")
+            404 -> throw IllegalStateException("未找到（404）：检查管理端口与 vhost 是否正确$reason")
+            else -> throw IllegalStateException("管理 API 返回 HTTP $status$reason")
+        }
+    }
+
+    companion object {
+        /** RabbitMQ 错误响应（JSON）里 reason 字段的提取；plain text 响应整体兜底。 */
+        private val REASON_REGEX = Regex("\"reason\"\\s*:\\s*\"([^\"]+)\"")
+
+        /** 非 2xx 的原因后缀：JSON 取 reason 字段，否则原文；截断 200 字符。 */
+        private fun reasonOf(body: String?): String {
+            val text = body?.trim().orEmpty()
+            if (text.isEmpty()) return ""
+            val matched = REASON_REGEX.find(text)?.groupValues?.get(1) ?: text
+            val snippet = if (matched.length > 200) matched.take(200) + "…" else matched
+            return "：$snippet"
         }
     }
 
@@ -206,8 +250,9 @@ class RabbitMqAdminClient(private val config: RabbitMqConfig) : AutoCloseable {
         } catch (e: Exception) {
             throw mapConnectionError(e)
         }
-        checkStatus(response.status.value)
-        return response.bodyAsText()
+        val body = response.bodyAsText()
+        checkStatus(response.status.value, body)
+        return body
     }
 
     /**
@@ -233,8 +278,9 @@ class RabbitMqAdminClient(private val config: RabbitMqConfig) : AutoCloseable {
         } catch (e: Exception) {
             throw mapConnectionError(e)
         }
-        checkStatus(response.status.value)
-        return response.bodyAsText()
+        val body = response.bodyAsText()
+        checkStatus(response.status.value, body)
+        return body
     }
 
     /** 连接类错误的统一文案（host:port 指向管理 API）。 */
@@ -330,6 +376,28 @@ class RabbitMqAdminClient(private val config: RabbitMqConfig) : AutoCloseable {
             pathSegment(queue),
             pathSegment(propertiesKey),
         )
+    }
+
+    /** 指定队列详情（实时查询，不走缓存）：属性对话框数据源（arguments / queue_type / 计数）。 */
+    suspend fun queueDetail(name: String): RabbitMqQueueDetailDto =
+        json.decodeFromString(
+            RabbitMqQueueDetailDto.serializer(),
+            getJson("queues", vhostSegment(), pathSegment(name)),
+        )
+
+    /**
+     * 清空队列：`DELETE /api/queues/{vhost}/{name}/contents`（只删 Ready，Unacked 不受影响）。成功 204。
+     */
+    suspend fun purgeQueue(name: String) {
+        mutatingRequest(HttpMethod.Delete, null, "queues", vhostSegment(), pathSegment(name), "contents")
+    }
+
+    /**
+     * 删除队列：`DELETE /api/queues/{vhost}/{name}`。成功 204。有消费者连接时服务端
+     * 返回 400（reason 在响应体，checkStatus 原样带进文案）。
+     */
+    suspend fun deleteQueue(name: String) {
+        mutatingRequest(HttpMethod.Delete, null, "queues", vhostSegment(), pathSegment(name))
     }
 
     /**

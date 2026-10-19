@@ -362,6 +362,73 @@ class RabbitMqScanService(private val context: ServiceContext) {
         return routed
     }
 
+    /**
+     * 队列详情（实时查询，不走缓存 —— 属性对话框要新鲜的 arguments / queue_type /
+     * 计数，与 exchangeBindings 同一哲学）。
+     */
+    suspend fun queueDetail(connectionId: String, name: String): RabbitMqQueueDetailSnapshot {
+        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
+        val admin = ctx.admin ?: throw IllegalStateException("未连接")
+        return withContext(Dispatchers.IO) { admin.queueDetail(name) }.let { d ->
+            RabbitMqQueueDetailSnapshot(
+                name = d.name,
+                state = d.stateText,
+                queueType = d.queueType,
+                durable = d.durable,
+                autoDelete = d.autoDelete,
+                exclusive = d.exclusive,
+                arguments = d.arguments.mapValues { (_, v) -> argumentText(v) },
+                messages = d.messages,
+                messagesReady = d.messagesReady,
+                messagesUnacknowledged = d.messagesUnacknowledged,
+                consumers = d.consumers,
+            )
+        }
+    }
+
+    /** argument 值投影：标量取原值（content 已去引号），数组 / 对象 toString。 */
+    private fun argumentText(value: kotlinx.serialization.json.JsonElement): String =
+        when (value) {
+            is kotlinx.serialization.json.JsonPrimitive -> value.content
+            else -> value.toString()
+        }
+
+    /**
+     * 清空队列（实时操作）：DELETE contents 端点（只删 Ready，Unacked 不受影响）。
+     * 成功后触发一轮 scanNow，快扫计数缓存几秒内归零（对话框自身也会重载实时详情）。
+     */
+    suspend fun purgeQueue(connectionId: String, name: String) {
+        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
+        val admin = ctx.admin ?: throw IllegalStateException("未连接")
+        withContext(Dispatchers.IO) { admin.purgeQueue(name) }
+        rabbitMqLog.info("queue purged: connection=$connectionId queue=$name")
+        RabbitMqModule.scanNow(connectionId)
+    }
+
+    /**
+     * 删除队列（实时操作）：成功后同步剪缓存（queues / queueStatus）→ OBJECTS_SCANNED
+     * 驱动列表与拓扑刷新（与 deleteExchange 同一模式）。有消费者连接时服务端 400，
+     * reason 原样抛给调用方。
+     */
+    suspend fun deleteQueue(connectionId: String, name: String) {
+        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
+        val admin = ctx.admin ?: throw IllegalStateException("未连接")
+        withContext(Dispatchers.IO) { admin.deleteQueue(name) }
+        ctx.cache?.let { cache ->
+            cache.getAs<List<RabbitMqQueueSnapshot>>(KEY_QUEUES).orEmpty()
+                .filter { it.name != name }
+                .let { cache.put(KEY_QUEUES, it, ttlMs = objectsTtlMs(ctx)) }
+            cache.getAs<Map<String, RabbitMqQueueStatusSnapshot>>(KEY_QUEUE_STATUS).orEmpty()
+                .filterKeys { it != name }
+                .let { cache.put(KEY_QUEUE_STATUS, it, ttlMs = statusTtlMs(ctx)) }
+        }
+        context.emit(
+            name = RabbitMqEvents.OBJECTS_SCANNED,
+            payload = mapOf("connectionId" to connectionId),
+        )
+        rabbitMqLog.info("queue deleted: connection=$connectionId queue=$name")
+    }
+
     // ---------------------------------------------------------------- 内部
 
     /** 连接处于 Connected 的上下文；否则 null（定时任务下一轮由状态守卫跳过）。 */

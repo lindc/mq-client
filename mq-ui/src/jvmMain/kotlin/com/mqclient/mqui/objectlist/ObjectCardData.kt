@@ -34,10 +34,30 @@ data class ObjectCardData(
      */
     val metricColor: Color? = null,
     /** 第 1 行的操作按钮（[CardAction]，由各 MQ 模块构造）；空则不渲染。 */
+    /**
+     * 第 2 行 actions 左侧的纯展示指标（icon + 数字/短文案，不可点击，如消费者数）。
+     * 空则不渲染，各模块不传即维持原布局。
+     */
+    val indicators: List<ObjectCardIndicator> = emptyList(),
+    /**
+     * 告警边框色（如积压无消费者的警告橙）：非空时卡片默认态与悬停态的边框都用它
+     * （悬停保留告警，交互反馈靠阴影抬升），按下态仍走 primary。null = 常规边框。
+     */
+    val alertTint: Color? = null,
     val actions: List<CardAction> = emptyList(),
     /**
      * 正在执行的动作 id 集合（[CardAction.id]）。命中的按钮显示内联转圈并禁用点击，
      * 用于「启动 / 停止」这类异步动作——执行期间不允许重复触发，也给出可见的反馈。
      */
     val executingActionIds: Set<String> = emptySet(),
+)
+
+/**
+ * 纯展示指标：icon + 数字/短文案，渲染在 actions 左侧（第 2 行右侧区），不可点击。
+ * [tint] 同时作用于图标与文字；null 用主题 onSurfaceVariant（次要灰）。
+ */
+data class ObjectCardIndicator(
+    val icon: ImageVector,
+    val label: String,
+    val tint: Color? = null,
 )

@@ -8,8 +8,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Circle
+import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -17,7 +21,11 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -25,11 +33,14 @@ import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.CoreModule
 import com.mqclient.uicommon.command.ToolbarButton
 import com.mqclient.mqui.common.CompactSearchField
+import com.mqclient.mqui.objectlist.CardAction
 import com.mqclient.mqui.objectlist.ObjectCardData
+import com.mqclient.mqui.objectlist.ObjectCardIndicator
 import com.mqclient.mqui.objectlist.ObjectListEmptyState
 import com.mqclient.mqui.objectlist.ObjectListPanel
 import com.mqclient.mqui.state.LoadStateContent
 import com.mqclient.rabbitmq.RabbitMqEvents
+import kotlinx.coroutines.launch
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
@@ -37,8 +48,10 @@ import com.mqclient.uicommon.i18n.withArg
 /**
  * 队列列表页（导航项 `queues` 的 Tab 内容）：缓存优先 + 事件驱动的卡片网格，与
  * kafka 的 TopicListPanel 同一套视觉语言（CompactSearchField / ToolbarButton /
- * ObjectListPanel）。卡片：队列名 + 状态 / 消息数 / 消费者数（计数走快扫缓存，
- * 未扫到显示 "-"）。第一阶段无卡片操作（消息收发在后续阶段）。
+ * ObjectListPanel）。卡片四角布局（共享 ObjectCard 槽位）：左上队列名 / 右上消息数
+ * （积压且无消费者时警告橙）/ 左下状态色点 / 右下消费者指标（People 图标 + 数字，
+ * 0 与快扫未到灰、有消费者正常色）+ 操作（查看消息、属性——第一阶段均为 Snackbar
+ * 占位）。计数走快扫缓存，未扫到显示 "-"。
  */
 @Composable
 fun RabbitMqQueuesPanel(
@@ -47,6 +60,8 @@ fun RabbitMqQueuesPanel(
 ) {
     val state = remember(connectionId) { RabbitMqQueuesState(connectionId) }
     val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    var propsQueue by remember(connectionId) { mutableStateOf<RabbitMqQueueCardInfo?>(null) }
     val connectionStatus = rememberRabbitMqConnectionStatus(connectionId)
     LaunchedEffect(connectionId) { state.load() }
     LaunchedEffect(connectionId, connectionStatus) { state.onStatusChanged(connectionStatus) }
@@ -111,23 +126,66 @@ fun RabbitMqQueuesPanel(
                     },
                     items =
                         state.filtered.map { info ->
+                            // 状态色点：running 绿 / idle 灰 / flow·down·crashed 红（危险）/
+                            // 未知或快扫未到灰。文字颜色随色点（共享卡片「同色」约定）。
+                            // 映射收敛在 rabbitMqQueueStateColor（与拓扑 severity 同口径）。
+                            val statusTint = rabbitMqQueueStateColor(info.state)
+                            val statusWord = when (info.state) {
+                                // flow = 内存/磁盘告警被阻塞，必须直白说出「阻塞」。
+                                "flow" -> stringResource("rabbitmq_ui_queue_state_blocked")
+                                else -> info.state
+                            }
+                            // 消息数告警：> 0 且确认无消费者 → 警告橙（积压无人消费）。
+                            val backlog = (info.messages ?: 0) > 0 && info.consumers == 0
+                            val metricColor = if (backlog) RabbitMqWarningOrange else null
                             ObjectCardData(
                                 id = info.name,
                                 title = info.name,
                                 typeIcon = Icons.Default.Forum,
                                 typeLabel = stringResource("rabbitmq_ui_nav_queues"),
-                                statusText =
+                                // 右上角：消息总数（Ready + Unacked）。
+                                metricValue = stringResource("rabbitmq_ui_queue_field_messages")
+                                    .withArg(info.messages.orDash()),
+                                metricColor = metricColor,
+                                // 左下：状态色点；running 只留绿点（共享卡 statusText=null
+                                // 不渲染文字），idle 灰点灰字，flow/down 红点红字。
+                                statusIcon = Icons.Filled.Circle,
+                                statusIconTint = statusTint,
+                                statusText = statusWord?.takeIf { it != "running" },
+                                // 右下：消费者指标（icon + 数字，纯展示）+ 查看消息 / 属性
+                                //（第一阶段 Snackbar 占位）。
+                                indicators =
                                     listOf(
-                                        info.state
-                                            ?.let { stringResource("rabbitmq_ui_queue_field_state").withArg(it) },
-                                        stringResource("rabbitmq_ui_queue_field_messages")
-                                            .withArg(info.messages.orDash()),
-                                        stringResource("rabbitmq_ui_queue_field_consumers")
-                                            .withArg(info.consumers.orDash()),
-                                        if (info.durable) stringResource("rabbitmq_ui_queue_field_durable") else null,
-                                    ).filterNotNull()
-                                        .joinToString(" · "),
-                                actions = emptyList(),
+                                        ObjectCardIndicator(
+                                            icon = Icons.Default.People,
+                                            label = info.consumers.orDash(),
+                                            // 纯数据弱化：统一 60% 次要灰，与可点操作区拉开层级。
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                        ),
+                                    ),
+                                // 积压告警边框：默认态与悬停态都保留（共享卡 alertTint 槽位）。
+                                alertTint = if (backlog) RabbitMqWarningOrange.copy(alpha = 0.5f) else null,
+                                actions =
+                                    listOf(
+                                        CardAction(
+                                            id = "messages",
+                                            icon = Icons.Default.Email,
+                                            tooltip = "rabbitmq_ui_queue_action_messages",
+                                            onClick = {
+                                                scope.launch {
+                                                    snackbarHostState.showSnackbar(
+                                                        stringResource("rabbitmq_ui_queue_messages_todo"),
+                                                    )
+                                                }
+                                            },
+                                        ),
+                                        CardAction(
+                                            id = "properties",
+                                            icon = Icons.Default.Info,
+                                            tooltip = "rabbitmq_ui_queue_action_props",
+                                            onClick = { propsQueue = info },
+                                        ),
+                                    ),
                             )
                         },
                     onCardClick = {},
@@ -136,6 +194,22 @@ fun RabbitMqQueuesPanel(
                 )
             }
         }
+        // 队列属性对话框（卡片 ⓘ 打开；删除成功后回调刷新 + Snackbar）。
+        propsQueue?.let { info ->
+            RabbitMqQueuePropertiesDialog(
+                connectionId = connectionId,
+                queueName = info.name,
+                onDismiss = { propsQueue = null },
+                onDeleted = {
+                    scope.launch {
+                        snackbarHostState.showSnackbar(
+                            stringResource("rabbitmq_ui_queue_delete_done").withArg(info.name),
+                        )
+                    }
+                },
+            )
+        }
+
         ThemedSnackbarHost(
             hostState = snackbarHostState,
             modifier = Modifier.align(Alignment.BottomCenter),

@@ -54,7 +54,8 @@ data class RabbitMqTopologySnapshot(
  *
  * 告警级别（[NodeSeverity]，与概览健康度同口径）：
  *  - queue：`messages > 0 && consumers == 0` → WARNING（有堆积没人消费）；
- *    state == "down" → ERROR；快扫计数未覆盖（status 缺该队列）→ NORMAL 不误判；
+ *    state == "down" / "flow"（阻塞）/ "crashed" → ERROR；快扫计数未覆盖（status
+ *    缺该队列）→ NORMAL 不误判；
  *  - exchange：恒 NORMAL。
  *
  * 限制：kuiver 的 EdgeStyle 不支持边标签 —— Routing Key 第一阶段不上图
@@ -125,14 +126,17 @@ fun buildKuiverFromSnapshot(
 }
 
 /**
- * queue 健康级别：有堆积且无消费者 → WARNING；state=down（节点不可用）→ ERROR；
+ * queue 健康级别：有堆积且无消费者 → WARNING；state=down/flow/crashed（不可用或阻塞）→ ERROR；
  * 快扫计数未覆盖（刚建 / 刚删窗口期）→ NORMAL 不误判。
  */
 private fun queueSeverity(
     queue: RabbitMqQueueSnapshot,
     status: RabbitMqQueueStatusSnapshot?,
 ): NodeSeverity = when {
-    queue.state.equals("down", ignoreCase = true) -> NodeSeverity.ERROR
+    // down（节点不可用）/ flow（内存/磁盘告警发布被阻塞）与队列卡片色点同一口径。
+    queue.state.equals("down", ignoreCase = true) ||
+        queue.state.equals("flow", ignoreCase = true) ||
+        queue.state.equals("crashed", ignoreCase = true) -> NodeSeverity.ERROR
     status != null && status.messages > 0 && status.consumers == 0 -> NodeSeverity.WARNING
     else -> NodeSeverity.NORMAL
 }

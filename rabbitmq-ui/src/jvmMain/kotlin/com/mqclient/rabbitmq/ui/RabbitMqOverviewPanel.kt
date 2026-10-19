@@ -70,13 +70,13 @@ import java.util.Locale
 internal const val BACKLOG_THRESHOLD = 1_000L
 
 /** 项目既定的语义告警橙（与 Kafka lag 染色同一约定，不随主题翻转）。 */
-private val WARNING_ORANGE = Color(0xFFED6C02)
+private val WARNING_ORANGE = RabbitMqWarningOrange
 
 /** 项目既定的语义健康绿（与 Kafka Controller 徽章同一约定，不随主题翻转）。 */
-private val HEALTH_GREEN = Color(0xFF2E7D32)
+private val HEALTH_GREEN = RabbitMqRunningGreen
 
 /** 项目既定的语义异常红（节点未运行，与上面两个同一套约定，不随主题翻转）。 */
-private val NODE_DOWN_RED = Color(0xFFD32F2F)
+private val NODE_DOWN_RED = RabbitMqDangerRed
 
 /** 一次缓存汇总的结果（纯数据）；null = 数据未到齐（卡片 "-" 占位 + Banner 加载态）。 */
 data class RabbitMqOverviewSummary(

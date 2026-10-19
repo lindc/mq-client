@@ -35,6 +35,7 @@ import com.mqclient.mqui.state.LoadState
 import com.mqclient.rabbitmq.RabbitMqEvents
 import com.mqclient.rabbitmq.RabbitMqExchangeSnapshot
 import com.mqclient.rabbitmq.RabbitMqModule
+import com.mqclient.rabbitmq.ui.RabbitMqQueuePropertiesDialog
 import com.mqclient.rabbitmq.ui.RabbitMqExchangePropertiesDialog
 import com.mqclient.rabbitmq.ui.ensureRabbitMqConnecting
 import com.mqclient.rabbitmq.ui.rememberRabbitMqConnectionStatus
@@ -148,6 +149,7 @@ fun RabbitMqTopologyPanel(
             }
             // 双击 exchange 节点 → 打开属性对话框（含 Bindings 表与删除入口）。
             var propsExchange by remember(connectionId) { mutableStateOf<RabbitMqExchangeSnapshot?>(null) }
+            var propsQueue by remember(connectionId) { mutableStateOf<String?>(null) }
             Column(modifier.fillMaxSize()) {
                 // 顶部开关行：系统对象（默认交换机 / amq.*）是否进图。
                 Row(
@@ -182,11 +184,12 @@ fun RabbitMqTopologyPanel(
                                     propsExchange = it
                                 }
                             }
-                            // queue 节点的属性对话框未实现，双击出提示。
-                            else -> scope.launch {
-                                snackbarHostState.showSnackbar(
-                                    stringResource("rabbitmq_ui_topology_queue_props_todo"),
-                                )
+                            // queue 节点：双击开属性对话框（节点 id 投影队列名，详情实时拉）。
+                            else -> {
+                                val name = nodeId.removePrefix("q:")
+                                if (name != nodeId) {
+                                    propsQueue = name
+                                }
                             }
                         }
                     },
@@ -198,6 +201,15 @@ fun RabbitMqTopologyPanel(
                     // TopologyCanvas 保证主线程相邻（时序不变量见 TopologyCanvas 文档）。
                     onBeforeLayout = { rabbitMqTopologyNodeTypes = it.nodeTypes },
                     snackbarHostState = snackbarHostState,
+                )
+            }
+
+            // 队列属性对话框（双击 queue 打开；删除成功后经 OBJECTS_SCANNED 事件刷新图）。
+            propsQueue?.let { queueName ->
+                RabbitMqQueuePropertiesDialog(
+                    connectionId = connectionId,
+                    queueName = queueName,
+                    onDismiss = { propsQueue = null },
                 )
             }
 
