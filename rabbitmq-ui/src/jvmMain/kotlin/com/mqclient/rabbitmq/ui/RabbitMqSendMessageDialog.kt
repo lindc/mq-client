@@ -17,9 +17,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Cancel
@@ -31,9 +30,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
@@ -50,7 +47,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.mqclient.mqui.objectlist.ObjectListEmptyState
 import com.mqclient.rabbitmq.RabbitMqModule
 import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.ThemedSnackbarHost
@@ -127,12 +123,9 @@ private class RabbitMqSendState(
     var singleOutcome by mutableStateOf<SingleOutcome?>(null)
         private set
 
-    // ---- 单条模式：Headers 键值对 + 消息正文 ----
+    // ---- Headers 键值对 + 消息正文（单条 / 批量共用同一组）----
     var headers by mutableStateOf(listOf<Pair<String, String>>())
     var payload by mutableStateOf("")
-
-    /** 批量模式专属 Headers（与单条的 [headers] 各存各的），应用到本轮每一条消息。 */
-    var batchHeaders by mutableStateOf(listOf<Pair<String, String>>())
 
     /* ------------------------------ 批量任务管理 ------------------------------ */
 
@@ -207,8 +200,8 @@ private class RabbitMqSendState(
             batchSummary = null
             batchTotal = targets.size
             processedCount = 0
-            // 本轮锁定：全部文件用同一组 batchHeaders（key 空白的行忽略）。
-            val headerMap = batchHeaders
+            // 本轮锁定：全部文件用同一组 headers（key 空白的行忽略）。
+            val headerMap = headers
                 .filter { it.first.isNotBlank() }
                 .associate { it.first.trim() to it.second }
             var ok = 0
@@ -232,7 +225,7 @@ private class RabbitMqSendState(
         if (task.status != SendStatus.FAILED) return
         scope.launch {
             updateTask(id) { it.copy(status = SendStatus.SENDING, unrouted = false, errorMessage = null) }
-            val headerMap = batchHeaders
+            val headerMap = headers
                 .filter { it.first.isNotBlank() }
                 .associate { it.first.trim() to it.second }
             val outcome = publish(routingKey, b64(task.content), headerMap, "base64")
@@ -283,9 +276,10 @@ private class RabbitMqSendState(
 
 /**
  * 「发送消息」对话框（交换机卡片 ✉️ 入口，开发辅助）：顶部固定区（目标交换机只读 +
- * Routing Key 必填）+ 单条 / 批量两个 Tab。单条 = Headers 键值对 + 正文 TextArea
- * （可从文件加载，string 编码）；批量 = 多文件表格，全部用同一个 Routing Key 串行
- * 发送（base64 编码），失败可重试。底层走管理 API publish（见
+ * Routing Key 必填）+ 单页融合发送区（对齐队列对话框 SendPane）：正文 TextArea（仅
+ * 手动输入）+ Headers + 文件列表（"选择文件"多选），全部用同一个 Routing Key 发送 ——
+ * 文件列表非空 = 按列表串行发（base64 编码，忽略正文），否则正文非空 = 单条发
+ * （string 编码），失败可重试。底层走管理 API publish（见
  * [com.mqclient.rabbitmq.RabbitMqScanService.publishTestMessage]）。
  */
 @Composable
@@ -300,7 +294,6 @@ fun RabbitMqSendMessageDialog(
     val state = remember { RabbitMqSendState(connectionId, exchangeName, scope) }
     var routingKey by remember { mutableStateOf("") }
     var routingKeyError by remember { mutableStateOf<String?>(null) }
-    var selectedTab by remember { mutableIntStateOf(0) }
 
     fun validatedRoutingKey(): String? {
         if (routingKey.isBlank()) {
@@ -311,31 +304,25 @@ fun RabbitMqSendMessageDialog(
         return routingKey
     }
 
-    fun pickForSingle() {
-        scope.launch {
-            val paths = pickFiles(stringResource("rabbitmq_ui_send_pick_title"))
-            val path = paths.firstOrNull() ?: return@launch
-            val text = withContext(Dispatchers.IO) {
-                runCatching { java.io.File(path).readText(Charsets.UTF_8) }.getOrNull()
-            }
-            if (text == null) {
-                snackbar.showSnackbar(
-                    stringResource("rabbitmq_ui_send_file_read_failed")
-                        .withArg(java.io.File(path).name),
-                )
-            } else {
-                state.payload = text
-            }
-        }
-    }
-
-    fun pickForBatch() {
+    fun pickFiles() {
         scope.launch {
             val paths = pickFiles(stringResource("rabbitmq_ui_send_pick_title"))
             if (paths.isEmpty()) return@launch
             val failed = state.loadFiles(paths)
             failed.forEach { name ->
                 snackbar.showSnackbar(stringResource("rabbitmq_ui_send_file_read_failed").withArg(name))
+            }
+        }
+    }
+
+    // 发送统一入口：文件列表非空 → 全部发送（忽略正文）；否则正文非空 → 单条发；
+    // 两者皆空 → 提示。Routing Key 均先校验。
+    fun submit() {
+        when {
+            state.tasks.isNotEmpty() -> validatedRoutingKey()?.let(state::sendAll)
+            state.payload.isNotBlank() -> validatedRoutingKey()?.let(state::sendSingle)
+            else -> scope.launch {
+                snackbar.showSnackbar(stringResource("rabbitmq_ui_send_input_required"))
             }
         }
     }
@@ -391,88 +378,125 @@ fun RabbitMqSendMessageDialog(
             }
             Spacer(Modifier.height(8.dp))
 
-            // ---- Tab：单条 / 批量 ----
-            PrimaryTabRow(selectedTabIndex = selectedTab) {
-                Tab(
-                    selected = selectedTab == 0,
-                    onClick = { selectedTab = 0 },
-                    text = { Text(stringResource("rabbitmq_ui_send_tab_single")) },
-                )
-                Tab(
-                    selected = selectedTab == 1,
-                    onClick = { selectedTab = 1 },
-                    text = { Text(stringResource("rabbitmq_ui_send_tab_batch")) },
-                )
-            }
-
+            // ---- 发送页（单页融合，无 Tab）----
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                when (selectedTab) {
-                    0 -> SingleSendPane(
-                        state = state,
-                        busy = state.busy,
-                        onPickFile = ::pickForSingle,
-                    )
-                    else -> BatchSendPane(
-                        state = state,
-                        onPickFiles = ::pickForBatch,
-                        onRetryTask = { id -> validatedRoutingKey()?.let { state.retryTask(id, it) } },
-                    )
-                }
+                SendPane(
+                    state = state,
+                    onPickFiles = ::pickFiles,
+                    onRetryTask = { id -> validatedRoutingKey()?.let { state.retryTask(id, it) } },
+                )
                 ThemedSnackbarHost(snackbar, modifier = Modifier.align(Alignment.BottomCenter))
             }
 
             HorizontalDivider()
 
             // ---- 底部：结果 / 进度 / 汇总 + 发送按钮 ----
-            SendBottomBar(
-                state = state,
-                isSingle = selectedTab == 0,
-                onSubmitSingle = { validatedRoutingKey()?.let(state::sendSingle) },
-                onSubmitAll = { validatedRoutingKey()?.let(state::sendAll) },
-            )
+            SendBottomBar(state = state, onSubmit = ::submit)
         }
     }
 }
 
-/* --------------------------- 单条发送 Tab --------------------------- */
+/* --------------------------- 发送页（单页融合） --------------------------- */
 
+/**
+ * 发送页**单页融合**（对齐 IBM MessageSendTab / 队列对话框 SendPane：无 Tab、按
+ * "是否选中文件"分流）：上半 = 正文 TextArea（仅手动输入/粘贴）+ Headers；下半 =
+ * 批量文件区（选中文件后出现表格）。发送分流逻辑在对话框层 submit()：文件列表
+ * 非空 → 全部发送（忽略正文）；正文非空 → 单条发；两者皆空 → 提示。
+ */
 @Composable
-private fun SingleSendPane(
+private fun SendPane(
     state: RabbitMqSendState,
-    busy: Boolean,
-    onPickFile: () -> Unit,
+    onPickFiles: () -> Unit,
+    onRetryTask: (String) -> Unit,
 ) {
-    // 整体可滚动：Headers 行多时不挤压正文；正文固定 200dp 保证输入空间。
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(vertical = 8.dp),
-    ) {
-        HeadersEditor(headers = state.headers, enabled = !busy, onChange = { state.headers = it })
-        Spacer(Modifier.height(8.dp))
-
-        // ---- 消息正文（TextArea，可从文件加载）----
-        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+    Column(modifier = Modifier.fillMaxSize().padding(vertical = 8.dp)) {
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState()),
+        ) {
+            // ---- 消息正文（仅手动输入/粘贴，文件统一走下方"选择文件"）----
             Text(
                 text = stringResource("rabbitmq_ui_send_payload"),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f),
             )
-            PressableButton(onClick = onPickFile, enabled = !busy) {
-                Text(stringResource("rabbitmq_ui_send_load_file"), style = MaterialTheme.typography.labelMedium)
+            Spacer(Modifier.height(4.dp))
+            OutlinedTextField(
+                value = state.payload,
+                onValueChange = { state.payload = it },
+                enabled = !state.busy,
+                singleLine = false,
+                textStyle = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.height(160.dp).fillMaxWidth(),
+            )
+            Spacer(Modifier.height(8.dp))
+            HeadersEditor(headers = state.headers, enabled = !state.busy, onChange = { state.headers = it })
+            Spacer(Modifier.height(12.dp))
+            HorizontalDivider()
+            Spacer(Modifier.height(8.dp))
+
+            // ---- 文件区工具栏：选择文件 / 数量 / 提示 / 清空 ----
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                PressableButton(onClick = onPickFiles, enabled = !state.busy) {
+                    Text(stringResource("rabbitmq_ui_send_pick_file"))
+                }
+                if (state.tasks.isNotEmpty()) {
+                    Text(
+                        text = stringResource("rabbitmq_ui_send_files_selected").withArg(state.tasks.size),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Text(
+                    text = stringResource("rabbitmq_ui_send_batch_hint"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.End,
+                    modifier = Modifier.weight(1f),
+                )
+                PressableButton(
+                    onClick = state::clearBatch,
+                    enabled = !state.busy && state.tasks.isNotEmpty(),
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                ) { Text(stringResource("rabbitmq_ui_send_clear")) }
+            }
+            Spacer(Modifier.height(4.dp))
+
+            // ---- 文件表格：名称 / 大小 / 状态 / 操作（选了文件才出现）----
+            if (state.tasks.isNotEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TableHeader(stringResource("rabbitmq_ui_send_col_file_name"), Modifier.weight(1f))
+                    TableHeader(stringResource("rabbitmq_ui_send_col_size"), Modifier.width(80.dp))
+                    TableHeader(stringResource("rabbitmq_ui_send_col_status"), Modifier.width(160.dp))
+                    TableHeader(stringResource("rabbitmq_ui_send_col_actions"), Modifier.width(72.dp))
+                }
+                HorizontalDivider()
+                state.tasks.forEach { task ->
+                    SendTaskRow(
+                        task = task,
+                        busy = state.busy,
+                        onRemove = { state.removeTask(task.id) },
+                        onRetry = { onRetryTask(task.id) },
+                    )
+                }
             }
         }
-        Spacer(Modifier.height(4.dp))
-        OutlinedTextField(
-            value = state.payload,
-            onValueChange = { state.payload = it },
-            enabled = !busy,
-            singleLine = false,
-            textStyle = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.height(280.dp).fillMaxWidth(),
-        )
     }
 }
 
@@ -545,87 +569,6 @@ internal fun HeadersEditor(
             Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
             Spacer(Modifier.width(4.dp))
             Text(stringResource("rabbitmq_ui_send_add_header"), style = MaterialTheme.typography.labelMedium)
-        }
-    }
-}
-
-/* --------------------------- 批量发送 Tab --------------------------- */
-
-@Composable
-private fun BatchSendPane(
-    state: RabbitMqSendState,
-    onPickFiles: () -> Unit,
-    onRetryTask: (String) -> Unit,
-) {
-    Column(modifier = Modifier.fillMaxSize().padding(vertical = 8.dp)) {
-        // ---- 工具栏：选择文件 / 数量 / 清空 ----
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            PressableButton(onClick = onPickFiles, enabled = !state.busy) {
-                Text(stringResource("rabbitmq_ui_send_pick_file"))
-            }
-            if (state.tasks.isNotEmpty()) {
-                Text(
-                    text = stringResource("rabbitmq_ui_send_files_selected").withArg(state.tasks.size),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Text(
-                text = stringResource("rabbitmq_ui_send_batch_hint"),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = androidx.compose.ui.text.style.TextAlign.End,
-                modifier = Modifier.weight(1f),
-            )
-            PressableButton(
-                onClick = state::clearBatch,
-                enabled = !state.busy && state.tasks.isNotEmpty(),
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-            ) { Text(stringResource("rabbitmq_ui_send_clear")) }
-        }
-        Spacer(Modifier.height(8.dp))
-        // ---- 批量 Headers：应用到本轮每一条消息（与单条 headers 各存各的）----
-        HeadersEditor(
-            headers = state.batchHeaders,
-            enabled = !state.busy,
-            onChange = { state.batchHeaders = it },
-        )
-        Spacer(Modifier.height(4.dp))
-
-        if (state.tasks.isEmpty()) {
-            ObjectListEmptyState(message = stringResource("rabbitmq_ui_send_empty"))
-        } else {
-            // ---- 文件表格：名称 / 大小 / 状态 / 操作 ----
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                TableHeader(stringResource("rabbitmq_ui_send_col_file_name"), Modifier.weight(1f))
-                TableHeader(stringResource("rabbitmq_ui_send_col_size"), Modifier.width(80.dp))
-                TableHeader(stringResource("rabbitmq_ui_send_col_status"), Modifier.width(160.dp))
-                TableHeader(stringResource("rabbitmq_ui_send_col_actions"), Modifier.width(72.dp))
-            }
-            HorizontalDivider()
-            LazyColumn(modifier = Modifier.weight(1f)) {
-                items(state.tasks, key = { it.id }) { task ->
-                    SendTaskRow(
-                        task = task,
-                        busy = state.busy,
-                        onRemove = { state.removeTask(task.id) },
-                        onRetry = { onRetryTask(task.id) },
-                    )
-                }
-            }
         }
     }
 }
@@ -723,13 +666,12 @@ private fun StatusText(text: String, color: Color = Color.Unspecified) {
 @Composable
 private fun SendBottomBar(
     state: RabbitMqSendState,
-    isSingle: Boolean,
-    onSubmitSingle: () -> Unit,
-    onSubmitAll: () -> Unit,
+    onSubmit: () -> Unit,
 ) {
+    val hasBatch = state.tasks.isNotEmpty()
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-        // 单条：最近一次发送结果（成功 / 未路由 / 失败原因 + 重试）。
-        if (isSingle) {
+        // 单条结果（仅文件列表为空时显示）：最近一次发送结果（成功 / 未路由 / 失败原因 + 重试）。
+        if (!hasBatch) {
             state.singleOutcome?.let { outcome ->
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
@@ -757,7 +699,7 @@ private fun SendBottomBar(
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f, fill = false),
                             )
-                            SmallSecondaryButton(stringResource("rabbitmq_ui_send_retry"), onClick = onSubmitSingle)
+                            SmallSecondaryButton(stringResource("rabbitmq_ui_send_retry"), onClick = onSubmit)
                         }
                         else -> {
                             Icon(imageVector = Icons.Default.Cancel, contentDescription = null, modifier = Modifier.size(16.dp), tint = FailedRed)
@@ -769,14 +711,14 @@ private fun SendBottomBar(
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f, fill = false),
                             )
-                            SmallSecondaryButton(stringResource("rabbitmq_ui_send_retry"), onClick = onSubmitSingle)
+                            SmallSecondaryButton(stringResource("rabbitmq_ui_send_retry"), onClick = onSubmit)
                         }
                     }
                 }
             }
         }
-        // 批量：发送中进度 + 一轮完成后的汇总。
-        if (!isSingle) {
+        // 批量进度 + 汇总（仅文件列表非空时显示）。
+        if (hasBatch) {
             if (state.busy && state.batchTotal > 0) {
                 Text(
                     text = stringResource("rabbitmq_ui_send_progress").withArg(state.processedCount, state.batchTotal),
@@ -801,17 +743,18 @@ private fun SendBottomBar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Spacer(Modifier.weight(1f))
-            val noWaiting = !isSingle && state.tasks.none { it.status == SendStatus.WAITING }
+            // 有文件但已无 WAITING 项（全发完）→ 禁用，需移除/重试或重新选文件。
+            val noWaiting = hasBatch && state.tasks.none { it.status == SendStatus.WAITING }
             PressableButton(
-                onClick = { if (isSingle) onSubmitSingle() else onSubmitAll() },
-                enabled = !state.busy && (isSingle || (state.tasks.isNotEmpty() && !noWaiting)),
+                onClick = onSubmit,
+                enabled = !state.busy && !noWaiting,
             ) {
                 Text(
                     text = when {
-                        isSingle && state.busy -> stringResource("rabbitmq_ui_send_sending")
-                        !isSingle && state.busy ->
+                        state.busy && hasBatch ->
                             stringResource("rabbitmq_ui_send_progress").withArg(state.processedCount, state.batchTotal)
-                        !isSingle -> stringResource("rabbitmq_ui_send_send_all")
+                        state.busy -> stringResource("rabbitmq_ui_send_sending")
+                        hasBatch -> stringResource("rabbitmq_ui_send_send_all")
                         else -> stringResource("rabbitmq_ui_send_button")
                     },
                 )

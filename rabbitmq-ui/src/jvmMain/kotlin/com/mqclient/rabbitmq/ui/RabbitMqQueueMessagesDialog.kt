@@ -56,7 +56,6 @@ import com.mqclient.rabbitmq.RabbitMqMessageSession
 import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
-import com.mqclient.uicommon.file.pickFile
 import com.mqclient.uicommon.file.pickFiles
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
@@ -252,20 +251,6 @@ fun RabbitMqQueueMessagesDialog(
         }
     }
 
-    fun loadPayloadFile() {
-        scope.launch {
-            val path = pickFile(stringResource("rabbitmq_ui_msg_pick_title"), extensions = emptyList()) ?: return@launch
-            val text = withContext(Dispatchers.IO) {
-                runCatching { java.io.File(path).readText(Charsets.UTF_8) }.getOrNull()
-            }
-            if (text == null) {
-                snackbar.showSnackbar(stringResource("rabbitmq_ui_msg_file_read_failed"))
-            } else {
-                payload = text
-            }
-        }
-    }
-
     fun loadSendFiles() {
         scope.launch {
             val paths = pickFiles(stringResource("rabbitmq_ui_msg_pick_title"))
@@ -383,7 +368,6 @@ fun RabbitMqQueueMessagesDialog(
                                     payload = payload,
                                     onPayload = { payload = it },
                                     busy = sending,
-                                    onLoadFile = ::loadPayloadFile,
                                     batchTasks = batchTasks,
                                     onPickFiles = ::loadSendFiles,
                                     onRemoveTask = { batchTasks = batchTasks.filterNot { t -> t.id == it } },
@@ -391,6 +375,9 @@ fun RabbitMqQueueMessagesDialog(
                                     onSendBatch = ::sendBatch,
                                     onRetryTask = ::retryBatchTask,
                                     sendError = sendError,
+                                    onEmptyInput = {
+                                        scope.launch { snackbar.showSnackbar(stringResource("rabbitmq_ui_send_input_required")) }
+                                    },
                                 )
                             }
                         }
@@ -522,8 +509,9 @@ private fun BrowsePane(
 
 /**
  * 发送页**单页融合**（对齐 IBM MessageSendTab：无 Tab、按"是否选中文件"分流）：
- * 上半 = 正文 TextArea + Headers；下半 = 批量文件区（选中文件后出现表格）；
- * 底部单一发送按钮 —— 有选中文件即"全部发送"（串行批量），否则"发送消息"（单条）。
+ * 上半 = 正文 TextArea（仅手动输入/粘贴）+ Headers；下半 = 批量文件区（选中文件后
+ * 出现表格）；底部单一发送按钮 —— 有选中文件即"全部发送"（串行批量，忽略正文），
+ * 否则正文非空走"发送消息"（单条），两者皆空提示后不发。
  */
 @Composable
 private fun SendPane(
@@ -532,7 +520,6 @@ private fun SendPane(
     payload: String,
     onPayload: (String) -> Unit,
     busy: Boolean,
-    onLoadFile: () -> Unit,
     batchTasks: List<BatchTask>,
     onPickFiles: () -> Unit,
     onRemoveTask: (String) -> Unit,
@@ -540,22 +527,17 @@ private fun SendPane(
     onSendBatch: () -> Unit,
     onRetryTask: (BatchTask) -> Unit,
     sendError: String?,
+    onEmptyInput: () -> Unit,
 ) {
     val hasBatch = batchTasks.isNotEmpty()
     Column(modifier = Modifier.fillMaxSize().padding(vertical = 8.dp)) {
         Column(modifier = Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
-            // ---- 上半：单条正文 ----
-            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = stringResource("rabbitmq_ui_send_payload"),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                )
-                PressableButton(onClick = onLoadFile, enabled = !busy) {
-                    Text(stringResource("rabbitmq_ui_send_load_file"), style = MaterialTheme.typography.labelMedium)
-                }
-            }
+            // ---- 上半：单条正文（仅手动输入，文件统一走下方"选择文件"）----
+            Text(
+                text = stringResource("rabbitmq_ui_send_payload"),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             Spacer(Modifier.height(4.dp))
             OutlinedTextField(
                 value = payload,
@@ -659,7 +641,7 @@ private fun SendPane(
             }
         }
         HorizontalDivider()
-        // ---- 底部条：单一发送按钮，按"是否选中文件"分流（IBM SendBottomBar 同款）----
+        // ---- 底部条：单一发送按钮，按"文件列表 / 正文"分流（IBM SendBottomBar 同款）----
         Row(
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -667,7 +649,16 @@ private fun SendPane(
         ) {
             Spacer(Modifier.weight(1f))
             PressableButton(
-                onClick = { if (hasBatch) onSendBatch() else onSendSingle() },
+                onClick = {
+                    when {
+                        // 情况 A：文件列表非空 → 忽略正文，严格按列表串行发。
+                        hasBatch -> onSendBatch()
+                        // 情况 B：列表空 + 正文非空 → 单条发。
+                        payload.isNotBlank() -> onSendSingle()
+                        // 情况 C：两者皆空 → 提示（按钮保持可点，点击即提示）。
+                        else -> onEmptyInput()
+                    }
+                },
                 enabled = !busy && (!hasBatch || batchTasks.any { it.status == BatchStatus.WAITING }),
             ) {
                 Text(
