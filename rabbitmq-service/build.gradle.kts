@@ -11,6 +11,8 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             implementation(projects.appCore)
+            // 消息体二进制判定（isProbablyBinary）：队列消息会话的拉取预览用。
+            implementation(projects.messageInterpreterApi)
             // MQ 公共基类（MQServiceAdapter）：api 暴露，消费方能看到完整父类链。
             api(projects.mqBase)
         }

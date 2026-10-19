@@ -151,6 +151,22 @@ object RabbitMqModule {
     }
 
     /**
+     * 队列消息会话入口（队列消息对话框）：AMQP 直连当前队列（autoAck = false）。
+     * 连接必须处于 Connected；会话生命周期归对话框 —— 关闭时调 [closeMessageSessionAsync]。
+     */
+    suspend fun openMessageSession(connectionId: String, queueName: String): RabbitMqMessageSession {
+        val ctx = connectionOrNull(connectionId)?.takeIf { it.status == ConnectionStatus.Connected }
+            ?: throw IllegalStateException("未连接")
+        return RabbitMqMessageSession.open(ctx.config, queueName)
+    }
+
+    /** 会话关闭的异步兜底（对话框 onDispose 是同步回调，挂起 close 另起协程跑）。 */
+    fun closeMessageSessionAsync(session: RabbitMqMessageSession?) {
+        if (session == null) return
+        moduleContext?.coroutineScope?.launch { runCatching { session.close() } }
+    }
+
+    /**
      * 「测试连接」入口（连接表单的「完成」用）：按**表单草稿**的配置发起一次临时
      * 连接（overview 验证，用完即关），失败抛异常。与 `rabbitmq.connection.test`
      * 事件版的差异：事件版只测已登记连接的配置快照，表单需要测的是还没落盘的草稿。

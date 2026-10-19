@@ -30,6 +30,9 @@ kotlin {
             implementation(compose.components.resources)
             // stringResource（i18n 查表）来自 ui-common 的 LanguageResources。
             implementation(projects.uiCommon)
+            // 消息正文解释器：聚合注册表一个依赖带上契约 + 全部实现（ServiceLoader
+            // 运行时发现），队列消息详情对话框的「解释器」窗格用（kafka-ui 同款）。
+            implementation(projects.messageInterpreterRegistry)
         }
         jvmTest.dependencies {
             implementation(kotlin("test"))

@@ -482,7 +482,7 @@ private fun SingleSendPane(
  * 批量 [RabbitMqSendState.batchHeaders] 各存各的），本组件是纯视图。
  */
 @Composable
-private fun HeadersEditor(
+internal fun HeadersEditor(
     headers: List<Pair<String, String>>,
     enabled: Boolean,
     onChange: (List<Pair<String, String>>) -> Unit,

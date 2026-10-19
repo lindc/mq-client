@@ -62,6 +62,7 @@ fun RabbitMqQueuesPanel(
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     var propsQueue by remember(connectionId) { mutableStateOf<RabbitMqQueueCardInfo?>(null) }
+    var msgQueue by remember(connectionId) { mutableStateOf<RabbitMqQueueCardInfo?>(null) }
     val connectionStatus = rememberRabbitMqConnectionStatus(connectionId)
     LaunchedEffect(connectionId) { state.load() }
     LaunchedEffect(connectionId, connectionStatus) { state.onStatusChanged(connectionStatus) }
@@ -171,13 +172,7 @@ fun RabbitMqQueuesPanel(
                                             id = "messages",
                                             icon = Icons.Default.Email,
                                             tooltip = "rabbitmq_ui_queue_action_messages",
-                                            onClick = {
-                                                scope.launch {
-                                                    snackbarHostState.showSnackbar(
-                                                        stringResource("rabbitmq_ui_queue_messages_todo"),
-                                                    )
-                                                }
-                                            },
+                                            onClick = { msgQueue = info },
                                         ),
                                         CardAction(
                                             id = "properties",
@@ -195,7 +190,15 @@ fun RabbitMqQueuesPanel(
             }
         }
         // 队列属性对话框（卡片 ⓘ 打开；删除成功后回调刷新 + Snackbar）。
-        propsQueue?.let { info ->
+        msgQueue?.let { info ->
+        RabbitMqQueueMessagesDialog(
+            connectionId = connectionId,
+            queueName = info.name,
+            onDismiss = { msgQueue = null },
+        )
+    }
+
+    propsQueue?.let { info ->
             RabbitMqQueuePropertiesDialog(
                 connectionId = connectionId,
                 queueName = info.name,
