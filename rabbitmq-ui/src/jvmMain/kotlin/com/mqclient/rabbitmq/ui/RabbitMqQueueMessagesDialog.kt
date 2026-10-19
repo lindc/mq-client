@@ -133,7 +133,6 @@ fun RabbitMqQueueMessagesDialog(
     var batchTasks by remember { mutableStateOf(listOf<BatchTask>()) }
     var sending by remember { mutableStateOf(false) }
     var sendError by remember { mutableStateOf<String?>(null) }
-    var sendTab by remember { mutableIntStateOf(0) }
 
     // 对话框销毁 → 收会话（onDispose 同步，挂起 close 另起协程；未 ack 自动重入队）。
     DisposableEffect(Unit) {
@@ -371,16 +370,14 @@ fun RabbitMqQueueMessagesDialog(
                                     limit = limit,
                                     onLimitChange = { limit = it.filter(Char::isDigit).take(3) },
                                     exhausted = exhausted,
+                                    held = held,
                                     onFetch = ::fetchMore,
                                     onRefresh = ::refreshQueue,
                                     onDetail = { detail = it },
                                     onDelete = ::deleteOne,
-                                    held = held,
                                 )
                             } else {
                                 SendPane(
-                                    sendTab = sendTab,
-                                    onSendTab = { sendTab = it },
                                     sendHeaders = sendHeaders,
                                     onSendHeaders = { sendHeaders = it },
                                     payload = payload,
@@ -394,7 +391,6 @@ fun RabbitMqQueueMessagesDialog(
                                     onSendBatch = ::sendBatch,
                                     onRetryTask = ::retryBatchTask,
                                     sendError = sendError,
-                                    queueEmpty = exhausted && messages.isEmpty(),
                                 )
                             }
                         }
@@ -443,7 +439,9 @@ private fun BrowsePane(
                 onValueChange = onLimitChange,
                 singleLine = true,
                 enabled = !fetching,
-                modifier = Modifier.width(72.dp),
+                label = { Text(stringResource("rabbitmq_ui_msg_fetch_limit"), style = MaterialTheme.typography.bodySmall) },
+                textStyle = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.width(100.dp).height(52.dp),
             )
             Text(
                 text = stringResource("rabbitmq_ui_msg_fetch_hint"),
@@ -522,10 +520,13 @@ private fun BrowsePane(
 
 /* ------------------------------ Tab 2：发送 ------------------------------ */
 
+/**
+ * 发送页**单页融合**（对齐 IBM MessageSendTab：无 Tab、按"是否选中文件"分流）：
+ * 上半 = 正文 TextArea + Headers；下半 = 批量文件区（选中文件后出现表格）；
+ * 底部单一发送按钮 —— 有选中文件即"全部发送"（串行批量），否则"发送消息"（单条）。
+ */
 @Composable
 private fun SendPane(
-    sendTab: Int,
-    onSendTab: (Int) -> Unit,
     sendHeaders: List<Pair<String, String>>,
     onSendHeaders: (List<Pair<String, String>>) -> Unit,
     payload: String,
@@ -539,180 +540,147 @@ private fun SendPane(
     onSendBatch: () -> Unit,
     onRetryTask: (BatchTask) -> Unit,
     sendError: String?,
-    queueEmpty: Boolean,
 ) {
+    val hasBatch = batchTasks.isNotEmpty()
     Column(modifier = Modifier.fillMaxSize().padding(vertical = 8.dp)) {
-        PrimaryTabRow(selectedTabIndex = sendTab) {
-            Tab(selected = sendTab == 0, onClick = { onSendTab(0) }, text = { Text(stringResource("rabbitmq_ui_send_tab_single")) })
-            Tab(selected = sendTab == 1, onClick = { onSendTab(1) }, text = { Text(stringResource("rabbitmq_ui_send_tab_batch")) })
-        }
-        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-            if (sendTab == 0) {
-                SingleSendPane(sendHeaders, onSendHeaders, payload, onPayload, busy, sendError, onLoadFile = onLoadFile)
-            } else {
-                BatchSendPane(sendHeaders, onSendHeaders, busy, batchTasks, onPickFiles, onRemoveTask, onSendBatch, onRetryTask, sendError)
-            }
-        }
-    }
-}
-
-@Composable
-private fun SingleSendPane(
-    headers: List<Pair<String, String>>,
-    onHeaders: (List<Pair<String, String>>) -> Unit,
-    payload: String,
-    onPayload: (String) -> Unit,
-    busy: Boolean,
-    sendError: String?,
-    onLoadFile: () -> Unit,
-) {
-    Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(vertical = 8.dp)) {
-        HeadersEditor(headers = headers, enabled = !busy, onChange = onHeaders)
-        Spacer(Modifier.height(8.dp))
-        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = stringResource("rabbitmq_ui_send_payload"),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f),
-            )
-            PressableButton(onClick = onLoadFile, enabled = !busy) {
-                Text(stringResource("rabbitmq_ui_send_load_file"), style = MaterialTheme.typography.labelMedium)
-            }
-        }
-        Spacer(Modifier.height(4.dp))
-        OutlinedTextField(
-            value = payload,
-            onValueChange = onPayload,
-            enabled = !busy,
-            singleLine = false,
-            textStyle = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.height(200.dp).fillMaxWidth(),
-        )
-        if (sendError != null) {
-            Spacer(Modifier.height(8.dp))
-            Text(sendError, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-        }
-    }
-}
-
-@Composable
-private fun BatchSendPane(
-    headers: List<Pair<String, String>>,
-    onHeaders: (List<Pair<String, String>>) -> Unit,
-    busy: Boolean,
-    tasks: List<BatchTask>,
-    onPickFiles: () -> Unit,
-    onRemoveTask: (String) -> Unit,
-    onSendBatch: () -> Unit,
-    onRetryTask: (BatchTask) -> Unit,
-    sendError: String?,
-) {
-    Column(modifier = Modifier.fillMaxSize().padding(vertical = 8.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            PressableButton(onClick = onPickFiles, enabled = !busy) { Text(stringResource("rabbitmq_ui_send_pick_file")) }
-            Text(
-                text = stringResource("rabbitmq_ui_send_files_selected").withArg(tasks.size),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.weight(1f))
-            PressableButton(
-                onClick = onSendBatch,
-                enabled = !busy && tasks.any { it.status == BatchStatus.WAITING },
-            ) { Text(stringResource("rabbitmq_ui_send_send_all")) }
-        }
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text = stringResource("rabbitmq_ui_send_batch_hint"),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(8.dp))
-        HeadersEditor(headers = headers, enabled = !busy, onChange = onHeaders)
-        Spacer(Modifier.height(8.dp))
-        if (tasks.isEmpty()) {
-            Box(Modifier.fillMaxWidth().padding(vertical = 24.dp), contentAlignment = Alignment.Center) {
+        Column(modifier = Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
+            // ---- 上半：单条正文 ----
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = stringResource("rabbitmq_ui_send_empty"),
+                    text = stringResource("rabbitmq_ui_send_payload"),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                PressableButton(onClick = onLoadFile, enabled = !busy) {
+                    Text(stringResource("rabbitmq_ui_send_load_file"), style = MaterialTheme.typography.labelMedium)
+                }
+            }
+            Spacer(Modifier.height(4.dp))
+            OutlinedTextField(
+                value = payload,
+                onValueChange = onPayload,
+                enabled = !busy,
+                singleLine = false,
+                textStyle = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.height(160.dp).fillMaxWidth(),
+            )
+            Spacer(Modifier.height(8.dp))
+            HeadersEditor(headers = sendHeaders, enabled = !busy, onChange = onSendHeaders)
+            Spacer(Modifier.height(12.dp))
+            HorizontalDivider()
+            Spacer(Modifier.height(8.dp))
+            // ---- 下半：批量文件区 ----
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                PressableButton(onClick = onPickFiles, enabled = !busy) { Text(stringResource("rabbitmq_ui_send_pick_file")) }
+                if (hasBatch) {
+                    Text(
+                        text = stringResource("rabbitmq_ui_send_files_selected").withArg(batchTasks.size),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Text(
+                    text = stringResource("rabbitmq_ui_send_batch_hint"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
                 )
             }
-        } else {
-            LazyColumn(modifier = Modifier.weight(1f)) {
-                items(tasks, key = { it.id }) { task ->
-                    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = task.fileName,
-                            style = MaterialTheme.typography.bodySmall,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Text(formatSize(task.fileSize), style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(72.dp))
-                        Box(modifier = Modifier.width(160.dp)) {
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                                when (task.status) {
-                                    BatchStatus.WAITING -> {
-                                        Box(Modifier.size(8.dp).clip(CircleShape).background(MaterialTheme.colorScheme.onSurfaceVariant))
-                                        Text(stringResource("rabbitmq_ui_send_status_waiting"), style = MaterialTheme.typography.bodySmall, maxLines = 1)
-                                    }
-                                    BatchStatus.SENDING -> {
-                                        CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
-                                        Text(stringResource("rabbitmq_ui_send_status_sending"), style = MaterialTheme.typography.bodySmall, maxLines = 1)
-                                    }
-                                    BatchStatus.SUCCESS -> {
-                                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = SuccessGreen, modifier = Modifier.size(16.dp))
-                                        Text(stringResource("rabbitmq_ui_send_status_success"), style = MaterialTheme.typography.bodySmall, maxLines = 1)
-                                    }
-                                    BatchStatus.FAILED -> {
-                                        Icon(Icons.Default.Cancel, contentDescription = null, tint = FailedRed, modifier = Modifier.size(16.dp))
-                                        Text(
-                                            text = task.errorMessage ?: stringResource("rabbitmq_ui_send_status_failed"),
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.error,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                    }
+            Spacer(Modifier.height(4.dp))
+            batchTasks.forEach { task ->
+                Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = task.fileName,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(formatSize(task.fileSize), style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(72.dp))
+                    Box(modifier = Modifier.width(160.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            when (task.status) {
+                                BatchStatus.WAITING -> {
+                                    Box(Modifier.size(8.dp).clip(CircleShape).background(MaterialTheme.colorScheme.onSurfaceVariant))
+                                    Text(stringResource("rabbitmq_ui_send_status_waiting"), style = MaterialTheme.typography.bodySmall, maxLines = 1)
+                                }
+                                BatchStatus.SENDING -> {
+                                    CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                                    Text(stringResource("rabbitmq_ui_send_status_sending"), style = MaterialTheme.typography.bodySmall, maxLines = 1)
+                                }
+                                BatchStatus.SUCCESS -> {
+                                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = SuccessGreen, modifier = Modifier.size(16.dp))
+                                    Text(stringResource("rabbitmq_ui_send_status_success"), style = MaterialTheme.typography.bodySmall, maxLines = 1)
+                                }
+                                BatchStatus.FAILED -> {
+                                    Icon(Icons.Default.Cancel, contentDescription = null, tint = FailedRed, modifier = Modifier.size(16.dp))
+                                    Text(
+                                        text = task.errorMessage ?: stringResource("rabbitmq_ui_send_status_failed"),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.error,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
                                 }
                             }
                         }
-                        Box(modifier = Modifier.width(72.dp)) {
-                            when {
-                                task.status == BatchStatus.WAITING && !busy ->
-                                    PressableButton(
-                                        onClick = { onRemoveTask(task.id) },
-                                        standardMinWidth = false,
-                                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    ) { Text(stringResource("rabbitmq_ui_send_remove")) }
-                                task.status == BatchStatus.FAILED && !busy ->
-                                    PressableButton(
-                                        onClick = { onRetryTask(task) },
-                                        standardMinWidth = false,
-                                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    ) { Text(stringResource("rabbitmq_ui_send_retry")) }
-                            }
+                    }
+                    Box(modifier = Modifier.width(72.dp)) {
+                        when {
+                            task.status == BatchStatus.WAITING && !busy ->
+                                PressableButton(
+                                    onClick = { onRemoveTask(task.id) },
+                                    standardMinWidth = false,
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                ) { Text(stringResource("rabbitmq_ui_send_remove")) }
+                            task.status == BatchStatus.FAILED && !busy ->
+                                PressableButton(
+                                    onClick = { onRetryTask(task) },
+                                    standardMinWidth = false,
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                ) { Text(stringResource("rabbitmq_ui_send_retry")) }
                         }
                     }
-                    HorizontalDivider(thickness = 0.5.dp)
                 }
+                HorizontalDivider(thickness = 0.5.dp)
+            }
+            if (sendError != null) {
+                Spacer(Modifier.height(4.dp))
+                Text(sendError, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
             }
         }
-        if (sendError != null) {
-            Spacer(Modifier.height(4.dp))
-            Text(sendError, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+        HorizontalDivider()
+        // ---- 底部条：单一发送按钮，按"是否选中文件"分流（IBM SendBottomBar 同款）----
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Spacer(Modifier.weight(1f))
+            PressableButton(
+                onClick = { if (hasBatch) onSendBatch() else onSendSingle() },
+                enabled = !busy && (!hasBatch || batchTasks.any { it.status == BatchStatus.WAITING }),
+            ) {
+                Text(
+                    text = when {
+                        busy -> stringResource("rabbitmq_ui_send_sending")
+                        hasBatch -> stringResource("rabbitmq_ui_send_send_all")
+                        else -> stringResource("rabbitmq_ui_send_button")
+                    },
+                )
+            }
         }
     }
 }
-
 /** 「重试」文本按钮（会话失败态）。 */
 @Composable
 private fun TextButtonCompat(onClick: () -> Unit) {

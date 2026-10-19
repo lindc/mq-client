@@ -220,5 +220,12 @@
   "rabbitmq_ui_msg_transient": "瞬态",
   "rabbitmq_ui_msg_col_time": "时间",
   "rabbitmq_ui_msg_pending_count": "，其中 %1$d 条待处理（关闭后自动重入队）",
-  "rabbitmq_ui_msg_file_read_failed": "文件读取失败"
+  "rabbitmq_ui_msg_file_read_failed": "文件读取失败",
+  "rabbitmq_ui_msg_detail_tab_body": "消息正文",
+  "rabbitmq_ui_msg_detail_tab_props": "消息属性",
+  "rabbitmq_ui_msg_detail_interpreters": "解释器",
+  "rabbitmq_ui_msg_detail_params": "解释器参数",
+  "rabbitmq_ui_msg_fetch_limit": "拉取条数",
+  "rabbitmq_ui_msg_detail_no_params": "该解释器无需参数",
+  "rabbitmq_ui_msg_detail_copy_value": "复制值"
 }
