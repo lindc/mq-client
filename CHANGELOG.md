@@ -120,6 +120,15 @@
   默认改 `Dp.Infinity`（原 1400×1000 钳制在大屏上会截掉 2/3；调用方仍可显式
   覆盖）；队列管理器属性窗口 `ConnectionPropertiesDialog` 初始尺寸从固定
   560×640dp 同步改为屏幕 2/3。
+- **ui-common 新增统一悬停提示组件 `AppTooltip`**：收敛全项目 5 处各自手写的
+  `TooltipArea + Surface`（4dp 圆角 / surfaceVariant / 4dp 投影）实现——ObjectCard
+  类型图标与操作按钮提示（×2）、IBM MQ 浏览/发送页 `HoverTooltip`（改为委托）、
+  Kafka 消息浏览页 `HoverTooltip`（改为委托）、RabbitMQ 概览页集群节点提示
+  （`NodeTooltip` 拆为内容 + 外壳）。节点提示原用 `inverseSurface` 反色对——固定
+  中性色在 MaterialKolor TonalSpot 彩色主题下近黑、与全局观感脱节（Snackbar 换
+  secondaryContainer 的同因先例），迁移后统一走 `surfaceVariant` 跟主题色相：
+  浅色 = 色调浅灰底深字、深色 = 深灰底浅字。`TooltipArea` 为
+  ExperimentalFoundationApi，组件文件级 `@file:OptIn`。
 
 ### Fixed
 

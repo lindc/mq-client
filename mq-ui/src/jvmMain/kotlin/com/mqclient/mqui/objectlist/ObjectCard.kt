@@ -5,7 +5,6 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.TooltipArea
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -41,6 +40,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.mqclient.uicommon.AppTooltip
 import com.mqclient.uicommon.i18n.stringResource
 
 private const val HOVER_ANIM_MS = 150
@@ -158,21 +158,9 @@ fun ObjectCard(
                         )
                     }
                     if (label != null) {
-                        TooltipArea(
-                            tooltip = {
-                                Surface(
-                                    shape = RoundedCornerShape(4.dp),
-                                    color = MaterialTheme.colorScheme.surfaceVariant,
-                                    shadowElevation = 4.dp,
-                                ) {
-                                    Text(
-                                        text = label,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                        style = MaterialTheme.typography.bodySmall,
-                                    )
-                                }
-                            },
-                        ) { iconNode() }
+                        AppTooltip(tooltip = { Text(text = label, style = MaterialTheme.typography.bodySmall) }) {
+                            iconNode()
+                        }
                     } else {
                         iconNode()
                     }
@@ -258,25 +246,10 @@ fun ObjectCard(
     }
 }
 
-/** 操作按钮：24dp 点击区 + 16dp 图标，TooltipArea 悬停显示 i18n 提示。 */
-@OptIn(ExperimentalFoundationApi::class)
+/** 操作按钮：24dp 点击区 + 16dp 图标，AppTooltip 悬停显示 i18n 提示。 */
 @Composable
 private fun ActionIconButton(action: CardAction, executing: Boolean) {
-    TooltipArea(
-        tooltip = {
-            Surface(
-                shape = RoundedCornerShape(4.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                shadowElevation = 4.dp,
-            ) {
-                Text(
-                    text = stringResource(action.tooltip),
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-        },
-    ) {
+    AppTooltip(tooltip = { Text(text = stringResource(action.tooltip), style = MaterialTheme.typography.bodySmall) }) {
         IconButton(
             onClick = action.onClick,
             enabled = action.enabled && !executing,

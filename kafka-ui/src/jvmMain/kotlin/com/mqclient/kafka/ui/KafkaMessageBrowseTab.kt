@@ -119,24 +119,7 @@ internal fun HoverTooltip(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
-    androidx.compose.foundation.TooltipArea(
-        tooltip = {
-            Surface(
-                shape = RoundedCornerShape(4.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                shadowElevation = 4.dp,
-            ) {
-                Text(
-                    text = text,
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                )
-            }
-        },
-        delayMillis = 400,
-        modifier = modifier,
-        content = content,
-    )
+    com.mqclient.uicommon.AppTooltip(text = text, modifier = modifier, content = content)
 }
 
 /** 表格表头单元格文本。 */

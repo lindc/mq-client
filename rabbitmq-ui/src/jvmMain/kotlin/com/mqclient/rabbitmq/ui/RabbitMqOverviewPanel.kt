@@ -5,7 +5,6 @@
 package com.mqclient.rabbitmq.ui
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.TooltipArea
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.hoverable
@@ -62,6 +61,7 @@ import com.mqclient.mqui.state.LoadStateContent
 import com.mqclient.rabbitmq.RabbitMqEvents
 import com.mqclient.rabbitmq.RabbitMqModule
 import com.mqclient.rabbitmq.RabbitMqNodeSnapshot
+import com.mqclient.uicommon.AppTooltip
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 import java.util.Locale
@@ -411,7 +411,7 @@ private fun NodesSection(nodes: List<RabbitMqNodeSnapshot>) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             nodes.forEach { node ->
-                TooltipArea(tooltip = { NodeTooltip(node) }, delayMillis = 400) {
+                AppTooltip(tooltip = { NodeTooltipContent(node) }, delayMillis = 400) {
                     NodeCard(node, Modifier.weight(1f))
                 }
             }
@@ -536,19 +536,15 @@ private fun NodeStatusText(text: String, color: Color) {
     )
 }
 
-/** 悬停提示：Uptime + 内存占用（memLimit 未知时省略内存行）+ 告警补充说明。 */
+/** 提示内容：Uptime + 内存占用（memLimit 未知时省略内存行）+ 告警补充说明（外壳样式走 AppTooltip）。 */
 @Composable
-private fun NodeTooltip(node: RabbitMqNodeSnapshot) {
-    Surface(
-        shape = RoundedCornerShape(6.dp),
-        color = MaterialTheme.colorScheme.inverseSurface,
-    ) {
-        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+private fun NodeTooltipContent(node: RabbitMqNodeSnapshot) {
+    Column {
             Text(
                 text = stringResource("rabbitmq_ui_overview_node_tooltip_uptime")
                     .withArg(formatUptime(node.uptime)),
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.inverseOnSurface,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             if (node.memLimit > 0) {
                 Spacer(Modifier.height(2.dp))
@@ -556,7 +552,7 @@ private fun NodeTooltip(node: RabbitMqNodeSnapshot) {
                     text = stringResource("rabbitmq_ui_overview_node_tooltip_memory")
                         .withArg(formatBytes(node.memUsed), formatBytes(node.memLimit)),
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.inverseOnSurface,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             if (node.memAlarm || node.diskFreeAlarm) {
@@ -568,7 +564,6 @@ private fun NodeTooltip(node: RabbitMqNodeSnapshot) {
                 )
             }
         }
-    }
 }
 
 /** 毫秒运行时长 → "3d 4h 5m"（天数/小时为 0 时省略对应段）。 */

@@ -54,6 +54,7 @@ import com.mqclient.ibmmq.messaging.SendDefaults
 import com.mqclient.ibmmq.messaging.SendResult
 import com.mqclient.mqui.objectlist.ObjectListEmptyState
 import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.AppTooltip
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.file.pickFiles
 import com.mqclient.uicommon.i18n.stringResource
@@ -566,7 +567,7 @@ private fun SendTaskRow(task: SendTask, state: SendMessagesState) {
             .padding(horizontal = ROW_HPADDING, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        HoverTooltip(task.fileName, Modifier.weight(1f)) {
+        AppTooltip(task.fileName, Modifier.weight(1f)) {
             Text(
                 text = task.fileName,
                 style = MaterialTheme.typography.bodySmall,
@@ -623,7 +624,7 @@ private fun StatusCell(task: SendTask) {
     }
     // 失败项 hover 显示错误原因。
     if (task.status == SendStatus.FAILED && task.errorMessage != null) {
-        HoverTooltip(task.errorMessage!!, Modifier) { cell() }
+        AppTooltip(task.errorMessage!!, Modifier) { cell() }
     } else {
         cell()
     }

@@ -74,6 +74,7 @@ import com.mqclient.ibmmq.messaging.browseErrorText
 import com.mqclient.mqui.common.CompactSearchField
 import com.mqclient.mqui.objectlist.ObjectListEmptyState
 import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.AppTooltip
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.dialog.DateTimePickerDialog
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
@@ -650,7 +651,7 @@ private fun RowActionIcon(
     executing: Boolean = false,
     onClick: () -> Unit = {},
 ) {
-    HoverTooltip(tooltip) {
+    AppTooltip(tooltip) {
         IconButton(
             onClick = onClick,
             enabled = enabled && !executing,
@@ -682,7 +683,7 @@ private fun IdCell(
     modifier: Modifier = Modifier,
     onCopy: (String) -> Unit,
 ) {
-    HoverTooltip(text, modifier) {
+    AppTooltip(text, modifier) {
         Text(
             text = text,
             style = MaterialTheme.typography.bodySmall,
@@ -702,7 +703,7 @@ private fun PersistenceIcon(persistence: Int) {
     val label = stringResource(
         if (persistent) "ibm_mq_msg_persistence_persistent" else "ibm_mq_msg_persistence_non_persistent",
     )
-    HoverTooltip(label) {
+    AppTooltip(label) {
         Icon(
             imageVector = if (persistent) Icons.Default.Lock else Icons.Default.LockOpen,
             contentDescription = label,
@@ -712,32 +713,7 @@ private fun PersistenceIcon(persistence: Int) {
     }
 }
 
-/** 轻量 hover 提示（同 ObjectCard 的 ActionIconButton 样式：surfaceVariant 跟主题走）；浏览 / 发送两页共用。 */
-@Composable
-internal fun HoverTooltip(
-    text: String,
-    modifier: Modifier = Modifier,
-    content: @Composable () -> Unit,
-) {
-    androidx.compose.foundation.TooltipArea(
-        tooltip = {
-            Surface(
-                shape = RoundedCornerShape(4.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                shadowElevation = 4.dp,
-            ) {
-                Text(
-                    text = text,
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                )
-            }
-        },
-        delayMillis = 400,
-        modifier = modifier,
-        content = content,
-    )
-}
+
 
 /* ------------------------------- 底部 ------------------------------- */
 
