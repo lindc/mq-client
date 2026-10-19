@@ -188,5 +188,6 @@
   "msg_detail_copy_value": "Copy value",
   "msg_detail_interpreter": "Interpreter",
   "msg_detail_no_params": "This interpreter needs no parameters",
-  "msg_detail_load_failed": "Failed to load: %1$s"
+  "msg_detail_load_failed": "Failed to load: %1$s",
+  "msg_detail_large_body": "Large message (%1$s MB) — showing only the first 1 MB for performance"
 }

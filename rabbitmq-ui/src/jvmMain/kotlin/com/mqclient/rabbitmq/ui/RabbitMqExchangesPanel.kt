@@ -38,6 +38,7 @@ import com.mqclient.mqui.objectlist.CardAction
 import com.mqclient.mqui.objectlist.ObjectCardData
 import com.mqclient.mqui.objectlist.ObjectListEmptyState
 import com.mqclient.mqui.objectlist.ObjectListPanel
+import com.mqclient.mqui.state.LoadState
 import com.mqclient.mqui.state.LoadStateContent
 import com.mqclient.rabbitmq.RabbitMqEvents
 import com.mqclient.rabbitmq.RabbitMqModule
@@ -72,6 +73,17 @@ fun RabbitMqExchangesPanel(
     var showCreate by remember(connectionId) { mutableStateOf(false) }
     var propsExchange by remember(connectionId) { mutableStateOf<RabbitMqExchangeCardInfo?>(null) }
     var sendExchange by remember(connectionId) { mutableStateOf<RabbitMqExchangeCardInfo?>(null) }
+
+    // DLX 链接跳转留下的「打开交换机属性」焦点：列表就绪后消费一次 —— 缓存里
+    // 找得到才开（不存在的目标静默丢弃，与「找不到不跳转」的链接判定同一口径）。
+    LaunchedEffect(state.loadState) {
+        val s = state.loadState
+        if (s is LoadState.Success) {
+            RabbitMqUiHints.consumeObjectFocus(connectionId, "exchange")?.let { name ->
+                s.data.firstOrNull { it.name == name }?.let { propsExchange = it }
+            }
+        }
+    }
 
     Box(modifier.fillMaxSize()) {
         Column(modifier.fillMaxSize()) {

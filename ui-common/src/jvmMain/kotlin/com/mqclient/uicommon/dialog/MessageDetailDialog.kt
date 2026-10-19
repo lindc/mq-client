@@ -45,6 +45,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ClipboardManager
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
@@ -69,6 +70,17 @@ import kotlinx.coroutines.withContext
 
 /** 正文预览长度上限（字符）：超出只显示前段，底部「展开全部」。 */
 private const val MAX_PREVIEW_CHARS = 20_000
+
+/**
+ * 送进解码 / 解释器的字节上限（1 MB）：超大消息在 Default 线程全量解码 + 解释器
+ * 渲染（JSON pretty-print 等）动辄秒级卡顿甚至 OOM，超限只取前 1 MB —— 解释失败
+ * 自动回落原始文本（现有 Failure 路径），渲染侧永远有界。「复制正文」仍复制完整
+ * 原文（点击时一次性解码，不进渲染链路）。
+ */
+private const val MAX_BODY_BYTES = 1024 * 1024
+
+/** 大内容警告横幅的语义橙（不随主题翻转，与各模块的告警橙同一约定）。 */
+private val LargeBodyWarning = Color(0xFFED6C02)
 
 /** 「Hex 预览」解释器（message-interpreter-hex）的 id：二进制内容默认选中它。 */
 private const val HEX_INTERPRETER_ID = "hex"
@@ -205,8 +217,12 @@ private fun DetailReadyPane(
 ) {
     // 解释器选择与参数（切换解释器时参数回默认值）；二进制内容默认 Hex。
     val interpreters = remember { MessageInterpreters.loadAll() }
-    val binary = remember(rawBody, codedCharSetId) { isProbablyBinary(rawBody, codedCharSetId) }
-    var selectedId by remember(rawBody) {
+    // 大消息防线：解码 / 解释 / hex 全部只喂前 1 MB（渲染结果有界）；原始 body
+    // 只留给「复制正文」按钮（footer 的一次性解码，不进渲染链路）。
+    val oversized = rawBody.size > MAX_BODY_BYTES
+    val effectiveBody = if (oversized) rawBody.copyOf(MAX_BODY_BYTES) else rawBody
+    val binary = remember(effectiveBody, codedCharSetId) { isProbablyBinary(effectiveBody, codedCharSetId) }
+    var selectedId by remember(effectiveBody) {
         val initial = if (binary && interpreters.any { it.id == HEX_INTERPRETER_ID }) {
             HEX_INTERPRETER_ID
         } else {
@@ -241,7 +257,9 @@ private fun DetailReadyPane(
                 headerContent()
             } else {
                 ContentTab(
-                    rawBody = rawBody,
+                    rawBody = effectiveBody,
+                    oversized = oversized,
+                    originalSizeBytes = rawBody.size.toLong(),
                     encoding = encoding,
                     codedCharSetId = codedCharSetId,
                     interpreter = interpreter,
@@ -272,6 +290,8 @@ private fun DetailReadyPane(
 @Composable
 private fun ContentTab(
     rawBody: ByteArray,
+    oversized: Boolean,
+    originalSizeBytes: Long,
     encoding: Int,
     codedCharSetId: Int,
     interpreter: MessageInterpreter?,
@@ -329,6 +349,24 @@ private fun ContentTab(
         val scroll = rememberScrollState()
         val base = preview
         Column(modifier = Modifier.fillMaxSize().verticalScroll(scroll).padding(12.dp)) {
+            // 大消息警告横幅：截断告知在最上方（浅橙底 + 语义橙文字，不随主题翻转）。
+            if (oversized) {
+                val mbText = String.format(
+                    java.util.Locale.ROOT,
+                    "%.1f",
+                    originalSizeBytes / (1024.0 * 1024.0),
+                )
+                Text(
+                    text = stringResource("msg_detail_large_body").withArg(mbText),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = LargeBodyWarning,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(LargeBodyWarning.copy(alpha = 0.12f))
+                        .padding(8.dp),
+                )
+                Spacer(Modifier.height(8.dp))
+            }
             when {
                 // 首帧：基线还没算完。
                 base == null -> CircularProgressIndicator(

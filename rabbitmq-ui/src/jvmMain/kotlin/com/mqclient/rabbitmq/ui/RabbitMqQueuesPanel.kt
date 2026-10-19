@@ -40,6 +40,7 @@ import com.mqclient.mqui.objectlist.ObjectCardIndicator
 import com.mqclient.mqui.objectlist.ObjectListEmptyState
 import com.mqclient.mqui.objectlist.ObjectListPanel
 import com.mqclient.mqui.state.LoadStateContent
+import com.mqclient.mqui.state.LoadState
 import com.mqclient.rabbitmq.RabbitMqEvents
 import kotlinx.coroutines.launch
 import com.mqclient.uicommon.ThemedSnackbarHost
@@ -77,6 +78,16 @@ fun RabbitMqQueuesPanel(
     LaunchedEffect(connectionId) {
         CoreModule.eventBusOrNull?.on(RabbitMqEvents.STATUS_SCANNED, scope = this) { event ->
             if (event.payload["connectionId"] as? String == connectionId) state.onStatusScanned()
+        }
+    }
+    // DLX routing key 跳转留下的「打开队列属性」焦点：列表就绪后消费一次（缓存里
+    // 找得到才开；不存在的目标静默丢弃，与「找不到不跳转」的链接判定同一口径）。
+    LaunchedEffect(state.loadState) {
+        val s = state.loadState
+        if (s is LoadState.Success) {
+            RabbitMqUiHints.consumeObjectFocus(connectionId, "queue")?.let { name ->
+                s.data.firstOrNull { it.name == name }?.let { propsQueue = it }
+            }
         }
     }
 

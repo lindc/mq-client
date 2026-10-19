@@ -56,6 +56,18 @@ data class RabbitMqQueueDetailSnapshot(
     val consumers: Int,
 )
 
+/**
+ * 一条队列消费者的实时快照（GET /api/queues/{vhost}/{name}/consumers 的 UI 投影）：
+ * 队列属性对话框「消费者」Tab 用。peerHost / peerPort 是消费者客户端的对端地址
+ * （channel_details.peer_*），管理端没给就为 null（UI 显示 -）。
+ */
+data class RabbitMqConsumerSnapshot(
+    val consumerTag: String,
+    val peerHost: String?,
+    val peerPort: Int?,
+    val ackRequired: Boolean,
+)
+
 /** 一条交换机的慢扫快照。name="" 是各 vhost 都有的默认交换机（UI 按「(AMQP default)」展示）。 */
 data class RabbitMqExchangeSnapshot(
     val name: String,

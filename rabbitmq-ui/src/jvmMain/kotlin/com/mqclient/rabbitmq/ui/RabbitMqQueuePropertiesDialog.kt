@@ -1,6 +1,7 @@
 package com.mqclient.rabbitmq.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -38,12 +39,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mqclient.mqui.state.LoadState
 import androidx.compose.material.icons.filled.Circle
+import com.mqclient.core.CoreModule
+import com.mqclient.core.event.EventNames
+import com.mqclient.rabbitmq.RabbitMqConsumerSnapshot
 import com.mqclient.rabbitmq.RabbitMqQueueDetailSnapshot
 import com.mqclient.rabbitmq.RabbitMqModule
 import com.mqclient.uicommon.PressableButton
@@ -64,10 +71,16 @@ private val ArgsKeyError = Color(0xFFD32F2F)
 
 /**
  * 队列属性对话框（队列卡片 ⓘ / 拓扑双击 queue 入口）：ObjectDetailDialog 外壳 +
- * PrimaryTabRow 两个 Tab（概览 / 参数），与 RabbitMqSendMessageDialog 同款 Tab。
+ * PrimaryTabRow 三个 Tab（概览 / 参数 / 消费者），与 RabbitMqSendMessageDialog
+ * 同款 Tab。
  *
  * 数据：打开即实时拉详情（[RabbitMqModule] service queueDetail —— 慢扫快照没有
- * arguments 与 queue_type），LoadState 三态。只读展示（RabbitMQ 不支持改队列参数）。
+ * arguments 与 queue_type），LoadState 三态。消费者 Tab 选中时才懒加载（避免打开
+ * 对话框就多打一次 HTTP，同新鲜数据哲学）。只读展示（RabbitMQ 不支持改队列参数）。
+ *
+ * 参数 Tab：死信类参数值渲染为链接 —— x-dead-letter-exchange 命中慢扫缓存里的
+ * 交换机时点击跳交换机页开属性；x-dead-letter-routing-key 命中缓存队列名时跳
+ * 队列页开属性（找不到则纯文本不可点）。
  *
  * 底部：清空队列（普通按钮 + 警示图标）与删除队列（danger 红），均二次确认
  * （AlertDialog 声明在本外壳 content lambda 内 —— 窗口归属随组合走）；执行中
@@ -84,6 +97,7 @@ fun RabbitMqQueuePropertiesDialog(
     val snackbar = remember { SnackbarHostState() }
     var selectedTab by remember(queueName) { mutableIntStateOf(0) }
     var detailState by remember(queueName) { mutableStateOf<LoadState<RabbitMqQueueDetailSnapshot>>(LoadState.Idle) }
+    var consumersState by remember(queueName) { mutableStateOf<LoadState<List<RabbitMqConsumerSnapshot>>>(LoadState.Idle) }
     var purgeConfirm by remember(queueName) { mutableStateOf(false) }
     var deleteConfirm by remember(queueName) { mutableStateOf(false) }
     var operating by remember(queueName) { mutableStateOf(false) }
@@ -102,6 +116,24 @@ fun RabbitMqQueuePropertiesDialog(
     }
 
     LaunchedEffect(connectionId, queueName) { load() }
+
+    // 消费者 Tab 懒加载：每次选中都重拉（新鲜数据哲学，一次 GET 很轻）。
+    fun loadConsumers() {
+        scope.launch {
+            consumersState = LoadState.Loading
+            consumersState = runCatching {
+                val service = RabbitMqModule.serviceOrNull() ?: error("服务未初始化")
+                LoadState.Success(service.queueConsumers(connectionId, queueName))
+            }.getOrElse { e ->
+                if (e is CancellationException) throw e
+                LoadState.Error(failureText(e))
+            }
+        }
+    }
+
+    LaunchedEffect(connectionId, queueName, selectedTab) {
+        if (selectedTab == 2) loadConsumers()
+    }
 
     fun purge() {
         scope.launch {
@@ -199,11 +231,17 @@ fun RabbitMqQueuePropertiesDialog(
                                 onClick = { selectedTab = 1 },
                                 text = { Text(stringResource("rabbitmq_ui_queue_props_tab_args")) },
                             )
+                            Tab(
+                                selected = selectedTab == 2,
+                                onClick = { selectedTab = 2 },
+                                text = { Text(stringResource("rabbitmq_ui_queue_props_tab_consumers")) },
+                            )
                         }
                         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                             when (selectedTab) {
                                 0 -> OverviewPane(detail)
-                                else -> ArgumentsPane(detail.arguments)
+                                1 -> ArgumentsPane(connectionId, detail.arguments, onDismiss)
+                                else -> ConsumersPane(consumersState, ::loadConsumers)
                             }
                         }
                     }
@@ -375,8 +413,43 @@ private fun OverviewPane(detail: RabbitMqQueueDetailSnapshot) {
 
 /* ------------------------------ Tab 2：参数 ------------------------------ */
 
+/**
+ * 死信参数的跳转目标（链接化判定）：value 命中慢扫缓存才可点 ——
+ * x-dead-letter-exchange → 交换机（默认交换机 name="" 不跳，列表里没有实体）；
+ * x-dead-letter-routing-key → 仅当它恰好是某个队列的名字。
+ * 判定走缓存零网络开销；找不到就纯文本，不给「点了没反应」的死链。
+ */
+private fun dlxLinkTarget(connectionId: String, key: String, value: String): String? {
+    val service = RabbitMqModule.serviceOrNull() ?: return null
+    return when {
+        key == "x-dead-letter-exchange" && value.isNotEmpty() &&
+            service.cachedExchanges(connectionId).any { it.name == value } -> "exchange"
+        key == "x-dead-letter-routing-key" && value.isNotEmpty() &&
+            service.cachedQueues(connectionId).any { it.name == value } -> "queue"
+        else -> null
+    }
+}
+
+/**
+ * 死信链接点击的跳转：先关当前队列属性弹窗（防 UI 叠层），再发 OBJECT_TAB_OPEN_REQUESTED
+ * 切主 Tab（宿主 MainWindow onSelect + openTab），最后留 focus hint 给目标面板 ——
+ * 列表就绪后自动打开对象属性对话框（RabbitMqExchangesPanel / RabbitMqQueuesPanel 消费）。
+ */
+private fun jumpToDlxTarget(connectionId: String, kind: String, name: String, dismissCurrent: () -> Unit) {
+    dismissCurrent()
+    CoreModule.eventBusOrNull?.emit(
+        name = EventNames.OBJECT_TAB_OPEN_REQUESTED,
+        payload = mapOf(
+            "connectionId" to connectionId,
+            "objectType" to if (kind == "exchange") "exchanges" else "queues",
+        ),
+        source = "rabbitmq",
+    )
+    RabbitMqUiHints.requestObjectFocus(connectionId, kind, name)
+}
+
 @Composable
-private fun ArgumentsPane(arguments: Map<String, String>) {
+private fun ArgumentsPane(connectionId: String, arguments: Map<String, String>, dismissCurrent: () -> Unit) {
     if (arguments.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(
@@ -411,6 +484,8 @@ private fun ArgumentsPane(arguments: Map<String, String>) {
             arguments.forEach { (key, value) ->
                 val isDeadLetter = key in DEAD_LETTER_KEYS || key.startsWith("x-dead-letter")
                 val isLimit = key in LIMIT_KEYS
+                // 死信参数的值命中缓存对象 → 链接（primary 色 + 下划线 + 小手）。
+                val linkTarget = if (isDeadLetter) dlxLinkTarget(connectionId, key, value) else null
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -437,16 +512,148 @@ private fun ArgumentsPane(arguments: Map<String, String>) {
                         color = if (isDeadLetter) ArgsKeyError else MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.weight(1.2f),
                     )
-                    Text(
-                        text = value,
-                        style = MaterialTheme.typography.bodySmall,
-                        fontFamily = FontFamily.Monospace,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
+                    if (linkTarget != null) {
+                        Text(
+                            text = value,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            color = MaterialTheme.colorScheme.primary,
+                            textDecoration = TextDecoration.Underline,
+                            modifier = Modifier
+                                .weight(1f)
+                                .pointerHoverIcon(PointerIcon.Hand)
+                                .clickable { jumpToDlxTarget(connectionId, linkTarget, value, dismissCurrent) },
+                        )
+                    } else {
+                        Text(
+                            text = value,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
                 }
                 HorizontalDivider(thickness = 0.5.dp)
+            }
+        }
+    }
+}
+
+/* ------------------------------ Tab 3：消费者 ------------------------------ */
+
+/**
+ * 消费者 Tab：四列表格（Consumer Tag / 连接 IP / 端口 / Ack Required），数据来自
+ * `GET /api/queues/{vhost}/{name}/consumers` 的实时投影。三态 —— Loading 转圈 /
+ * Error（404 / 403 等由 AdminClient 统一转文案，给重试）/ 空（当前无消费者连接）。
+ */
+@Composable
+private fun ConsumersPane(
+    state: LoadState<List<RabbitMqConsumerSnapshot>>,
+    onRetry: () -> Unit,
+) {
+    when (state) {
+        is LoadState.Idle, is LoadState.Loading -> {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+        }
+        is LoadState.Error -> {
+            Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center) {
+                Text(
+                    text = stringResource("rabbitmq_ui_consumers_load_failed").withArg(state.message),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                TextButton(onClick = onRetry) { Text(stringResource("rabbitmq_ui_refresh")) }
+            }
+        }
+        is LoadState.Success -> {
+            val consumers = state.data
+            if (consumers.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        text = stringResource("rabbitmq_ui_consumers_empty"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                return
+            }
+            Column(modifier = Modifier.fillMaxSize().padding(vertical = 8.dp)) {
+                Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+                    Text(
+                        text = stringResource("rabbitmq_ui_consumers_col_tag"),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1.4f),
+                    )
+                    Text(
+                        text = stringResource("rabbitmq_ui_consumers_col_host"),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        text = stringResource("rabbitmq_ui_consumers_col_port"),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(0.5f),
+                    )
+                    Text(
+                        text = stringResource("rabbitmq_ui_consumers_col_ack"),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(0.5f),
+                    )
+                }
+                HorizontalDivider()
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    consumers.forEach { consumer ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = consumer.consumerTag,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1.4f),
+                            )
+                            Text(
+                                text = consumer.peerHost ?: "-",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Text(
+                                text = consumer.peerPort?.toString() ?: "-",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                                modifier = Modifier.weight(0.5f),
+                            )
+                            Text(
+                                text = stringResource(
+                                    if (consumer.ackRequired) "rabbitmq_ui_exchange_props_yes" else "rabbitmq_ui_exchange_props_no",
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.weight(0.5f),
+                            )
+                        }
+                        HorizontalDivider(thickness = 0.5.dp)
+                    }
+                }
             }
         }
     }

@@ -188,5 +188,6 @@
   "msg_detail_copy_value": "复制值",
   "msg_detail_interpreter": "解释器",
   "msg_detail_no_params": "该解释器无需参数",
-  "msg_detail_load_failed": "加载失败：%1$s"
+  "msg_detail_load_failed": "加载失败：%1$s",
+  "msg_detail_large_body": "消息内容较大（%1$s MB），为保障性能仅展示前 1 MB 的内容"
 }

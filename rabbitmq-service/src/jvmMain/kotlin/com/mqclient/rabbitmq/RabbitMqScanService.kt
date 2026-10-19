@@ -413,6 +413,24 @@ class RabbitMqScanService(private val context: ServiceContext) {
         }
 
     /**
+     * 队列消费者列表（实时查询，不走缓存 —— 属性对话框「消费者」Tab 要新鲜数据，
+     * 与 queueDetail 同一哲学）。队列不存在 / 无权限由 AdminClient 的 checkStatus
+     * 转文案，原样上抛给 UI。
+     */
+    suspend fun queueConsumers(connectionId: String, name: String): List<RabbitMqConsumerSnapshot> {
+        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
+        val admin = ctx.admin ?: throw IllegalStateException("未连接")
+        return withContext(Dispatchers.IO) { admin.queueConsumers(name) }.map {
+            RabbitMqConsumerSnapshot(
+                consumerTag = it.consumerTag,
+                peerHost = it.channelDetails?.peerHost,
+                peerPort = it.channelDetails?.peerPort,
+                ackRequired = it.ackRequired,
+            )
+        }
+    }
+
+    /**
      * 清空队列（实时操作）：DELETE contents 端点（只删 Ready，Unacked 不受影响）。
      * 成功后触发一轮 scanNow，快扫计数缓存几秒内归零（对话框自身也会重载实时详情）。
      */

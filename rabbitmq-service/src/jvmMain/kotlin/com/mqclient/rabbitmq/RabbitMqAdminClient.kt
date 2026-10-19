@@ -103,6 +103,25 @@ data class RabbitMqQueueDetailDto(
         }
 }
 
+/**
+ * 消费者条目（`GET /api/queues/{vhost}/{name}/consumers`）：队列属性对话框
+ * 「消费者」Tab 的实时数据源。管理端点返回字段更多（active / prefetch / 通道
+ * 详情几十项），ignoreUnknownKeys 只取投影所需。
+ */
+@Serializable
+data class RabbitMqConsumerDto(
+    @SerialName("consumer_tag") val consumerTag: String = "",
+    @SerialName("ack_required") val ackRequired: Boolean = true,
+    @SerialName("channel_details") val channelDetails: RabbitMqChannelDetailsDto? = null,
+)
+
+/** 消费者所在通道的连接信息（对端 IP / 端口即消费者客户端的地址）。 */
+@Serializable
+data class RabbitMqChannelDetailsDto(
+    @SerialName("peer_host") val peerHost: String? = null,
+    @SerialName("peer_port") val peerPort: Int? = null,
+)
+
 /** 交换机条目（`GET /api/exchanges/{vhost}`；含 name="" 的默认交换机）。 */
 @Serializable
 data class RabbitMqExchangeDto(
@@ -405,6 +424,17 @@ class RabbitMqAdminClient(private val config: RabbitMqConfig) : AutoCloseable {
         json.decodeFromString(
             RabbitMqQueueDetailDto.serializer(),
             getJson("queues", vhostSegment(), pathSegment(name)),
+        )
+
+    /**
+     * 指定队列的消费者列表（实时查询，不走缓存）：`GET
+     * /api/queues/{vhost}/{name}/consumers`。队列不存在时服务端 404 /
+     * 无权限 403，由 checkStatus 统一转文案。
+     */
+    suspend fun queueConsumers(name: String): List<RabbitMqConsumerDto> =
+        json.decodeFromString(
+            ListSerializer(RabbitMqConsumerDto.serializer()),
+            getJson("queues", vhostSegment(), pathSegment(name), "consumers"),
         )
 
     /**
