@@ -169,7 +169,7 @@ fun RabbitMqExchangePropertiesDialog(
     ) {
         Column(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp)) {
             // ---- 概览行 ----
-            PropertyLine(stringResource("rabbitmq_ui_exchange_field_type"), type)
+            PropertyLine(stringResource("rabbitmq_ui_exchange_props_field_type"), type)
             PropertyLine(
                 stringResource("rabbitmq_ui_exchange_field_durable"),
                 stringResource(if (durable) "rabbitmq_ui_exchange_props_yes" else "rabbitmq_ui_exchange_props_no"),
@@ -178,9 +178,10 @@ fun RabbitMqExchangePropertiesDialog(
                 stringResource("rabbitmq_ui_exchange_field_auto_delete"),
                 stringResource(if (autoDelete) "rabbitmq_ui_exchange_props_yes" else "rabbitmq_ui_exchange_props_no"),
             )
-            if (internal) {
-                PropertyLine(stringResource("rabbitmq_ui_exchange_field_internal"), stringResource("rabbitmq_ui_exchange_props_yes"))
-            }
+            PropertyLine(
+                stringResource("rabbitmq_ui_exchange_field_internal"),
+                stringResource(if (internal) "rabbitmq_ui_exchange_props_yes" else "rabbitmq_ui_exchange_props_no"),
+            )
             Spacer(Modifier.height(16.dp))
             HorizontalDivider()
             Spacer(Modifier.height(12.dp))
@@ -375,7 +376,10 @@ private fun BindingsTable(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    TableCell(binding.destination, Modifier.weight(1.4f))
+                    TableCell(
+                        if (binding.destinationType == "exchange") "[E] ${binding.destination}" else binding.destination,
+                        Modifier.weight(1.4f),
+                    )
                     TableCell(binding.routingKey.ifEmpty { "-" }, Modifier.weight(1.2f))
                     TableCell(binding.argumentsText, Modifier.weight(1f))
                     if (onDelete != null) {

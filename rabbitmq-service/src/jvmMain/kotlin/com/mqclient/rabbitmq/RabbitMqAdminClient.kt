@@ -96,6 +96,12 @@ data class RabbitMqBindingDto(
     @SerialName("properties_key") val propertiesKey: String? = null,
 )
 
+/** ``POST /api/exchanges/{vhost}/{name}/publish`` 的响应：routed = 是否路由到至少一个队列。 */
+@Serializable
+data class RabbitMqPublishResultDto(
+    val routed: Boolean = false,
+)
+
 /**
  * 集群节点条目（`GET /api/nodes`）：概览页节点区块的投影 —— 只取名称 / 类型 /
  * 运行状态与资源告警水位。管理端点实际返回几十个字段（fsu / sockets / gc 相关等），
@@ -204,12 +210,15 @@ class RabbitMqAdminClient(private val config: RabbitMqConfig) : AutoCloseable {
         return response.bodyAsText()
     }
 
-    /** 写请求（PUT / DELETE）：2xx 视为成功，其余走统一错误映射。 */
+    /**
+     * 写请求（PUT / DELETE / POST）：2xx 视为成功，其余走统一错误映射。返回响应体
+     * （publish 端点要读 `{"routed":bool}`；PUT / DELETE 204 时为空串，调用方忽略）。
+     */
     private suspend fun mutatingRequest(
         method: HttpMethod,
         body: String?,
         vararg segments: String,
-    ) {
+    ): String {
         val response: HttpResponse = try {
             http.request(apiUrl(*segments)) {
                 this.method = method
@@ -225,6 +234,7 @@ class RabbitMqAdminClient(private val config: RabbitMqConfig) : AutoCloseable {
             throw mapConnectionError(e)
         }
         checkStatus(response.status.value)
+        return response.bodyAsText()
     }
 
     /** 连接类错误的统一文案（host:port 指向管理 API）。 */
@@ -320,6 +330,37 @@ class RabbitMqAdminClient(private val config: RabbitMqConfig) : AutoCloseable {
             pathSegment(queue),
             pathSegment(propertiesKey),
         )
+    }
+
+    /**
+     * 测试发布：`POST /api/exchanges/{vhost}/{name}/publish`，body =
+     * `{"properties","routing_key","payload","payload_encoding"}`，headers 进
+     * `properties.headers`；payloadEncoding 手输文本用 "string"，文件字节用 "base64"
+     * （管理端点原生支持，避免二进制被 UTF-8 解码弄坏）。响应 `{"routed":bool}` —— routed=false 表示消息已提交但
+     * 没有命中任何队列（无绑定 / key 不匹配等）。默认交换机（name=""）在管理 API 里
+     * 编址为 amq.default。这是开发辅助通道：与 AMQP 客户端发布语义不同（非事务、
+     * 无 publisher confirm），仅供属性对话框验证路由。
+     */
+    suspend fun publish(
+        exchange: String,
+        routingKey: String,
+        payload: String,
+        headers: Map<String, String>,
+        payloadEncoding: String = "string",
+    ): Boolean {
+        val target = exchange.ifEmpty { "amq.default" }
+        val body = buildJsonObject {
+            put("properties", buildJsonObject {
+                if (headers.isNotEmpty()) {
+                    put("headers", buildJsonObject { headers.forEach { (k, v) -> put(k, v) } })
+                }
+            })
+            put("routing_key", routingKey)
+            put("payload", payload)
+            put("payload_encoding", payloadEncoding)
+        }.toString()
+        val response = mutatingRequest(HttpMethod.Post, body, "exchanges", vhostSegment(), pathSegment(target), "publish")
+        return json.decodeFromString(RabbitMqPublishResultDto.serializer(), response).routed
     }
 
     override fun close() {

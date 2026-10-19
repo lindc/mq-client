@@ -337,6 +337,31 @@ class RabbitMqScanService(private val context: ServiceContext) {
         rabbitMqLog.info("binding deleted: connection=$connectionId exchange=$exchange queue=$queue")
     }
 
+    /**
+     * 测试发布（实时操作，开发辅助）：走管理 API publish 端点，返回 routed
+     * （是否路由到至少一个队列，false = 已提交但没进任何队列）。headers 键值对进
+     * `properties.headers`；与其他写操作同一模式：连接守卫 + Dispatchers.IO。
+     */
+    suspend fun publishTestMessage(
+        connectionId: String,
+        exchange: String,
+        routingKey: String,
+        payload: String,
+        headers: Map<String, String>,
+        payloadEncoding: String = "string",
+    ): Boolean {
+        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
+        val admin = ctx.admin ?: throw IllegalStateException("未连接")
+        val routed = withContext(Dispatchers.IO) {
+            admin.publish(exchange, routingKey, payload, headers, payloadEncoding)
+        }
+        rabbitMqLog.info(
+            "test message published: connection=$connectionId exchange=$exchange " +
+                "routingKey=$routingKey routed=$routed",
+        )
+        return routed
+    }
+
     // ---------------------------------------------------------------- 内部
 
     /** 连接处于 Connected 的上下文；否则 null（定时任务下一轮由状态守卫跳过）。 */

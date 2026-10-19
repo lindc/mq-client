@@ -2,6 +2,7 @@ package com.mqclient.app
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Campaign
+import androidx.compose.material.icons.filled.CallSplit
 import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Group
@@ -35,6 +36,8 @@ internal fun navigationIcon(iconId: String): ImageVector =
         "command" -> Icons.Filled.Terminal
         // ===== Kafka =====
         "groups" -> Icons.Filled.Group
+        // ===== RabbitMQ =====
+        "exchanges" -> Icons.Filled.CallSplit
         // ===== IBM MQ 对象类型 =====
         "queues" -> Icons.Filled.Inbox
         "topics" -> Icons.Filled.Campaign

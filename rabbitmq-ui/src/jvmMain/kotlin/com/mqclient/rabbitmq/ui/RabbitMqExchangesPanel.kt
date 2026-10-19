@@ -11,6 +11,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CallSplit
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -69,6 +71,7 @@ fun RabbitMqExchangesPanel(
     // 创建 / 属性两个对话框。
     var showCreate by remember(connectionId) { mutableStateOf(false) }
     var propsExchange by remember(connectionId) { mutableStateOf<RabbitMqExchangeCardInfo?>(null) }
+    var sendExchange by remember(connectionId) { mutableStateOf<RabbitMqExchangeCardInfo?>(null) }
 
     Box(modifier.fillMaxSize()) {
         Column(modifier.fillMaxSize()) {
@@ -138,6 +141,15 @@ fun RabbitMqExchangesPanel(
                                         .joinToString(" · "),
                                 actions =
                                     buildList {
+                                        // 发送消息：开发辅助，所有交换机可发（默认交换机编址 amq.default）。
+                                        add(
+                                            CardAction(
+                                                id = "send",
+                                                icon = Icons.Default.Email,
+                                                tooltip = "rabbitmq_ui_send_action",
+                                                onClick = { sendExchange = info },
+                                            ),
+                                        )
                                         // 属性：所有交换机可看（含 Bindings 表与删除入口）。
                                         // 删除统一收拢在属性对话框 footer（默认 / amq.* 隐藏）。
                                         add(
@@ -167,6 +179,15 @@ fun RabbitMqExchangesPanel(
         RabbitMqCreateExchangeDialog(
             connectionId = connectionId,
             onDismiss = { showCreate = false },
+        )
+    }
+
+    sendExchange?.let { info ->
+        RabbitMqSendMessageDialog(
+            connectionId = connectionId,
+            exchangeName = info.name,
+            displayName = state.displayName(info),
+            onDismiss = { sendExchange = null },
         )
     }
 
