@@ -49,6 +49,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.mqclient.mqui.objectlist.ObjectListEmptyState
 import com.mqclient.mqui.state.LoadState
 import com.mqclient.rabbitmq.RabbitMqFetchedMessage
 import com.mqclient.rabbitmq.RabbitMqModule
@@ -99,8 +100,8 @@ private fun effectiveLimit(raw: String): Int =
  * 上继续往后取（不 requeue），队列取尽时给出提示。
  *
  * **发送（直发队列）**：经默认交换机 basicPublish("", queue, props, body) ——
- * UI 免填 Exchange / Routing Key；单条（Headers + 正文）/ 批量（多文件串行直发
- * 原始字节）。发送成功自动触发一次「重新拉取」刷新列表。
+ * UI 免填 Exchange / Routing Key；纯文件驱动（Headers + 多文件串行直发原始字节，
+ * 单文件即单发）。发送成功自动触发一次「重新拉取」刷新列表。
  *
  * 会话生命周期：打开时 [RabbitMqModule.openMessageSession]（三态），onDispose
  * 走 [RabbitMqModule.closeMessageSessionAsync]（同步回调里挂起 close 另起协程）。
@@ -128,7 +129,6 @@ fun RabbitMqQueueMessagesDialog(
 
     // ---- 发送状态 ----
     var sendHeaders by remember { mutableStateOf(listOf<Pair<String, String>>()) }
-    var payload by remember { mutableStateOf("") }
     var batchTasks by remember { mutableStateOf(listOf<BatchTask>()) }
     var sending by remember { mutableStateOf(false) }
     var sendError by remember { mutableStateOf<String?>(null) }
@@ -223,24 +223,33 @@ fun RabbitMqQueueMessagesDialog(
         }
     }
 
-    fun sendSingle() {
+    fun sendBatch() {
         val s = session ?: return
         scope.launch {
             sending = true
             sendError = null
             try {
                 val headers = sendHeaders.filter { it.first.isNotBlank() }.associate { it.first.trim() to it.second }
-                s.publishDirect(payload.toByteArray(Charsets.UTF_8), headers)
-                snackbar.showSnackbar(stringResource("rabbitmq_ui_msg_sent"))
-                payload = ""
-                sendHeaders = emptyList()
-                // 发送成功自动刷新列表（重新拉取：新消息在队列头部）。
-                s.requeueAll()
-                messages = emptyList()
-                exhausted = false
-                messages = s.fetchNext(effectiveLimit(limit))
-                exhausted = messages.isEmpty()
-                held = s.heldCount()
+                var sent = 0
+                for (task in batchTasks.filter { it.status == BatchStatus.WAITING }) {
+                    updateBatchTask(task.id) { it.copy(status = BatchStatus.SENDING, errorMessage = null) }
+                    val (ok, err) = sendOneDirect(task.content, headers, s)
+                    updateBatchTask(task.id) {
+                        if (ok) it.copy(status = BatchStatus.SUCCESS) else it.copy(status = BatchStatus.FAILED, errorMessage = err)
+                    }
+                    if (ok) sent++
+                }
+                if (sent > 0) {
+                    // 有成功投递 → 自动重新拉取刷新列表（新消息在队列头部）。
+                    s.requeueAll()
+                    messages = emptyList()
+                    exhausted = false
+                    messages = s.fetchNext(effectiveLimit(limit))
+                    exhausted = messages.isEmpty()
+                    held = s.heldCount()
+                }
+                val failed = batchTasks.count { it.status == BatchStatus.FAILED }
+                if (failed == 0) snackbar.showSnackbar(stringResource("rabbitmq_ui_msg_batch_done"))
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -250,7 +259,6 @@ fun RabbitMqQueueMessagesDialog(
             }
         }
     }
-
     fun loadSendFiles() {
         scope.launch {
             val paths = pickFiles(stringResource("rabbitmq_ui_msg_pick_title"))
@@ -262,32 +270,6 @@ fun RabbitMqQueueMessagesDialog(
                         BatchTask(id = UUID.randomUUID().toString(), fileName = file.name, fileSize = it.size.toLong(), content = it)
                     }
                 }
-            }
-        }
-    }
-
-    fun sendBatch() {
-        val s = session ?: return
-        scope.launch {
-            sending = true
-            sendError = null
-            try {
-                val headers = sendHeaders.filter { it.first.isNotBlank() }.associate { it.first.trim() to it.second }
-                for (task in batchTasks.filter { it.status == BatchStatus.WAITING }) {
-                    updateBatchTask(task.id) { it.copy(status = BatchStatus.SENDING, errorMessage = null) }
-                    val (ok, err) = sendOneDirect(task.content, headers, s)
-                    updateBatchTask(task.id) {
-                        if (ok) it.copy(status = BatchStatus.SUCCESS) else it.copy(status = BatchStatus.FAILED, errorMessage = err)
-                    }
-                }
-                val failed = batchTasks.count { it.status == BatchStatus.FAILED }
-                if (failed == 0) snackbar.showSnackbar(stringResource("rabbitmq_ui_msg_batch_done"))
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                sendError = failureText(e)
-            } finally {
-                sending = false
             }
         }
     }
@@ -365,19 +347,13 @@ fun RabbitMqQueueMessagesDialog(
                                 SendPane(
                                     sendHeaders = sendHeaders,
                                     onSendHeaders = { sendHeaders = it },
-                                    payload = payload,
-                                    onPayload = { payload = it },
                                     busy = sending,
                                     batchTasks = batchTasks,
                                     onPickFiles = ::loadSendFiles,
                                     onRemoveTask = { batchTasks = batchTasks.filterNot { t -> t.id == it } },
-                                    onSendSingle = ::sendSingle,
                                     onSendBatch = ::sendBatch,
                                     onRetryTask = ::retryBatchTask,
                                     sendError = sendError,
-                                    onEmptyInput = {
-                                        scope.launch { snackbar.showSnackbar(stringResource("rabbitmq_ui_send_input_required")) }
-                                    },
                                 )
                             }
                         }
@@ -508,51 +484,30 @@ private fun BrowsePane(
 /* ------------------------------ Tab 2：发送 ------------------------------ */
 
 /**
- * 发送页**单页融合**（对齐 IBM MessageSendTab：无 Tab、按"是否选中文件"分流）：
- * 上半 = 正文 TextArea（仅手动输入/粘贴）+ Headers；下半 = 批量文件区（选中文件后
- * 出现表格）；底部单一发送按钮 —— 有选中文件即"全部发送"（串行批量，忽略正文），
- * 否则正文非空走"发送消息"（单条），两者皆空提示后不发。
+ * 发送页**纯文件驱动**（对齐 IBM MessageSendTab）：Headers + 文件选择区（FileKit
+ * 多选，唯一消息来源，无正文输入框）+ 文件表格；底部单一"发送文件"按钮 —— 有
+ * WAITING 项即可点，按列表逐个直发（单文件即单发）；有成功投递自动刷新列表。
  */
 @Composable
 private fun SendPane(
     sendHeaders: List<Pair<String, String>>,
     onSendHeaders: (List<Pair<String, String>>) -> Unit,
-    payload: String,
-    onPayload: (String) -> Unit,
     busy: Boolean,
     batchTasks: List<BatchTask>,
     onPickFiles: () -> Unit,
     onRemoveTask: (String) -> Unit,
-    onSendSingle: () -> Unit,
     onSendBatch: () -> Unit,
     onRetryTask: (BatchTask) -> Unit,
     sendError: String?,
-    onEmptyInput: () -> Unit,
 ) {
     val hasBatch = batchTasks.isNotEmpty()
     Column(modifier = Modifier.fillMaxSize().padding(vertical = 8.dp)) {
         Column(modifier = Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
-            // ---- 上半：单条正文（仅手动输入，文件统一走下方"选择文件"）----
-            Text(
-                text = stringResource("rabbitmq_ui_send_payload"),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(4.dp))
-            OutlinedTextField(
-                value = payload,
-                onValueChange = onPayload,
-                enabled = !busy,
-                singleLine = false,
-                textStyle = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.height(160.dp).fillMaxWidth(),
-            )
-            Spacer(Modifier.height(8.dp))
             HeadersEditor(headers = sendHeaders, enabled = !busy, onChange = onSendHeaders)
             Spacer(Modifier.height(12.dp))
             HorizontalDivider()
             Spacer(Modifier.height(8.dp))
-            // ---- 下半：批量文件区 ----
+            // ---- 文件区：选择文件 / 数量 / 提示 ----
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -576,6 +531,9 @@ private fun SendPane(
                 )
             }
             Spacer(Modifier.height(4.dp))
+            if (!hasBatch) {
+                ObjectListEmptyState(message = stringResource("rabbitmq_ui_send_empty"))
+            }
             batchTasks.forEach { task ->
                 Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(
@@ -641,7 +599,7 @@ private fun SendPane(
             }
         }
         HorizontalDivider()
-        // ---- 底部条：单一发送按钮，按"文件列表 / 正文"分流（IBM SendBottomBar 同款）----
+        // ---- 底部条：单一"发送文件"按钮，只看待发送文件 ----
         Row(
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -649,24 +607,12 @@ private fun SendPane(
         ) {
             Spacer(Modifier.weight(1f))
             PressableButton(
-                onClick = {
-                    when {
-                        // 情况 A：文件列表非空 → 忽略正文，严格按列表串行发。
-                        hasBatch -> onSendBatch()
-                        // 情况 B：列表空 + 正文非空 → 单条发。
-                        payload.isNotBlank() -> onSendSingle()
-                        // 情况 C：两者皆空 → 提示（按钮保持可点，点击即提示）。
-                        else -> onEmptyInput()
-                    }
-                },
-                enabled = !busy && (!hasBatch || batchTasks.any { it.status == BatchStatus.WAITING }),
+                onClick = onSendBatch,
+                enabled = !busy && batchTasks.any { it.status == BatchStatus.WAITING },
             ) {
                 Text(
-                    text = when {
-                        busy -> stringResource("rabbitmq_ui_send_sending")
-                        hasBatch -> stringResource("rabbitmq_ui_send_send_all")
-                        else -> stringResource("rabbitmq_ui_send_button")
-                    },
+                    text = if (busy) stringResource("rabbitmq_ui_send_sending")
+                    else stringResource("rabbitmq_ui_send_send_files"),
                 )
             }
         }
