@@ -147,6 +147,7 @@
   "rabbitmq_ui_send_send_files": "发送文件",
   "rabbitmq_ui_send_empty": "请选择要发送的文件",
   "rabbitmq_ui_queue_action_messages": "查看消息",
+  "rabbitmq_ui_action_ask_ai": "询问 AI",
   "rabbitmq_ui_queue_action_props": "属性",
   "rabbitmq_ui_queue_state_blocked": "已阻塞（flow）",
   "rabbitmq_ui_queue_props_title": "队列属性：%1$s",

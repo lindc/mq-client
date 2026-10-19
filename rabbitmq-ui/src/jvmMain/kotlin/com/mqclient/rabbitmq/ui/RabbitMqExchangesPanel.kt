@@ -42,6 +42,9 @@ import com.mqclient.mqui.state.LoadState
 import com.mqclient.mqui.state.LoadStateContent
 import com.mqclient.rabbitmq.RabbitMqEvents
 import com.mqclient.rabbitmq.RabbitMqModule
+import com.mqclient.rabbitmq.ui.ai.RabbitMqAiChainBuilder
+import com.mqclient.rabbitmq.ui.ai.askAiCardAction
+import com.mqclient.uicommon.LocalAiAsk
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
@@ -73,6 +76,8 @@ fun RabbitMqExchangesPanel(
     var showCreate by remember(connectionId) { mutableStateOf(false) }
     var propsExchange by remember(connectionId) { mutableStateOf<RabbitMqExchangeCardInfo?>(null) }
     var sendExchange by remember(connectionId) { mutableStateOf<RabbitMqExchangeCardInfo?>(null) }
+    // 「询问 AI」宿主回调：宿主没 Provide（独立预览等）时为 null —— AI 按钮不显示。
+    val aiAsk = LocalAiAsk.current
 
     // DLX 链接跳转留下的「打开交换机属性」焦点：列表就绪后消费一次 —— 缓存里
     // 找得到才开（不存在的目标静默丢弃，与「找不到不跳转」的链接判定同一口径）。
@@ -153,6 +158,16 @@ fun RabbitMqExchangesPanel(
                                         .joinToString(" · "),
                                 actions =
                                     buildList {
+                                        // AI 绝对最左（三家同一拼接约定）；系统交换机
+                                        // 也开放（默认交换机是排查路由问题的关键对象）。
+                                        if (aiAsk != null) {
+                                            add(
+                                                askAiCardAction {
+                                                    RabbitMqAiChainBuilder.buildForExchange(connectionId, info.name)
+                                                        ?.let(aiAsk::onAsk)
+                                                },
+                                            )
+                                        }
                                         // 发送消息：开发辅助，所有交换机可发（默认交换机编址 amq.default）。
                                         add(
                                             CardAction(

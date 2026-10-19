@@ -33,6 +33,8 @@ kotlin {
             // 消息正文解释器：聚合注册表一个依赖带上契约 + 全部实现（ServiceLoader
             // 运行时发现），队列消息详情对话框的「解释器」窗格用（kafka-ui 同款）。
             implementation(projects.messageInterpreterRegistry)
+            // kotlinx.serialization JSON DSL：AiChainBuilder 组装链路上下文（kafka-ui 同款）。
+            implementation(libs.kotlinx.serialization.json)
         }
         jvmTest.dependencies {
             implementation(kotlin("test"))

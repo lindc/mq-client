@@ -147,6 +147,7 @@
   "rabbitmq_ui_send_send_files": "Send files",
   "rabbitmq_ui_send_empty": "Select files to send",
   "rabbitmq_ui_queue_action_messages": "View messages",
+  "rabbitmq_ui_action_ask_ai": "Ask AI",
   "rabbitmq_ui_queue_action_props": "Properties",
   "rabbitmq_ui_queue_state_blocked": "Blocked (flow)",
   "rabbitmq_ui_queue_props_title": "Queue properties: %1$s",

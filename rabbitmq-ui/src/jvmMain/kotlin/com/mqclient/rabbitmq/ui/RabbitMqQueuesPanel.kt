@@ -42,6 +42,9 @@ import com.mqclient.mqui.objectlist.ObjectListPanel
 import com.mqclient.mqui.state.LoadStateContent
 import com.mqclient.mqui.state.LoadState
 import com.mqclient.rabbitmq.RabbitMqEvents
+import com.mqclient.rabbitmq.ui.ai.RabbitMqAiChainBuilder
+import com.mqclient.rabbitmq.ui.ai.askAiCardAction
+import com.mqclient.uicommon.LocalAiAsk
 import kotlinx.coroutines.launch
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.i18n.stringResource
@@ -66,6 +69,8 @@ fun RabbitMqQueuesPanel(
     var propsQueue by remember(connectionId) { mutableStateOf<RabbitMqQueueCardInfo?>(null) }
     var msgQueue by remember(connectionId) { mutableStateOf<RabbitMqQueueCardInfo?>(null) }
     var showCreate by remember(connectionId) { mutableStateOf(false) }
+    // 「询问 AI」宿主回调：宿主没 Provide（独立预览等）时为 null —— AI 按钮不显示。
+    val aiAsk = LocalAiAsk.current
     val connectionStatus = rememberRabbitMqConnectionStatus(connectionId)
     LaunchedEffect(connectionId) { state.load() }
     LaunchedEffect(connectionId, connectionStatus) { state.onStatusChanged(connectionStatus) }
@@ -185,20 +190,33 @@ fun RabbitMqQueuesPanel(
                                 // 积压告警边框：默认态与悬停态都保留（共享卡 alertTint 槽位）。
                                 alertTint = if (backlog) RabbitMqWarningOrange.copy(alpha = 0.5f) else null,
                                 actions =
-                                    listOf(
-                                        CardAction(
-                                            id = "messages",
-                                            icon = Icons.Default.Email,
-                                            tooltip = "rabbitmq_ui_queue_action_messages",
-                                            onClick = { msgQueue = info },
-                                        ),
-                                        CardAction(
-                                            id = "properties",
-                                            icon = Icons.Default.Info,
-                                            tooltip = "rabbitmq_ui_queue_action_props",
-                                            onClick = { propsQueue = info },
-                                        ),
-                                    ),
+                                    buildList {
+                                        // AI 绝对最左（三家同一拼接约定）。
+                                        if (aiAsk != null) {
+                                            add(
+                                                askAiCardAction {
+                                                    RabbitMqAiChainBuilder.buildForQueue(connectionId, info.name)
+                                                        ?.let(aiAsk::onAsk)
+                                                },
+                                            )
+                                        }
+                                        add(
+                                            CardAction(
+                                                id = "messages",
+                                                icon = Icons.Default.Email,
+                                                tooltip = "rabbitmq_ui_queue_action_messages",
+                                                onClick = { msgQueue = info },
+                                            ),
+                                        )
+                                        add(
+                                            CardAction(
+                                                id = "properties",
+                                                icon = Icons.Default.Info,
+                                                tooltip = "rabbitmq_ui_queue_action_props",
+                                                onClick = { propsQueue = info },
+                                            ),
+                                        )
+                                    },
                             )
                         },
                     onCardClick = {},
