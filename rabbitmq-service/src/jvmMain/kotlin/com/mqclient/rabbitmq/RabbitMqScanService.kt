@@ -11,6 +11,8 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 
 /**
  * RabbitMQ 对象 / 状态扫描：定时快扫 / 慢扫 + 缓存写入 + 事件通知，与 kafka 的
@@ -403,6 +405,56 @@ class RabbitMqScanService(private val context: ServiceContext) {
         withContext(Dispatchers.IO) { admin.purgeQueue(name) }
         rabbitMqLog.info("queue purged: connection=$connectionId queue=$name")
         RabbitMqModule.scanNow(connectionId)
+    }
+
+    /**
+     * 创建队列（管理端点 PUT）：成功后同步补缓存（queues 插入新快照）→
+     * OBJECTS_SCANNED 驱动列表刷新（与 createExchange 同一模式）。state 未知置
+     * null，快扫跑过自然补上。[arguments] 是 x-arguments 原始键值对（值为字符串，
+     * 这里统一做类型化：纯整数字符串 → Long、"true"/"false" → Boolean、其余按
+     * 字符串 —— 与管理端行为一致）。服务端错误（已存在 / 权限不足等）原样抛给调用方。
+     */
+    suspend fun createQueue(
+        connectionId: String,
+        name: String,
+        durable: Boolean,
+        autoDelete: Boolean,
+        exclusive: Boolean,
+        arguments: Map<String, String>,
+    ) {
+        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
+        val admin = ctx.admin ?: throw IllegalStateException("未连接")
+        val args = buildJsonObject {
+            arguments
+                .filter { it.key.isNotBlank() }
+                .forEach { (key, value) ->
+                    val t = value.trim()
+                    put(
+                        key.trim(),
+                        when {
+                            t == "true" -> JsonPrimitive(true)
+                            t == "false" -> JsonPrimitive(false)
+                            else -> t.toLongOrNull()?.let { JsonPrimitive(it) } ?: JsonPrimitive(t)
+                        },
+                    )
+                }
+        }
+        withContext(Dispatchers.IO) { admin.createQueue(name, durable, autoDelete, exclusive, args) }
+        ctx.cache?.let { cache ->
+            val current = cache.getAs<List<RabbitMqQueueSnapshot>>(KEY_QUEUES).orEmpty()
+                .filter { it.name != name }
+            cache.put(
+                KEY_QUEUES,
+                (current + RabbitMqQueueSnapshot(name, state = null, durable, autoDelete, exclusive))
+                    .sortedBy { it.name },
+                ttlMs = objectsTtlMs(ctx),
+            )
+        }
+        context.emit(
+            name = RabbitMqEvents.OBJECTS_SCANNED,
+            payload = mapOf("connectionId" to connectionId),
+        )
+        rabbitMqLog.info("queue created: connection=$connectionId queue=$name")
     }
 
     /**

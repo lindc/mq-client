@@ -25,6 +25,7 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -320,6 +321,27 @@ class RabbitMqAdminClient(private val config: RabbitMqConfig) : AutoCloseable {
             put("internal", false)
         }.toString()
         mutatingRequest(HttpMethod.Put, body, "exchanges", vhostSegment(), pathSegment(name))
+    }
+
+    /**
+     * 创建队列：`PUT /api/queues/{vhost}/{name}`。成功 201。
+     * [arguments] 是 x-arguments 的 JSON 对象（数值 / 布尔 / 字符串混合，由 UI 层
+     * 完成字符串到对应类型的转换 —— 与管理端行为一致）。
+     */
+    suspend fun createQueue(
+        name: String,
+        durable: Boolean,
+        autoDelete: Boolean,
+        exclusive: Boolean,
+        arguments: JsonObject,
+    ) {
+        val body = buildJsonObject {
+            put("durable", durable)
+            put("auto_delete", autoDelete)
+            put("exclusive", exclusive)
+            put("arguments", arguments)
+        }.toString()
+        mutatingRequest(HttpMethod.Put, body, "queues", vhostSegment(), pathSegment(name))
     }
 
     /**

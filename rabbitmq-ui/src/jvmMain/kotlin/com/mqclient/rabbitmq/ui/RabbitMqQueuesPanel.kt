@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.FilterList
@@ -63,6 +64,7 @@ fun RabbitMqQueuesPanel(
     val scope = rememberCoroutineScope()
     var propsQueue by remember(connectionId) { mutableStateOf<RabbitMqQueueCardInfo?>(null) }
     var msgQueue by remember(connectionId) { mutableStateOf<RabbitMqQueueCardInfo?>(null) }
+    var showCreate by remember(connectionId) { mutableStateOf(false) }
     val connectionStatus = rememberRabbitMqConnectionStatus(connectionId)
     LaunchedEffect(connectionId) { state.load() }
     LaunchedEffect(connectionId, connectionStatus) { state.onStatusChanged(connectionStatus) }
@@ -101,6 +103,11 @@ fun RabbitMqQueuesPanel(
                     isActive = state.problemOnly,
                     enabled = state.hasProblemQueues || state.problemOnly,
                     onClick = { state.problemOnly = !state.problemOnly },
+                )
+                ToolbarButton(
+                    icon = Icons.Default.Add,
+                    text = stringResource("rabbitmq_ui_queue_create"),
+                    onClick = { showCreate = true },
                 )
                 ToolbarButton(
                     icon = Icons.Default.Refresh,
@@ -189,6 +196,14 @@ fun RabbitMqQueuesPanel(
                 )
             }
         }
+        // 创建队列对话框（工具栏「+ 创建队列」打开；成功后服务端广播 OBJECTS_SCANNED）。
+        if (showCreate) {
+            RabbitMqCreateQueueDialog(
+                connectionId = connectionId,
+                onDismiss = { showCreate = false },
+            )
+        }
+
         // 队列属性对话框（卡片 ⓘ 打开；删除成功后回调刷新 + Snackbar）。
         msgQueue?.let { info ->
         RabbitMqQueueMessagesDialog(

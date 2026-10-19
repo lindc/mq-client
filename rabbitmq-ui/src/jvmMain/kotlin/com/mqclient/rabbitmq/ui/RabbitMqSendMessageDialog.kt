@@ -460,18 +460,20 @@ private fun SendPane(
 }
 
 /**
- * Headers 键值对编辑器（单条 / 批量两 Tab 共用同一实现）：标签行 + 键值对行（可删）+
- * 「添加 Header」。状态由调用方持有（单条 [RabbitMqSendState.headers] /
- * 批量 [RabbitMqSendState.batchHeaders] 各存各的），本组件是纯视图。
+ * Headers 键值对编辑器（发送消息 / 创建队列等共用）：标签行 + 键值对行（可删）+
+ * 「添加 Header」。状态由调用方持有，本组件是纯视图。[titleLabel] / [addLabel]
+ * 可覆盖默认文案（创建队列的 Arguments 场景）。
  */
 @Composable
 internal fun HeadersEditor(
     headers: List<Pair<String, String>>,
     enabled: Boolean,
     onChange: (List<Pair<String, String>>) -> Unit,
+    titleLabel: String? = null,
+    addLabel: String? = null,
 ) {
     Text(
-        text = stringResource("rabbitmq_ui_send_headers"),
+        text = titleLabel ?: stringResource("rabbitmq_ui_send_headers"),
         style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -527,7 +529,7 @@ internal fun HeadersEditor(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
             Spacer(Modifier.width(4.dp))
-            Text(stringResource("rabbitmq_ui_send_add_header"), style = MaterialTheme.typography.labelMedium)
+            Text(addLabel ?: stringResource("rabbitmq_ui_send_add_header"), style = MaterialTheme.typography.labelMedium)
         }
     }
 }

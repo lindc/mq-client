@@ -206,5 +206,17 @@
   "rabbitmq_ui_msg_pending_count": ", %1$d pending (auto-requeued on close)",
   "rabbitmq_ui_msg_fetch_limit": "Fetch count",
   "rabbitmq_ui_msg_detail_no_params": "This interpreter has no parameters",
-  "rabbitmq_ui_msg_detail_copy_value": "Copy value"
+  "rabbitmq_ui_msg_detail_copy_value": "Copy value",
+  "rabbitmq_ui_queue_create": "Create queue",
+  "rabbitmq_ui_queue_create_title": "Create queue",
+  "rabbitmq_ui_queue_create_field_name": "Name",
+  "rabbitmq_ui_queue_create_field_durable": "Durable",
+  "rabbitmq_ui_queue_create_field_auto_delete": "Auto delete",
+  "rabbitmq_ui_queue_create_field_exclusive": "Exclusive",
+  "rabbitmq_ui_queue_create_field_arguments": "Arguments (optional)",
+  "rabbitmq_ui_queue_create_add_argument": "Add argument",
+  "rabbitmq_ui_queue_create_confirm": "Create",
+  "rabbitmq_ui_queue_create_error_name_required": "Name is required",
+  "rabbitmq_ui_queue_create_error_name_charset": "Name allows letters / digits / . _ - only",
+  "rabbitmq_ui_queue_create_error_name_amq": "The amq. prefix is reserved for system queues"
 }
