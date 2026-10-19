@@ -2,6 +2,7 @@ package com.mqclient.kafka
 
 import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ConnectionStore
+import com.mqclient.core.db.CommandAudit
 import com.mqclient.core.cache.CacheManager
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.emit
@@ -229,10 +230,12 @@ class KafkaScanService(private val context: ServiceContext) {
         val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
         val admin = ctx.adminClient ?: throw IllegalStateException("未连接")
         val timeoutMs = ctx.config.connectionTimeout * 1_000L
-        withContext(Dispatchers.IO) {
-            admin.createTopics(listOf(NewTopic(name, partitions, replicationFactor.toShort())))
-                .all()
-                .get(timeoutMs, TimeUnit.MILLISECONDS)
+        audited(connectionId, "CREATE TOPIC $name (partitions=$partitions, replicationFactor=$replicationFactor)") {
+            withContext(Dispatchers.IO) {
+                admin.createTopics(listOf(NewTopic(name, partitions, replicationFactor.toShort())))
+                    .all()
+                    .get(timeoutMs, TimeUnit.MILLISECONDS)
+            }
         }
         kafkaLog.info("topic created: connection=$connectionId topic=$name partitions=$partitions replicas=$replicationFactor")
 
@@ -332,8 +335,10 @@ class KafkaScanService(private val context: ServiceContext) {
         val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
         val admin = ctx.adminClient ?: throw IllegalStateException("未连接")
         val timeoutMs = ctx.config.connectionTimeout * 1_000L
-        withContext(Dispatchers.IO) {
-            admin.deleteTopics(setOf(name)).all().get(timeoutMs, TimeUnit.MILLISECONDS)
+        audited(connectionId, "DELETE TOPIC $name") {
+            withContext(Dispatchers.IO) {
+                admin.deleteTopics(setOf(name)).all().get(timeoutMs, TimeUnit.MILLISECONDS)
+            }
         }
         kafkaLog.info("topic deleted: connection=$connectionId topic=$name")
     }
@@ -352,7 +357,8 @@ class KafkaScanService(private val context: ServiceContext) {
         val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
         val admin = ctx.adminClient ?: throw IllegalStateException("未连接")
         val timeoutMs = ctx.config.connectionTimeout * 1_000L
-        val cleared = withContext(Dispatchers.IO) {
+        val cleared = audited(connectionId, "PURGE TOPIC $name", resultNote = { "(partitions=$it)" }) {
+            withContext(Dispatchers.IO) {
             val partitions = admin.describeTopics(listOf(name))
                 .allTopicNames()
                 .get(timeoutMs, TimeUnit.MILLISECONDS)[name]
@@ -375,6 +381,7 @@ class KafkaScanService(private val context: ServiceContext) {
             admin.deleteRecords(targets).all()
                 .get(timeoutMs, TimeUnit.MILLISECONDS)
             targets.size
+            }
         }
         kafkaLog.info("topic records cleared: connection=$connectionId topic=$name partitions=$cleared")
         return cleared
@@ -481,7 +488,18 @@ class KafkaScanService(private val context: ServiceContext) {
     ): Int {
         val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
         val admin = ctx.adminClient ?: throw IllegalStateException("未连接")
-        return resetGroupOffsets(admin, groupId, to, ctx.config.connectionTimeout * 1_000L)
+        val strategy = when (to) {
+            is KafkaGroupResetTo.Earliest -> "EARLIEST"
+            is KafkaGroupResetTo.Latest -> "LATEST"
+            is KafkaGroupResetTo.AtTimestamp -> "TIMESTAMP"
+        }
+        return audited(
+            connectionId,
+            "RESET OFFSETS GROUP $groupId (strategy=$strategy)",
+            resultNote = { "(partitions=$it)" },
+        ) {
+            resetGroupOffsets(admin, groupId, to, ctx.config.connectionTimeout * 1_000L)
+        }
     }
 
     /**
@@ -563,10 +581,12 @@ class KafkaScanService(private val context: ServiceContext) {
         val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
         val admin = ctx.adminClient ?: throw IllegalStateException("未连接")
         val timeoutMs = ctx.config.connectionTimeout * 1_000L
-        withContext(Dispatchers.IO) {
-            admin.deleteConsumerGroups(setOf(groupId))
-                .all()
-                .get(timeoutMs, TimeUnit.MILLISECONDS)
+        audited(connectionId, "DELETE GROUP $groupId") {
+            withContext(Dispatchers.IO) {
+                admin.deleteConsumerGroups(setOf(groupId))
+                    .all()
+                    .get(timeoutMs, TimeUnit.MILLISECONDS)
+            }
         }
     }
 
@@ -817,6 +837,46 @@ class KafkaScanService(private val context: ServiceContext) {
     private fun connectedContext(connectionId: String): KafkaConnectionContext? =
         KafkaModule.connectionOrNull(connectionId)
             ?.takeIf { it.status == ConnectionStatus.Connected }
+
+    /**
+     * 写操作审计包裹：操作前计时，成功 / 失败各发一条 core.mq.command.executed
+     * 事件（CommandAudit 内部 runCatching，审计失败不影响本操作）。[command] 是
+     * 拼装好的伪命令；[resultNote] 成功后追加结果注记（如 "(partitions=6)"）。
+     * 消息生产（sendMessage）不是管理操作，不经此包裹 —— 与 IBM MQ 的 MqscExecutor
+     * 咽喉点口径一致。
+     */
+    private suspend fun <T> audited(
+        connectionId: String,
+        command: String,
+        resultNote: ((T) -> String?)? = null,
+        block: suspend () -> T,
+    ): T {
+        val start = System.currentTimeMillis()
+        return try {
+            val result = block()
+            CommandAudit.emit(
+                connectionId = connectionId,
+                command = command + (resultNote?.invoke(result)?.let { note -> " $note" } ?: ""),
+                status = "SUCCESS",
+                response = null,
+                requestTime = start,
+                responseTime = System.currentTimeMillis(),
+            )
+            result
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            CommandAudit.emit(
+                connectionId = connectionId,
+                command = command,
+                status = "FAILED",
+                response = CommandAudit.describeError(e),
+                requestTime = start,
+                responseTime = System.currentTimeMillis(),
+            )
+            throw e
+        }
+    }
 
     private fun cacheOf(connectionId: String): CacheManager? =
         KafkaModule.connectionOrNull(connectionId)?.cache

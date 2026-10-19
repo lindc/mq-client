@@ -117,7 +117,12 @@ class RabbitMqMessageSession private constructor(
         }
     }
 
-    /** 直发当前队列：经默认交换机（""，routing key = 队列名）。 */
+    /**
+     * 直发当前队列：经默认交换机（""，routing key = 队列名）。
+     *
+     * 消息发布**不进写操作审计**（mq_command 表语义是管理操作，且高频批量会膨胀
+     * 审计表 —— 与 IBM MQ 的 MqscExecutor 咽喉点口径一致）。
+     */
     suspend fun publishDirect(body: ByteArray, headers: Map<String, String>) = lock.withLock {
         withContext(Dispatchers.IO) {
             checkOpen()

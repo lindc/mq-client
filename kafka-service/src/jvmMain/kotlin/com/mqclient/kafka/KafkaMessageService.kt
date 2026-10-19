@@ -245,6 +245,9 @@ class KafkaMessageService {
      * 发送一条消息。阻塞等 ack 与元数据（partition/offset/timestamp），失败转
      * [KafkaSendResult.failure] 不上抛（批量逐条记状态需要）；真正的协程取消除外。
      * 每次临时建 producer（对标 ibm-mq MessageSender 的独立句柄模式）。
+     *
+     * 消息生产**不进写操作审计**（mq_command 表语义是管理操作，且高频批量会膨胀
+     * 审计表 —— 与 IBM MQ 的 MqscExecutor 咽喉点口径一致）。
      */
     suspend fun sendMessage(
         connectionId: String,

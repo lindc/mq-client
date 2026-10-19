@@ -2,6 +2,7 @@ package com.mqclient.rabbitmq
 
 import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ConnectionStore
+import com.mqclient.core.db.CommandAudit
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.emit
 import kotlinx.coroutines.CancellationException
@@ -250,7 +251,14 @@ class RabbitMqScanService(private val context: ServiceContext) {
     ) {
         val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
         val admin = ctx.admin ?: throw IllegalStateException("未连接")
-        withContext(Dispatchers.IO) { admin.createExchange(name, type, durable, autoDelete) }
+        val flags = listOfNotNull(
+            "type=$type",
+            "durable".takeIf { durable },
+            "autoDelete".takeIf { autoDelete },
+        ).joinToString(", ")
+        audited(connectionId, "CREATE EXCHANGE $name" + flags.takeIf { it.isNotEmpty() }?.let { " [$it]" }) {
+            withContext(Dispatchers.IO) { admin.createExchange(name, type, durable, autoDelete) }
+        }
         // 同步补缓存：新交换机立即出现在列表（OBJECTS_SCANNED 事件驱动 UI 重读）。
         ctx.cache?.let { cache ->
             val current = cache.getAs<List<RabbitMqExchangeSnapshot>>(KEY_EXCHANGES).orEmpty()
@@ -279,7 +287,9 @@ class RabbitMqScanService(private val context: ServiceContext) {
         }
         val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
         val admin = ctx.admin ?: throw IllegalStateException("未连接")
-        withContext(Dispatchers.IO) { admin.deleteExchange(name) }
+        audited(connectionId, "DELETE EXCHANGE $name") {
+            withContext(Dispatchers.IO) { admin.deleteExchange(name) }
+        }
         ctx.cache?.let { cache ->
             cache.getAs<List<RabbitMqExchangeSnapshot>>(KEY_EXCHANGES).orEmpty()
                 .filter { it.name != name }
@@ -324,7 +334,9 @@ class RabbitMqScanService(private val context: ServiceContext) {
     suspend fun createBinding(connectionId: String, exchange: String, queue: String, routingKey: String) {
         val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
         val admin = ctx.admin ?: throw IllegalStateException("未连接")
-        withContext(Dispatchers.IO) { admin.createBinding(exchange, queue, routingKey) }
+        audited(connectionId, "CREATE BINDING $exchange -> $queue" + routingKey.takeIf { it.isNotBlank() }?.let { " [rk=$it]" }) {
+            withContext(Dispatchers.IO) { admin.createBinding(exchange, queue, routingKey) }
+        }
         rabbitMqLog.info("binding created: connection=$connectionId exchange=$exchange queue=$queue routingKey=$routingKey")
     }
 
@@ -335,7 +347,9 @@ class RabbitMqScanService(private val context: ServiceContext) {
     suspend fun deleteBinding(connectionId: String, exchange: String, queue: String, propertiesKey: String) {
         val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
         val admin = ctx.admin ?: throw IllegalStateException("未连接")
-        withContext(Dispatchers.IO) { admin.deleteBinding(exchange, queue, propertiesKey) }
+        audited(connectionId, "DELETE BINDING $exchange -> $queue" + propertiesKey.takeIf { it.isNotBlank() }?.let { " [rk=$it]" }) {
+            withContext(Dispatchers.IO) { admin.deleteBinding(exchange, queue, propertiesKey) }
+        }
         rabbitMqLog.info("binding deleted: connection=$connectionId exchange=$exchange queue=$queue")
     }
 
@@ -343,6 +357,9 @@ class RabbitMqScanService(private val context: ServiceContext) {
      * 测试发布（实时操作，开发辅助）：走管理 API publish 端点，返回 routed
      * （是否路由到至少一个队列，false = 已提交但没进任何队列）。headers 键值对进
      * `properties.headers`；与其他写操作同一模式：连接守卫 + Dispatchers.IO。
+     *
+     * 消息发布**不进写操作审计**（mq_command 表语义是管理操作，且高频批量会膨胀
+     * 审计表 —— 与 IBM MQ 的 MqscExecutor 咽喉点口径一致）。
      */
     suspend fun publishTestMessage(
         connectionId: String,
@@ -402,7 +419,9 @@ class RabbitMqScanService(private val context: ServiceContext) {
     suspend fun purgeQueue(connectionId: String, name: String) {
         val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
         val admin = ctx.admin ?: throw IllegalStateException("未连接")
-        withContext(Dispatchers.IO) { admin.purgeQueue(name) }
+        audited(connectionId, "PURGE QUEUE $name") {
+            withContext(Dispatchers.IO) { admin.purgeQueue(name) }
+        }
         rabbitMqLog.info("queue purged: connection=$connectionId queue=$name")
         RabbitMqModule.scanNow(connectionId)
     }
@@ -439,7 +458,14 @@ class RabbitMqScanService(private val context: ServiceContext) {
                     )
                 }
         }
-        withContext(Dispatchers.IO) { admin.createQueue(name, durable, autoDelete, exclusive, args) }
+        val flags = listOfNotNull(
+            "durable".takeIf { durable },
+            "autoDelete".takeIf { autoDelete },
+            "exclusive".takeIf { exclusive },
+        ).joinToString(", ")
+        audited(connectionId, "CREATE QUEUE $name" + flags.takeIf { it.isNotEmpty() }?.let { " [$it]" }) {
+            withContext(Dispatchers.IO) { admin.createQueue(name, durable, autoDelete, exclusive, args) }
+        }
         ctx.cache?.let { cache ->
             val current = cache.getAs<List<RabbitMqQueueSnapshot>>(KEY_QUEUES).orEmpty()
                 .filter { it.name != name }
@@ -465,7 +491,9 @@ class RabbitMqScanService(private val context: ServiceContext) {
     suspend fun deleteQueue(connectionId: String, name: String) {
         val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
         val admin = ctx.admin ?: throw IllegalStateException("未连接")
-        withContext(Dispatchers.IO) { admin.deleteQueue(name) }
+        audited(connectionId, "DELETE QUEUE $name") {
+            withContext(Dispatchers.IO) { admin.deleteQueue(name) }
+        }
         ctx.cache?.let { cache ->
             cache.getAs<List<RabbitMqQueueSnapshot>>(KEY_QUEUES).orEmpty()
                 .filter { it.name != name }
@@ -487,6 +515,46 @@ class RabbitMqScanService(private val context: ServiceContext) {
     private fun connectedContext(connectionId: String): RabbitMqConnectionContext? =
         RabbitMqModule.connectionOrNull(connectionId)
             ?.takeIf { it.status == ConnectionStatus.Connected }
+
+    /**
+     * 写操作审计包裹：操作前计时，成功 / 失败各发一条 core.mq.command.executed
+     * 事件（CommandAudit 内部 runCatching，审计失败不影响本操作）。[command] 是
+     * 拼装好的伪命令（CREATE/DELETE/PURGE QUEUE|EXCHANGE、BINDING 等，全大写操作
+     * 词打头）；[resultNote] 成功后追加结果注记。消息发布（publishTestMessage /
+     * publishDirect）不是管理操作，不经此包裹。
+     */
+    private suspend fun <T> audited(
+        connectionId: String,
+        command: String,
+        resultNote: ((T) -> String?)? = null,
+        block: suspend () -> T,
+    ): T {
+        val start = System.currentTimeMillis()
+        return try {
+            val result = block()
+            CommandAudit.emit(
+                connectionId = connectionId,
+                command = command + (resultNote?.invoke(result)?.let { note -> " $note" } ?: ""),
+                status = "SUCCESS",
+                response = null,
+                requestTime = start,
+                responseTime = System.currentTimeMillis(),
+            )
+            result
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            CommandAudit.emit(
+                connectionId = connectionId,
+                command = command,
+                status = "FAILED",
+                response = CommandAudit.describeError(e),
+                requestTime = start,
+                responseTime = System.currentTimeMillis(),
+            )
+            throw e
+        }
+    }
 
     private fun objectsTtlMs(ctx: RabbitMqConnectionContext): Long =
         ctx.config.objectScanIntervalMinutes * 60_000L * OBJECTS_TTL_FACTOR.toLong()
