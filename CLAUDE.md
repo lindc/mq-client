@@ -9,7 +9,7 @@ KMP 桌面端中间件管理工具（IBM MQ / Kafka / RabbitMQ / RocketMQ / Puls
   /opt/software/build/gradle/bin/gradle assemble jvmTest   # 全量构建 + 测试
   /opt/software/build/gradle/bin/gradle :rabbitmq-ui:jvmTest  # 单模块
   ```
-- 实连 diag 测试默认跳过，需 `-Dkafkadiag.enabled=true -D...` 透传（见 `kafka-service/build.gradle.kts` 与 diag 测试 KDoc）。
+- 实连 diag 测试默认跳过，需 `-Dkafkadiag.enabled=true -D...` / `-Drocketmqdiag.enabled=true -D...` 透传（见 `kafka-service` / `rocketmq-service` 的 `build.gradle.kts` 与 diag 测试 KDoc）。
 
 ## 架构速查
 
@@ -27,7 +27,8 @@ KMP 桌面端中间件管理工具（IBM MQ / Kafka / RabbitMQ / RocketMQ / Puls
 - **Kafka**：连接 / 扫描、Topic 管理、消费组重置位移（earliest / latest / 按时间戳，含状态守卫）、消息读写、拓扑图、AI 链路（含消费组 lag 上下文）、diag 实连测试。
 - **RabbitMQ**（阶段一 + 交换机管理已落地）：管理 API（Ktor + Basic Auth，vhost 按 `%2F` 编码）、显式连接、对象慢扫（5min）+ 队列计数快扫（10s）、概览 Dashboard（指标卡 + 健康度 Banner + Loading 骨架）、队列 / 交换机列表、交换机创建 / 删除 / 属性（**Bindings 增删查**：添加绑定弹窗 + 行内删除，`propertiesKey` 随列表下发用于 DELETE 路径；系统交换机默认 / amq.* 禁写）、拓扑图（Exchange → Binding → Queue 两列布局，双击 exchange 开属性）、AI 链路（CLUSTER → TOPIC → CONSUMER_GROUP lag 上下文）。
 - **RabbitMQ 待做**：消息发布 / 消费（amqp-client 5.22.0 已引入未使用）、队列管理操作、拓扑 E2E 绑定边、Routing Key 边标签（待 kuiver 支持）。
+- **RocketMQ**：连接表单（ACL + TLS：Truststore 收 JKS/P12 自动转 PEM、PEM CA 证书直接透传；Keystore 双向认证；密码框随文件联动禁用）、显式连接、对象双扫（慢扫 clusterInfo/topics/groups + 快扫消费组 Lag）、Topic 删除、拓扑图、diag 实连测试。TLS 坑位：`ClientConfig.useTLS` 构造时固化（必须 `setUseTLS` 显式传，start 时写 `tls.enable` 全局无效），`TlsSystemConfig` 证书字段在 start() 内 `buildSslContext` 才读取（窗口罩 start()）； PEM 证书若 `IOException` 客户端会静默降级明文，构造前必须预校验。
 
 ## 测试环境
 
-chillbear 服务器（`ssh app@www.chillbear.top`）有 IBM MQ / Kafka / RabbitMQ 容器可做实连冒烟；RabbitMQ 4.3.6 三节点集群管理端口 11207-11209（HTTP），mq-client 冒烟账号 `mqclient`。本机无容器运行时，容器操作走 ssh。
+chillbear 服务器（`ssh app@www.chillbear.top`）有 IBM MQ / Kafka / RabbitMQ / RocketMQ 容器可做实连冒烟；RabbitMQ 4.3.6 三节点集群管理端口 11207-11209（HTTP），mq-client 冒烟账号 `mqclient`。RocketMQ 5.3.2 三节点（`/opt/server/rocketmq`，说明文件 `connect.txt`）：NameServer 公网端口 **15672**（≠ broker 的 11207-11209），TLS enforcing 单向认证（客户端只需 PEM `ca.crt`，本机在 `~/Documents/mq/rocketmq/`），diag 冒烟账号 `reader-app`；`connect.txt` 含明文 ACL 密钥，禁止入 git。本机无容器运行时，容器操作走 ssh。
