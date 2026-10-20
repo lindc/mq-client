@@ -83,7 +83,7 @@ class RabbitMqTopologyGraphBuilderTest {
     }
 
     @Test
-    fun exchangeToExchangeBindingsSkippedInPhaseOne() {
+    fun exchangeToExchangeBindingsDrawn() {
         val data = buildKuiverFromSnapshot(
             snapshot(
                 exchanges = listOf(exchange("a"), exchange("b")),
@@ -93,8 +93,30 @@ class RabbitMqTopologyGraphBuilderTest {
             strings,
             showSystemObjects = true,
         )
-        assertTrue(data.kuiver.edges.isEmpty(), "E2E 绑定第一阶段不画")
+        // e→e 绑定画 EXCHANGE → EXCHANGE 边。
+        assertEquals(setOf("x:a" to "x:b"), data.kuiver.edges.map { it.fromId to it.toId }.toSet())
         assertEquals(2, data.kuiver.nodes.size)
+    }
+
+    @Test
+    fun exchangeChainToQueueDrawsAllEdges() {
+        val data = buildKuiverFromSnapshot(
+            snapshot(
+                exchanges = listOf(exchange("a"), exchange("b")),
+                queues = listOf(queue("team.q")),
+                bindings = listOf(
+                    binding("a", "b", type = "exchange"),
+                    binding("b", "team.q"),
+                ),
+            ),
+            strings,
+            showSystemObjects = true,
+        )
+        // 链式路由 a→b→q：两条边都在。
+        assertEquals(
+            setOf("x:a" to "x:b", "x:b" to "q:team.q"),
+            data.kuiver.edges.map { it.fromId to it.toId }.toSet(),
+        )
     }
 
     @Test

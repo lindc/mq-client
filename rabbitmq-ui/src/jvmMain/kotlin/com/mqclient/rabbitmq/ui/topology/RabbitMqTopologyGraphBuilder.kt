@@ -31,7 +31,7 @@ class RabbitMqTopologyStrings(
 data class RabbitMqTopologySnapshot(
     val exchanges: List<RabbitMqExchangeSnapshot>,
     val queues: List<RabbitMqQueueSnapshot>,
-    /** 全量绑定（含 exchange 目标）；builder 只取 destinationType=queue 的部分。 */
+    /** 全量绑定（queue 与 exchange 目标都参与建边）。 */
     val bindings: List<RabbitMqBindingSnapshot>,
     /** 队列状态（快扫）：badge 消息数与 severity 的数据源。 */
     val queueStatus: Map<String, RabbitMqQueueStatusSnapshot>,
@@ -42,7 +42,7 @@ data class RabbitMqTopologySnapshot(
 /**
  * 从 [RabbitMqTopologySnapshot] 构建 RabbitMQ 拓扑图（纯函数，jvmTest 直测）。
  *
- * 结构：两列路由链路 `EXCHANGE —(binding)→ RABBIT_QUEUE`：
+ * 结构：路由链路 `EXCHANGE —(binding)→ RABBIT_QUEUE`，e→e 绑定画 `EXCHANGE → EXCHANGE` 边：
  *  - exchange 节点：id `x:<name>`（name="" 的默认交换机仅在 [showSystemObjects]
  *    开启时进图，显示名取 [RabbitMqTopologyStrings] 的默认交换机标记之外由面板
  *    displayName 处理）；`amq.*` 系统交换机同受开关控制；
@@ -104,16 +104,19 @@ fun buildKuiverFromSnapshot(
         )
     }
 
-    // ---- 边：binding（仅 queue 目标）----
+    // ---- 边：binding（queue 与 exchange 目标都画；e→e 链式路由自然成多跳）----
     val edges = LinkedHashSet<Pair<String, String>>()
     fun link(from: String, to: String) {
         if (from != to && from in nodeTypes && to in nodeTypes) edges += from to to
     }
     snapshot.bindings.forEach { binding ->
-        if (binding.destinationType != "queue") return@forEach
         // 系统对象被过滤时，指向它们的边一并隐藏（含默认交换机的自动绑定）。
         if (!showSystemObjects && isSystemExchange(binding.source)) return@forEach
-        link(exchangeNodeId(binding.source), queueNodeId(binding.destination))
+        when (binding.destinationType) {
+            "queue" -> link(exchangeNodeId(binding.source), queueNodeId(binding.destination))
+            // e→e：目标交换机被系统过滤时 link() 自动不画（from/to 不在 nodeTypes）。
+            "exchange" -> link(exchangeNodeId(binding.source), exchangeNodeId(binding.destination))
+        }
     }
 
     val kuiver = buildKuiver {

@@ -33,14 +33,15 @@ import kotlinx.coroutines.launch
 
 /**
  * 添加绑定对话框（交换机属性对话框的「+ 添加绑定」入口）：ObjectDetailDialog 外壳 +
- * 表单（目标队列下拉 / Routing Key）。提交走
+ * 表单（目标类型 / 目标下拉 / Routing Key）。提交走
  * [com.mqclient.rabbitmq.RabbitMqScanService.createBinding]
- * （`POST /api/bindings/{vhost}/e/{exchange}/q/{queue}`）；成功后 [onCreated] 回调
- * （父级重载实时列表 + scanNow 同步慢扫缓存）。
+ * （`POST /api/bindings/{vhost}/e/{exchange}/{q|e}/{destination}`）；成功后
+ * [onCreated] 回调（父级重载实时列表 + scanNow 同步慢扫缓存）。
  *
- * 校验：目标队列必选（缓存无队列时下拉禁用 + 提示）；direct / topic 类型 Routing Key
- * 必填，fanout 可留空（提示语义）。Arguments 第一版固定 `{}`（KDoc 注明，后续按需
- * 加键值对编辑）。仅支持绑定到 Queue（Exchange 目标的第一版不画，见拓扑 KDoc）。
+ * 目标类型：队列（默认）/ 交换机（e→e）——交换机目标排除自身、默认交换机（""
+ * 不可作为 destination）与 amq.* 系统交换机。校验：目标必选（候选为空时按钮禁用 +
+ * 提示）；direct / topic 类型 Routing Key 必填，fanout 可留空（提示语义）。
+ * Arguments 第一版固定 `{}`（KDoc 注明，后续按需加键值对编辑）。
  */
 @Composable
 fun RabbitMqAddBindingDialog(
@@ -53,9 +54,19 @@ fun RabbitMqAddBindingDialog(
     val queues = remember(connectionId) {
         RabbitMqModule.serviceOrNull()?.cachedQueues(connectionId).orEmpty().map { it.name }
     }
+    val exchanges = remember(connectionId) {
+        // 交换机目标候选：排除自身 / 默认交换机（name=""，不可作为 destination）/
+        // amq.* 系统交换机。
+        RabbitMqModule.serviceOrNull()?.cachedExchanges(connectionId).orEmpty()
+            .map { it.name }
+            .filter { it.isNotEmpty() && it != exchangeName && !it.startsWith("amq.") }
+    }
+    var destinationType by remember { mutableStateOf("queue") }
     var destination by remember { mutableStateOf<String?>(null) }
     var routingKey by remember { mutableStateOf("") }
+    var bindingArguments by remember { mutableStateOf(listOf<Pair<String, String>>()) }
     var destinationError by remember { mutableStateOf<String?>(null) }
+    val candidates = if (destinationType == "queue") queues else exchanges
     var routingKeyError by remember { mutableStateOf<String?>(null) }
     var submitting by remember { mutableStateOf(false) }
     var submitError by remember { mutableStateOf<String?>(null) }
@@ -86,7 +97,16 @@ fun RabbitMqAddBindingDialog(
         submitError = null
         scope.launch {
             try {
-                service.createBinding(connectionId, exchangeName, target, routingKey.trim())
+                service.createBinding(
+                    connectionId = connectionId,
+                    exchange = exchangeName,
+                    destination = target,
+                    destinationType = destinationType,
+                    routingKey = routingKey.trim(),
+                    arguments = bindingArguments
+                        .filter { it.first.isNotBlank() }
+                        .associate { it.first.trim() to it.second },
+                )
                 onCreated()
                 onDismiss()
             } catch (e: CancellationException) {
@@ -106,7 +126,7 @@ fun RabbitMqAddBindingDialog(
         footerActions = {
             PressableButton(
                 onClick = { submit() },
-                enabled = !submitting && queues.isNotEmpty(),
+                enabled = !submitting && candidates.isNotEmpty(),
             ) { Text(stringResource("rabbitmq_ui_binding_add_confirm")) }
             PressableButton(
                 onClick = onDismiss,
@@ -120,9 +140,33 @@ fun RabbitMqAddBindingDialog(
                 .fillMaxSize()
                 .padding(horizontal = 20.dp, vertical = 12.dp),
         ) {
-            if (queues.isEmpty()) {
+            // 目标类型（队列 / 交换机）：切换时清空已选目标。
+            SettingsDropdownRow(
+                label = stringResource("rabbitmq_ui_binding_add_dest_type"),
+                currentLabel = stringResource(
+                    if (destinationType == "queue") "rabbitmq_ui_binding_add_dest_type_queue"
+                    else "rabbitmq_ui_binding_add_dest_type_exchange",
+                ),
+                options = listOf("queue", "exchange"),
+                optionLabel = {
+                    stringResource(
+                        if (it == "queue") "rabbitmq_ui_binding_add_dest_type_queue"
+                        else "rabbitmq_ui_binding_add_dest_type_exchange",
+                    )
+                },
+                onPick = {
+                    destinationType = it
+                    destination = null
+                    destinationError = null
+                },
+            )
+            Spacer(Modifier.height(8.dp))
+            if (candidates.isEmpty()) {
                 Text(
-                    text = stringResource("rabbitmq_ui_binding_add_destination_none"),
+                    text = stringResource(
+                        if (destinationType == "queue") "rabbitmq_ui_binding_add_destination_none"
+                        else "rabbitmq_ui_binding_add_destination_none_exchange",
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -131,7 +175,7 @@ fun RabbitMqAddBindingDialog(
                     label = stringResource("rabbitmq_ui_binding_add_destination"),
                     currentLabel = destination
                         ?: stringResource("rabbitmq_ui_binding_add_destination_pick"),
-                    options = queues,
+                    options = candidates,
                     optionLabel = { it },
                     onPick = {
                         destination = it
@@ -168,6 +212,17 @@ fun RabbitMqAddBindingDialog(
                     )
                 }
             }
+            Spacer(Modifier.height(12.dp))
+            // Arguments 键值对（headers 交换机的匹配条件等）：复用 HeadersEditor，值智能判型。
+            HeadersEditor(headers = bindingArguments, enabled = !submitting, onChange = { bindingArguments = it })
+            Text(
+                text = stringResource("rabbitmq_ui_binding_add_arguments_hint"),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 4.dp),
+            )
             if (exchangeType == "fanout") {
                 Spacer(Modifier.height(4.dp))
                 Text(

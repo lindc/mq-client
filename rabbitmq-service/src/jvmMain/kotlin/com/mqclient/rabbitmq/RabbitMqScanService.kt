@@ -331,26 +331,44 @@ class RabbitMqScanService(private val context: ServiceContext) {
      * 添加绑定（实时操作，不改缓存）：POST bindings 端点；成功后由调用方重载
      * 实时列表并触发 scanNow 同步慢扫缓存。
      */
-    suspend fun createBinding(connectionId: String, exchange: String, queue: String, routingKey: String) {
+    suspend fun createBinding(
+        connectionId: String,
+        exchange: String,
+        destination: String,
+        destinationType: String,
+        routingKey: String,
+        arguments: Map<String, String> = emptyMap(),
+    ) {
         val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
         val admin = ctx.admin ?: throw IllegalStateException("未连接")
-        audited(connectionId, "CREATE BINDING $exchange -> $queue" + routingKey.takeIf { it.isNotBlank() }?.let { " [rk=$it]" }) {
-            withContext(Dispatchers.IO) { admin.createBinding(exchange, queue, routingKey) }
+        audited(connectionId, "CREATE BINDING $exchange -> $destination" + routingKey.takeIf { it.isNotBlank() }?.let { " [rk=$it]" }) {
+            withContext(Dispatchers.IO) { admin.createBinding(exchange, destination, destinationType, routingKey, arguments) }
         }
-        rabbitMqLog.info("binding created: connection=$connectionId exchange=$exchange queue=$queue routingKey=$routingKey")
+        rabbitMqLog.info(
+            "binding created: connection=$connectionId exchange=$exchange destination=$destination " +
+                "type=$destinationType routingKey=$routingKey",
+        )
     }
 
     /**
      * 删除绑定（实时操作，不改缓存）：DELETE bindings 端点（propertiesKey 随列表
      * 下发）；成功后由调用方重载实时列表并触发 scanNow 同步慢扫缓存。
      */
-    suspend fun deleteBinding(connectionId: String, exchange: String, queue: String, propertiesKey: String) {
+    suspend fun deleteBinding(
+        connectionId: String,
+        exchange: String,
+        destination: String,
+        destinationType: String,
+        propertiesKey: String,
+    ) {
         val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
         val admin = ctx.admin ?: throw IllegalStateException("未连接")
-        audited(connectionId, "DELETE BINDING $exchange -> $queue" + propertiesKey.takeIf { it.isNotBlank() }?.let { " [rk=$it]" }) {
-            withContext(Dispatchers.IO) { admin.deleteBinding(exchange, queue, propertiesKey) }
+        audited(connectionId, "DELETE BINDING $exchange -> $destination" + propertiesKey.takeIf { it.isNotBlank() }?.let { " [rk=$it]" }) {
+            withContext(Dispatchers.IO) { admin.deleteBinding(exchange, destination, destinationType, propertiesKey) }
         }
-        rabbitMqLog.info("binding deleted: connection=$connectionId exchange=$exchange queue=$queue")
+        rabbitMqLog.info(
+            "binding deleted: connection=$connectionId exchange=$exchange destination=$destination type=$destinationType",
+        )
     }
 
     /**

@@ -101,7 +101,7 @@ fun RabbitMqExchangePropertiesDialog(
             deleting = true
             try {
                 val propertiesKey = binding.propertiesKey ?: error("缺少删除凭据（properties_key）")
-                service.deleteBinding(connectionId, exchangeName, binding.destination, propertiesKey)
+                service.deleteBinding(connectionId, exchangeName, binding.destination, binding.destinationType, propertiesKey)
                 deleting = false
                 deleteConfirm = null
                 bindingsReload++

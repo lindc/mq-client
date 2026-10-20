@@ -380,13 +380,24 @@ class RabbitMqAdminClient(private val config: RabbitMqConfig) : AutoCloseable {
         )
 
     /**
-     * 添加绑定：`POST /api/bindings/{vhost}/e/{exchange}/q/{queue}`，body =
+     * 添加绑定：`POST /api/bindings/{vhost}/e/{exchange}/{q|e}/{destination}`，body =
      * `{"routing_key","arguments"}`（arguments 第一版固定 `{}`）。成功 201。
+     * [destinationType] = "queue"（默认）/ "exchange" —— e→e 绑定走 `e` 路径段。
      */
-    suspend fun createBinding(exchange: String, queue: String, routingKey: String) {
+    suspend fun createBinding(
+        exchange: String,
+        destination: String,
+        destinationType: String,
+        routingKey: String,
+        arguments: Map<String, String> = emptyMap(),
+    ) {
         val body = buildJsonObject {
             put("routing_key", routingKey)
-            put("arguments", buildJsonObject { })
+            // 值智能判型（与 RabbitMQ 管理 UI 一致）：整数 → 数字、"true/false" → 布尔、
+            // 其余 → 字符串 —— headers 交换机的 x-match 匹配对值类型敏感。
+            put("arguments", buildJsonObject {
+                arguments.forEach { (k, v) -> put(k, argValue(v)) }
+            })
         }.toString()
         mutatingRequest(
             HttpMethod.Post,
@@ -395,17 +406,17 @@ class RabbitMqAdminClient(private val config: RabbitMqConfig) : AutoCloseable {
             vhostSegment(),
             "e",
             pathSegment(exchange),
-            "q",
-            pathSegment(queue),
+            if (destinationType == "exchange") "e" else "q",
+            pathSegment(destination),
         )
     }
 
     /**
-     * 删除绑定：`DELETE /api/bindings/{vhost}/e/{exchange}/q/{queue}/{properties_key}`。
+     * 删除绑定：`DELETE /api/bindings/{vhost}/e/{exchange}/{q|e}/{destination}/{properties_key}`。
      * propertiesKey 来自绑定列表响应（服务端生成的路径转义键，随 routing_key /
-     * arguments 变化）。
+     * arguments 变化）；[destinationType] 同 createBinding。
      */
-    suspend fun deleteBinding(exchange: String, queue: String, propertiesKey: String) {
+    suspend fun deleteBinding(exchange: String, destination: String, destinationType: String, propertiesKey: String) {
         mutatingRequest(
             HttpMethod.Delete,
             null,
@@ -413,8 +424,8 @@ class RabbitMqAdminClient(private val config: RabbitMqConfig) : AutoCloseable {
             vhostSegment(),
             "e",
             pathSegment(exchange),
-            "q",
-            pathSegment(queue),
+            if (destinationType == "exchange") "e" else "q",
+            pathSegment(destination),
             pathSegment(propertiesKey),
         )
     }
@@ -481,6 +492,14 @@ class RabbitMqAdminClient(private val config: RabbitMqConfig) : AutoCloseable {
         }.toString()
         val response = mutatingRequest(HttpMethod.Post, body, "exchanges", vhostSegment(), pathSegment(target), "publish")
         return json.decodeFromString(RabbitMqPublishResultDto.serializer(), response).routed
+    }
+
+    /** 绑定 / 参数值的类型投影：整数 → Long、true/false → Boolean、其余保留字符串。 */
+    private fun argValue(raw: String): JsonElement = when {
+        raw.toLongOrNull() != null -> JsonPrimitive(raw.toLong())
+        raw.equals("true", ignoreCase = true) -> JsonPrimitive(true)
+        raw.equals("false", ignoreCase = true) -> JsonPrimitive(false)
+        else -> JsonPrimitive(raw)
     }
 
     override fun close() {
