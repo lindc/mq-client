@@ -25,6 +25,10 @@ data class RabbitMqConfig(
     val password: String = "",
     /** true = AMQP 走 5671 TLS、管理 API 走 https。 */
     val useTls: Boolean = false,
+    /** TLS 信任库路径（PKCS12，自签 CA 场景）；空 = JVM 默认信任链。 */
+    val tlsTruststorePath: String = "",
+    /** TLS 信任库密码。 */
+    val tlsTruststorePassword: String = "",
     /** 连接阶段（overview 验证）与管理 API 请求的超时秒数。 */
     val connectionTimeout: Int = DEFAULT_CONNECTION_TIMEOUT_SECONDS,
     /** 对象慢扫间隔（分钟）：exchanges / queues / bindings（见 RabbitMqScanService）。 */
@@ -51,6 +55,8 @@ private object OptionKeys {
     const val USERNAME = "username"
     const val PASSWORD = "password"
     const val USE_TLS = "useTls"
+    const val TLS_TRUSTSTORE_PATH = "tlsTruststorePath"
+    const val TLS_TRUSTSTORE_PASSWORD = "tlsTruststorePassword"
     const val CONNECTION_TIMEOUT = "connectionTimeout"
     const val OBJECT_SCAN_INTERVAL = "objectScanIntervalMinutes"
     const val STATUS_SCAN_INTERVAL = "statusScanIntervalSeconds"
@@ -65,6 +71,8 @@ fun RabbitMqConfig.toOptions(): Map<String, String> = buildMap {
     put(OptionKeys.USERNAME, username)
     put(OptionKeys.PASSWORD, password)
     put(OptionKeys.USE_TLS, useTls.toString())
+    put(OptionKeys.TLS_TRUSTSTORE_PATH, tlsTruststorePath)
+    put(OptionKeys.TLS_TRUSTSTORE_PASSWORD, tlsTruststorePassword)
     put(OptionKeys.CONNECTION_TIMEOUT, connectionTimeout.toString())
     put(OptionKeys.OBJECT_SCAN_INTERVAL, objectScanIntervalMinutes.toString())
     put(OptionKeys.STATUS_SCAN_INTERVAL, statusScanIntervalSeconds.toString())
@@ -83,6 +91,8 @@ fun rabbitMqConfigFromOptions(options: Map<String, String>): RabbitMqConfig {
         username = options[OptionKeys.USERNAME].orEmpty(),
         password = options[OptionKeys.PASSWORD].orEmpty(),
         useTls = boolean(OptionKeys.USE_TLS, false),
+        tlsTruststorePath = options[OptionKeys.TLS_TRUSTSTORE_PATH].orEmpty(),
+        tlsTruststorePassword = options[OptionKeys.TLS_TRUSTSTORE_PASSWORD].orEmpty(),
         connectionTimeout = int(OptionKeys.CONNECTION_TIMEOUT, RabbitMqConfig.DEFAULT_CONNECTION_TIMEOUT_SECONDS),
         objectScanIntervalMinutes = int(
             OptionKeys.OBJECT_SCAN_INTERVAL,

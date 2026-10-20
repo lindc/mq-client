@@ -23,6 +23,8 @@ kotlin {
             // 管理 API HTTP 客户端（Ktor：core + CIO 引擎，版本随 catalog）。
             implementation(libs.ktor.client.core)
             implementation(libs.ktor.client.cio)
+            // 自签 TLS：CIO 引擎不支持定制 SSLContext，Java 引擎可以（管理 API https 用）。
+            implementation(libs.ktor.client.java)
             // 管理 API 响应 DTO 解析。
             implementation(libs.kotlinx.serialization.json)
         }

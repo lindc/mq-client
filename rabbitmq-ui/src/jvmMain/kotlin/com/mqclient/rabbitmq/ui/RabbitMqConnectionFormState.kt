@@ -107,6 +107,8 @@ class RabbitMqConnectionFormState(
     var username by mutableStateOf("")
     var password by mutableStateOf("")
     var useTls by mutableStateOf(false)
+    var tlsTruststorePath by mutableStateOf("")
+    var tlsTruststorePassword by mutableStateOf("")
     var connectionTimeout by mutableStateOf(RabbitMqConfig.DEFAULT_CONNECTION_TIMEOUT_SECONDS.toString())
     var objectScanIntervalMinutes by mutableStateOf(RabbitMqConfig.DEFAULT_OBJECT_SCAN_INTERVAL_MINUTES.toString())
     var statusScanIntervalSeconds by mutableStateOf(RabbitMqConfig.DEFAULT_STATUS_SCAN_INTERVAL_SECONDS.toString())
@@ -160,6 +162,8 @@ class RabbitMqConnectionFormState(
         username = username.trim(),
         password = if (passwordChanged || originalPassword.isEmpty()) password else originalPassword,
         useTls = useTls,
+        tlsTruststorePath = tlsTruststorePath.trim(),
+        tlsTruststorePassword = tlsTruststorePassword,
         connectionTimeout = connectionTimeout.trim().toIntOrNull()
             ?: RabbitMqConfig.DEFAULT_CONNECTION_TIMEOUT_SECONDS,
         objectScanIntervalMinutes = objectScanIntervalMinutes.trim().toIntOrNull()
@@ -179,6 +183,8 @@ class RabbitMqConnectionFormState(
         username = ""
         password = ""
         useTls = false
+        tlsTruststorePath = ""
+        tlsTruststorePassword = ""
         connectionTimeout = RabbitMqConfig.DEFAULT_CONNECTION_TIMEOUT_SECONDS.toString()
         objectScanIntervalMinutes = RabbitMqConfig.DEFAULT_OBJECT_SCAN_INTERVAL_MINUTES.toString()
         statusScanIntervalSeconds = RabbitMqConfig.DEFAULT_STATUS_SCAN_INTERVAL_SECONDS.toString()
@@ -206,6 +212,8 @@ class RabbitMqConnectionFormState(
         vhost = config.vhost
         username = config.username
         useTls = config.useTls
+        tlsTruststorePath = config.tlsTruststorePath
+        tlsTruststorePassword = config.tlsTruststorePassword
         connectionTimeout = config.connectionTimeout.toString()
         objectScanIntervalMinutes = config.objectScanIntervalMinutes.toString()
         statusScanIntervalSeconds = config.statusScanIntervalSeconds.toString()

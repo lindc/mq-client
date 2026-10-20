@@ -200,7 +200,11 @@ class RabbitMqMessageSession private constructor(
                     connectionTimeout = config.connectionTimeout * 1_000
                     // 会话生命周期由对话框显式管理，不走自动恢复（避免 close 语义被自动重连搅乱）。
                     isAutomaticRecoveryEnabled = false
-                    if (config.useTls) useSslProtocol()
+                    if (config.useTls) {
+                        rabbitMqSslContext(config.tlsTruststorePath, config.tlsTruststorePassword)
+                            ?.let { useSslProtocol(it) }
+                            ?: run { useSslProtocol() }
+                    }
                 }
                 var connection: Connection? = null
                 var channel: Channel? = null

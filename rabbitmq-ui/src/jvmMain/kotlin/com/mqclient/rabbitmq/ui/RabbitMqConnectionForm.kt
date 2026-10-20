@@ -123,6 +123,21 @@ internal fun RabbitMqConnectionFormContent(state: RabbitMqConnectionFormState) {
             onChange = { state.useTls = it },
             hint = stringResource("rabbitmq_ui_hint_use_tls"),
         )
+        if (state.useTls) {
+            Spacer(Modifier.height(12.dp))
+            TextRow(
+                label = stringResource("rabbitmq_ui_field_truststore_path"),
+                value = state.tlsTruststorePath,
+                onChange = { state.tlsTruststorePath = it },
+                hint = stringResource("rabbitmq_ui_hint_truststore_path"),
+            )
+            Spacer(Modifier.height(12.dp))
+            TextRow(
+                label = stringResource("rabbitmq_ui_field_truststore_password"),
+                value = state.tlsTruststorePassword,
+                onChange = { state.tlsTruststorePassword = it },
+            )
+        }
 
         SectionDivider()
         SectionHeader(stringResource("rabbitmq_ui_section_auth"))

@@ -2,6 +2,7 @@ package com.mqclient.rabbitmq
 
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
+import io.ktor.client.engine.java.Java
 import io.ktor.client.network.sockets.ConnectTimeoutException
 import io.ktor.client.network.sockets.SocketTimeoutException
 import io.ktor.client.plugins.HttpTimeout
@@ -191,9 +192,15 @@ class RabbitMqAdminClient(private val config: RabbitMqConfig) : AutoCloseable {
 
     private val json = Json { ignoreUnknownKeys = true }
 
-    private val http: HttpClient = HttpClient(CIO) {
+    private val http: HttpClient = HttpClient(Java) {
         // 状态码自己检查转文案（expectSuccess=true 会先抛不带上下文的异常）。
         expectSuccess = false
+        // 自签 CA：信任库配置了就挂定制 SSLContext（AMQP 会话与管理 API 同源）。
+        engine {
+            rabbitMqSslContext(config.tlsTruststorePath, config.tlsTruststorePassword)?.let { ctx ->
+                config { sslContext(ctx) }
+            }
+        }
         install(HttpTimeout) {
             requestTimeoutMillis = config.connectionTimeout * 1_000L
             connectTimeoutMillis = config.connectionTimeout * 1_000L
@@ -332,12 +339,19 @@ class RabbitMqAdminClient(private val config: RabbitMqConfig) : AutoCloseable {
      * 创建交换机：`PUT /api/exchanges/{vhost}/{name}`。成功 201 / 204。
      * internal 恒 false（内部交换机是 amq.* 系统物件，不提供创建入口）。
      */
-    suspend fun createExchange(name: String, type: String, durable: Boolean, autoDelete: Boolean) {
+    suspend fun createExchange(
+        name: String,
+        type: String,
+        durable: Boolean,
+        autoDelete: Boolean,
+        arguments: JsonObject = buildJsonObject { },
+    ) {
         val body = buildJsonObject {
             put("type", type)
             put("durable", durable)
             put("auto_delete", autoDelete)
             put("internal", false)
+            put("arguments", arguments)
         }.toString()
         mutatingRequest(HttpMethod.Put, body, "exchanges", vhostSegment(), pathSegment(name))
     }
