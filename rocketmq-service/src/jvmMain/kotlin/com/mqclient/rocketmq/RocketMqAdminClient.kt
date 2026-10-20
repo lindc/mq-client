@@ -29,11 +29,11 @@ import java.util.UUID
  * 失败"…），UI 直出。
  *
  * TLS 注入（`config.tlsEnabled` 时）：`useTLS` 快照与 `SslContext` 都在
- * DefaultMQAdminExt **构造时**定格到实例 —— 先把 JKS/P12 证书库经 [TlsPemExport]
- * 转成临时 PEM（预校验在这里完成：证书加载错误在构造前就转成可读文案，杜绝
- * RocketMQ 对 IOException 只记日志、静默降级明文的行为），再在
- * [TLS_BUILD_LOCK] 互斥窗口内「写全局 TLS 状态 → 构造 → 还原」，此后该实例与
- * 全局无关。临时 PEM 在 [close] 删除。
+ * DefaultMQAdminExt **构造时**定格到实例 —— PEM 证书（集群分发的 ca.crt 等）
+ * 直接透传原路径；JKS/P12 证书库经 [TlsPemExport] 转成临时 PEM（预校验在这里
+ * 完成：证书加载错误在构造前就转成可读文案，杜绝 RocketMQ 对 IOException 只记
+ * 日志、静默降级明文的行为），再在 [TLS_BUILD_LOCK] 互斥窗口内「写全局 TLS
+ * 状态 → 构造 → 还原」，此后该实例与全局无关。临时 PEM 在 [close] 删除。
  *
  * 线程纪律：DefaultMQAdminExt 的调用是阻塞 IO，全部经 [ioCall] 跑在
  * Dispatchers.IO。DefaultMQAdminExt 自身线程安全（Remoting 层有连接复用），
@@ -194,16 +194,28 @@ class RocketMqAdminClient(private val config: RocketMqConfig) : AutoCloseable {
 
         try {
             // 预校验 + 转换：Truststore（校验服务器时）与 Keystore（双向认证时）。
+            // PEM 证书（如集群分发的 ca.crt）直接透传原文件路径，不复制、不进临时目录；
+            // JKS/P12 才走 KeyStore 加载 + 临时 PEM 导出。
             val trustPem =
                 if (config.tlsVerifyServer) {
-                    writeTempPem("rmq-trust-", trustCertsToPem(config.trustStorePath.trim(), config.trustStorePassword))
-                        .also { tempPemFiles.add(it) }
+                    pemCertOrNull(config.trustStorePath.trim())
+                        ?: writeTempPem(
+                            "rmq-trust-",
+                            trustCertsToPem(config.trustStorePath.trim(), config.trustStorePassword),
+                        ).also { tempPemFiles.add(it) }
                 } else {
                     null
                 }
             val keyEntry =
                 config.keyStorePath.trim().takeIf(String::isNotEmpty)
-                    ?.let { exportKeyEntryToPem(it, config.keyStorePassword) }
+                    ?.let { keyPath ->
+                        if (isPemFile(keyPath)) {
+                            throw IllegalStateException(
+                                "Keystore 仅支持 JKS/P12 证书库（需含私钥）；PEM 证书请直接用作 Truststore：$keyPath",
+                            )
+                        }
+                        exportKeyEntryToPem(keyPath, config.keyStorePassword)
+                    }
             val certPem = keyEntry?.let { writeTempPem("rmq-cert-", it.certChainPem) }?.also { tempPemFiles.add(it) }
             val keyPem = keyEntry?.let { writeTempPem("rmq-key-", it.privateKeyPem) }?.also { tempPemFiles.add(it) }
 

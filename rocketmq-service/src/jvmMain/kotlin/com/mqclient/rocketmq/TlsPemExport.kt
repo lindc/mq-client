@@ -83,6 +83,43 @@ private fun loadKeyStore(path: String, password: String): KeyStore {
     return store
 }
 
+/**
+ * 文件是 PEM 编码证书（含 `CERTIFICATE` 块）时返回**原文件路径**，调用方直接把
+ * 路径喂给客户端 `tls.client.trustCertPath` —— 公开证书无需转换、无需临时副本；
+ * 是 PEM 但没有证书块（如只有私钥）→ 抛可读错误；不是 PEM → 返回 null（走
+ * JKS/P12 加载）。
+ */
+internal fun pemCertOrNull(path: String): Path? {
+    val file = File(path)
+    if (!file.isFile) {
+        throw IllegalStateException("证书文件不存在：$path")
+    }
+    if (file.length() > MAX_PEM_BYTES) {
+        throw IllegalStateException("证书文件异常（超过 1MB）：$path")
+    }
+    val text = file.readText(Charsets.US_ASCII)
+    return when {
+        text.contains("-----BEGIN CERTIFICATE-----") -> file.toPath()
+        text.contains("-----BEGIN") ->
+            throw IllegalStateException("PEM 文件中没有证书（可能只有私钥），Truststore 需要证书文件：$path")
+        else -> null
+    }
+}
+
+/** 快速判断文件是否 PEM 编码（读文件头找 BEGIN 标记）：Keystore 槽位只收二进制证书库。 */
+internal fun isPemFile(path: String): Boolean {
+    val file = File(path)
+    if (!file.isFile) {
+        throw IllegalStateException("证书文件不存在：$path")
+    }
+    val head = file.inputStream().use { input ->
+        val buf = ByteArray(4096)
+        val n = input.read(buf)
+        String(buf, 0, maxOf(n, 0), Charsets.US_ASCII)
+    }
+    return head.contains("-----BEGIN")
+}
+
 /** PEM 块：label ∈ {CERTIFICATE, PRIVATE KEY}；DER 按 64 列 Base64 MIME 编码。 */
 internal fun pemBlock(der: ByteArray, label: String): String = buildString {
     append("-----BEGIN ").append(label).append("-----\n")
@@ -112,3 +149,6 @@ internal fun deleteQuietly(path: Path?) {
     if (path == null) return
     runCatching { Files.deleteIfExists(path) }
 }
+
+/** PEM 文件大小上限：证书 / 证书链正常几 KB，超过 1MB 视为选错文件（防误读大文件）。 */
+private const val MAX_PEM_BYTES = 1_000_000L
