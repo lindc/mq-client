@@ -248,6 +248,7 @@ class RabbitMqScanService(private val context: ServiceContext) {
         type: String,
         durable: Boolean,
         autoDelete: Boolean,
+        arguments: Map<String, String> = emptyMap(),
     ) {
         val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
         val admin = ctx.admin ?: throw IllegalStateException("未连接")
@@ -255,9 +256,25 @@ class RabbitMqScanService(private val context: ServiceContext) {
             "type=$type",
             "durable".takeIf { durable },
             "autoDelete".takeIf { autoDelete },
+            "args=" + arguments.keys.takeIf { it.isNotEmpty() }?.joinToString("|"),
         ).joinToString(", ")
         audited(connectionId, "CREATE EXCHANGE $name" + flags.takeIf { it.isNotEmpty() }?.let { " [$it]" }) {
-            withContext(Dispatchers.IO) { admin.createExchange(name, type, durable, autoDelete) }
+            // 值类型化（与 createQueue 同口径）：整数 → Long、true/false → Boolean、其余字符串。
+            val args = buildJsonObject {
+                arguments.filter { it.key.isNotBlank() }.forEach { (key, value) ->
+                    val t = value.trim()
+                    put(
+                        key,
+                        when {
+                            t.toLongOrNull() != null -> JsonPrimitive(t.toLong())
+                            t.equals("true", ignoreCase = true) -> JsonPrimitive(true)
+                            t.equals("false", ignoreCase = true) -> JsonPrimitive(false)
+                            else -> JsonPrimitive(t)
+                        },
+                    )
+                }
+            }
+            withContext(Dispatchers.IO) { admin.createExchange(name, type, durable, autoDelete, args) }
         }
         // 同步补缓存：新交换机立即出现在列表（OBJECTS_SCANNED 事件驱动 UI 重读）。
         ctx.cache?.let { cache ->

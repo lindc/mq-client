@@ -58,6 +58,7 @@ fun RabbitMqCreateExchangeDialog(
     var nameError by remember { mutableStateOf<String?>(null) }
     var submitting by remember { mutableStateOf(false) }
     var submitError by remember { mutableStateOf<String?>(null) }
+    var arguments by remember { mutableStateOf(listOf("" to "")) }
     val scope = rememberCoroutineScope()
 
     fun submit() {
@@ -86,7 +87,16 @@ fun RabbitMqCreateExchangeDialog(
         submitError = null
         scope.launch {
             try {
-                service.createExchange(connectionId, trimmed, type, durable, autoDelete)
+                service.createExchange(
+                    connectionId = connectionId,
+                    name = trimmed,
+                    type = type,
+                    durable = durable,
+                    autoDelete = autoDelete,
+                    arguments = arguments
+                        .filter { it.first.isNotBlank() }
+                        .associate { it.first.trim() to it.second },
+                )
                 // 成功：服务端已把新交换机写入缓存并广播 OBJECTS_SCANNED，列表立即刷新。
                 onDismiss()
             } catch (e: CancellationException) {
@@ -152,6 +162,23 @@ fun RabbitMqCreateExchangeDialog(
                 label = stringResource("rabbitmq_ui_exchange_create_field_auto_delete"),
                 checked = autoDelete,
                 onChange = { autoDelete = it },
+            )
+            Spacer(Modifier.height(12.dp))
+            // Arguments 键值对（alternate-exchange 等扩展参数）：复用 HeadersEditor，值智能判型。
+            HeadersEditor(
+                headers = arguments,
+                enabled = !submitting,
+                onChange = { arguments = it },
+                titleLabel = stringResource("rabbitmq_ui_queue_create_field_arguments"),
+                addLabel = stringResource("rabbitmq_ui_queue_create_add_argument"),
+            )
+            Text(
+                text = stringResource("rabbitmq_ui_exchange_create_arguments_hint"),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 4.dp),
             )
             submitError?.let { error ->
                 Spacer(Modifier.height(12.dp))
