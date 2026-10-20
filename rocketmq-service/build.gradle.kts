@@ -26,3 +26,11 @@ kotlin {
         }
     }
 }
+
+tasks.withType<Test>().configureEach {
+    // diag 实连测试（RocketMqConnectionDiagTest）的开关透传：命令行 -Drocketmqdiag.xxx=...
+    // 原样传给测试 JVM。默认一个都不设 → 测试自己打 skip，日常 jvmTest 不触网。
+    System.getProperties()
+        .filterKeys { it is String && it.startsWith("rocketmqdiag.") }
+        .forEach { (key, value) -> systemProperty(key.toString(), value.toString()) }
+}

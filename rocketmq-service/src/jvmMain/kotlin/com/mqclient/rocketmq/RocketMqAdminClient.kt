@@ -28,12 +28,14 @@ import java.util.UUID
  * 转成人类可读文案（"无法连接 NameServer" / "NameServer 连接超时" / "ACL 认证
  * 失败"…），UI 直出。
  *
- * TLS 注入（`config.tlsEnabled` 时）：`useTLS` 快照与 `SslContext` 都在
- * DefaultMQAdminExt **构造时**定格到实例 —— PEM 证书（集群分发的 ca.crt 等）
- * 直接透传原路径；JKS/P12 证书库经 [TlsPemExport] 转成临时 PEM（预校验在这里
- * 完成：证书加载错误在构造前就转成可读文案，杜绝 RocketMQ 对 IOException 只记
- * 日志、静默降级明文的行为），再在 [TLS_BUILD_LOCK] 互斥窗口内「写全局 TLS
- * 状态 → 构造 → 还原」，此后该实例与全局无关。临时 PEM 在 [close] 删除。
+ * TLS 注入（`config.tlsEnabled` 时）：**开关**在构造时用 `setUseTLS` 显式定死
+ * （`ClientConfig.useTLS` 从构造起固化，start 时写全局来不及）；**证书**的
+ * `TlsSystemConfig` 静态字段在 start() 内部 `buildSslContext` 时才读取 —— PEM
+ * 证书（集群分发的 ca.crt 等）直接透传原路径；JKS/P12 证书库经 [TlsPemExport]
+ * 转成临时 PEM（预校验在这里完成：证书加载错误在 start 前就转成可读文案，
+ * 杜绝 RocketMQ 对 IOException 只记日志、静默降级明文的行为）；在
+ * [TLS_BUILD_LOCK] 互斥窗口内「写证书字段 → start → 还原」，此后该实例与全局
+ * 无关。临时 PEM 在 [close] 删除。
  *
  * 线程纪律：DefaultMQAdminExt 的调用是阻塞 IO，全部经 [ioCall] 跑在
  * Dispatchers.IO。DefaultMQAdminExt 自身线程安全（Remoting 层有连接复用），
@@ -51,13 +53,16 @@ class RocketMqAdminClient(private val config: RocketMqConfig) : AutoCloseable {
     /** TLS 注入产生的临时 PEM（构造失败时在 [buildAdmin] 就地清理，正常路径 [close] 删）。 */
     private val tempPemFiles = mutableListOf<Path>()
 
+    /** start() 窗口待用的 TLS 参数：[buildAdmin] 暂存，[startAdminWithTls] 消费后置空。 */
+    private var pendingTlsPaths: TlsPaths? = null
+
     private val admin: DefaultMQAdminExt = buildAdmin()
 
     private var started = false
 
     /** start + examineBrokerClusterInfo：NameServer 连通性 / ACL 一次验完。 */
     suspend fun startAndVerify() {
-        ioCall { admin.start() }
+        ioCall { startAdminWithTls() }
         started = true
         ioCall { admin.examineBrokerClusterInfo() }
     }
@@ -183,11 +188,17 @@ class RocketMqAdminClient(private val config: RocketMqConfig) : AutoCloseable {
     private fun plainAdmin(): DefaultMQAdminExt =
         DefaultMQAdminExt(rpcHook, config.connectionTimeout * 1_000L).apply {
             setNamesrvAddr(config.namesrvAddr.trim())
+            // 开关显式传入：ClientConfig.useTLS 在构造时从 TlsSystemConfig.tlsEnable /
+            // tls.enable property 固化初始值，MQClientInstance.start() 里又原样拷贝进
+            // NettyClientConfig —— 任何「start 时再写全局」都来不及，必须在构造时就定死。
+            setUseTLS(config.tlsEnabled)
         }
 
     /**
      * 构造 AdminExt：TLS 关闭走 [plainAdmin]；开启时先把证书库转临时 PEM（预校验
-     * 一并完成，加载错误在这里直接抛可读文案），再进互斥窗口构造。
+     * 一并完成，加载错误在这里直接抛可读文案）并**暂存参数**——全局 TLS 状态的
+     * 写入推迟到 [startAdminWithTls] 的 start() 窗口里（`useTLS` 快照与 `SslContext`
+     * 都在 start() 内部才定格，构造窗口罩不住它们）。
      */
     private fun buildAdmin(): DefaultMQAdminExt {
         if (!config.tlsEnabled) return plainAdmin()
@@ -219,45 +230,65 @@ class RocketMqAdminClient(private val config: RocketMqConfig) : AutoCloseable {
             val certPem = keyEntry?.let { writeTempPem("rmq-cert-", it.certChainPem) }?.also { tempPemFiles.add(it) }
             val keyPem = keyEntry?.let { writeTempPem("rmq-key-", it.privateKeyPem) }?.also { tempPemFiles.add(it) }
 
-            synchronized(TLS_BUILD_LOCK) {
-                val snapshot = TlsSnapshot.capture()
-                try {
-                    applyTls(trustPem, certPem, keyPem)
-                    return plainAdmin()
-                } finally {
-                    snapshot.restore()
-                }
-            }
+            pendingTlsPaths = TlsPaths(trustPem, certPem, keyPem)
         } catch (error: Throwable) {
             // 构造失败时对象不会建成，close 不会被调用 —— 临时 PEM 在这里就地清理。
             tempPemFiles.forEach(::deleteQuietly)
             tempPemFiles.clear()
             throw error
         }
+        return plainAdmin()
     }
 
     /**
-     * 在构造窗口内写全局 TLS 状态（离开窗口前由快照还原）：
-     *  - 开关 `tls.enable` 走 System property —— `NettyClientConfig.useTLS` 构造时直接读它；
-     *  - 证书走 `TlsSystemConfig` 静态字段 —— 客户端类加载后改 System property 无效；
+     * start AdminExt：`NettyClientConfig.useTLS` 快照与 `NettyRemotingClient` 的
+     * `SslContext` 都在 admin.start() 内部（NettyRemotingClient 此时才创建）定格，
+     * 所以 TLS 全局状态必须在 start() 期间有效，窗口罩 start() 而不是构造。
+     * admin.start() 是纯阻塞调用（无线程切换），synchronized 窗口安全；start 完成
+     * 后客户端实例已持有自己的快照与 sslContext，还原全局互不影响。
+     */
+    private fun startAdminWithTls() {
+        val pending = pendingTlsPaths
+        if (pending == null) {
+            admin.start()
+            return
+        }
+        synchronized(TLS_BUILD_LOCK) {
+            val snapshot = TlsSnapshot.capture()
+            try {
+                applyTls(pending)
+                admin.start()
+            } finally {
+                snapshot.restore()
+                pendingTlsPaths = null
+            }
+        }
+    }
+
+    /**
+     * 在 start() 窗口内写证书相关的全局状态（离开窗口前由快照还原）。TLS **开关**
+     * 不走这里 —— 已在 [plainAdmin] 用 `setUseTLS` 显式定死；本函数只负责证书字段：
+     *  - 证书走 `TlsSystemConfig` 静态字段 —— 客户端类加载后改 System property 无效，
+     *    且它们在 start() 内部 `buildSslContext` 时才被读取；
      *  - `tlsTestModeEnable` 必须关（默认 true = 信任所有证书，Truststore 形同虚设）；
      *  - `tlsConfigFile` 指向不存在路径，屏蔽机器全局 `/etc/rocketmq/tls.properties`
      *    在 `buildSslContext` 里反过来覆盖我们的字段。
      */
-    private fun applyTls(trustPem: Path?, certPem: Path?, keyPem: Path?) {
-        System.setProperty(TlsSystemConfig.TLS_ENABLE, "true")
+    private fun applyTls(pending: TlsPaths) {
         TlsSystemConfig.tlsTestModeEnable = false
         TlsSystemConfig.tlsClientAuthServer = config.tlsVerifyServer
-        TlsSystemConfig.tlsClientTrustCertPath = trustPem?.toString()
-        TlsSystemConfig.tlsClientCertPath = certPem?.toString()
-        TlsSystemConfig.tlsClientKeyPath = keyPem?.toString()
+        TlsSystemConfig.tlsClientTrustCertPath = pending.trustPem?.toString()
+        TlsSystemConfig.tlsClientCertPath = pending.certPem?.toString()
+        TlsSystemConfig.tlsClientKeyPath = pending.keyPem?.toString()
         TlsSystemConfig.tlsClientKeyPassword = null
         TlsSystemConfig.tlsConfigFile = BLOCKED_TLS_CONFIG_FILE
     }
 
-    /** `TlsSystemConfig` 全局状态的快照：进构造窗口前 [capture]，离开时 [restore]。 */
+    /** start() 窗口的 TLS 参数：临时 PEM 路径（[buildAdmin] 暂存、[startAdminWithTls] 消费）。 */
+    private class TlsPaths(val trustPem: Path?, val certPem: Path?, val keyPem: Path?)
+
+    /** `TlsSystemConfig` 证书字段的全局快照：进 start() 窗口前 [capture]，离开时 [restore]。 */
     private class TlsSnapshot(
-        private val tlsEnableProp: String?,
         private val testMode: Boolean,
         private val authServer: Boolean,
         private val trustCertPath: String?,
@@ -267,11 +298,6 @@ class RocketMqAdminClient(private val config: RocketMqConfig) : AutoCloseable {
         private val configFile: String,
     ) {
         fun restore() {
-            if (tlsEnableProp == null) {
-                System.clearProperty(TlsSystemConfig.TLS_ENABLE)
-            } else {
-                System.setProperty(TlsSystemConfig.TLS_ENABLE, tlsEnableProp)
-            }
             TlsSystemConfig.tlsTestModeEnable = testMode
             TlsSystemConfig.tlsClientAuthServer = authServer
             TlsSystemConfig.tlsClientTrustCertPath = trustCertPath
@@ -283,7 +309,6 @@ class RocketMqAdminClient(private val config: RocketMqConfig) : AutoCloseable {
 
         companion object {
             fun capture(): TlsSnapshot = TlsSnapshot(
-                tlsEnableProp = System.getProperty(TlsSystemConfig.TLS_ENABLE),
                 testMode = TlsSystemConfig.tlsTestModeEnable,
                 authServer = TlsSystemConfig.tlsClientAuthServer,
                 trustCertPath = TlsSystemConfig.tlsClientTrustCertPath,
@@ -300,13 +325,14 @@ class RocketMqAdminClient(private val config: RocketMqConfig) : AutoCloseable {
         const val RETRY_TOPIC_PREFIX = "%RETRY%"
 
         /**
-         * TLS 全局环境构造锁：`tls.enable` property 与 `TlsSystemConfig` 静态字段是
-         * 进程级全局，「写 → 构造 → 还原」窗口必须互斥，否则两条不同证书的连接并发
-         * 构造会互相踩。窗口内不做 IO，持有时间极短。
+         * TLS 全局环境窗口锁：`tls.enable` property 与 `TlsSystemConfig` 静态字段是
+         * 进程级全局，「写 → start → 还原」窗口必须互斥，否则两条不同证书的连接并发
+         * start 会互相踩（后 apply 的覆盖前者的证书字段）。窗口内是纯阻塞调用，
+         * 持有时间极短。
          */
         private val TLS_BUILD_LOCK = Any()
 
-        /** 构造窗口内用于屏蔽机器全局 tls.properties 的路径（随机后缀，保证不存在）。 */
+        /** start() 窗口内用于屏蔽机器全局 tls.properties 的路径（随机后缀，保证不存在）。 */
         private val BLOCKED_TLS_CONFIG_FILE: String =
             System.getProperty("java.io.tmpdir") + "/mqclient-no-tls-config-" + UUID.randomUUID() + ".properties"
     }
