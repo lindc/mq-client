@@ -1,5 +1,6 @@
 package com.mqclient.rabbitmq.ui
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -7,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -27,12 +29,15 @@ import com.mqclient.uicommon.LabeledField
 import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.SettingsDropdownRow
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
+import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.i18n.stringResource
+import com.mqclient.uicommon.i18n.withArg
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 /**
- * 消息转发对话框（浏览列表「转发」入口，DLQ 重新投递场景）：目标类型（队列 /
+ * 消息转发对话框（浏览列表「转发」入口 + 工具栏「全部转发」，DLQ 重新投递场景）：
+ * [targets] 是待转发消息列表（单条 = size 1）。目标类型（队列 /
  * 交换机）+ 目标下拉 + Routing Key（仅交换机目标显示）+「转发后删除原消息」开关
  * （默认勾选 = 搬移语义 publish + ack；不勾 = 复制语义只发不删）。
  *
@@ -45,17 +50,19 @@ import kotlinx.coroutines.launch
 fun RabbitMqForwardMessageDialog(
     connectionId: String,
     sourceQueue: String,
-    message: RabbitMqFetchedMessage,
+    targets: List<RabbitMqFetchedMessage>,
     session: RabbitMqMessageSession,
     onDismiss: () -> Unit,
-    onForwarded: (deleteSource: Boolean) -> Unit,
+    onForwarded: (forwarded: List<RabbitMqFetchedMessage>, deleteSource: Boolean) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
     var destinationType by remember { mutableStateOf("queue") }
     var destination by remember { mutableStateOf<String?>(null) }
     var routingKey by remember { mutableStateOf("") }
     var deleteSource by remember { mutableStateOf(true) }
     var forwarding by remember { mutableStateOf(false) }
+    var processed by remember { mutableStateOf(0) }
     var submitError by remember { mutableStateOf<String?>(null) }
 
     // 目标候选：队列排除当前队列（搬回自身 = 死循环）；交换机排除默认（""，不可
@@ -81,17 +88,33 @@ fun RabbitMqForwardMessageDialog(
         forwarding = true
         submitError = null
         scope.launch {
+            var ok = 0
+            var failed = 0
+            val forwarded = mutableListOf<RabbitMqFetchedMessage>()
             try {
+                val exchange = if (destinationType == "queue") "" else target
                 val rk = if (destinationType == "queue") target else routingKey.trim()
-                session.forward(
-                    message = message,
-                    exchange = if (destinationType == "queue") "" else target,
-                    routingKey = rk,
-                )
-                if (deleteSource) {
-                    session.ack(message.deliveryTag)
+                for (msg in targets) {
+                    try {
+                        session.forward(message = msg, exchange = exchange, routingKey = rk)
+                        if (deleteSource) {
+                            session.ack(msg.deliveryTag)
+                        }
+                        forwarded += msg
+                        ok++
+                        processed++
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        failed++
+                    }
                 }
-                onForwarded(deleteSource)
+                onForwarded(forwarded, deleteSource)
+                if (failed > 0) {
+                    snackbarHostState.showSnackbar(
+                        stringResource("rabbitmq_ui_msg_forward_done_batch").withArg(ok, failed),
+                    )
+                }
                 onDismiss()
             } catch (e: CancellationException) {
                 throw e
@@ -118,14 +141,17 @@ fun RabbitMqForwardMessageDialog(
             ) { Text(stringResource("common_cancel")) }
         },
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 12.dp),
-        ) {
-            // 消息摘要（只读）：MessageId + 大小。
+        Box(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 12.dp),
+            ) {
+            // 消息摘要（只读）：条数 + 进度。
             Text(
-                text = (message.messageId ?: "-") + " · " + formatSizeOf(message.size),
+                text = stringResource("rabbitmq_ui_msg_forward_count").withArg(targets.size) +
+                    if (forwarding) " · " + stringResource("rabbitmq_ui_send_progress")
+                        .withArg(processed, targets.size) else "",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
@@ -207,6 +233,8 @@ fun RabbitMqForwardMessageDialog(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            }
+            ThemedSnackbarHost(snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter))
         }
     }
 }

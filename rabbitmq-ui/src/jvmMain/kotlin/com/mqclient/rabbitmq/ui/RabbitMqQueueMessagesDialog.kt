@@ -127,7 +127,7 @@ fun RabbitMqQueueMessagesDialog(
     var exhausted by remember { mutableStateOf(false) }
     var held by remember { mutableStateOf(0) }
     var detail by remember { mutableStateOf<RabbitMqFetchedMessage?>(null) }
-    var forwarding by remember { mutableStateOf<RabbitMqFetchedMessage?>(null) }
+    var forwarding by remember { mutableStateOf<List<RabbitMqFetchedMessage>>(emptyList()) }
 
     // ---- 发送状态 ----
     var sendHeaders by remember { mutableStateOf(listOf<Pair<String, String>>()) }
@@ -194,12 +194,15 @@ fun RabbitMqQueueMessagesDialog(
         }
     }
 
-    fun onForwarded(msg: RabbitMqFetchedMessage, deleteSource: Boolean) {
+    fun onForwarded(forwarded: List<RabbitMqFetchedMessage>, deleteSource: Boolean) {
+        if (forwarded.isEmpty()) return
         if (deleteSource) {
-            messages = messages.filterNot { it.deliveryTag == msg.deliveryTag }
+            val tags = forwarded.map { it.deliveryTag }.toSet()
+            messages = messages.filterNot { it.deliveryTag in tags }
             scope.launch { held = session?.heldCount() ?: held }
-        } else {
-            scope.launch { snackbar.showSnackbar(stringResource("rabbitmq_ui_msg_forward_done_copy")) }
+        }
+        scope.launch {
+            snackbar.showSnackbar(stringResource("rabbitmq_ui_msg_forward_done_count").withArg(forwarded.size))
         }
     }
 
@@ -353,7 +356,8 @@ fun RabbitMqQueueMessagesDialog(
                                     onRefresh = ::refreshQueue,
                                     onDetail = { detail = it },
                                     onDelete = ::deleteOne,
-                                    onForward = { forwarding = it },
+                                    onForward = { forwarding = listOf(it) },
+                                    onForwardAll = { forwarding = messages.toList() },
                                 )
                             } else {
                                 SendPane(
@@ -379,16 +383,18 @@ fun RabbitMqQueueMessagesDialog(
             RabbitMqMessageDetailDialog(message = msg, onDismiss = { detail = null })
         }
 
-        forwarding?.let { msg ->
+        if (forwarding.isNotEmpty()) {
             val s = session
             if (s != null) {
                 RabbitMqForwardMessageDialog(
                     connectionId = connectionId,
                     sourceQueue = queueName,
-                    message = msg,
+                    targets = forwarding,
                     session = s,
-                    onDismiss = { forwarding = null },
-                    onForwarded = { deleteSource -> onForwarded(msg, deleteSource) },
+                    onDismiss = { forwarding = emptyList() },
+                    onForwarded = { forwarded, deleteSource ->
+                        onForwarded(forwarded, deleteSource)
+                    },
                 )
             }
         }
@@ -410,6 +416,7 @@ private fun BrowsePane(
     onDetail: (RabbitMqFetchedMessage) -> Unit,
     onDelete: (RabbitMqFetchedMessage) -> Unit,
     onForward: (RabbitMqFetchedMessage) -> Unit,
+    onForwardAll: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize().padding(vertical = 8.dp)) {
         Row(
@@ -424,6 +431,12 @@ private fun BrowsePane(
                 containerColor = MaterialTheme.colorScheme.surfaceVariant,
                 contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ) { Text(stringResource("rabbitmq_ui_msg_refetch")) }
+            PressableButton(
+                onClick = onForwardAll,
+                enabled = !fetching && messages.isNotEmpty(),
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            ) { Text(stringResource("rabbitmq_ui_msg_forward_all")) }
             OutlinedTextField(
                 value = limit,
                 onValueChange = onLimitChange,

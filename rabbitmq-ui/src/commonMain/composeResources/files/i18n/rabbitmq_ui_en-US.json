@@ -246,5 +246,13 @@
   "rabbitmq_ui_conn_props_timeout": "Timed out loading data, please retry",
   "rabbitmq_ui_conn_props_no_service": "Service unavailable",
   "rabbitmq_ui_conn_props_no_nodes": "No node data yet",
-  "rabbitmq_ui_binding_add_arguments_hint": "Values are auto-typed (integer → number, true/false → boolean); headers exchanges route on these arguments"
+  "rabbitmq_ui_binding_add_arguments_hint": "Values are auto-typed (integer → number, true/false → boolean); headers exchanges route on these arguments",
+  "rabbitmq_ui_field_truststore_path": "TLS truststore path",
+  "rabbitmq_ui_hint_truststore_path": "PKCS12 truststore file (self-signed CA); empty = JVM default trust chain",
+  "rabbitmq_ui_field_truststore_password": "Truststore password",
+  "rabbitmq_ui_msg_forward_count": "Forwarding %1$d message(s)",
+  "rabbitmq_ui_msg_forward_done_count": "Forwarded %1$d message(s)",
+  "rabbitmq_ui_msg_forward_done_batch": "Forward done: %1$d ok, %2$d failed",
+  "rabbitmq_ui_msg_forward_all": "Forward all",
+  "rabbitmq_ui_exchange_create_arguments_hint": "Extended arguments (e.g. alternate-exchange); values are auto-typed"
 }
