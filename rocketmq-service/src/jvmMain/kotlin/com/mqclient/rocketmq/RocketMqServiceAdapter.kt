@@ -2,6 +2,7 @@ package com.mqclient.rocketmq
 
 import com.mqclient.core.ConnectionInfo
 import com.mqclient.core.NavigationItem
+import com.mqclient.core.spi.ServiceContext
 import com.mqclient.mq.base.MQServiceAdapter
 
 class RocketMqServiceAdapter : MQServiceAdapter() {
@@ -22,4 +23,22 @@ class RocketMqServiceAdapter : MQServiceAdapter() {
         NavigationItem(id = "topics", titleKey = "rocketmq_ui_nav_topics", iconId = "topics"),
         NavigationItem(id = "groups", titleKey = "rocketmq_ui_nav_groups", iconId = "groups"),
     )
+
+    /**
+     * SPI 发现后由 ModuleRegistry 调用：注册本模块的事件订阅
+     * （核心 `core.connection.*` + 宿主的 connect/disconnect/test 动作请求）。
+     * 缺了它 `RocketMqModule.testConnection` 会抛「RocketMQ 模块未初始化」——
+     * 与 KafkaServiceAdapter / RabbitMqServiceAdapter 同构。
+     */
+    override fun initialize(context: ServiceContext) {
+        RocketMqModule.initialize(context)
+    }
+
+    /**
+     * SPI 模块销毁：应用退出时由 ModuleRegistry 调用，转给 [RocketMqModule.shutdown]
+     * 断开全部连接并取消本模块的订阅。
+     */
+    override fun dispose() {
+        RocketMqModule.shutdown()
+    }
 }

@@ -14,6 +14,8 @@ import com.mqclient.rocketmq.RocketMqModule
 import com.mqclient.rocketmq.rocketMqConfigFromOptions
 import com.mqclient.rocketmq.toOptions
 import com.mqclient.uicommon.i18n.stringResource
+import com.mqclient.uicommon.file.normalizePath
+import com.mqclient.uicommon.file.pickFile
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.TimeoutCancellationException
@@ -46,6 +48,9 @@ class RocketMqConnectionFormState(
         const val STATUS_SCAN_MAX = 3600
     }
 
+    /** 证书库文件选择器的扩展名过滤：.p12/.pfx 按 PKCS12、其余按 JKS 解析（与 Kafka 同规则）。 */
+    private val CERT_EXTENSIONS = listOf("p12", "pfx", "jks")
+
     override val busy: Boolean get() = saveState == SaveState.Testing
 
     var defaultName by mutableStateOf(defaultName); private set
@@ -60,12 +65,22 @@ class RocketMqConnectionFormState(
     var namesrvAddr by mutableStateOf("")
     var accessKey by mutableStateOf("")
     var secretKey by mutableStateOf("")
+    var tlsEnabled by mutableStateOf(false)
+    var tlsVerifyServer by mutableStateOf(true)
+    var trustStorePath by mutableStateOf("")
+    var trustStorePassword by mutableStateOf("")
+    var keyStorePath by mutableStateOf("")
+    var keyStorePassword by mutableStateOf("")
     var connectionTimeout by mutableStateOf(RocketMqConfig.DEFAULT_CONNECTION_TIMEOUT_SECONDS.toString())
     var objectScanIntervalMinutes by mutableStateOf(RocketMqConfig.DEFAULT_OBJECT_SCAN_INTERVAL_MINUTES.toString())
     var statusScanIntervalSeconds by mutableStateOf(RocketMqConfig.DEFAULT_STATUS_SCAN_INTERVAL_SECONDS.toString())
 
     var originalSecretKey by mutableStateOf(""); private set
     var secretKeyChanged by mutableStateOf(false)
+    var originalTrustStorePassword by mutableStateOf(""); private set
+    var trustStorePasswordChanged by mutableStateOf(false)
+    var originalKeyStorePassword by mutableStateOf(""); private set
+    var keyStorePasswordChanged by mutableStateOf(false)
 
     fun validate(): Boolean {
         var e = RocketMqFieldErrors()
@@ -84,6 +99,7 @@ class RocketMqConnectionFormState(
         if (s == null || s !in STATUS_SCAN_MIN..STATUS_SCAN_MAX) {
             e = e.copy(statusScanInterval = stringResource("rocketmq_ui_error_status_scan_range"))
         }
+        e = validateTls(e)
         errors = e
         return !e.hasAny
     }
@@ -92,6 +108,16 @@ class RocketMqConnectionFormState(
         namesrvAddr = namesrvAddr.trim(),
         accessKey = accessKey.trim(),
         secretKey = if (secretKeyChanged || originalSecretKey.isEmpty()) secretKey else originalSecretKey,
+        tlsEnabled = tlsEnabled,
+        tlsVerifyServer = tlsVerifyServer,
+        trustStorePath = trustStorePath.trim(),
+        trustStorePassword =
+            if (trustStorePasswordChanged || originalTrustStorePassword.isEmpty()) trustStorePassword
+            else originalTrustStorePassword,
+        keyStorePath = keyStorePath.trim(),
+        keyStorePassword =
+            if (keyStorePasswordChanged || originalKeyStorePassword.isEmpty()) keyStorePassword
+            else originalKeyStorePassword,
         connectionTimeout = connectionTimeout.trim().toIntOrNull()
             ?: RocketMqConfig.DEFAULT_CONNECTION_TIMEOUT_SECONDS,
         objectScanIntervalMinutes = objectScanIntervalMinutes.trim().toIntOrNull()
@@ -106,11 +132,21 @@ class RocketMqConnectionFormState(
         namesrvAddr = ""
         accessKey = ""
         secretKey = ""
+        tlsEnabled = false
+        tlsVerifyServer = true
+        trustStorePath = ""
+        trustStorePassword = ""
+        keyStorePath = ""
+        keyStorePassword = ""
         connectionTimeout = RocketMqConfig.DEFAULT_CONNECTION_TIMEOUT_SECONDS.toString()
         objectScanIntervalMinutes = RocketMqConfig.DEFAULT_OBJECT_SCAN_INTERVAL_MINUTES.toString()
         statusScanIntervalSeconds = RocketMqConfig.DEFAULT_STATUS_SCAN_INTERVAL_SECONDS.toString()
         originalSecretKey = ""
         secretKeyChanged = false
+        originalTrustStorePassword = ""
+        trustStorePasswordChanged = false
+        originalKeyStorePassword = ""
+        keyStorePasswordChanged = false
         errors = RocketMqFieldErrors()
         saveError = null
         pendingConfig = null
@@ -131,6 +167,16 @@ class RocketMqConnectionFormState(
         originalSecretKey = config.secretKey
         secretKey = ""
         secretKeyChanged = false
+        tlsEnabled = config.tlsEnabled
+        tlsVerifyServer = config.tlsVerifyServer
+        trustStorePath = config.trustStorePath
+        keyStorePath = config.keyStorePath
+        originalTrustStorePassword = config.trustStorePassword
+        trustStorePassword = ""
+        trustStorePasswordChanged = false
+        originalKeyStorePassword = config.keyStorePassword
+        keyStorePassword = ""
+        keyStorePasswordChanged = false
 
         errors = RocketMqFieldErrors()
         saveError = null
@@ -140,6 +186,41 @@ class RocketMqConnectionFormState(
 
     fun clearErrors() {
         errors = RocketMqFieldErrors()
+    }
+
+    /** ---------------- TLS 区 ---------------- */
+
+    /** 弹文件选择器挑 Truststore / Keystore；取消则不动草稿（与 Kafka 表单同一套）。 */
+    fun pickTrustStore() {
+        scope.launch {
+            val title = stringResource("rocketmq_ui_tls_file_dialog_title")
+            pickFile(title, CERT_EXTENSIONS)?.let { trustStorePath = normalizePath(it) }
+        }
+    }
+
+    fun pickKeyStore() {
+        scope.launch {
+            val title = stringResource("rocketmq_ui_tls_file_dialog_title")
+            pickFile(title, CERT_EXTENSIONS)?.let { keyStorePath = normalizePath(it) }
+        }
+    }
+
+    /** 证书库文件加载校验放在底层（RocketMqAdminClient 构造前的 KeyStore.load），这里只做结构校验。 */
+    private fun validateTls(e: RocketMqFieldErrors): RocketMqFieldErrors {
+        if (!tlsEnabled) return e
+        var err = e
+        if (tlsVerifyServer) {
+            if (trustStorePath.isBlank()) {
+                err = err.copy(tls = stringResource("rocketmq_ui_error_tls_truststore_required"))
+            } else if (trustStorePassword.isBlank()) {
+                err = err.copy(tls = stringResource("rocketmq_ui_error_tls_truststore_password_required"))
+            }
+        }
+        val hasKeyEntry = keyStorePath.isNotBlank() || keyStorePassword.isNotBlank()
+        if (hasKeyEntry && (keyStorePath.isBlank() || keyStorePassword.isBlank())) {
+            err = err.copy(tls = stringResource("rocketmq_ui_error_tls_keystore_pair"))
+        }
+        return err
     }
 
     override fun submit(): Boolean {
@@ -227,10 +308,12 @@ data class RocketMqFieldErrors(
     val connectionTimeout: String? = null,
     val objectScanInterval: String? = null,
     val statusScanInterval: String? = null,
+    val tls: String? = null,
 ) {
     val hasAny: Boolean
         get() = namesrvAddr != null ||
             connectionTimeout != null ||
             objectScanInterval != null ||
-            statusScanInterval != null
+            statusScanInterval != null ||
+            tls != null
 }

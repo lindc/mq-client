@@ -1,6 +1,7 @@
 package com.mqclient.rocketmq.ui
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -28,6 +29,7 @@ import com.mqclient.core.ConnectionFormUi
 import com.mqclient.mqui.state.SaveAnywayDialog
 import com.mqclient.mqui.state.SaveState
 import com.mqclient.uicommon.i18n.stringResource
+import com.mqclient.uicommon.PathRow
 
 /**
  * RocketMQ 的「新建 / 编辑连接」表单（`ConnectionFormUi` SPI 实现，注册见
@@ -82,6 +84,7 @@ internal fun RocketMqConnectionFormContent(state: RocketMqConnectionFormState) {
             label = stringResource("rocketmq_ui_field_access_key"),
             value = state.accessKey,
             onChange = { state.accessKey = it },
+            placeholder = stringResource("rocketmq_ui_field_access_key_placeholder"),
         )
         Spacer(Modifier.height(12.dp))
         PasswordRow(
@@ -97,6 +100,69 @@ internal fun RocketMqConnectionFormContent(state: RocketMqConnectionFormState) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.fillMaxWidth(),
         )
+
+        SectionDivider()
+        SectionHeader(stringResource("rocketmq_ui_section_tls"))
+        CheckboxRow(
+            label = stringResource("rocketmq_ui_tls_enable"),
+            checked = state.tlsEnabled,
+            onChange = { state.tlsEnabled = it; state.clearErrors() },
+        )
+        if (state.tlsEnabled) {
+            Spacer(Modifier.height(12.dp))
+            CheckboxRow(
+                label = stringResource("rocketmq_ui_tls_verify_server"),
+                checked = state.tlsVerifyServer,
+                onChange = { state.tlsVerifyServer = it; state.clearErrors() },
+            )
+            if (!state.tlsVerifyServer) {
+                Text(
+                    text = stringResource("rocketmq_ui_tls_verify_warning"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+            PathRow(
+                label = stringResource("rocketmq_ui_tls_field_truststore_path"),
+                value = state.trustStorePath,
+                onBrowse = state::pickTrustStore,
+            )
+            Text(
+                text = stringResource("rocketmq_ui_tls_hint_truststore"),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(12.dp))
+            PasswordRow(
+                label = stringResource("rocketmq_ui_tls_field_truststore_password"),
+                value = state.trustStorePassword,
+                onChange = { state.trustStorePassword = it; state.trustStorePasswordChanged = true },
+                showPlaceholder = state.originalTrustStorePassword.isNotEmpty(),
+            )
+            Spacer(Modifier.height(12.dp))
+            PathRow(
+                label = stringResource("rocketmq_ui_tls_field_keystore_path"),
+                value = state.keyStorePath,
+                onBrowse = state::pickKeyStore,
+            )
+            Text(
+                text = stringResource("rocketmq_ui_tls_hint_keystore"),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(12.dp))
+            PasswordRow(
+                label = stringResource("rocketmq_ui_tls_field_keystore_password"),
+                value = state.keyStorePassword,
+                onChange = { state.keyStorePassword = it; state.keyStorePasswordChanged = true },
+                showPlaceholder = state.originalKeyStorePassword.isNotEmpty(),
+            )
+            FieldError(state.errors.tls)
+        }
 
         SectionDivider()
         SectionHeader(stringResource("rocketmq_ui_section_advanced"))
@@ -206,15 +272,32 @@ private fun PasswordRow(
             value = value,
             onValueChange = onChange,
             singleLine = true,
-            placeholder =
-                if (showPlaceholder) {
-                    { Text(stringResource("rocketmq_ui_field_secret_placeholder")) }
-                } else {
-                    null
-                },
+            placeholder = {
+                Text(
+                    stringResource(
+                        if (showPlaceholder) {
+                            "rocketmq_ui_field_secret_placeholder"
+                        } else {
+                            "rocketmq_ui_field_secret_key_placeholder"
+                        },
+                    )
+                )
+            },
             visualTransformation = PasswordVisualTransformation(),
             modifier = Modifier.fillMaxWidth(),
         )
+    }
+}
+
+/** 带标签的开关行：整行可点（点标签即可切换，不用瞄准小方块）。 */
+@Composable
+private fun CheckboxRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Checkbox(checked = checked, onCheckedChange = onChange)
+        Text(label, style = MaterialTheme.typography.bodyMedium)
     }
 }
 
