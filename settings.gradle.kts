@@ -46,7 +46,6 @@ include(
     ":mq-base",
     ":mq-ui",
     ":kafka-service", ":kafka-ui",
-    ":pulsar-service", ":pulsar-ui",
     ":rabbitmq-service", ":rabbitmq-ui",
     ":rocketmq-service", ":rocketmq-ui",
     // 拓扑图通用件：graph-core 纯模型（统一节点词汇），topology-ui 通用渲染。

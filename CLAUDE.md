@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-KMP 桌面端中间件管理工具（IBM MQ / Kafka / RabbitMQ / RocketMQ / Pulsar），Compose Multiplatform for Desktop + Material 3。项目结构与约定详见 `README.md`。
+KMP 桌面端中间件管理工具（IBM MQ / Kafka / RabbitMQ / RocketMQ），Compose Multiplatform for Desktop + Material 3。项目结构与约定详见 `README.md`。
 
 ## 构建与测试
 

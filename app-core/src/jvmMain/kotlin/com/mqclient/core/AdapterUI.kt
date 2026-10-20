@@ -27,7 +27,7 @@ interface AdapterUI {
      *
      * **键名约定**（模块表是全局合并的，重名会静默互相覆盖 —— 合并顺序取 SPI 的
      * classpath 顺序，哪个赢都不一定；守卫见 app-ui 的 `ModuleI18nMergeTest`）：
-     *  - 模块的键一律带**模块前缀**（`kafka_ui_*` / `ibm_mq_*` / `pulsar_*`），
+     *  - 模块的键一律带**模块前缀**（`kafka_ui_*` / `ibm_mq_*` / `rocketmq_ui_*`），
      *    **导航项也不例外**（`ibm_mq_nav_queues` / `kafka_ui_nav_topics`）—— 模块自己定
      *    文案、自己管表，新增模块不需要动公共表。`NavigationItem.titleKey` 填前缀后的
      *    键即可，宿主只按 titleKey 查表、不关心键名；
