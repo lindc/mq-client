@@ -128,6 +128,7 @@ internal fun RocketMqConnectionFormContent(state: RocketMqConnectionFormState) {
                 label = stringResource("rocketmq_ui_tls_field_truststore_path"),
                 value = state.trustStorePath,
                 onBrowse = state::pickTrustStore,
+                onClear = state.trustStorePath.ifEmpty { null }?.let { state::clearTrustStore },
             )
             Text(
                 text = stringResource("rocketmq_ui_tls_hint_truststore"),
@@ -141,12 +142,16 @@ internal fun RocketMqConnectionFormContent(state: RocketMqConnectionFormState) {
                 value = state.trustStorePassword,
                 onChange = { state.trustStorePassword = it; state.trustStorePasswordChanged = true },
                 showPlaceholder = state.originalTrustStorePassword.isNotEmpty(),
+                enabled = state.trustStorePath.isNotEmpty(),
+                disabledPlaceholder = stringResource("rocketmq_ui_tls_field_truststore_disabled_placeholder"),
             )
+            FieldError(state.errors.tlsTrustStore)
             Spacer(Modifier.height(12.dp))
             PathRow(
                 label = stringResource("rocketmq_ui_tls_field_keystore_path"),
                 value = state.keyStorePath,
                 onBrowse = state::pickKeyStore,
+                onClear = state.keyStorePath.ifEmpty { null }?.let { state::clearKeyStore },
             )
             Text(
                 text = stringResource("rocketmq_ui_tls_hint_keystore"),
@@ -160,8 +165,10 @@ internal fun RocketMqConnectionFormContent(state: RocketMqConnectionFormState) {
                 value = state.keyStorePassword,
                 onChange = { state.keyStorePassword = it; state.keyStorePasswordChanged = true },
                 showPlaceholder = state.originalKeyStorePassword.isNotEmpty(),
+                enabled = state.keyStorePath.isNotEmpty(),
+                disabledPlaceholder = stringResource("rocketmq_ui_tls_field_keystore_disabled_placeholder"),
             )
-            FieldError(state.errors.tls)
+            FieldError(state.errors.tlsKeyStore)
         }
 
         SectionDivider()
@@ -266,21 +273,22 @@ private fun PasswordRow(
     value: String,
     onChange: (String) -> Unit,
     showPlaceholder: Boolean,
+    enabled: Boolean = true,
+    disabledPlaceholder: String? = null,
 ) {
     Column {
         OutlinedTextField(
             value = value,
             onValueChange = onChange,
             singleLine = true,
+            enabled = enabled,
             placeholder = {
                 Text(
-                    stringResource(
-                        if (showPlaceholder) {
-                            "rocketmq_ui_field_secret_placeholder"
-                        } else {
-                            "rocketmq_ui_field_secret_key_placeholder"
-                        },
-                    )
+                    when {
+                        !enabled && disabledPlaceholder != null -> disabledPlaceholder
+                        showPlaceholder -> stringResource("rocketmq_ui_field_secret_placeholder")
+                        else -> stringResource("rocketmq_ui_field_secret_key_placeholder")
+                    }
                 )
             },
             visualTransformation = PasswordVisualTransformation(),

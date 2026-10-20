@@ -48,8 +48,10 @@ class RocketMqConnectionFormState(
         const val STATUS_SCAN_MAX = 3600
     }
 
-    /** 证书库文件选择器的扩展名过滤：.p12/.pfx 按 PKCS12、其余按 JKS 解析（与 Kafka 同规则）。 */
-    private val CERT_EXTENSIONS = listOf("p12", "pfx", "jks")
+    /**
+     * Keystore 槽位不收的 PEM 类扩展（Keystore 需含私钥的二进制证书库）。
+     */
+    private val PEM_EXTENSIONS = setOf("pem", "crt", "cer")
 
     override val busy: Boolean get() = saveState == SaveState.Testing
 
@@ -111,13 +113,9 @@ class RocketMqConnectionFormState(
         tlsEnabled = tlsEnabled,
         tlsVerifyServer = tlsVerifyServer,
         trustStorePath = trustStorePath.trim(),
-        trustStorePassword =
-            if (trustStorePasswordChanged || originalTrustStorePassword.isEmpty()) trustStorePassword
-            else originalTrustStorePassword,
+        trustStorePassword = effectiveTrustStorePassword,
         keyStorePath = keyStorePath.trim(),
-        keyStorePassword =
-            if (keyStorePasswordChanged || originalKeyStorePassword.isEmpty()) keyStorePassword
-            else originalKeyStorePassword,
+        keyStorePassword = effectiveKeyStorePassword,
         connectionTimeout = connectionTimeout.trim().toIntOrNull()
             ?: RocketMqConfig.DEFAULT_CONNECTION_TIMEOUT_SECONDS,
         objectScanIntervalMinutes = objectScanIntervalMinutes.trim().toIntOrNull()
@@ -190,20 +188,62 @@ class RocketMqConnectionFormState(
 
     /** ---------------- TLS 区 ---------------- */
 
-    /** 弹文件选择器挑 Truststore / Keystore；取消则不动草稿（与 Kafka 表单同一套）。 */
+    /**
+     * 弹文件选择器挑 Truststore / Keystore；取消则不动草稿（与 Kafka 表单同一套）。
+     *
+     * **不设扩展名过滤**（`pickFile` 空清单 = 全部文件）：Linux 上 FileKit 回落
+     * AWT FileDialog，其 `filenameFilter` 由桌面环境实现、多扩展名清单会整块滤掉
+     * `.crt` 等条目——集群分发的就是 `ca.crt`，不能在对话框里被挡。选错文件由
+     * 底层的 PEM 检测 / `KeyStore.load` 给出可读错误，比对话框过滤更可靠。
+     */
+    private suspend fun pickCertFile(): String? =
+        pickFile(stringResource("rocketmq_ui_tls_file_dialog_title"), emptyList())
+
     fun pickTrustStore() {
         scope.launch {
-            val title = stringResource("rocketmq_ui_tls_file_dialog_title")
-            pickFile(title, CERT_EXTENSIONS)?.let { trustStorePath = normalizePath(it) }
+            pickCertFile()?.let { trustStorePath = normalizePath(it) }
         }
     }
 
     fun pickKeyStore() {
         scope.launch {
-            val title = stringResource("rocketmq_ui_tls_file_dialog_title")
-            pickFile(title, CERT_EXTENSIONS)?.let { keyStorePath = normalizePath(it) }
+            pickCertFile()?.let { keyStorePath = normalizePath(it) }
         }
     }
+
+    /**
+     * 清空 Truststore / Keystore 条目：路径、草稿密码、original 密码与 changed
+     * 标记一次全清 —— 清文件即清整个条目。全清是刻意的：密码框此时因路径为空
+     * 已被禁用，若残留密码会陷入「报错缺文件、密码又清不掉」的死锁。
+     */
+    fun clearTrustStore() {
+        trustStorePath = ""
+        trustStorePassword = ""
+        originalTrustStorePassword = ""
+        trustStorePasswordChanged = false
+    }
+
+    fun clearKeyStore() {
+        keyStorePath = ""
+        keyStorePassword = ""
+        originalKeyStorePassword = ""
+        keyStorePasswordChanged = false
+    }
+
+    /**
+     * 落盘用的有效密码：编辑模式（original 非空且未改动）沿用原值，否则用草稿。
+     * 校验与 buildConfig 共用，避免两边口径不一致（编辑旧连接时草稿为空但原值
+     * 有效，不能误报「密码必填」）。
+     */
+    private val effectiveTrustStorePassword: String
+        get() =
+            if (trustStorePasswordChanged || originalTrustStorePassword.isEmpty()) trustStorePassword
+            else originalTrustStorePassword
+
+    private val effectiveKeyStorePassword: String
+        get() =
+            if (keyStorePasswordChanged || originalKeyStorePassword.isEmpty()) keyStorePassword
+            else originalKeyStorePassword
 
     /** 证书库文件加载校验放在底层（RocketMqAdminClient 构造前的 KeyStore.load），这里只做结构校验。 */
     private fun validateTls(e: RocketMqFieldErrors): RocketMqFieldErrors {
@@ -211,14 +251,19 @@ class RocketMqConnectionFormState(
         var err = e
         if (tlsVerifyServer) {
             if (trustStorePath.isBlank()) {
-                err = err.copy(tls = stringResource("rocketmq_ui_error_tls_truststore_required"))
-            } else if (trustStorePassword.isBlank()) {
-                err = err.copy(tls = stringResource("rocketmq_ui_error_tls_truststore_password_required"))
+                err = err.copy(tlsTrustStore = stringResource("rocketmq_ui_error_tls_truststore_required"))
+            } else if (effectiveTrustStorePassword.isBlank()) {
+                err = err.copy(tlsTrustStore = stringResource("rocketmq_ui_error_tls_truststore_password_required"))
             }
         }
-        val hasKeyEntry = keyStorePath.isNotBlank() || keyStorePassword.isNotBlank()
-        if (hasKeyEntry && (keyStorePath.isBlank() || keyStorePassword.isBlank())) {
-            err = err.copy(tls = stringResource("rocketmq_ui_error_tls_keystore_pair"))
+        // Keystore 是选填：留空 = 单向认证（联动禁用已保证「有密码没文件」不会出现）。
+        if (keyStorePath.isNotBlank()) {
+            when {
+                effectiveKeyStorePassword.isBlank() ->
+                    err = err.copy(tlsKeyStore = stringResource("rocketmq_ui_error_tls_keystore_pair"))
+                keyStorePath.substringAfterLast('.', "").lowercase() in PEM_EXTENSIONS ->
+                    err = err.copy(tlsKeyStore = stringResource("rocketmq_ui_error_tls_keystore_pem"))
+            }
         }
         return err
     }
@@ -308,12 +353,14 @@ data class RocketMqFieldErrors(
     val connectionTimeout: String? = null,
     val objectScanInterval: String? = null,
     val statusScanInterval: String? = null,
-    val tls: String? = null,
+    val tlsTrustStore: String? = null,
+    val tlsKeyStore: String? = null,
 ) {
     val hasAny: Boolean
         get() = namesrvAddr != null ||
             connectionTimeout != null ||
             objectScanInterval != null ||
             statusScanInterval != null ||
-            tls != null
+            tlsTrustStore != null ||
+            tlsKeyStore != null
 }
