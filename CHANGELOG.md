@@ -2,6 +2,52 @@
 
 本文件记录 MQClient 的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [Unreleased] — 2026-10-20
+
+### Added
+
+- **RocketMQ 连接表单 TLS 支持**（commit f3f09c9）：`RocketMqConfig` 新增
+  `tlsEnabled` / `tlsVerifyServer` / `trustStorePath` / `trustStorePassword` /
+  `keyStorePath` / `keyStorePassword` 六字段（两个密码键名命中
+  `SENSITIVE_NAME_KEYWORDS` 落盘自动加密）。表单在「高级」上方加「TLS 安全认证」
+  区块：启用与「校验服务器证书」两个开关（关闭校验时红字警示仅建议联调使用）、
+  Truststore / Keystore 经 ui-common `PathRow` + `pickFile` 选文件
+  （.p12/.pfx/.jks），密码掩码输入并沿用 secretKey 的「编辑不回填、留空沿用
+  原值」语义。校验：启用校验时 Truststore 路径与密码必填，Keystore 路径与
+  密码成对填写。
+- **JKS/P12 → PEM 转换层**（rocketmq-service `TlsPemExport`）：RocketMQ 5.3.1
+  Remoting 客户端（Netty `SslContextBuilder`）只吃 PEM，与 Kafka / IBM MQ 表单
+  的 JKS/P12 证书库体系不一致 —— 按扩展名判型（.p12/.pfx → PKCS12，其余 → JKS，
+  与 Kafka 同规则）加载证书库，导出全部受信证书与第一个私钥条目（证书链 +
+  **未加密 PKCS#8** 私钥，keystore 密码只在加载时用，客户端侧
+  `tls.client.keyPassword` 保持空）；临时 PEM 写系统临时目录、POSIX 600，
+  close 即删。
+- **RocketMQAdminClient TLS 注入**：`useTLS` 快照与 `SslContext` 都在
+  `DefaultMQAdminExt` **构造时**定格到实例 —— 在模块级互斥锁窗口内「写
+  `tls.enable` property + `TlsSystemConfig` 静态字段 → 构造 → 快照还原」，
+  多连接不同证书并发构造互不踩；三个客户端坑位（拉 5.3.1 sources 核实）：
+  `tlsTestModeEnable` 默认 true = 信任所有证书（Truststore 形同虚设）必须关、
+  `buildSslContext` 开头会读机器全局 `/etc/rocketmq/tls.properties` 反向覆盖
+  字段（窗口内把 `tlsConfigFile` 指向随机不存在路径屏蔽）、证书 IOException
+  只记日志 **sslContext=null 静默降级明文** —— 构造前用 `KeyStore.load`
+  预校验把错误提前转成可读文案。`mapError` 增加 SSL / certificate 关键词映射。
+
+### Fixed
+
+- **RocketMQ 测试连接抛「模块未初始化」**：`RocketMqServiceAdapter` 缺
+  `initialize` / `dispose` override（`ServiceAdapter` 默认空实现静默跳过），
+  `RocketMqModule.initialize` 从未被调用，`testConnection` 拿到的 manager 恒
+  null —— 与 Kafka / RabbitMQ adapter 同构补上。
+- **RocketMQ 表单 ACL 输入框无占位符**：AccessKey 加「AccessKey（未开启 ACL
+  可留空）」；SecretKey 占位区分新建 / 编辑两种语义（新建「SecretKey（未开启
+  ACL 可留空）」、编辑维持「已加密保存，留空沿用原值」）。
+
+### Tests
+
+- `RocketMqConfigTest`（6 例）：options 往返（全字段 / 默认值）、布尔解析只认
+  true/false 字面量、路径反斜杠归一、keystore 扩展名判型、PEM 编码头尾标签与
+  64 列 Base64。KeyStore 全链路加载靠真机冒烟（`:app-ui:run`）。
+
 ## [Unreleased] — 2026-09-29
 
 ### Added
