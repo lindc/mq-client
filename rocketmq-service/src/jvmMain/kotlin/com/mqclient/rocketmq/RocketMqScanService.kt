@@ -203,6 +203,49 @@ class RocketMqScanService(private val context: ServiceContext) {
     fun cachedGroupLags(connectionId: String): Map<String, RocketMqGroupLagSnapshot> =
         cacheOf(connectionId)?.getAs(KEY_GROUP_LAGS) ?: emptyMap()
 
+    // ---------------------------------------------------------------- Topic 属性 / 删除
+
+    /**
+     * Topic 消息类型现查（不进缓存 —— 属性对话框要新鲜数据）：经 Master 地址 examine
+     * TopicConfig 并提取 attributes["message.type"]（5.x；4.x / 未设置返回 null，
+     * UI 回落 Normal）。TopicConfig 不出本模块（rocketmq-ui 无 rocketmq 类路径）。
+     */
+    suspend fun fetchTopicMessageType(connectionId: String, topic: String): String? =
+        withContext(Dispatchers.IO) {
+            val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
+            val admin = ctx.adminClient ?: throw IllegalStateException("未连接")
+            admin.fetchTopicConfig(topic)?.attributes
+                ?.entries
+                ?.firstOrNull { it.key.trimStart('+') == "message.type" }
+                ?.value
+                ?.takeIf(String::isNotBlank)
+        }
+
+    /**
+     * 删除主题：deleteTopicInBroker（全部 broker 地址）+ deleteTopicInNameServer
+     * 两步清元数据；成功后剪掉慢扫缓存里的 topic 并发 OBJECTS_SCANNED 驱动列表 /
+     * 拓扑刷新。
+     */
+    suspend fun deleteTopic(connectionId: String, topic: String) {
+        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
+        val admin = ctx.adminClient ?: throw IllegalStateException("未连接")
+        // 命令历史审计：RocketMQ 阶段 1 未接入（与 kafka/rabbitmq 的 audited 同款，
+        // 后续按 f25cc1a 的 CommandAudit 模式补）。
+        withContext(Dispatchers.IO) { admin.deleteTopic(topic) }
+        // 缓存剪除 + 事件驱动刷新（与 RabbitMQ 的 deleteExchange 同一模式）。
+        ctx.cache?.let { cache ->
+            cache.getAs<List<RocketMqTopicSnapshot>>(KEY_TOPICS).orEmpty()
+                .filter { it.name != topic }
+                .let { cache.put(KEY_TOPICS, it, ttlMs = objectsTtlMs(ctx)) }
+            // groupLags 不动：消费组与 topic 删除解耦（组仍可能存在，只是无订阅）。
+        }
+        context.emit(
+            name = RocketMqEvents.OBJECTS_SCANNED,
+            payload = mapOf("connectionId" to connectionId),
+        )
+        rocketMqLog.info("topic deleted: connection=$connectionId topic=$topic")
+    }
+
     // ---------------------------------------------------------------- 内部
 
     /** 慢扫：逐 topic 路由（受限并发）+ 消费组（含在线成员数，best-effort）。 */

@@ -9,6 +9,7 @@ import org.apache.rocketmq.acl.common.AclClientRPCHook
 import org.apache.rocketmq.acl.common.SessionCredentials
 import org.apache.rocketmq.client.exception.MQClientException
 import org.apache.rocketmq.remoting.protocol.admin.ConsumeStats
+import org.apache.rocketmq.common.TopicConfig
 import org.apache.rocketmq.remoting.protocol.body.ClusterInfo
 import org.apache.rocketmq.remoting.protocol.body.ConsumerConnection
 import org.apache.rocketmq.remoting.exception.RemotingConnectException
@@ -80,6 +81,38 @@ class RocketMqAdminClient(private val config: RocketMqConfig) : AutoCloseable {
 
     /** Topic 路由（阶段 2 拓扑用；阶段 1 仅预留）。 */
     suspend fun fetchTopicRoute(topic: String) = ioCall { admin.examineTopicRouteInfo(topic) }
+
+    /**
+     * Topic 配置（attributes 含 message.type 等 5.x 扩展属性）：经 Master 地址现查
+     * （broker 未显式设置时返回的 attributes 为空 —— 调用方回落默认值）。
+     */
+    suspend fun fetchTopicConfig(topic: String): TopicConfig? {
+        val cluster = ioCall { admin.examineBrokerClusterInfo() }
+        val addr = cluster.brokerAddrTable.values
+            .flatMap { it.brokerAddrs.values }
+            .firstOrNull()
+            ?: throw IllegalStateException("集群中没有可用 Broker，无法查询 Topic 配置")
+        return ioCall { admin.examineTopicConfig(addr, topic) }
+    }
+
+    /**
+     * 删除主题：先清全部 broker 上的路由与元数据，再清 NameServer（与 mqadmin
+     * deleteTopic 行为一致，两步缺一不可 —— 只清 NameServer 会导致路由残留）。
+     */
+    suspend fun deleteTopic(topic: String) {
+        val cluster = ioCall { admin.examineBrokerClusterInfo() }
+        val brokerAddrs = cluster.brokerAddrTable.values
+            .flatMap { it.brokerAddrs.values }
+            .toSet()
+        val nameSrvAddrs = config.namesrvAddr.split(";", ",", "；", "，")
+            .map(String::trim)
+            .filter(String::isNotEmpty)
+            .toSet()
+        ioCall {
+            admin.deleteTopicInBroker(brokerAddrs, topic)
+            admin.deleteTopicInNameServer(nameSrvAddrs, topic)
+        }
+    }
 
     override fun close() {
         if (!started) return
