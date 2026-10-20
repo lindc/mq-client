@@ -118,20 +118,48 @@ class RabbitMqMessageSession private constructor(
     }
 
     /**
-     * 直发当前队列：经默认交换机（""，routing key = 队列名）。
+     * 通用发布（消息重发 / 搬移用）：任意 exchange + routing key；[props] 传
+     * [buildProps] 的重建属性可保留原消息的 messageId / headers 等元数据，null = 空
+     * 属性。
      *
      * 消息发布**不进写操作审计**（mq_command 表语义是管理操作，且高频批量会膨胀
      * 审计表 —— 与 IBM MQ 的 MqscExecutor 咽喉点口径一致）。
      */
-    suspend fun publishDirect(body: ByteArray, headers: Map<String, String>) = lock.withLock {
-        withContext(Dispatchers.IO) {
-            checkOpen()
-            val props = AMQP.BasicProperties.Builder()
-                .headers(headers)
-                .build()
-            channel.basicPublish("", queueName, props, body)
+    suspend fun publish(exchange: String, routingKey: String, body: ByteArray, props: AMQP.BasicProperties?) =
+        lock.withLock {
+            withContext(Dispatchers.IO) {
+                checkOpen()
+                channel.basicPublish(exchange, routingKey, props ?: AMQP.BasicProperties.Builder().build(), body)
+            }
         }
+
+    /** 直发当前队列：经默认交换机（""，routing key = 队列名），自拼 headers 的重载。 */
+    suspend fun publishDirect(body: ByteArray, headers: Map<String, String>) {
+        val props = AMQP.BasicProperties.Builder().headers(headers).build()
+        publish("", queueName, body, props)
     }
+
+    /**
+     * 转发（重发）消息：把已拉取的消息经任意 exchange + routing key 重新发布，
+     * 属性经 [buildProps] 保留原元数据。搬移语义 = 本方法 + [ack]（由调用方组合）。
+     */
+    suspend fun forward(message: RabbitMqFetchedMessage, exchange: String, routingKey: String) =
+        publish(exchange, routingKey, message.body, buildProps(message))
+
+    /** 从已拉取消息重建 AMQP 属性：转发 / 重发时保留原消息的元数据（body 除外）。 */
+    fun buildProps(message: RabbitMqFetchedMessage): AMQP.BasicProperties =
+        AMQP.BasicProperties.Builder()
+            .messageId(message.messageId)
+            .timestamp(message.timestamp)
+            .deliveryMode(if (message.persistent) 2 else 1)
+            .contentType(message.contentType)
+            .contentEncoding(message.contentEncoding)
+            .priority(message.priority)
+            .expiration(message.expiration)
+            .correlationId(message.correlationId)
+            .replyTo(message.replyTo)
+            .headers(message.headers)
+            .build()
 
     /** 优雅关闭：显式 requeue 全部未 ack（broker 本也会自动重入队，双保险）→ 关 channel → 关 connection。 */
     suspend fun close() = lock.withLock {

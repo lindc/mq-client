@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -126,6 +127,7 @@ fun RabbitMqQueueMessagesDialog(
     var exhausted by remember { mutableStateOf(false) }
     var held by remember { mutableStateOf(0) }
     var detail by remember { mutableStateOf<RabbitMqFetchedMessage?>(null) }
+    var forwarding by remember { mutableStateOf<RabbitMqFetchedMessage?>(null) }
 
     // ---- 发送状态 ----
     var sendHeaders by remember { mutableStateOf(listOf<Pair<String, String>>()) }
@@ -189,6 +191,15 @@ fun RabbitMqQueueMessagesDialog(
             } finally {
                 fetching = false
             }
+        }
+    }
+
+    fun onForwarded(msg: RabbitMqFetchedMessage, deleteSource: Boolean) {
+        if (deleteSource) {
+            messages = messages.filterNot { it.deliveryTag == msg.deliveryTag }
+            scope.launch { held = session?.heldCount() ?: held }
+        } else {
+            scope.launch { snackbar.showSnackbar(stringResource("rabbitmq_ui_msg_forward_done_copy")) }
         }
     }
 
@@ -342,6 +353,7 @@ fun RabbitMqQueueMessagesDialog(
                                     onRefresh = ::refreshQueue,
                                     onDetail = { detail = it },
                                     onDelete = ::deleteOne,
+                                    onForward = { forwarding = it },
                                 )
                             } else {
                                 SendPane(
@@ -366,6 +378,20 @@ fun RabbitMqQueueMessagesDialog(
         detail?.let { msg ->
             RabbitMqMessageDetailDialog(message = msg, onDismiss = { detail = null })
         }
+
+        forwarding?.let { msg ->
+            val s = session
+            if (s != null) {
+                RabbitMqForwardMessageDialog(
+                    connectionId = connectionId,
+                    sourceQueue = queueName,
+                    message = msg,
+                    session = s,
+                    onDismiss = { forwarding = null },
+                    onForwarded = { deleteSource -> onForwarded(msg, deleteSource) },
+                )
+            }
+        }
     }
 }
 
@@ -383,6 +409,7 @@ private fun BrowsePane(
     onRefresh: () -> Unit,
     onDetail: (RabbitMqFetchedMessage) -> Unit,
     onDelete: (RabbitMqFetchedMessage) -> Unit,
+    onForward: (RabbitMqFetchedMessage) -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize().padding(vertical = 8.dp)) {
         Row(
@@ -422,7 +449,7 @@ private fun BrowsePane(
             Text(stringResource("rabbitmq_ui_msg_col_body"), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(64.dp))
             Text(stringResource("rabbitmq_ui_msg_col_size"), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(72.dp))
             Text(stringResource("rabbitmq_ui_msg_col_time"), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(90.dp))
-            Text(stringResource("rabbitmq_ui_msg_col_actions"), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(88.dp))
+            Text(stringResource("rabbitmq_ui_msg_col_actions"), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(116.dp))
         }
         HorizontalDivider()
         LazyColumn(modifier = Modifier.weight(1f)) {
@@ -451,9 +478,16 @@ private fun BrowsePane(
                         fontFamily = FontFamily.Monospace,
                         modifier = Modifier.width(90.dp),
                     )
-                    Row(modifier = Modifier.width(88.dp)) {
+                    Row(modifier = Modifier.width(116.dp)) {
                         IconButton(onClick = { onDetail(msg) }, modifier = Modifier.size(28.dp)) {
                             Icon(Icons.Default.Info, contentDescription = stringResource("rabbitmq_ui_msg_action_detail"), modifier = Modifier.size(18.dp))
+                        }
+                        IconButton(onClick = { onForward(msg) }, modifier = Modifier.size(28.dp)) {
+                            Icon(
+                                Icons.Default.Send,
+                                contentDescription = stringResource("rabbitmq_ui_msg_action_forward"),
+                                modifier = Modifier.size(18.dp),
+                            )
                         }
                         IconButton(onClick = { onDelete(msg) }, modifier = Modifier.size(28.dp)) {
                             Icon(
