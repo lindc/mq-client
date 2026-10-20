@@ -189,5 +189,9 @@
   "msg_detail_interpreter": "解释器",
   "msg_detail_no_params": "该解释器无需参数",
   "msg_detail_load_failed": "加载失败：%1$s",
-  "msg_detail_large_body": "消息内容较大（%1$s MB），为保障性能仅展示前 1 MB 的内容"
+  "msg_detail_large_body": "消息内容较大（%1$s MB），为保障性能仅展示前 1 MB 的内容",
+  "msg_detail_hex": "十六进制",
+  "msg_detail_download": "下载消息",
+  "msg_detail_saved": "已保存到 %1$s",
+  "msg_detail_save_failed": "保存失败：%1$s"
 }

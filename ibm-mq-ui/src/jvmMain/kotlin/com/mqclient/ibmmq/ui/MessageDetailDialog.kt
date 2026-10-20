@@ -88,20 +88,6 @@ internal fun MessageDetailDialog(
         }
     }
 
-    /** 下载：消息体已在详情里（Ready 时才可见），直接写盘，不再回查队列。 */
-    fun downloadDetail(detail: MessageDetail) {
-        scope.launch {
-            try {
-                val saved = saveFileBytes("msg_${detail.messageId.take(8)}.bin", "bin", detail.content)
-                if (saved != null) {
-                    snackbarHostState.showSnackbar(stringResource("ibm_mq_msg_browse_saved").withArg(saved))
-                }
-            } catch (e: Exception) {
-                snackbarHostState.showSnackbar(stringResource("ibm_mq_msg_save_failed").withArg(e.message ?: ""))
-            }
-        }
-    }
-
     /** 导出 dmpmqmsg：IO/Default 线程生成文本，FileKit 另存为。 */
     fun exportDmpmqmsg(detail: MessageDetail) {
         scope.launch {
@@ -272,10 +258,8 @@ internal fun MessageDetailDialog(
                         Spacer(Modifier.height(12.dp))
                     }
                 },
+                downloadBaseName = "msg_" + summary.messageId.take(8),
                 extraBottomActions = {
-                    FooterAction(stringResource("ibm_mq_msg_detail_download")) {
-                        downloadDetail(detail)
-                    }
                     FooterAction(stringResource("ibm_mq_msg_detail_export_dmpmqmsg")) {
                         exportDmpmqmsg(detail)
                     }

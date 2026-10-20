@@ -61,6 +61,7 @@ import com.mqclient.message.interpreter.ParamKind
 import com.mqclient.message.interpreter.hexPreview
 import com.mqclient.message.interpreter.isProbablyBinary
 import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.file.saveFileBytes
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
@@ -74,8 +75,9 @@ private const val MAX_PREVIEW_CHARS = 20_000
 /**
  * 送进解码 / 解释器的字节上限（1 MB）：超大消息在 Default 线程全量解码 + 解释器
  * 渲染（JSON pretty-print 等）动辄秒级卡顿甚至 OOM，超限只取前 1 MB —— 解释失败
- * 自动回落原始文本（现有 Failure 路径），渲染侧永远有界。「复制正文」仍复制完整
- * 原文（点击时一次性解码，不进渲染链路）。
+ * 自动回落原始文本（现有 Failure 路径），渲染侧永远有界。「复制正文」复制**当前
+ * 展示的文本**（解释器 formatted 全量 / hex；显示截断不影响复制；未就绪回退全量
+ * 原文解码），「下载消息」写原始字节（无损，不受 1 MB 渲染上限影响）。
  */
 private const val MAX_BODY_BYTES = 1024 * 1024
 
@@ -98,7 +100,8 @@ private data class ContentPreview(val isBinary: Boolean, val rawText: String, va
  * 渲染 [headerContent] 插槽（各行用 [MessageHeaderRow]，小节标题用
  * [MessageDetailSectionTitle]）；右侧解释器选择 + 参数区（列表来自
  * [MessageInterpreters]，不在本组件写死；二进制内容默认选中 Hex 解释器）。
- * 底部统一「复制正文」+ 关闭，[extraBottomActions] 渲染在二者之前。
+ * 底部统一「下载消息 / 复制正文」+ 关闭，[extraBottomActions] 渲染在三者之前；
+ * [downloadBaseName] 定制下载文件名主体。
  *
  * **加载三态不在本组件**：数据获取方式各模块不同（IBM/Kafka 现查 service，
  * Rabbit 本地对象）—— 宿主自行 when 分发，非就绪态用 [MessageDetailLoadingView]
@@ -122,6 +125,8 @@ fun MessageDetailDialog(
     subtitleText: String? = null,
     encoding: Int = 0,
     codedCharSetId: Int = 1208,
+    /** 下载消息的默认文件名主体（不带扩展名）；null = msg_<yyyyMMdd_HHmmss>。IBM / Kafka 传各自的定制名。 */
+    downloadBaseName: String? = null,
     minWidth: Dp = 760.dp,
     minHeight: Dp = 520.dp,
     nestedContent: @Composable () -> Unit = {},
@@ -129,6 +134,51 @@ fun MessageDetailDialog(
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
     val clipboard = LocalClipboardManager.current
+
+    // 解释器选择与渲染状态：提升到对话框级 —— footer 的「下载消息 / 复制正文」需要
+    // 读取当前展示的文本、二进制标志与选中解释器（原先在 ContentTab 内部拿不到）。
+    val interpreters = remember { MessageInterpreters.loadAll() }
+    val oversized = rawBody.size > MAX_BODY_BYTES
+    val effectiveBody = if (oversized) rawBody.copyOf(MAX_BODY_BYTES) else rawBody
+    val binary = remember(effectiveBody, codedCharSetId) { isProbablyBinary(effectiveBody, codedCharSetId) }
+    var selectedId by remember(effectiveBody) {
+        val initial = if (binary && interpreters.any { it.id == HEX_INTERPRETER_ID }) {
+            HEX_INTERPRETER_ID
+        } else {
+            interpreters.firstOrNull()?.id ?: ""
+        }
+        mutableStateOf(initial)
+    }
+    val interpreter = remember(selectedId, interpreters) {
+        interpreters.firstOrNull { it.id == selectedId } ?: interpreters.firstOrNull()
+    }
+    var params by remember(interpreter) { mutableStateOf(interpreter?.defaultParams ?: emptyMap()) }
+    var preview by remember(effectiveBody) { mutableStateOf<ContentPreview?>(null) }
+    var rendered by remember(effectiveBody) { mutableStateOf<RenderedText?>(null) }
+    var rendering by remember(effectiveBody) { mutableStateOf(false) }
+
+    LaunchedEffect(effectiveBody, binary) {
+        preview = withContext(Dispatchers.Default) {
+            ContentPreview(
+                isBinary = binary,
+                rawText = if (binary) "" else MessageCharsets.decode(effectiveBody, codedCharSetId),
+                hex = if (binary) hexPreview(effectiveBody) else "",
+            )
+        }
+    }
+    LaunchedEffect(effectiveBody, interpreter, params, preview) {
+        val base = preview ?: return@LaunchedEffect
+        // 二进制只支持 Hex 解释器（对字节流跑文本解释器无意义）。
+        if (base.isBinary && interpreter?.id != HEX_INTERPRETER_ID) return@LaunchedEffect
+        val target = interpreter ?: return@LaunchedEffect
+        rendering = true
+        rendered = withContext(Dispatchers.Default) {
+            when (val result = target.interpret(effectiveBody, encoding, codedCharSetId, params)) {
+                is InterpreterResult.Success -> RenderedText(result.formatted)
+                is InterpreterResult.Failure -> RenderedText(base.rawText, result.message)
+            }
+        }
+    }
 
     fun showCopied() {
         scope.launch { snackbarHostState.showSnackbar(stringResource("msg_detail_copied")) }
@@ -143,7 +193,42 @@ fun MessageDetailDialog(
             extraBottomActions()
             PressableButton(
                 onClick = {
-                    clipboard.setText(AnnotatedString(MessageCharsets.decode(rawBody, codedCharSetId)))
+                    scope.launch {
+                        try {
+                            val ext = when {
+                                binary || selectedId == HEX_INTERPRETER_ID -> "bin"
+                                selectedId == "json" -> "json"
+                                else -> "txt"
+                            }
+                            val baseName = downloadBaseName
+                                ?: "msg_" + java.time.LocalDateTime.now()
+                                    .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
+                            val saved = withContext(Dispatchers.IO) {
+                                saveFileBytes(baseName + "." + ext, ext, rawBody)
+                            }
+                            if (saved != null) {
+                                snackbarHostState.showSnackbar(stringResource("msg_detail_saved").withArg(saved))
+                            }
+                        } catch (e: Exception) {
+                            snackbarHostState.showSnackbar(stringResource("msg_detail_save_failed").withArg(e.message ?: ""))
+                        }
+                    }
+                },
+                enabled = rawBody.isNotEmpty(),
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            ) { Text(stringResource("msg_detail_download")) }
+            PressableButton(
+                onClick = {
+                    // 复制当前展示的文本：hex 模式复制 hex；解释器模式复制全量 formatted
+                    // （显示截断不影响复制）；未就绪 / 解析失败回退全量原文解码。
+                    val copied = when {
+                        binary || selectedId == HEX_INTERPRETER_ID -> preview?.hex ?: ""
+                        else -> rendered?.text?.takeIf { it.isNotEmpty() }
+                            ?: preview?.rawText
+                            ?: MessageCharsets.decode(rawBody, codedCharSetId)
+                    }
+                    clipboard.setText(AnnotatedString(copied))
                     showCopied()
                 },
                 enabled = rawBody.isNotEmpty(),
@@ -190,9 +275,19 @@ fun MessageDetailDialog(
                 }
 
                 DetailReadyPane(
-                    rawBody = rawBody,
-                    encoding = encoding,
-                    codedCharSetId = codedCharSetId,
+                    oversized = oversized,
+                    effectiveBody = effectiveBody,
+                    originalSizeBytes = rawBody.size.toLong(),
+                    binary = binary,
+                    selectedId = selectedId,
+                    interpreters = interpreters,
+                    interpreter = interpreter,
+                    params = params,
+                    preview = preview,
+                    rendered = rendered,
+                    rendering = rendering,
+                    onSelect = { selectedId = it },
+                    onParamsChange = { params = it },
                     headerContent = headerContent,
                     modifier = Modifier.weight(1f),
                 )
@@ -206,34 +301,27 @@ fun MessageDetailDialog(
     }
 }
 
-/** 就绪态主体：左侧 3/5（正文 / Header Tab）+ 右侧 2/5（解释器区），中间细分隔线。 */
+/** 就绪态主体：左侧 3/5（正文 / Header Tab）+ 右侧 2/5（解释器区），中间细分隔线。
+ *  解释器选择与渲染状态由 [MessageDetailDialog] 持有（footer 的复制 / 下载按钮要读）。
+ */
 @Composable
 private fun DetailReadyPane(
-    rawBody: ByteArray,
-    encoding: Int,
-    codedCharSetId: Int,
+    interpreters: List<MessageInterpreter>,
+    oversized: Boolean,
+    effectiveBody: ByteArray,
+    originalSizeBytes: Long,
+    binary: Boolean,
+    selectedId: String,
+    interpreter: MessageInterpreter?,
+    params: Map<String, String>,
+    preview: ContentPreview?,
+    rendered: RenderedText?,
+    rendering: Boolean,
+    onSelect: (String) -> Unit,
+    onParamsChange: (Map<String, String>) -> Unit,
     headerContent: (@Composable () -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
-    // 解释器选择与参数（切换解释器时参数回默认值）；二进制内容默认 Hex。
-    val interpreters = remember { MessageInterpreters.loadAll() }
-    // 大消息防线：解码 / 解释 / hex 全部只喂前 1 MB（渲染结果有界）；原始 body
-    // 只留给「复制正文」按钮（footer 的一次性解码，不进渲染链路）。
-    val oversized = rawBody.size > MAX_BODY_BYTES
-    val effectiveBody = if (oversized) rawBody.copyOf(MAX_BODY_BYTES) else rawBody
-    val binary = remember(effectiveBody, codedCharSetId) { isProbablyBinary(effectiveBody, codedCharSetId) }
-    var selectedId by remember(effectiveBody) {
-        val initial = if (binary && interpreters.any { it.id == HEX_INTERPRETER_ID }) {
-            HEX_INTERPRETER_ID
-        } else {
-            interpreters.firstOrNull()?.id ?: ""
-        }
-        mutableStateOf(initial)
-    }
-    val interpreter = remember(selectedId, interpreters) {
-        interpreters.firstOrNull { it.id == selectedId } ?: interpreters.firstOrNull()
-    }
-    var params by remember(interpreter) { mutableStateOf(interpreter?.defaultParams ?: emptyMap()) }
     var selectedTab by remember { mutableStateOf(0) }
 
     Row(modifier = modifier) {
@@ -259,12 +347,11 @@ private fun DetailReadyPane(
                 ContentTab(
                     rawBody = effectiveBody,
                     oversized = oversized,
-                    originalSizeBytes = rawBody.size.toLong(),
-                    encoding = encoding,
-                    codedCharSetId = codedCharSetId,
-                    interpreter = interpreter,
-                    params = params,
+                    originalSizeBytes = originalSizeBytes,
                     binary = binary,
+                    preview = preview,
+                    rendered = rendered,
+                    rendering = rendering,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -277,26 +364,25 @@ private fun DetailReadyPane(
         InterpreterPane(
             interpreters = interpreters,
             selectedId = selectedId,
-            onSelect = { selectedId = it },
+            onSelect = onSelect,
             interpreter = interpreter,
             params = params,
-            onParamsChange = { params = it },
+            onParamsChange = onParamsChange,
             modifier = Modifier.weight(2f).fillMaxSize(),
         )
     }
 }
 
-/** Tab 1：消息正文（解释器渲染 + 预览截断 + 解析失败回落原始文本 + 二进制 hex 预览）。 */
+/** Tab 1：消息正文（纯视图）：解释器渲染 + 预览截断 + 解析失败回落原文 + 二进制 hex 预览。 */
 @Composable
 private fun ContentTab(
     rawBody: ByteArray,
     oversized: Boolean,
     originalSizeBytes: Long,
-    encoding: Int,
-    codedCharSetId: Int,
-    interpreter: MessageInterpreter?,
-    params: Map<String, String>,
     binary: Boolean,
+    preview: ContentPreview?,
+    rendered: RenderedText?,
+    rendering: Boolean,
     modifier: Modifier = Modifier,
 ) {
     if (rawBody.isEmpty()) {
@@ -314,36 +400,6 @@ private fun ContentTab(
     // 大内容展开/折叠（只在本 Tab 内；截断时正文底部给切换入口）。
     var expanded by remember(rawBody) { mutableStateOf(false) }
 
-    // 预览基线（Default 线程算，避免大消息卡组合）：原始文本 / hex。
-    var preview by remember(rawBody) { mutableStateOf<ContentPreview?>(null) }
-    // 解释器渲染结果只按 rawBody 记忆：切换解释器 / 参数时保留旧内容继续显示
-    // （不清空、不丢滚动位置），新结果算完替换；仅首帧为 null 显示转圈。
-    var rendered by remember(rawBody) { mutableStateOf<RenderedText?>(null) }
-    var rendering by remember(rawBody) { mutableStateOf(false) }
-
-    LaunchedEffect(rawBody, binary) {
-        preview = withContext(Dispatchers.Default) {
-            ContentPreview(
-                isBinary = binary,
-                rawText = if (binary) "" else MessageCharsets.decode(rawBody, codedCharSetId),
-                hex = if (binary) hexPreview(rawBody) else "",
-            )
-        }
-    }
-    LaunchedEffect(rawBody, interpreter, params, preview) {
-        val base = preview ?: return@LaunchedEffect
-        // 二进制只支持 Hex 解释器（对字节流跑文本解释器无意义）。
-        if (base.isBinary && interpreter?.id != HEX_INTERPRETER_ID) return@LaunchedEffect
-        val target = interpreter ?: return@LaunchedEffect
-        rendering = true
-        rendered = withContext(Dispatchers.Default) {
-            when (val result = target.interpret(rawBody, encoding, codedCharSetId, params)) {
-                is InterpreterResult.Success -> RenderedText(result.formatted)
-                is InterpreterResult.Failure -> RenderedText(base.rawText, result.message)
-            }
-        }
-        rendering = false
-    }
 
     Box(modifier = modifier) {
         val scroll = rememberScrollState()

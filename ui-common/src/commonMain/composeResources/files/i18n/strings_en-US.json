@@ -189,5 +189,9 @@
   "msg_detail_interpreter": "Interpreter",
   "msg_detail_no_params": "This interpreter needs no parameters",
   "msg_detail_load_failed": "Failed to load: %1$s",
-  "msg_detail_large_body": "Large message (%1$s MB) — showing only the first 1 MB for performance"
+  "msg_detail_large_body": "Large message (%1$s MB) — showing only the first 1 MB for performance",
+  "msg_detail_hex": "Hex",
+  "msg_detail_download": "Download message",
+  "msg_detail_saved": "Saved to %1$s",
+  "msg_detail_save_failed": "Save failed: %1$s"
 }

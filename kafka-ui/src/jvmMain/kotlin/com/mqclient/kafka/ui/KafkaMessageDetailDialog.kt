@@ -86,26 +86,6 @@ internal fun KafkaMessageDetailDialog(
         }
     }
 
-    /** 下载：消息体已在详情里（Ready 时才可见），直接写盘，不再回查。 */
-    fun downloadDetail(detail: KafkaMessageDetail) {
-        scope.launch {
-            try {
-                val saved = saveFileBytes(
-                    "msg_${detail.topic}_p${detail.partition}_o${detail.offset}.bin",
-                    "bin",
-                    detail.valueBytes,
-                )
-                if (saved != null) {
-                    snackbarHostState.showSnackbar(stringResource("kafka_ui_msg_saved").withArg(saved))
-                }
-            } catch (e: Exception) {
-                snackbarHostState.showSnackbar(
-                    stringResource("kafka_ui_msg_save_failed").withArg(e.message ?: ""),
-                )
-            }
-        }
-    }
-
     // 本宿主自己的 snackbar 反馈（下载等），声明在当前对话框 content 内 —— compose
     // Dialog 的窗口归属随声明组合走，挂到外层会被本对话框压住（ObjectDetailDialog KDoc）。
     val hostOverlay: @Composable () -> Unit = {
@@ -148,13 +128,7 @@ internal fun KafkaMessageDetailDialog(
                 subtitleText = "$topicName [${summary.partition}:${summary.offset}] · " +
                     formatTimestamp(summary.timestamp),
                 headerContent = { KafkaHeaderContent(detail = detail) },
-                extraBottomActions = {
-                    PressableButton(
-                        onClick = { downloadDetail(detail) },
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    ) { Text(stringResource("kafka_ui_msg_detail_download")) }
-                },
+                downloadBaseName = "msg_" + detail.topic + "_p" + detail.partition + "_o" + detail.offset,
                 minWidth = 720.dp,
                 minHeight = 480.dp,
                 nestedContent = hostOverlay,
