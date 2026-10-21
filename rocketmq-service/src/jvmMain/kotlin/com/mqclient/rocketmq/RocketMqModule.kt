@@ -43,6 +43,7 @@ object RocketMqModule {
     private var moduleContext: ServiceContext? = null
     private var service: RocketMqScanService? = null
     private var manager: RocketMqConnectionManager? = null
+    private var messageService: RocketMqMessageService? = null
     private var subscriptions: List<Job> = emptyList()
 
     /** 幂等：重复调用直接返回，不会重复注册订阅。 */
@@ -53,6 +54,7 @@ object RocketMqModule {
         val createdService = RocketMqScanService(context)
         val created = RocketMqConnectionManager(context, createdService)
         service = createdService
+        messageService = RocketMqMessageService()
 
         subscriptions = listOf(
             // 跨模块：核心广播连接变化，只处理属于本模块的连接（payload 里 `type`
@@ -123,6 +125,9 @@ object RocketMqModule {
     /** 扫描服务（缓存只读口 / 手动扫描）；模块未初始化时为 null。 */
     fun serviceOrNull(): RocketMqScanService? = service
 
+    /** 消息读写服务（浏览 / 发送）；模块未初始化时为 null（同 KafkaModule.messageServiceOrNull）。 */
+    fun messageServiceOrNull(): RocketMqMessageService? = messageService
+
     /**
      * 手动扫描入口（UI 刷新按钮）：在模块 scope 里跑一轮**对象慢扫**（scanLock
      * 串行）；扫完经 OBJECTS_SCANNED 事件驱动 UI 刷新。
@@ -160,6 +165,7 @@ object RocketMqModule {
         } finally {
             subscriptionsToCancel.forEach(Job::cancel)
             service = null
+            messageService = null
             moduleContext = null
         }
     }

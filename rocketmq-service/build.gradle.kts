@@ -20,6 +20,8 @@ kotlin {
             implementation("org.apache.rocketmq:rocketmq-tools:5.3.1")
             // ACL 凭证：AclClientRPCHook + SessionCredentials（RPCHook 构造参数注入）。
             implementation("org.apache.rocketmq:rocketmq-acl:5.3.1")
+            // 消息正文二进制判定（isProbablyBinary）：消息列表的 valueProbablyBinary 用。
+            implementation(projects.messageInterpreterApi)
         }
         jvmTest.dependencies {
             implementation(kotlin("test"))

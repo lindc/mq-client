@@ -21,11 +21,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -55,6 +52,8 @@ import com.mqclient.kafka.KafkaSendResult
 import com.mqclient.mqui.objectlist.ObjectListEmptyState
 import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.ThemedSnackbarHost
+import com.mqclient.uicommon.dialog.HeaderDraft
+import com.mqclient.uicommon.dialog.HeadersEditor
 import com.mqclient.uicommon.file.pickFile
 import com.mqclient.uicommon.file.pickFiles
 import com.mqclient.uicommon.i18n.stringResource
@@ -79,27 +78,19 @@ private val WaitingGray = Color(0xFF9E9E9E)
 /** 发送任务状态机：等待 → 发送中 → 成功 / 失败（失败可重试回发送中）。 */
 enum class SendStatus { WAITING, SENDING, SUCCESS, FAILED }
 
-/** Header 编辑器的一行草稿（valueIsHex：勾上时按 hex 解码成字节发送）。 */
-data class HeaderDraft(
-    val id: String = UUID.randomUUID().toString(),
-    var key: String = "",
-    var value: String = "",
-    var valueIsHex: Boolean = false,
-) {
-    /** 解析成消息头；key 为空或 hex 解析失败返回 null（发送时跳过该行）。 */
-    fun toHeader(): KafkaMessageHeader? {
-        if (key.isBlank()) return null
-        val bytes = if (valueIsHex) {
-            val compact = value.trim().replace(" ", "")
-            if (compact.length % 2 != 0 || compact.any { it.isDigit().not() && it.lowercaseChar() !in 'a'..'f' }) {
-                return null
-            }
-            compact.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
-        } else {
-            value.toByteArray(Charsets.UTF_8)
+/** Header 编辑草稿（[HeaderDraft]）→ Kafka 消息头；key 为空或 hex 解析失败返回 null（发送时跳过该行）。 */
+private fun HeaderDraft.toHeader(): KafkaMessageHeader? {
+    if (key.isBlank()) return null
+    val bytes = if (valueIsHex) {
+        val compact = value.trim().replace(" ", "")
+        if (compact.length % 2 != 0 || compact.any { it.isDigit().not() && it.lowercaseChar() !in 'a'..'f' }) {
+            return null
         }
-        return KafkaMessageHeader(key.trim(), bytes)
+        compact.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+    } else {
+        value.toByteArray(Charsets.UTF_8)
     }
+    return KafkaMessageHeader(key.trim(), bytes)
 }
 
 /** 一个待发送文件的任务；[content] 在选择时已读入（读失败的文件不进列表）。 */
@@ -423,88 +414,19 @@ private fun TargetRow(state: KafkaSendMessagesState) {
                 modifier = Modifier.weight(1f),
             )
         }
-        // Headers 编辑器（可增删键值行，value 可勾 hex）。
+        // Headers 编辑器（可增删键值行，value 可勾 hex）—— ui-common 公共组件，
+        // IBM MQ / RocketMQ 发送页同款（文案各模块自传）。
         if (state.tasks.size <= 1) {
-            HeadersEditor(state)
-        }
-    }
-}
-
-/** Headers 键值对编辑器：一行一个 header，右侧加/删按钮，value 可勾「按 HEX 发送」。
- *  行间距 8dp（与 MQ AdvancedPropsSection 等项目表单惯例一致），与上方 Topic 行同理。 */
-@Composable
-private fun HeadersEditor(state: KafkaSendMessagesState) {
-    Column(
-        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = stringResource("kafka_ui_send_headers"),
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            HeadersEditor(
+                headers = state.headers,
+                onHeadersChange = { state.headers = it },
+                title = stringResource("kafka_ui_send_headers"),
+                addText = stringResource("kafka_ui_send_header_add"),
+                keyPlaceholder = stringResource("kafka_ui_send_header_key"),
+                valuePlaceholder = stringResource("kafka_ui_send_header_value"),
+                hexText = stringResource("kafka_ui_send_header_hex"),
+                removeText = stringResource("kafka_ui_send_remove"),
             )
-            Spacer(Modifier.weight(1f))
-            IconButton(
-                onClick = { state.headers = state.headers + HeaderDraft() },
-                modifier = Modifier.size(24.dp),
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = stringResource("kafka_ui_send_header_add"),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(16.dp),
-                )
-            }
-        }
-        state.headers.forEachIndexed { index, draft ->
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                OutlinedTextField(
-                    value = draft.key,
-                    onValueChange = { state.headers = state.headers.mapIndexed { i, h -> if (i == index) h.copy(key = it) else h } },
-                    placeholder = { Text(stringResource("kafka_ui_send_header_key")) },
-                    singleLine = true,
-                    textStyle = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.weight(0.8f),
-                )
-                OutlinedTextField(
-                    value = draft.value,
-                    onValueChange = { state.headers = state.headers.mapIndexed { i, h -> if (i == index) h.copy(value = it) else h } },
-                    placeholder = { Text(stringResource("kafka_ui_send_header_value")) },
-                    singleLine = true,
-                    textStyle = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.weight(1.2f),
-                )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = stringResource("kafka_ui_send_header_hex"),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Checkbox(
-                        checked = draft.valueIsHex,
-                        onCheckedChange = { checked ->
-                            state.headers = state.headers.mapIndexed { i, h -> if (i == index) h.copy(valueIsHex = checked) else h }
-                        },
-                        modifier = Modifier.size(32.dp),
-                    )
-                }
-                IconButton(
-                    onClick = { state.headers = state.headers.filterIndexed { i, _ -> i != index } },
-                    enabled = state.headers.size > 1,
-                    modifier = Modifier.size(28.dp),
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Delete,
-                        contentDescription = stringResource("kafka_ui_send_remove"),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(16.dp),
-                    )
-                }
-            }
         }
     }
 }

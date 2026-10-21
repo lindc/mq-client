@@ -62,6 +62,7 @@ fun RocketMqTopicsPanel(
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
     var propsTopic by remember { mutableStateOf<RocketMqTopicSnapshot?>(null) }
+    var messagesTopic by remember { mutableStateOf<String?>(null) }
     var showCreate by remember { mutableStateOf(false) }
     LaunchedEffect(connectionId) { state.load() }
     LaunchedEffect(connectionId, connectionStatus) { state.onStatusChanged(connectionStatus) }
@@ -116,32 +117,26 @@ fun RocketMqTopicsPanel(
                     items =
                         state.filtered.map { topic ->
                             // 精简卡片：只留图标 + 名称（队列/权限详情在属性对话框）；
-                            // 右下 ✉️ = 消息处理入口（收发底层阶段 3 未做，Snackbar 占位）。
+                            // 右下 ✉️ = 消息处理入口（浏览/发送双 Tab 对话框）。
                             ObjectCardData(
-                                id = topic.name,
-                                title = topic.name,
-                                typeIcon = Icons.Default.Description,
-                                typeLabel = stringResource("rocketmq_ui_nav_topics"),
-                                actions = listOf(
-                                    CardAction(
-                                        id = "messages",
-                                        icon = Icons.Default.Email,
-                                        tooltip = "rocketmq_ui_topic_action_messages",
-                                        onClick = {
-                                            scope.launch {
-                                                snackbarHostState.showSnackbar(
-                                                    stringResource("rocketmq_ui_topic_messages_todo"),
-                                                )
-                                            }
-                                        },
-                                    ),
-                                    CardAction(
-                                        id = "properties",
-                                        icon = Icons.Default.Info,
-                                        tooltip = "rocketmq_ui_topic_props_action",
-                                        onClick = { propsTopic = topic },
-                                    ),
+                        id = topic.name,
+                        title = topic.name,
+                        typeIcon = Icons.Default.Description,
+                        typeLabel = stringResource("rocketmq_ui_nav_topics"),
+                            actions = listOf(
+                                CardAction(
+                                    id = "messages",
+                                    icon = Icons.Default.Email,
+                                    tooltip = "rocketmq_ui_topic_action_messages",
+                                    onClick = { messagesTopic = topic.name },
                                 ),
+                                CardAction(
+                                    id = "properties",
+                                    icon = Icons.Default.Info,
+                                    tooltip = "rocketmq_ui_topic_props_action",
+                                    onClick = { propsTopic = topic },
+                                ),
+                            ),
                             )
                         },
                     onCardClick = {},
@@ -160,17 +155,12 @@ fun RocketMqTopicsPanel(
             )
         }
 
-        if (showCreate) {
-            RocketMqCreateTopicDialog(
+        // 消息对话框（卡片 ✉）：浏览 + 发送双 Tab，外壳与 KafkaMessagesDialog 同构。
+        messagesTopic?.let { topicName ->
+            RocketMqMessagesDialog(
                 connectionId = connectionId,
-                onDismiss = { showCreate = false },
-                onCreated = {
-                    showCreate = false
-                    state.requestScan()
-                    scope.launch {
-                        snackbarHostState.showSnackbar(stringResource("rocketmq_ui_topic_create_success"))
-                    }
-                },
+                topicName = topicName,
+                onDismiss = { messagesTopic = null },
             )
         }
 
