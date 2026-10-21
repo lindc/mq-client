@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -26,8 +27,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mqclient.core.CoreModule
@@ -98,7 +97,7 @@ fun RocketMqOverviewPanel(
                 if (namesrvAddrs.isEmpty()) {
                     Text(
                         text = stringResource("rocketmq_ui_overview_no_nameservers"),
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(start = 12.dp),
                     )
@@ -116,7 +115,7 @@ fun RocketMqOverviewPanel(
                 if (cluster.brokers.isEmpty()) {
                     Text(
                         text = stringResource("rocketmq_ui_overview_no_brokers"),
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else {
@@ -153,7 +152,7 @@ fun RocketMqOverviewPanel(
 /** Broker 表头：名称 / ID / 角色 / 地址，权重 3 : 1 : 1.5 : 4（行内全部 weight，无定宽）。 */
 @Composable
 private fun BrokerTableHeader() {
-    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+    Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp)) {
         Text(
             text = stringResource("rocketmq_ui_overview_col_name"),
             style = MaterialTheme.typography.labelMedium,
@@ -191,33 +190,32 @@ private fun BrokerTableRow(broker: RocketMqBrokerSnapshot, zebra: Boolean) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .heightIn(min = 40.dp)
             .background(
                 if (zebra) {
-                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f)
+                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
                 } else {
                     Color.Transparent
                 },
             )
-            .padding(horizontal = 4.dp, vertical = 6.dp),
+            .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             text = broker.brokerName,
-            style = MaterialTheme.typography.bodySmall,
-            fontWeight = FontWeight.Medium,
-            fontFamily = FontFamily.Monospace,
+            style = MaterialTheme.typography.bodyMedium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(3f),
         )
         Text(
             text = broker.brokerId.toString(),
-            style = MaterialTheme.typography.bodySmall,
+            style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.weight(1f),
         )
         Text(
             text = broker.role,
-            style = MaterialTheme.typography.bodySmall,
+            style = MaterialTheme.typography.bodyMedium,
             color = if (broker.role == "Master") {
                 MaterialTheme.colorScheme.primary
             } else {
@@ -227,8 +225,7 @@ private fun BrokerTableRow(broker: RocketMqBrokerSnapshot, zebra: Boolean) {
         )
         Text(
             text = broker.address,
-            style = MaterialTheme.typography.bodySmall,
-            fontFamily = FontFamily.Monospace,
+            style = MaterialTheme.typography.bodyMedium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(4f),

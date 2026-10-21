@@ -149,5 +149,10 @@
   "rocketmq_ui_group_props_value_disabled": "已停用",
   "rocketmq_ui_group_props_value_unknown": "未知",
   "rocketmq_ui_topic_action_messages": "消息",
-  "rocketmq_ui_topic_messages_todo": "消息功能开发中"
+  "rocketmq_ui_topic_messages_todo": "消息功能开发中",
+  "rocketmq_ui_group_delete": "删除消费组",
+  "rocketmq_ui_group_delete_confirm_title": "确认删除消费组",
+  "rocketmq_ui_group_delete_confirm_text": "确定删除消费组 %1$s？将同时移除全部 Broker 上的订阅组配置，此操作不可恢复。",
+  "rocketmq_ui_group_deleting": "删除中…",
+  "rocketmq_ui_group_deleted": "消费组已删除"
 }

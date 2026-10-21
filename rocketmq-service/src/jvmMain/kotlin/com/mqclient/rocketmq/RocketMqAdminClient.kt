@@ -178,6 +178,22 @@ class RocketMqAdminClient(private val config: RocketMqConfig) : AutoCloseable {
         }
     }
 
+    /**
+     * 删除消费组：`deleteSubscriptionGroup` 写入全部 broker 地址（移除订阅组配置；
+     * 组的 %RETRY%/%DLQ% topic 与位点数据不受影响——那属于 topic 生命周期）。
+     */
+    suspend fun deleteSubscriptionGroup(groupName: String) {
+        val cluster = ioCall { admin.examineBrokerClusterInfo() }
+        val brokerAddrs = cluster.brokerAddrTable.values
+            .flatMap { it.brokerAddrs.values }
+            .toSet()
+        ioCall {
+            brokerAddrs.forEach { addr ->
+                admin.deleteSubscriptionGroup(addr, groupName)
+            }
+        }
+    }
+
     override fun close() {
         if (started) {
             runCatching { admin.shutdown() }

@@ -31,6 +31,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,6 +53,7 @@ import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 
 /** 积压告警色（>0 橙，与消费组卡片 Lag 告警同口径）。 */
 private val LagOrange = Color(0xFFED6C02)
@@ -74,12 +76,17 @@ fun RocketMqGroupPropertiesDialog(
     connectionId: String,
     groupName: String,
     onDismiss: () -> Unit,
+    onDeleted: () -> Unit = {},
 ) {
+    val scope = rememberCoroutineScope()
     var detail by remember(groupName) {
         mutableStateOf<LoadState<RocketMqGroupDetailSnapshot>>(LoadState.Loading)
     }
     var tab by remember(groupName) { mutableIntStateOf(0) }
     var retryKey by remember(groupName) { mutableIntStateOf(0) }
+    var deleteConfirm by remember(groupName) { mutableStateOf(false) }
+    var deleting by remember(groupName) { mutableStateOf(false) }
+    var deleteError by remember(groupName) { mutableStateOf<String?>(null) }
 
     LaunchedEffect(groupName, retryKey) {
         detail = LoadState.Loading
@@ -98,12 +105,37 @@ fun RocketMqGroupPropertiesDialog(
         }
     }
 
+    fun delete() {
+        val service = RocketMqModule.serviceOrNull() ?: run {
+            deleteError = stringResource("rocketmq_ui_conn_props_no_service")
+            return
+        }
+        scope.launch {
+            deleting = true
+            try {
+                service.deleteConsumerGroup(connectionId, groupName)
+                deleting = false
+                deleteConfirm = false
+                onDismiss()
+                onDeleted()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                deleting = false
+                deleteError = failureText(e)
+            }
+        }
+    }
+
     ObjectDetailDialog(
         title = stringResource("rocketmq_ui_group_props_title").withArg(groupName),
         onDismiss = onDismiss,
         minWidth = 680.dp,
         minHeight = 440.dp,
         footerActions = {
+            PressableButton(onClick = { deleteConfirm = true; deleteError = null }, danger = true) {
+                Text(stringResource("rocketmq_ui_group_delete"))
+            }
             Spacer(Modifier.weight(1f))
             PressableButton(
                 onClick = onDismiss,

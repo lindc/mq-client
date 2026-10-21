@@ -328,6 +328,30 @@ class RocketMqScanService(private val context: ServiceContext) {
         )
     }
 
+    /**
+     * 删除消费组：全部 broker 地址移除订阅组配置；成功后剪掉慢扫缓存里的组与
+     * Lag 并发 OBJECTS_SCANNED 驱动列表刷新。组的 %RETRY%/%DLQ% topic 不在此
+     * 清理（属 topic 生命周期，broker 会自行回收）。
+     */
+    suspend fun deleteConsumerGroup(connectionId: String, group: String) {
+        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
+        val admin = ctx.adminClient ?: throw IllegalStateException("未连接")
+        withContext(Dispatchers.IO) { admin.deleteSubscriptionGroup(group) }
+        ctx.cache?.let { cache ->
+            cache.getAs<List<RocketMqGroupSnapshot>>(KEY_GROUPS).orEmpty()
+                .filter { it.name != group }
+                .let { cache.put(KEY_GROUPS, it, ttlMs = objectsTtlMs(ctx)) }
+            cache.getAs<Map<String, RocketMqGroupLagSnapshot>>(KEY_GROUP_LAGS).orEmpty()
+                .filterKeys { it != group }
+                .let { cache.put(KEY_GROUP_LAGS, it, ttlMs = lagTtlMs(ctx)) }
+        }
+        context.emit(
+            name = RocketMqEvents.OBJECTS_SCANNED,
+            payload = mapOf("connectionId" to connectionId),
+        )
+        rocketMqLog.info("consumer group deleted: connection=$connectionId group=$group")
+    }
+
     // ---------------------------------------------------------------- Topic 属性 / 删除
 
     /**

@@ -149,5 +149,10 @@
   "rocketmq_ui_group_props_value_disabled": "Disabled",
   "rocketmq_ui_group_props_value_unknown": "Unknown",
   "rocketmq_ui_topic_action_messages": "Messages",
-  "rocketmq_ui_topic_messages_todo": "Messaging coming soon"
+  "rocketmq_ui_topic_messages_todo": "Messaging coming soon",
+  "rocketmq_ui_group_delete": "Delete group",
+  "rocketmq_ui_group_delete_confirm_title": "Confirm Delete Group",
+  "rocketmq_ui_group_delete_confirm_text": "Delete consumer group %1$s? This removes the subscription group config from all brokers and cannot be undone.",
+  "rocketmq_ui_group_deleting": "Deleting…",
+  "rocketmq_ui_group_deleted": "Consumer group deleted"
 }

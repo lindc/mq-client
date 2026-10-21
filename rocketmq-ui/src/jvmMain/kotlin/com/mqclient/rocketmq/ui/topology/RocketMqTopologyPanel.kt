@@ -34,6 +34,7 @@ import com.mqclient.rocketmq.RocketMqEvents
 import com.mqclient.rocketmq.RocketMqModule
 import com.mqclient.rocketmq.ui.ensureRocketMqConnecting
 import kotlinx.coroutines.launch
+import com.mqclient.rocketmq.ui.RocketMqTopicPropertiesDialog
 import com.mqclient.rocketmq.ui.rememberRocketMqConnectionStatus
 import com.mqclient.topology.TopologyCanvas
 import com.mqclient.uicommon.command.ToolbarButton
@@ -64,6 +65,7 @@ fun RocketMqTopologyPanel(
     }
 
     var showSystemTopics by remember { mutableStateOf(false) }
+    var propsTopic by remember { mutableStateOf<String?>(null) }
     var data by remember(connectionId) { mutableStateOf<TopologyData?>(null) }
 
     // badge 文案模板（builder 在组合外执行，模板在此解析、builder 里替换参数）。
@@ -158,8 +160,11 @@ fun RocketMqTopologyPanel(
                     nodeDragEnabled = true,
                     // 手动扫描：一轮对象慢扫，扫完经 OBJECTS_SCANNED 事件回到 onObjectsScanned。
                     onRescan = { RocketMqModule.scanNow(connectionId) },
-                    // 双击节点：阶段 2 无节点属性对话框，预留。
-                    onNodeDoubleClick = { },
+                    // 双击节点：TOPIC（id = 主题原名）打开属性对话框；BROKER（b: 前缀）
+                    // 无详情对话框，不响应。拖拽由 NodeDoubleClick 的两击窗口机制隔离。
+                    onNodeDoubleClick = { nodeId ->
+                        if (!nodeId.startsWith("b:")) propsTopic = nodeId
+                    },
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxSize(),
@@ -170,5 +175,13 @@ fun RocketMqTopologyPanel(
                 )
             }
         }
+    }
+
+    propsTopic?.let { name ->
+        RocketMqTopicPropertiesDialog(
+            connectionId = connectionId,
+            topicName = name,
+            onDismiss = { propsTopic = null },
+        )
     }
 }

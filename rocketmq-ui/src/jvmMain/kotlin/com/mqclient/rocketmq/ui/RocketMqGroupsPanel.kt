@@ -162,6 +162,13 @@ fun RocketMqGroupsPanel(
                 connectionId = connectionId,
                 groupName = info.name,
                 onDismiss = { propsGroup = null },
+                onDeleted = {
+                    propsGroup = null
+                    state.requestScan()
+                    scope.launch {
+                        snackbarHostState.showSnackbar(stringResource("rocketmq_ui_group_deleted"))
+                    }
+                },
             )
         }
 
