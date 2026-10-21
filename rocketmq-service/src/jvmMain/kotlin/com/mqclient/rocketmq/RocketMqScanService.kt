@@ -96,9 +96,10 @@ class RocketMqScanService(private val context: ServiceContext) {
             val result = withContext(Dispatchers.IO) {
                 coroutineScope {
                     val cluster = async {
-                        runCatching { admin.fetchClusterInfo() }
-                            .map { clusterSnapshot(it) }
-                            .getOrElse { RocketMqClusterInfoSnapshot(null, emptyList(), emptyList()) }
+                        // cluster 分支失败 = NameServer 层不可达/被拒 = 连接大概率已断：
+                        // **不吞** —— 上抛让整轮失败走 markFailed，各页面 Error + 重试
+                        // （异常必须反映到 UI，不能只留日志）。
+                        clusterSnapshot(admin.fetchClusterInfo())
                     }
                     val topics = async {
                         runCatching { scanTopics(admin) }.getOrElse { emptyList() }

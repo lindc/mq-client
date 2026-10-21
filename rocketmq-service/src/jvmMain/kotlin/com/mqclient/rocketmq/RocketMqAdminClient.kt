@@ -73,13 +73,28 @@ class RocketMqAdminClient(private val config: RocketMqConfig) : AutoCloseable {
     /** 全量 topic 列表（含系统 topic：%RETRY% 组、%DLQ%、TBW102 等）。 */
     suspend fun fetchTopicList(): Set<String> = ioCall { admin.fetchAllTopicList().topicList }
 
-    /** 消费组列表：从 %RETRY%<group> 系统主题推导（fetchAllTopicList 一次调用覆盖）。 */
+    /**
+     * 消费组列表：**broker 订阅组配置为主源**（getAllSubscriptionGroup，覆盖所有
+     * 经订阅注册过的组 —— %RETRY% topic 只在组触发过重试时才存在，纯 %RETRY% 推导
+     * 会漏组），∪ %RETRY%<group> 主题推导兜底（broker 配置被清但 retry topic 还在
+     * 的过渡态）。逐 broker 容错：单个 broker 失败只少该节的数据（ACL / 掉线是
+     * 预期内现象），全部失败时退化为 %RETRY% 推导。
+     */
     suspend fun fetchConsumerGroupList(): List<String> =
         ioCall {
-            admin.fetchAllTopicList().topicList
+            val brokerAddrs = admin.examineBrokerClusterInfo().brokerAddrTable.values
+                .flatMap { it.brokerAddrs.values }
+                .toSet()
+            val fromBrokers = brokerAddrs.flatMap { addr ->
+                runCatching { admin.getAllSubscriptionGroup(addr, config.connectionTimeout * 1_000L) }
+                    .map { it.subscriptionGroupTable.keys }
+                    .onFailure { rocketMqLog.warn("subscription group list failed: broker=" + addr + " error=" + it.message) }
+                    .getOrDefault(emptySet())
+            }
+            val fromRetryTopics = admin.fetchAllTopicList().topicList
                 .filter { it.startsWith(RETRY_TOPIC_PREFIX) }
                 .map { it.removePrefix(RETRY_TOPIC_PREFIX) }
-                .distinct()
+            (fromBrokers + fromRetryTopics).distinct()
         }
 
     /** 消费组消费统计：每个 MessageQueue 的 broker / consumer offset（diff = Lag）。 */
