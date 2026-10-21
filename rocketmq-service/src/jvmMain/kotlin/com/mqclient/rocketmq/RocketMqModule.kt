@@ -51,6 +51,10 @@ object RocketMqModule {
     fun initialize(context: ServiceContext) {
         if (manager != null) return
 
+        // 客户端日志落点必须早于任何 RocketMQ 类被触碰（shaded logback 在首个日志类
+        // 加载时定格配置）—— 模块启动咽喉点的第一件事，先于 service / manager 创建。
+        RocketMqClientLogConfigurator.init()
+
         val createdService = RocketMqScanService(context)
         val created = RocketMqConnectionManager(context, createdService)
         service = createdService
