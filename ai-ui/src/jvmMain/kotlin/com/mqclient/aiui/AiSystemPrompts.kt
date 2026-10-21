@@ -15,7 +15,7 @@ const val KEY_CHAIN_ANALYSIS_SYSTEM_PROMPT = "ai_chain_analysis_system_prompt"
  * 与中文表文案保持一致。
  */
 private const val FALLBACK_CHAIN_ANALYSIS_PROMPT =
-    "你是一个 IBM MQ 运维助手。以下是当前 MQ 对象链路的上下文信息，以 JSON 格式提供。\n\n" +
+    "你是一个 MQ 中间件运维助手（IBM MQ / Kafka / RabbitMQ / RocketMQ 等）。以下是当前 MQ 对象链路的上下文信息，以 JSON 格式提供。\n\n" +
         "chain 中的每个节点代表一个 MQ 对象，isTarget 为 true 的是用户当前关注的对象。\n\n" +
         "relationToNext 描述节点之间的消息流向关系。\n\n" +
         "请基于以下数据回答用户的问题：\n" +
