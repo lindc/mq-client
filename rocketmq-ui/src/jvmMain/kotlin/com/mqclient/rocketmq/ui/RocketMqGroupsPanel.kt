@@ -1,17 +1,20 @@
 package com.mqclient.rocketmq.ui
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -19,6 +22,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -32,7 +36,12 @@ import com.mqclient.mqui.objectlist.ObjectListEmptyState
 import com.mqclient.mqui.objectlist.ObjectListPanel
 import com.mqclient.mqui.state.LoadStateContent
 import com.mqclient.rocketmq.RocketMqEvents
+import com.mqclient.rocketmq.RocketMqModule
+import com.mqclient.rocketmq.ui.RocketMqCreateGroupDialog
+import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.command.ToolbarButton
+import com.mqclient.uicommon.i18n.withArg
+import kotlinx.coroutines.launch
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 
@@ -52,7 +61,10 @@ fun RocketMqGroupsPanel(
 ) {
     val state = remember(connectionId) { RocketMqGroupsState(connectionId) }
     val connectionStatus = rememberRocketMqConnectionStatus(connectionId)
+    val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
     var propsGroup by remember { mutableStateOf<RocketMqGroupCardInfo?>(null) }
+    var showCreate by remember { mutableStateOf(false) }
     LaunchedEffect(connectionId) { state.load() }
     LaunchedEffect(connectionId, connectionStatus) { state.onStatusChanged(connectionStatus) }
     LaunchedEffect(connectionId) {
@@ -66,7 +78,8 @@ fun RocketMqGroupsPanel(
         }
     }
 
-    Column(modifier = modifier.fillMaxSize()) {
+    Box(modifier = modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -78,6 +91,11 @@ fun RocketMqGroupsPanel(
                 onValueChange = { state.search = it },
                 placeholder = stringResource("rocketmq_ui_group_search"),
                 modifier = Modifier.weight(1f),
+            )
+            ToolbarButton(
+                icon = Icons.Default.Add,
+                text = stringResource("rocketmq_ui_group_add"),
+                onClick = { showCreate = true },
             )
             ToolbarButton(
                 icon = Icons.Default.Refresh,
@@ -137,6 +155,7 @@ fun RocketMqGroupsPanel(
                 modifier = Modifier.fillMaxSize(),
             )
         }
+        }
 
         propsGroup?.let { info ->
             RocketMqGroupPropertiesDialog(
@@ -145,5 +164,21 @@ fun RocketMqGroupsPanel(
                 onDismiss = { propsGroup = null },
             )
         }
+
+        if (showCreate) {
+            RocketMqCreateGroupDialog(
+                connectionId = connectionId,
+                onDismiss = { showCreate = false },
+                onCreated = {
+                    showCreate = false
+                    state.requestScan()
+                    scope.launch {
+                        snackbarHostState.showSnackbar(stringResource("rocketmq_ui_group_create_success"))
+                    }
+                },
+            )
+        }
+
+        ThemedSnackbarHost(snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter))
     }
 }

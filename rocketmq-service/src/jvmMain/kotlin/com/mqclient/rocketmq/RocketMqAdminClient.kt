@@ -12,6 +12,7 @@ import org.apache.rocketmq.remoting.netty.TlsSystemConfig
 import org.apache.rocketmq.remoting.protocol.admin.ConsumeStats
 import org.apache.rocketmq.common.TopicConfig
 import org.apache.rocketmq.remoting.protocol.body.ClusterInfo
+import org.apache.rocketmq.remoting.protocol.subscription.SubscriptionGroupConfig
 import org.apache.rocketmq.remoting.protocol.body.ConsumerConnection
 import org.apache.rocketmq.remoting.exception.RemotingConnectException
 import org.apache.rocketmq.remoting.exception.RemotingTimeoutException
@@ -142,6 +143,38 @@ class RocketMqAdminClient(private val config: RocketMqConfig) : AutoCloseable {
         ioCall {
             admin.deleteTopicInBroker(brokerAddrs, topic)
             admin.deleteTopicInNameServer(nameSrvAddrs, topic)
+        }
+    }
+
+    /**
+     * 订阅组配置查询：**不依赖 %RETRY% 路由**（直接读 broker 本地配置），组从未
+     * 消费也能拿到 —— 属性对话框局部降级的基础数据源。
+     */
+    suspend fun fetchGroupConfig(groupName: String): SubscriptionGroupConfig {
+        val addr = ioCall { admin.examineBrokerClusterInfo() }.brokerAddrTable.values
+            .flatMap { it.brokerAddrs.values }
+            .firstOrNull()
+            ?: throw IllegalStateException("集群中没有可用 Broker，无法查询订阅组配置")
+        return ioCall { admin.examineSubscriptionGroupConfig(addr, groupName) }
+    }
+
+    /**
+     * 创建消费组：`createAndUpdateSubscriptionGroupConfig` 写入全部 broker 地址
+     * （update 语义幂等，已存在等同改配置）。开启 ACL 时走既有 RPCHook。
+     */
+    suspend fun createSubscriptionGroup(groupName: String, orderly: Boolean) {
+        val cluster = ioCall { admin.examineBrokerClusterInfo() }
+        val brokerAddrs = cluster.brokerAddrTable.values
+            .flatMap { it.brokerAddrs.values }
+            .toSet()
+        ioCall {
+            brokerAddrs.forEach { addr ->
+                val config = org.apache.rocketmq.remoting.protocol.subscription.SubscriptionGroupConfig()
+                config.groupName = groupName
+                config.isConsumeEnable = true
+                config.isConsumeMessageOrderly = orderly
+                admin.createAndUpdateSubscriptionGroupConfig(addr, config)
+            }
         }
     }
 
