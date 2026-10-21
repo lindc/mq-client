@@ -1,6 +1,8 @@
 package com.mqclient.rocketmq.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -9,19 +11,20 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -30,8 +33,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -274,48 +277,60 @@ private fun RoutesTab(
         return
     }
     Column(modifier = Modifier.fillMaxSize().padding(vertical = 8.dp)) {
-        Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-            Text(stringResource("rocketmq_ui_topic_props_col_broker"), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1.4f))
-            Text(stringResource("rocketmq_ui_topic_props_col_read"), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(80.dp))
-            Text(stringResource("rocketmq_ui_topic_props_col_write"), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(80.dp))
-            Text(stringResource("rocketmq_ui_topic_props_col_perm"), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(90.dp))
-            Text(stringResource("rocketmq_ui_topic_props_col_role"), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(90.dp))
+        // 与概览（PropertyTable）同款视觉：斑马纹 + 4dp 圆角 + bodyMedium/onSurface +
+        // 40dp 最小行高 + 10/8 内边距 + 8dp 行距，无分割线；列宽统一 weight。
+        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp)) {
+            Text(stringResource("rocketmq_ui_topic_props_col_broker"), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(2f))
+            Text(stringResource("rocketmq_ui_topic_props_col_read"), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+            Text(stringResource("rocketmq_ui_topic_props_col_write"), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+            Text(stringResource("rocketmq_ui_topic_props_col_perm"), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1.2f))
+            Text(stringResource("rocketmq_ui_topic_props_col_role"), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1.2f))
         }
-        HorizontalDivider()
-        LazyColumn(modifier = Modifier.fillMaxSize()) {
-            items(routes.size) { index ->
-                val route = routes[index]
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+        ) {
+            itemsIndexed(routes) { index, route ->
                 val role = clusterBrokers
                     .firstOrNull { it.brokerName == route.brokerName }
                     ?.role ?: "-"
-                Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 40.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(
+                            if (index % 2 == 1) {
+                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                            } else {
+                                Color.Transparent
+                            },
+                        )
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Text(
                         text = route.brokerName,
-                        style = MaterialTheme.typography.bodySmall,
-                        fontFamily = FontFamily.Monospace,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1.4f),
+                        modifier = Modifier.weight(2f),
                     )
-                    Text(route.readQueueNums.toString(), style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(80.dp))
-                    Text(route.writeQueueNums.toString(), style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(80.dp))
-                    Text(
-                        text = formatPerm(route.perm),
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.width(90.dp),
-                    )
+                    Text(route.readQueueNums.toString(), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
+                    Text(route.writeQueueNums.toString(), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
+                    Text(formatPerm(route.perm), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1.2f))
                     Text(
                         text = role,
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.bodyMedium,
                         color = if (role == "Master") {
                             MaterialTheme.colorScheme.primary
                         } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
+                            MaterialTheme.colorScheme.onSurface
                         },
-                        modifier = Modifier.width(90.dp),
+                        modifier = Modifier.weight(1.2f),
                     )
                 }
-                HorizontalDivider(modifier = Modifier.fillMaxWidth(), thickness = 0.5.dp)
             }
         }
     }
