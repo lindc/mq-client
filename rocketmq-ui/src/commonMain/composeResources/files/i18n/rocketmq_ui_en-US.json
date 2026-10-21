@@ -147,5 +147,7 @@
   "rocketmq_ui_group_props_orderly": "Orderly consumption",
   "rocketmq_ui_group_props_value_enabled": "Enabled",
   "rocketmq_ui_group_props_value_disabled": "Disabled",
-  "rocketmq_ui_group_props_value_unknown": "Unknown"
+  "rocketmq_ui_group_props_value_unknown": "Unknown",
+  "rocketmq_ui_topic_action_messages": "Messages",
+  "rocketmq_ui_topic_messages_todo": "Messaging coming soon"
 }

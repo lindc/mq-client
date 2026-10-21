@@ -43,8 +43,9 @@ import com.mqclient.rocketmq.RocketMqModule
 import com.mqclient.rocketmq.RocketMqTopicSnapshot
 import com.mqclient.rocketmq.RocketMqTopicRouteSnapshot
 import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.PropertyRow
+import com.mqclient.uicommon.PropertySection
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
-import com.mqclient.uicommon.dialog.MessageDetailSectionTitle
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 import kotlinx.coroutines.CancellationException
@@ -230,45 +231,47 @@ private fun OverviewTab(
             .verticalScroll(rememberScrollState())
             .padding(vertical = 8.dp),
     ) {
-        MessageDetailSectionTitle(text = stringResource("rocketmq_ui_topic_props_section_basic"))
-        Spacer(Modifier.height(4.dp))
-        PropertyRow(stringResource("rocketmq_ui_topic_props_name"), topicName)
-        PropertyRow(stringResource("rocketmq_ui_topic_props_message_type"), messageTypeText)
-        Spacer(Modifier.height(12.dp))
-        MessageDetailSectionTitle(text = stringResource("rocketmq_ui_topic_props_section_perm"))
-        Spacer(Modifier.height(4.dp))
-        val perm = snapshot?.perm ?: 0
-        val permColor = when {
-            perm and 6 == 6 -> PermRwGreen
-            perm and 4 == 4 -> PermWOrange
-            else -> PermNoneRed
-        }
-        Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = stringResource("rocketmq_ui_topic_props_perm"),
-                style = MaterialTheme.typography.bodySmall,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.width(140.dp),
-            )
-            Box(Modifier.size(8.dp).background(permColor, CircleShape))
-            Spacer(Modifier.width(8.dp))
-            Text(
-                text = formatPerm(perm),
-                style = MaterialTheme.typography.bodySmall,
-                fontFamily = FontFamily.Monospace,
-            )
+        // 与消费组属性对话框同一套 ui-common 排版：浅色卡片 + 次要色 label / 主色值右对齐。
+        PropertySection(title = stringResource("rocketmq_ui_topic_props_section_basic")) {
+            PropertyRow(stringResource("rocketmq_ui_topic_props_name"), topicName)
+            PropertyRow(stringResource("rocketmq_ui_topic_props_message_type"), messageTypeText)
         }
         Spacer(Modifier.height(12.dp))
-        MessageDetailSectionTitle(text = stringResource("rocketmq_ui_topic_props_section_queues"))
-        Spacer(Modifier.height(4.dp))
-        PropertyRow(
-            stringResource("rocketmq_ui_topic_props_read_queues"),
-            (snapshot?.readQueueNums ?: 0).toString(),
-        )
-        PropertyRow(
-            stringResource("rocketmq_ui_topic_props_write_queues"),
-            (snapshot?.writeQueueNums ?: 0).toString(),
-        )
+        PropertySection(title = stringResource("rocketmq_ui_topic_props_section_perm")) {
+            val perm = snapshot?.perm ?: 0
+            val permColor = when {
+                perm and 6 == 6 -> PermRwGreen
+                perm and 4 == 4 -> PermWOrange
+                else -> PermNoneRed
+            }
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = stringResource("rocketmq_ui_topic_props_perm"),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Box(Modifier.size(8.dp).background(permColor, CircleShape))
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = formatPerm(perm),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.End,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        PropertySection(title = stringResource("rocketmq_ui_topic_props_section_queues")) {
+            PropertyRow(
+                stringResource("rocketmq_ui_topic_props_read_queues"),
+                (snapshot?.readQueueNums ?: 0).toString(),
+            )
+            PropertyRow(
+                stringResource("rocketmq_ui_topic_props_write_queues"),
+                (snapshot?.writeQueueNums ?: 0).toString(),
+            )
+        }
         Spacer(Modifier.height(12.dp))
     }
 }
@@ -339,27 +342,6 @@ private fun RoutesTab(
 }
 
 /* ------------------------------ 公共小件 ------------------------------ */
-
-/** 属性行（概览两列排版：key Medium 140dp + 值 monospace）。 */
-@Composable
-private fun PropertyRow(name: String, value: String) {
-    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.Top) {
-        Text(
-            text = name,
-            style = MaterialTheme.typography.bodySmall,
-            fontWeight = FontWeight.Medium,
-            modifier = Modifier.width(140.dp),
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodySmall,
-            fontFamily = FontFamily.Monospace,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-    }
-}
 
 /** 失败原因：解 ExecutionException 包装（与其他对话框调用处同一简化版）。 */
 private fun failureText(error: Throwable): String =

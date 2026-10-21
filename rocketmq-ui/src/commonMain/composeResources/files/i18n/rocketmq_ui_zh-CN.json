@@ -147,5 +147,7 @@
   "rocketmq_ui_group_props_orderly": "顺序消费",
   "rocketmq_ui_group_props_value_enabled": "已启用",
   "rocketmq_ui_group_props_value_disabled": "已停用",
-  "rocketmq_ui_group_props_value_unknown": "未知"
+  "rocketmq_ui_group_props_value_unknown": "未知",
+  "rocketmq_ui_topic_action_messages": "消息",
+  "rocketmq_ui_topic_messages_todo": "消息功能开发中"
 }

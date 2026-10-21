@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.HorizontalDivider
@@ -23,6 +24,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -39,9 +41,10 @@ import com.mqclient.mqui.state.LoadStateContent
 import com.mqclient.rocketmq.RocketMqEvents
 import com.mqclient.rocketmq.RocketMqTopicSnapshot
 import com.mqclient.rocketmq.ui.RocketMqTopicPropertiesDialog
+import kotlinx.coroutines.launch
+import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.command.ToolbarButton
 import com.mqclient.uicommon.i18n.stringResource
-import com.mqclient.uicommon.i18n.withArg
 
 /**
  * 主题列表页（导航项 `topics` 的 Tab 内容）：缓存优先 + 事件驱动的卡片网格。
@@ -55,6 +58,8 @@ fun RocketMqTopicsPanel(
 ) {
     val state = remember(connectionId) { RocketMqTopicsState(connectionId) }
     val connectionStatus = rememberRocketMqConnectionStatus(connectionId)
+    val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
     var propsTopic by remember { mutableStateOf<RocketMqTopicSnapshot?>(null) }
     LaunchedEffect(connectionId) { state.load() }
     LaunchedEffect(connectionId, connectionStatus) { state.onStatusChanged(connectionStatus) }
@@ -103,18 +108,26 @@ fun RocketMqTopicsPanel(
                     },
                     items =
                         state.filtered.map { topic ->
+                            // 精简卡片：只留图标 + 名称（队列/权限详情在属性对话框）；
+                            // 右下 ✉️ = 消息处理入口（收发底层阶段 3 未做，Snackbar 占位）。
                             ObjectCardData(
                                 id = topic.name,
                                 title = topic.name,
                                 typeIcon = Icons.Default.Description,
                                 typeLabel = stringResource("rocketmq_ui_nav_topics"),
-                                statusText =
-                                    listOf(
-                                        stringResource("rocketmq_ui_topic_read_queues").withArg(topic.readQueueNums),
-                                        stringResource("rocketmq_ui_topic_write_queues").withArg(topic.writeQueueNums),
-                                        stringResource("rocketmq_ui_topic_perm").withArg(formatPerm(topic.perm)),
-                                    ).joinToString(" · "),
                                 actions = listOf(
+                                    CardAction(
+                                        id = "messages",
+                                        icon = Icons.Default.Email,
+                                        tooltip = "rocketmq_ui_topic_action_messages",
+                                        onClick = {
+                                            scope.launch {
+                                                snackbarHostState.showSnackbar(
+                                                    stringResource("rocketmq_ui_topic_messages_todo"),
+                                                )
+                                            }
+                                        },
+                                    ),
                                     CardAction(
                                         id = "properties",
                                         icon = Icons.Default.Info,
@@ -139,6 +152,8 @@ fun RocketMqTopicsPanel(
                 onDeleted = { state.requestScan() },
             )
         }
+
+        ThemedSnackbarHost(snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter))
     }
 }
 
