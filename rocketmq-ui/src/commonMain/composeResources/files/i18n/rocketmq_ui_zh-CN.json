@@ -101,5 +101,10 @@
   "rocketmq_ui_topic_type_retry": "重试队列",
   "rocketmq_ui_overview_cluster": "集群信息",
   "rocketmq_ui_overview_cluster_name": "集群名称",
-  "rocketmq_ui_overview_nameserver_addr": "NameServer 地址"
+  "rocketmq_ui_overview_nameserver_addr": "NameServer 地址",
+  "rocketmq_ui_overview_col_name": "Broker 名称",
+  "rocketmq_ui_overview_col_id": "ID",
+  "rocketmq_ui_overview_col_role": "角色",
+  "rocketmq_ui_overview_col_addr": "地址",
+  "rocketmq_ui_overview_copy_address": "复制地址"
 }

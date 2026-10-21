@@ -101,5 +101,10 @@
   "rocketmq_ui_topic_type_retry": "Retry",
   "rocketmq_ui_overview_cluster": "Cluster info",
   "rocketmq_ui_overview_cluster_name": "Cluster name",
-  "rocketmq_ui_overview_nameserver_addr": "NameServer address"
+  "rocketmq_ui_overview_nameserver_addr": "NameServer address",
+  "rocketmq_ui_overview_col_name": "Broker name",
+  "rocketmq_ui_overview_col_id": "ID",
+  "rocketmq_ui_overview_col_role": "Role",
+  "rocketmq_ui_overview_col_addr": "Address",
+  "rocketmq_ui_overview_copy_address": "Copy address"
 }
