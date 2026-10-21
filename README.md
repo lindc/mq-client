@@ -66,6 +66,29 @@ RabbitMQ 连接涉及**两套端口**：AMQP 0.9.1（默认 5672，消息收发�
 - 路径留空：使用 JVM 默认信任链（公共 CA 签发的证书场景）
 - 信任库加载失败会在连接时报出具体原因
 
+## UI 属性表规范（PropertyTable）
+
+各 MQ 模块的属性面板/对话框统一用 `ui-common` 的 `PropertyTable` 展示 Key-Value 属性（连接属性、队列管理器、主题/消费组属性、集群概览等）：
+
+```kotlin
+data class PropertyItem(val key: String, val value: String?, val copyable: Boolean = true)
+
+@Composable
+fun PropertyTable(items: List<PropertyItem>, modifier: Modifier = Modifier)
+@Composable
+fun PropertyTableSection(title: String, items: List<PropertyItem>, modifier: Modifier = Modifier)
+```
+
+视觉与交互约定：
+
+- **斑马纹**：奇数行 `surfaceVariant.copy(alpha = 0.3f)` + 4dp 圆角，偶数行透明；行高最小 40dp，行距 8dp
+- **对齐**：Key 定宽 120dp 左对齐（次要色）；Value `weight(1f)` **左对齐**（不右对齐），超长两行后省略，包在 `SelectionContainer` 里可拖选
+- **空值**：`null` / 空串显示 `-`，且不渲染复制按钮
+- **复制**：行尾 24dp IconButton（ContentCopy 图标），点击写剪贴板并弹「已复制」Snackbar（host 内置在组件里，调用方无需接入）
+- **分组**：小标题 + `PropertyTable`（用 `PropertyTableSection`），不再套卡片背景（避免与斑马纹叠色）
+
+范围边界：`MessageHeaderRow`（消息详情 Header 的元数据表）与 IBM MQ 的 `PropertyGroupsPane`（队列管理器分组管线）不在该组件范围内；UI 层禁止直接展示 `CODE: 17 DESC: ...` 一类的原始错误码——service 层转友好文案，原始异常只进日志。
+
 ## 架构
 
 - `app-core`：配置 / 事件总线 / 加密 / 日志 / 数据库 / 调度 / SPI 定义（不依赖 Compose）
