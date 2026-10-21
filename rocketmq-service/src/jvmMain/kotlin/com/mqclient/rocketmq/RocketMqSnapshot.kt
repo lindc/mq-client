@@ -55,3 +55,30 @@ data class RocketMqGroupLagSnapshot(
     /** 参与统计的 MessageQueue 数。 */
     val queueCount: Int,
 )
+
+/** 消费组在单个 MessageQueue 上的位点行（ConsumeStats.offsetTable 扁平化投影）。 */
+data class RocketMqOffsetRowSnapshot(
+    val topic: String,
+    val broker: String,
+    val queueId: Int,
+    /** 最大位点（brokerOffset）。 */
+    val maxOffset: Long,
+    /** 消费位点（consumerOffset）。 */
+    val consumerOffset: Long,
+    /** 积压量 = maxOffset - consumerOffset（负值截 0）。 */
+    val lag: Long,
+)
+
+/** 消费组详情快照（属性对话框现查投影，数据已在 service 层拍平）。 */
+data class RocketMqGroupDetailSnapshot(
+    val name: String,
+    val memberCount: Int,
+    /** 消费模式原始枚举名（CLUSTERING / BROADCASTING），UI 层翻译；未知为空串。 */
+    val consumeMode: String,
+    /** 订阅的 topic 列表（subscriptionTable keys，已排序）。 */
+    val subscriptions: List<String>,
+    /** 消费进度行（按 topic / broker / queueId 排序）。 */
+    val rows: List<RocketMqOffsetRowSnapshot>,
+    /** 组级总积压（rows 求和）。 */
+    val totalLag: Long,
+)

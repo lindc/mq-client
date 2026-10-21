@@ -161,6 +161,9 @@ class RocketMqScanService(private val context: ServiceContext) {
                     groups.map { group ->
                         async {
                             sem.withPermit {
+                                // 逐组容错 + **兜底 lag=0**：失败（组从未消费 / ACL / 超时）
+                                // 不再从结果里抹掉该组 —— UI 没有 "未知" 形态；根因 warn
+                                // 日志留痕，属性对话框现查时会看到真实错误。
                                 runCatching {
                                     val stats = admin.fetchConsumerProgress(group)
                                     RocketMqGroupLagSnapshot(
@@ -170,10 +173,16 @@ class RocketMqScanService(private val context: ServiceContext) {
                                         },
                                         queueCount = stats.offsetTable.size,
                                     )
-                                }.getOrNull()
+                                }.getOrElse {
+                                    rocketMqLog.warn(
+                                        "group lag failed, fallback to 0: group=" + group +
+                                            " error=" + (it.message ?: it::class.simpleName),
+                                    )
+                                    RocketMqGroupLagSnapshot(group = group, totalLag = 0, queueCount = 0)
+                                }
                             }
                         }
-                    }.awaitAll().filterNotNull()
+                    }.awaitAll()
                 }
             }
 
@@ -223,6 +232,48 @@ class RocketMqScanService(private val context: ServiceContext) {
     /** 当前缓存的组级 Lag（快扫产物）；key = groupId。 */
     fun cachedGroupLags(connectionId: String): Map<String, RocketMqGroupLagSnapshot> =
         cacheOf(connectionId)?.getAs(KEY_GROUP_LAGS) ?: emptyMap()
+
+    // ---------------------------------------------------------------- 消费组详情
+
+    /**
+     * 消费组详情现查（属性对话框用，不进缓存）：成员 / 消费模式 / 订阅来自
+     * examineConsumerConnectionInfo（组离线时为 null → 兜底空值）；消费进度来自
+     * examineConsumeStats，**嵌套 offsetTable 在这里拍平**成一行一 queue 的列表
+     * （UI 只接一维数据）。进度查询失败直接抛（对话框 Error + 重试）；成员查询
+     * 失败降级空值不阻塞进度展示。
+     */
+    suspend fun fetchGroupDetail(connectionId: String, group: String): RocketMqGroupDetailSnapshot {
+        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
+        val admin = ctx.adminClient ?: throw IllegalStateException("未连接")
+        return withContext(Dispatchers.IO) {
+            val conn = runCatching { admin.fetchConsumerConnection(group) }
+                .onFailure {
+                    rocketMqLog.warn(
+                        "group detail connection failed: group=" + group + " error=" + it.message,
+                    )
+                }
+                .getOrNull()
+            val stats = admin.fetchConsumerProgress(group)
+            val rows = stats.offsetTable.entries.map { (mq, wrapper) ->
+                RocketMqOffsetRowSnapshot(
+                    topic = mq.topic,
+                    broker = mq.brokerName,
+                    queueId = mq.queueId,
+                    maxOffset = wrapper.brokerOffset,
+                    consumerOffset = wrapper.consumerOffset,
+                    lag = (wrapper.brokerOffset - wrapper.consumerOffset).coerceAtLeast(0),
+                )
+            }.sortedWith(compareBy({ it.topic }, { it.broker }, { it.queueId }))
+            RocketMqGroupDetailSnapshot(
+                name = group,
+                memberCount = conn?.connectionSet?.size ?: 0,
+                consumeMode = conn?.messageModel?.name ?: "",
+                subscriptions = conn?.subscriptionTable?.keys?.sorted().orEmpty(),
+                rows = rows,
+                totalLag = rows.sumOf { it.lag },
+            )
+        }
+    }
 
     // ---------------------------------------------------------------- Topic 属性 / 删除
 
@@ -302,12 +353,18 @@ class RocketMqScanService(private val context: ServiceContext) {
     private suspend fun scanGroups(admin: RocketMqAdminClient): List<RocketMqGroupSnapshot> {
         val groups = admin.fetchConsumerGroupList().sorted()
         return groups.map { group ->
-            // 逐组容错：成员数是 best-effort（组不在线 / broker 慢都只降级该行，
-            // 不能让一个组的 RemotingTimeoutException 炸掉整轮组列表）。
+            // 逐组容错 + **兜底为 0**：组离线（MQClientException，fetchConsumerConnection
+            // 内部已转 null）与其他失败一律落 0 —— 卡片区没有 "未知" 形态；失败原因
+            // warn 日志留痕（group + 根因），不让 UI 猜。
             val memberCount = runCatching { admin.fetchConsumerConnection(group) }
-                .onFailure { rocketMqLog.warn("group member count failed: group=" + group + " error=" + it.message) }
+                .onFailure {
+                    rocketMqLog.warn(
+                        "group member count failed, fallback to 0: group=" + group +
+                            " error=" + it.message,
+                    )
+                }
                 .getOrNull()
-                ?.connectionSet?.size
+                ?.connectionSet?.size ?: 0
             RocketMqGroupSnapshot(name = group, memberCount = memberCount)
         }
     }

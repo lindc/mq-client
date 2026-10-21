@@ -6,7 +6,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -14,13 +16,17 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.CoreModule
 import com.mqclient.mqui.common.CompactSearchField
+import com.mqclient.mqui.objectlist.CardAction
 import com.mqclient.mqui.objectlist.ObjectCardData
 import com.mqclient.mqui.objectlist.ObjectListEmptyState
 import com.mqclient.mqui.objectlist.ObjectListPanel
@@ -29,6 +35,11 @@ import com.mqclient.rocketmq.RocketMqEvents
 import com.mqclient.uicommon.command.ToolbarButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
+
+/** 状态语义色：成员在线绿 / 积压告警橙 / 零成员有积压红（与 Topic 属性对话框同口径）。 */
+private val StatusGreen = Color(0xFF2E7D32)
+private val LagOrange = Color(0xFFED6C02)
+private val StatusRed = Color(0xFFD32F2F)
 
 /**
  * 消费组列表页（导航项 `groups` 的 Tab 内容）：缓存优先 + 事件驱动的卡片网格。
@@ -41,6 +52,7 @@ fun RocketMqGroupsPanel(
 ) {
     val state = remember(connectionId) { RocketMqGroupsState(connectionId) }
     val connectionStatus = rememberRocketMqConnectionStatus(connectionId)
+    var propsGroup by remember { mutableStateOf<RocketMqGroupCardInfo?>(null) }
     LaunchedEffect(connectionId) { state.load() }
     LaunchedEffect(connectionId, connectionStatus) { state.onStatusChanged(connectionStatus) }
     LaunchedEffect(connectionId) {
@@ -92,26 +104,45 @@ fun RocketMqGroupsPanel(
                 },
                 items =
                     state.filtered.map { info ->
+                        // 四角布局：左上组名 / 右上 Lag（>0 橙）/ 左下状态点 + 成员数 /
+                        // 右下属性 ⓘ。Lag 与成员数在 service 层已兜底为 0，不再有 null。
+                        val lag = info.totalLag ?: 0
+                        val members = info.memberCount ?: 0
                         ObjectCardData(
                             id = info.name,
                             title = info.name,
                             typeIcon = Icons.Default.Group,
                             typeLabel = stringResource("rocketmq_ui_nav_groups"),
-                            statusText =
-                                listOf(
-                                    stringResource("rocketmq_ui_group_lag").withArg(
-                                        info.totalLag?.toString() ?: "-",
-                                    ),
-                                    stringResource("rocketmq_ui_group_members").withArg(
-                                        info.memberCount?.toString() ?: "-",
-                                    ),
-                                ).joinToString(" · "),
-                            actions = emptyList(),
+                            metricValue = stringResource("rocketmq_ui_group_lag").withArg(lag),
+                            metricColor = if (lag > 0) LagOrange else null,
+                            statusIcon = Icons.Filled.Circle,
+                            statusIconTint = when {
+                                members > 0 -> StatusGreen
+                                members == 0 && lag > 0 -> StatusRed
+                                else -> null
+                            },
+                            statusText = stringResource("rocketmq_ui_group_members").withArg(members),
+                            actions = listOf(
+                                CardAction(
+                                    id = "properties",
+                                    icon = Icons.Default.Info,
+                                    tooltip = "rocketmq_ui_group_props_action",
+                                    onClick = { propsGroup = info },
+                                ),
+                            ),
                         )
                     },
                 onCardClick = {},
                 onCardDoubleClick = {},
                 modifier = Modifier.fillMaxSize(),
+            )
+        }
+
+        propsGroup?.let { info ->
+            RocketMqGroupPropertiesDialog(
+                connectionId = connectionId,
+                groupName = info.name,
+                onDismiss = { propsGroup = null },
             )
         }
     }
