@@ -70,6 +70,7 @@ class RocketMqScanService(private val context: ServiceContext) {
     private val scanLock = Mutex()
 
 
+
     /**
      * 「至少完成过一轮对象慢扫」标记（connectionId → true）。UI 用它区分「还在等
      * 首扫」（保持 Loading）与「扫完了但确实没有对象」（显示空态）——**不依赖
@@ -394,6 +395,10 @@ class RocketMqScanService(private val context: ServiceContext) {
      * 拓扑刷新。
      */
     suspend fun deleteTopic(connectionId: String, topic: String) {
+        // 第二道防呆（第一道是属性对话框按钮禁用）：绕过 UI 的调用路径也拦下。
+        if (isSystemTopic(topic)) {
+            throw IllegalStateException("系统内置主题不允许删除：$topic")
+        }
         val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
         val admin = ctx.adminClient ?: throw IllegalStateException("未连接")
         // 命令历史审计：RocketMQ 阶段 1 未接入（与 kafka/rabbitmq 的 audited 同款，
@@ -521,3 +526,18 @@ class RocketMqScanService(private val context: ServiceContext) {
             ?: error::class.simpleName
             ?: "unknown"
 }
+
+/**
+ * 系统保留主题判定（删除防呆 + 拓扑/列表过滤共用，顶层函数供 service 与 UI 双侧
+ * import）：%. 前缀（重试 / 死信 / POP 回调等）、调度 / 弹幂 / 事务 / 轨迹 / 位点
+ * 漂移 / 自测 / TBW102 / 默认主题，大小写两种形态的 RMQ_SYS_ 都覆盖（服务端实测
+ * 两种均有）。
+ */
+fun isSystemTopic(name: String): Boolean =
+    name.startsWith("%") ||
+        name.startsWith("SCHEDULE_TOPIC_") ||
+        name.startsWith("TBW102") ||
+        name.startsWith("SELF_TEST_TOPIC") ||
+        name.startsWith("OFFSET_MOVED_EVENT") ||
+        name.startsWith("DEFAULT_TOPIC") ||
+        name.startsWith("RMQ_SYS_", ignoreCase = true)

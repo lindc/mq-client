@@ -7,6 +7,7 @@ import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ConnectionStore
 import com.mqclient.mqui.state.LoadState
 import com.mqclient.rocketmq.RocketMqModule
+import com.mqclient.rocketmq.isSystemTopic
 import com.mqclient.rocketmq.RocketMqTopicSnapshot
 import com.mqclient.rocketmq.ui.ensureRocketMqConnecting
 import com.mqclient.uicommon.i18n.stringResource

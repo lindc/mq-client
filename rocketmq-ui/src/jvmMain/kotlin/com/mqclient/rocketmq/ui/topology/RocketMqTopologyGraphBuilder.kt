@@ -6,6 +6,7 @@ import com.dk.kuiver.model.KuiverEdge
 import com.dk.kuiver.model.KuiverNode
 import com.dk.kuiver.model.NodeDimensions
 import com.dk.kuiver.model.buildKuiver
+import com.mqclient.rocketmq.isSystemTopic
 import com.mqclient.graph.NodeSeverity
 import com.mqclient.graph.TopologyData
 import com.mqclient.graph.TopologyNodeType
@@ -105,12 +106,3 @@ fun topicNodeId(name: String): String = name
 
 /** broker 节点 id（`b:` 前缀避免与 topic 名冲突）。 */
 fun brokerNodeId(name: String): String = "b:$name"
-
-/**
- * 系统主题判定：RocketMQ 的内置主题（重试 / 死信 / 调度 / 弹幂等）默认不进图。
- * %RETRY%<group> / %DLQ%<group>？—— DLQ 其实是排查高频对象，这里归入系统类，
- * 用户要看可开「显示系统主题」开关。
- */
-fun isSystemTopic(name: String): Boolean =
-    name.startsWith("%") || name.startsWith("SCHEDULE_TOPIC_") || name.startsWith("TBW102") ||
-        name.startsWith("rmq_sys_")

@@ -39,6 +39,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mqclient.rocketmq.RocketMqBrokerSnapshot
+import com.mqclient.rocketmq.isSystemTopic
 import com.mqclient.rocketmq.RocketMqModule
 import com.mqclient.rocketmq.RocketMqTopicSnapshot
 import com.mqclient.rocketmq.RocketMqTopicRouteSnapshot
@@ -76,7 +77,7 @@ fun RocketMqTopicPropertiesDialog(
     val snapshot = remember(topicName) {
         RocketMqModule.serviceOrNull()?.cachedTopics(connectionId)?.firstOrNull { it.name == topicName }
     }
-    val systemTopic = com.mqclient.rocketmq.ui.topology.isSystemTopic(topicName)
+    val systemTopic = com.mqclient.rocketmq.isSystemTopic(topicName)
     val clusterBrokers = remember(topicName) {
         RocketMqModule.serviceOrNull()?.cachedClusterInfo(connectionId)?.brokers.orEmpty()
     }
