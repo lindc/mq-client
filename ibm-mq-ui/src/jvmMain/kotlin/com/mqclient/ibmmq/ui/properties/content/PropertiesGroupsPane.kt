@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -23,11 +22,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mqclient.ibmmq.ui.properties.ObjectPropertyGroup
 import com.mqclient.ibmmq.ui.properties.ResolvedObjectProperty
+import com.mqclient.uicommon.PropertyItem
+import com.mqclient.uicommon.PropertyTable
 import com.mqclient.uicommon.i18n.stringResource
 
 /**
@@ -94,15 +94,20 @@ internal fun PropertyGroupsPane(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            rows.forEach { row ->
-                PropertyRowLocalized(
-                    row = row,
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                )
-                HorizontalDivider(
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
-                )
-            }
+            // 叶子行统一走 ui-common PropertyTable（斑马纹 + 左对齐 + 行尾复制）：
+            // 名称 / 说明 / 值的 i18n 解析在组合期完成（缺失回落英文名 / 原始值）。
+            PropertyTable(
+                items = rows.map { row ->
+                    val name = stringResource(row.nameKey).let { if (it == row.nameKey) row.labelEn else it }
+                    val desc = stringResource(row.descKey).let { if (it == row.descKey) null else it }
+                    val value = listOfNotNull(row.valueKey, row.valueFallbackKey)
+                        .map { key -> key to stringResource(key) }
+                        .firstOrNull { (k, text) -> text != k }
+                        ?.second
+                        ?: row.rawValue
+                    PropertyItem(key = name, value = value, description = desc)
+                },
+            )
         }
     }
 }
@@ -124,47 +129,4 @@ private fun GroupEntry(titleKey: String, selected: Boolean, onClick: () -> Unit)
             .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 12.dp),
     )
-}
-
-/**
- * 属性行：左 = 属性名（i18n，缺失回落英文名）+ 一句话说明（i18n，小字，最多两行）；
- * 右 = 值（先查策展 queue_value_* 键，缺失查 <常量>.title 兜底键，再缺显示原始值）。
- */
-@Composable
-private fun PropertyRowLocalized(row: ResolvedObjectProperty, modifier: Modifier = Modifier) {
-    val name = stringResource(row.nameKey).let { if (it == row.nameKey) row.labelEn else it }
-    val desc = stringResource(row.descKey).let { if (it == row.descKey) "" else it }
-    val value = listOfNotNull(row.valueKey, row.valueFallbackKey)
-        .map { key -> key to stringResource(key) }
-        .firstOrNull { (key, text) -> text != key }
-        ?.second
-        ?: row.rawValue
-
-    Row(modifier = modifier, verticalAlignment = Alignment.Top) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = name,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            if (desc.isNotBlank()) {
-                Text(
-                    text = desc,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 2.dp),
-                )
-            }
-        }
-        Spacer(Modifier.width(16.dp))
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-            textAlign = TextAlign.End,
-            modifier = Modifier.width(160.dp),
-        )
-    }
 }

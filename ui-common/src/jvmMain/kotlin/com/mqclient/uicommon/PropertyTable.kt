@@ -53,6 +53,8 @@ data class PropertyItem(
     val key: String,
     val value: String?,
     val copyable: Boolean = true,
+    /** 可选说明行：渲染在 Key 下方的小字（labelSmall 次要色，两行截断）；null 不渲染。 */
+    val description: String? = null,
 )
 
 /** 属性表：若干 [PropertyItem] 的斑马纹两列展示，行尾复制按钮 + 内置 Snackbar。 */
@@ -86,12 +88,23 @@ fun PropertyTable(
                         .padding(horizontal = 10.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        text = item.key,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.width(120.dp),
-                    )
+                    Column(modifier = Modifier.width(120.dp)) {
+                        Text(
+                            text = item.key,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        if (!item.description.isNullOrBlank()) {
+                            Text(
+                                text = item.description,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(top = 2.dp),
+                            )
+                        }
+                    }
                     androidx.compose.foundation.text.selection.SelectionContainer(
                         modifier = Modifier.weight(1f),
                     ) {
