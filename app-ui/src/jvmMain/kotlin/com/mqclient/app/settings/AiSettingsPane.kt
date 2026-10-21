@@ -44,6 +44,7 @@ import com.mqclient.ai.AiProvider
 import com.mqclient.core.AiConfig
 import com.mqclient.core.AiConnection
 import com.mqclient.core.ModuleRegistry
+import com.mqclient.aiui.AiSslHint
 import com.mqclient.openai.ui.ModelComboBox
 import com.mqclient.openai.ui.openAiIcon
 import com.mqclient.uicommon.LabeledField
@@ -229,24 +230,28 @@ private fun ConnectionCard(
     var model by remember(connection.id) { mutableStateOf(connection.model) }
     var prompt by remember(connection.id) { mutableStateOf(connection.systemPrompt) }
     var enabled by remember(connection.id) { mutableStateOf(connection.enabled) }
+    var ignoreSsl by remember(connection.id) { mutableStateOf(connection.ignoreSsl) }
     // API key 默认遮蔽；眼睛按钮切换明文，方便粘贴 / 核对。
     var tokenVisible by remember { mutableStateOf(false) }
     var testing by remember(connection.id) { mutableStateOf(false) }
-    var testResult by remember(connection.id) { mutableStateOf<Boolean?>(null) }
+    // null = 未测过 / 测试中；true = 成功；失败存可读原因（SSL 类经 AiSslHint 翻译）。
+    var testOutcome by remember(connection.id) { mutableStateOf<TestOutcome?>(null) }
     val scope = rememberCoroutineScope()
 
+    /** 测试按钮的输入快照（可能还没 flush 回上层草稿）。 */
+    fun snapshot(): AiConnection = connection.copy(
+        name = name,
+        providerId = providerId,
+        baseUrl = baseUrl,
+        token = token,
+        model = model,
+        systemPrompt = prompt,
+        enabled = enabled,
+        ignoreSsl = ignoreSsl,
+    )
+
     fun flush() {
-        onChange(
-            connection.copy(
-                name = name,
-                providerId = providerId,
-                baseUrl = baseUrl,
-                token = token,
-                model = model,
-                systemPrompt = prompt,
-                enabled = enabled,
-            ),
-        )
+        onChange(snapshot())
     }
 
     Column(
@@ -382,25 +387,38 @@ private fun ConnectionCard(
         }
         Spacer(Modifier.height(12.dp))
 
+        // 忽略 SSL 证书校验（信任自签名证书）：per-connection 开关，只影响本连接
+        // 走的 HTTP 客户端（trust-all），默认关 —— 严格校验。
+        ToggleRow(
+            label = stringResource("ai_field_ignore_ssl"),
+            description = stringResource("ai_field_ignore_ssl_desc"),
+            checked = ignoreSsl,
+            onCheckedChange = {
+                ignoreSsl = it
+                flush()
+            },
+        )
+        Spacer(Modifier.height(12.dp))
+
         Row(verticalAlignment = Alignment.CenterVertically) {
             PressableButton(
                 onClick = {
-                    // 用输入框里的当前值发起测试（可能还没 flush 回上层草稿）。
-                    val snapshot = connection.copy(
-                        name = name,
-                        providerId = providerId,
-                        baseUrl = baseUrl,
-                        token = token,
-                        model = model,
-                        systemPrompt = prompt,
-                        enabled = enabled,
-                    )
                     testing = true
-                    testResult = null
+                    testOutcome = null
                     scope.launch {
-                        testResult = runCatching {
-                            AiAdapterRegistry.adapter(snapshot.providerId)?.testConnection(snapshot) ?: false
-                        }.getOrDefault(false)
+                        // 异常经 AiSslHint 翻译（自签名证书 → 开启忽略 SSL 的指引；
+                        // testQuietly 对 SSL 类失败会重抛，其余失败仍返回 false）。
+                        val outcome = runCatching {
+                            val adapter = AiAdapterRegistry.adapter(snapshot().providerId)
+                            adapter != null && adapter.testConnection(snapshot())
+                        }
+                        testOutcome = when {
+                            outcome.getOrDefault(false) -> TestOutcome.Success
+                            else -> TestOutcome.Failed(
+                                reason = outcome.exceptionOrNull()
+                                    ?.let { AiSslHint.displayMessage(it) },
+                            )
+                        }
                         testing = false
                     }
                 },
@@ -411,21 +429,39 @@ private fun ConnectionCard(
                 Text(if (testing) stringResource("ai_testing") else stringResource("conn_test_connection"))
             }
             Spacer(Modifier.width(8.dp))
-            testResult?.let { ok ->
+            testOutcome?.let { outcome ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    // 结果图标替代原字符串里的 ✔/✘ 前缀（emoji 依赖系统字体）。
-                    Icon(
-                        imageVector = if (ok) Icons.Default.Check else Icons.Default.Close,
-                        contentDescription = null,
-                        tint = if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
-                        modifier = Modifier.size(14.dp),
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        text = if (ok) stringResource("ai_test_ok") else stringResource("ai_test_fail"),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
-                    )
+                    when (outcome) {
+                        TestOutcome.Success -> {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(14.dp),
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                text = stringResource("ai_test_ok"),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                        is TestOutcome.Failed -> {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(14.dp),
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                text = outcome.reason
+                                    ?: stringResource("ai_test_fail"),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    }
                 }
             }
             Spacer(Modifier.weight(1f))
@@ -436,4 +472,10 @@ private fun ConnectionCard(
             ) { Text(stringResource("common_delete")) }
         }
     }
+}
+
+/** 测试连接的展示结果：成功 / 失败（带可读原因；null = 走通用「详情见日志」文案）。 */
+private sealed interface TestOutcome {
+    data object Success : TestOutcome
+    data class Failed(val reason: String?) : TestOutcome
 }

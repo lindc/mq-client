@@ -3,6 +3,7 @@ package com.mqclient.openai.ui
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -61,6 +63,7 @@ class OpenAiConnectionForm : ConnectionFormUi {
         var token by remember { mutableStateOf("") }
         var tokenVisible by remember { mutableStateOf(false) }
         var model by remember { mutableStateOf(providers.firstOrNull()?.defaultModels?.firstOrNull().orEmpty()) }
+        var ignoreSsl by remember { mutableStateOf(false) }
 
         return object : ConnectionFormState {
             override fun reset(defaultName: String) {
@@ -69,6 +72,7 @@ class OpenAiConnectionForm : ConnectionFormUi {
                 baseUrl = providers.firstOrNull()?.defaultBaseUrl.orEmpty()
                 token = ""
                 model = providers.firstOrNull()?.defaultModels?.firstOrNull().orEmpty()
+                ignoreSsl = false
                 saveError = null
             }
 
@@ -80,6 +84,7 @@ class OpenAiConnectionForm : ConnectionFormUi {
                     baseUrl = baseUrl.trim(),
                     token = token,
                     model = model.trim(),
+                    ignoreSsl = ignoreSsl,
                 )
                 val created = AiConnectionRepository.create(connection)
                 val failure = created.exceptionOrNull()
@@ -181,6 +186,30 @@ class OpenAiConnectionForm : ConnectionFormUi {
                             provider = providers.firstOrNull { it.id == providerId },
                             model = model,
                             onChange = { model = it },
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+
+                    // 忽略 SSL 证书校验（信任自签名证书）：per-connection，默认关。
+                    Row(
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable { ignoreSsl = !ignoreSsl }
+                                .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(stringResource("ai_field_ignore_ssl"), style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                stringResource("ai_field_ignore_ssl_desc"),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = ignoreSsl,
+                            onCheckedChange = { ignoreSsl = it },
                         )
                     }
 

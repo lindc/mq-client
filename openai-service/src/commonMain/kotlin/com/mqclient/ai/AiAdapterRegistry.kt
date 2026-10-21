@@ -23,7 +23,8 @@ object AiAdapterRegistry {
     private val registry = MutableStateFlow<Map<String, Entry>>(emptyMap())
 
     init {
-        register(AiProviders.OPENAI_COMPATIBLE, OpenAiCompatibleAdapter(AiHttp.client))
+        // clientFor 按连接分发：默认严格 CIO，ignoreSsl=true 走 trust-all（见 AiHttp）。
+        register(AiProviders.OPENAI_COMPATIBLE, OpenAiCompatibleAdapter(AiHttp::clientFor))
     }
 
     /** 登记（或同名替换）一个 Provider 及其适配器。id 不一致直接拒绝 —— 那是接线错误。 */

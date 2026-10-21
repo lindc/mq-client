@@ -56,8 +56,15 @@ private const val DEFAULT_MAX_TOKENS = 4096
  *
  * 第一版不转换 tool_use / image 等非文本 content block（IR 只有纯文本），
  * 也不支持 prompt caching / extended thinking。
+ *
+ * HTTP 客户端经 [clientFor] 按连接取：`ignoreSsl=true` 的连接走 trust-all 客户端
+ * （见 openai-service 的 AiHttp.clientFor），默认走严格校验的共享客户端。旧构造
+ * （固定 client）保留 —— 适配器契约测试的 MockEngine 注入路径不变。
  */
-class AnthropicAdapter(private val client: HttpClient) : AiAdapter {
+class AnthropicAdapter(private val clientFor: (AiConnection) -> HttpClient) : AiAdapter {
+
+    /** 固定客户端的旧构造：测试注入 MockEngine 等场景（不区分连接）。 */
+    constructor(client: HttpClient) : this({ _ -> client })
 
     override val providerId: String = "anthropic"
 
@@ -71,7 +78,7 @@ class AnthropicAdapter(private val client: HttpClient) : AiAdapter {
                 "messages=${messages.size} stream=false",
         )
         try {
-            val response = client.post(connection.endpoint("/v1/messages")) {
+            val response = clientFor(connection).post(connection.endpoint("/v1/messages")) {
                 connection.applyAuth(this)
                 contentType(ContentType.Application.Json)
                 setBody(
@@ -129,7 +136,7 @@ class AnthropicAdapter(private val client: HttpClient) : AiAdapter {
                 "messages=${messages.size} stream=true",
         )
         try {
-            val response = client.post(connection.endpoint("/v1/messages")) {
+            val response = clientFor(connection).post(connection.endpoint("/v1/messages")) {
                 connection.applyAuth(this)
                 contentType(ContentType.Application.Json)
                 setBody(
@@ -206,7 +213,7 @@ class AnthropicAdapter(private val client: HttpClient) : AiAdapter {
     /** GET /v1/models：Anthropic 的 Models API，最便宜的真实验证请求。 */
     override suspend fun testConnection(connection: AiConnection): Boolean =
         testQuietly(PROVIDER_LABEL, connection.name) {
-            val response = client.get(connection.endpoint("/v1/models")) {
+            val response = clientFor(connection).get(connection.endpoint("/v1/models")) {
                 connection.applyAuth(this)
             }
             response.throwIfNotSuccess(PROVIDER_LABEL)

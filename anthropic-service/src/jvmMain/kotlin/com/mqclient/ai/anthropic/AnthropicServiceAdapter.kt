@@ -22,6 +22,7 @@ class AnthropicServiceAdapter : ServiceAdapter {
     override val category = "AI"
 
     override fun initialize(context: ServiceContext) {
-        AiAdapterRegistry.register(AnthropicProviders.ANTHROPIC, AnthropicAdapter(AiHttp.client))
+        // clientFor 按连接分发：默认严格 CIO，ignoreSsl=true 走 trust-all（见 AiHttp）。
+        AiAdapterRegistry.register(AnthropicProviders.ANTHROPIC, AnthropicAdapter(AiHttp::clientFor))
     }
 }

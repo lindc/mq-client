@@ -279,8 +279,9 @@ class AiPanelState internal constructor(
                 // 失败必须看得见：否则界面上只剩一个永远“…”的空气泡。未捕获异常逃出
                 // 这里会直接把 scope 的 Job 弄失败，整个面板之后 launch 全部被取消。
                 // 刻意不写进 messages —— 那会被下一轮当成 history 发给模型；失败只进
-                // 审计表（FAILED 记录，见 emitChatSaved）。
-                panelError = error.message ?: error.javaClass.simpleName
+                // 审计表（FAILED 记录，见 emitChatSaved）。SSL 类失败经 [AiSslHint]
+                // 翻译成「开启忽略 SSL 证书校验」的指引（自签名证书场景）。
+                panelError = AiSslHint.displayMessage(error)
                 emitChatSaved(
                     connection = connection,
                     chain = chain,

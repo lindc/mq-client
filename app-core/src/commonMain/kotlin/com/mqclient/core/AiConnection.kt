@@ -32,4 +32,10 @@ data class AiConnection(
     val systemPrompt: String = "",
     /** 停用的连接不出现在面板的连接下拉里（设置界面仍然可见，方便改回来）。 */
     val enabled: Boolean = true,
+    /**
+     * 忽略 SSL 证书校验（信任自签名证书）：仅影响本连接的 HTTP 客户端（Java 引擎
+     * trust-all，见 openai-service 的 AiHttp.clientFor），默认 false 走严格的 CIO
+     * 校验，不影响进程里其他 HTTPS 流量。自建 AI 服务器 + HTTPS 自签名证书时开启。
+     */
+    val ignoreSsl: Boolean = false,
 )

@@ -38,8 +38,15 @@ private const val DONE_SENTINEL = "[DONE]"
  *   Provider 预置默认值已经带好）；
  * - 鉴权：`Authorization: Bearer <token>`；token 为空则不带头（本地 Ollama）；
  * - 流式：`stream: true` + SSE，`data: [DONE]` 结束。
+ *
+ * HTTP 客户端经 [clientFor] 按连接取：`ignoreSsl=true` 的连接走 trust-all 客户端
+ * （见 [AiHttp.clientFor]），默认走严格校验的共享客户端。旧构造（固定 client）保留
+ * —— 适配器契约测试的 MockEngine 注入路径不变。
  */
-class OpenAiCompatibleAdapter(private val client: HttpClient) : AiAdapter {
+class OpenAiCompatibleAdapter(private val clientFor: (AiConnection) -> HttpClient) : AiAdapter {
+
+    /** 固定客户端的旧构造：测试注入 MockEngine 等场景（不区分连接）。 */
+    constructor(client: HttpClient) : this({ _ -> client })
 
     override val providerId: String = "openai-compatible"
 
@@ -53,7 +60,7 @@ class OpenAiCompatibleAdapter(private val client: HttpClient) : AiAdapter {
                 "messages=${messages.size} stream=false",
         )
         try {
-            val response = client.post(connection.endpoint("/chat/completions")) {
+            val response = clientFor(connection).post(connection.endpoint("/chat/completions")) {
                 connection.applyAuth(this)
                 contentType(ContentType.Application.Json)
                 setBody(aiJson.encodeToString(ChatRequest.serializer(), ChatRequest(connection.model, messages.toDto())))
@@ -95,7 +102,7 @@ class OpenAiCompatibleAdapter(private val client: HttpClient) : AiAdapter {
                 "messages=${messages.size} stream=true",
         )
         try {
-            val response = client.post(connection.endpoint("/chat/completions")) {
+            val response = clientFor(connection).post(connection.endpoint("/chat/completions")) {
                 connection.applyAuth(this)
                 contentType(ContentType.Application.Json)
                 setBody(
@@ -159,7 +166,7 @@ class OpenAiCompatibleAdapter(private val client: HttpClient) : AiAdapter {
     /** GET /models：最便宜的真实验证请求（OpenAI / Ollama / DeepSeek 都实现了它）。 */
     override suspend fun testConnection(connection: AiConnection): Boolean =
         testQuietly(PROVIDER_LABEL, connection.name) {
-            val response = client.get(connection.endpoint("/models")) {
+            val response = clientFor(connection).get(connection.endpoint("/models")) {
                 connection.applyAuth(this)
             }
             response.throwIfNotSuccess(PROVIDER_LABEL)
