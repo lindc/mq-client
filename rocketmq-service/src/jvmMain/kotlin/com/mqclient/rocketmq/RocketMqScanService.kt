@@ -6,6 +6,7 @@ import com.mqclient.core.cache.CacheManager
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.emit
 import org.apache.rocketmq.remoting.protocol.body.ClusterInfo
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutionException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -66,6 +67,24 @@ class RocketMqScanService(private val context: ServiceContext) {
     /** 同一模块内多次扫描串行执行，避免重叠扫描互相覆盖结果。 */
     private val scanLock = Mutex()
 
+    /**
+     * 「至少完成过一轮对象慢扫」标记（connectionId → true）。UI 用它区分「还在等
+     * 首扫」（保持 Loading）与「扫完了但确实没有对象」（显示空态）——**不依赖
+     * 事件是否恰好被收到**：事件先于页面订阅到达时，页面读这个标记同样能出空态。
+     * 慢扫整轮失败（markFailed）也算完成过——失败路径由连接状态 Failed → UI Error
+     * 承担，不再挂 Loading。断开时由 ConnectionManager 调 [clearScanState] 移除。
+     */
+    private val objectsScannedOnce = ConcurrentHashMap<String, Boolean>()
+
+    /** 该连接是否至少完成过一轮对象慢扫（成功或部分失败都算）。 */
+    fun hasScannedObjects(connectionId: String): Boolean =
+        objectsScannedOnce.containsKey(connectionId)
+
+    /** 断开 / 清缓存时同步清除扫描标记（ConnectionManager.disconnectNow 调用）。 */
+    fun clearScanState(connectionId: String) {
+        objectsScannedOnce.remove(connectionId)
+    }
+
     // ---------------------------------------------------------------- 对象慢扫
 
     /** 定时任务入口（`rocketmq.<connectionId>.scan.objects`）。 */
@@ -99,6 +118,7 @@ class RocketMqScanService(private val context: ServiceContext) {
             }
             cache?.put(KEY_TOPICS, topics, ttlMs = objectsTtl)
             cache?.put(KEY_GROUPS, groups, ttlMs = objectsTtl)
+            objectsScannedOnce[connectionId] = true
 
             context.emit(
                 name = RocketMqEvents.OBJECTS_SCANNED,
@@ -278,13 +298,18 @@ class RocketMqScanService(private val context: ServiceContext) {
         }
     }
 
-    private suspend fun scanGroups(admin: RocketMqAdminClient): List<RocketMqGroupSnapshot> =
-        admin.fetchConsumerGroupList().sorted().map { group ->
-            RocketMqGroupSnapshot(
-                name = group,
-                memberCount = admin.fetchConsumerConnection(group)?.connectionSet?.size,
-            )
+    private suspend fun scanGroups(admin: RocketMqAdminClient): List<RocketMqGroupSnapshot> {
+        val groups = admin.fetchConsumerGroupList().sorted()
+        return groups.map { group ->
+            // 逐组容错：成员数是 best-effort（组不在线 / broker 慢都只降级该行，
+            // 不能让一个组的 RemotingTimeoutException 炸掉整轮组列表）。
+            val memberCount = runCatching { admin.fetchConsumerConnection(group) }
+                .onFailure { rocketMqLog.warn("group member count failed: group=" + group + " error=" + it.message) }
+                .getOrNull()
+                ?.connectionSet?.size
+            RocketMqGroupSnapshot(name = group, memberCount = memberCount)
         }
+    }
 
     /** 慢扫数据 TTL：配置的慢扫间隔 × 1.5。 */
     private fun objectsTtlMs(ctx: RocketMqConnectionContext): Long =

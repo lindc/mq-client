@@ -30,7 +30,6 @@ class RocketMqGroupsState(
 
     var loadState by mutableStateOf<LoadState<List<RocketMqGroupCardInfo>>>(LoadState.Idle); private set
     var search by mutableStateOf("")
-    var scannedOnce by mutableStateOf(false); private set
 
     val filtered: List<RocketMqGroupCardInfo>
         get() = when (val s = loadState) {
@@ -78,7 +77,6 @@ class RocketMqGroupsState(
             ?: stringResource("rocketmq_ui_connect_failed")
 
     fun onObjectsScanned() {
-        scannedOnce = true
         refreshFromCache()
     }
 
@@ -91,12 +89,17 @@ class RocketMqGroupsState(
         RocketMqModule.scanNow(connectionId)
     }
 
-    /** 慢扫 groups + 快扫 groupLags 按组名合并。 */
+    /**
+     * 慢扫 groups + 快扫 groupLags 按组名合并。空列表不再依赖「收到过
+     * OBJECTS_SCANNED 事件」才落地（事件先于页面订阅到达会永久挂 Loading）：
+     * 只要慢扫跑完过一轮（service 的扫描标记，成功或部分失败都算），空缓存即
+     * 真实空态 → 显示「暂无消费组」。
+     */
     private fun refreshFromCache(keepList: Boolean = false) {
-        val service = RocketMqModule.serviceOrNull()
-        val groups: List<RocketMqGroupSnapshot> = service?.cachedGroups(connectionId) ?: emptyList()
+        val service = RocketMqModule.serviceOrNull() ?: return
+        val groups: List<RocketMqGroupSnapshot> = service.cachedGroups(connectionId)
         if (groups.isNotEmpty()) {
-            val lags = service?.cachedGroupLags(connectionId) ?: emptyMap()
+            val lags = service.cachedGroupLags(connectionId)
             loadState = LoadState.Success(
                 groups.map { group ->
                     val lag = lags[group.name]
@@ -108,7 +111,7 @@ class RocketMqGroupsState(
                     )
                 },
             )
-        } else if (scannedOnce && !keepList) {
+        } else if (service.hasScannedObjects(connectionId) && !keepList) {
             loadState = LoadState.Success(emptyList())
         }
     }

@@ -156,6 +156,8 @@ class RocketMqConnectionManager(
             unregisterScanJobs(connectionId)
             closeQuietly(ctx)
             ctx.cleanup()
+            // 扫描完成标记与缓存同生命周期：断开清掉，重连后重新等首扫。
+            service.clearScanState(connectionId)
             setStatus(ctx, ConnectionStatus.Disconnected)
             context.emit(
                 name = RocketMqEvents.DISCONNECTED,

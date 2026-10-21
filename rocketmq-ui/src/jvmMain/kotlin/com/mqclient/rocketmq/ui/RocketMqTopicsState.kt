@@ -24,9 +24,6 @@ class RocketMqTopicsState(
     var loadState by mutableStateOf<LoadState<List<RocketMqTopicSnapshot>>>(LoadState.Idle); private set
     var search by mutableStateOf("")
 
-    /** 至少完成过一轮对象扫描：区分「还在等首扫」与「扫完了但确实没有主题」。 */
-    var scannedOnce by mutableStateOf(false); private set
-
     /** 搜索过滤后的列表（按名称包含匹配，忽略大小写）。 */
     val filtered: List<RocketMqTopicSnapshot>
         get() = when (val s = loadState) {
@@ -75,9 +72,8 @@ class RocketMqTopicsState(
             ?.takeIf(String::isNotBlank)
             ?: stringResource("rocketmq_ui_connect_failed")
 
-    /** OBJECTS_SCANNED 事件回调：列表重建；空缓存不落地（保持加载态）。 */
+    /** OBJECTS_SCANNED 事件回调：列表重建。 */
     fun onObjectsScanned() {
-        scannedOnce = true
         refreshFromCache()
     }
 
@@ -86,12 +82,16 @@ class RocketMqTopicsState(
         RocketMqModule.scanNow(connectionId)
     }
 
+    /**
+     * 缓存读取；空列表同样不再依赖「收到过 OBJECTS_SCANNED 事件」才落地（事件
+     * 先于页面订阅到达会永久挂 Loading）：慢扫跑完过一轮（扫描标记）即真实空态。
+     */
     private fun refreshFromCache() {
-        val service = RocketMqModule.serviceOrNull()
-        val topics: List<RocketMqTopicSnapshot> = service?.cachedTopics(connectionId) ?: emptyList()
+        val service = RocketMqModule.serviceOrNull() ?: return
+        val topics: List<RocketMqTopicSnapshot> = service.cachedTopics(connectionId)
         if (topics.isNotEmpty()) {
             loadState = LoadState.Success(topics)
-        } else if (scannedOnce) {
+        } else if (service.hasScannedObjects(connectionId)) {
             loadState = LoadState.Success(emptyList())
         }
     }
