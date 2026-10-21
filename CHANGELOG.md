@@ -2,6 +2,68 @@
 
 本文件记录 MQClient 的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [Unreleased] — 2026-10-21
+
+### Added
+
+- **RocketMQ 主题消息对话框**（commit fbef9d9）：主题卡片 ✉ 打开「浏览 / 发送」
+  双 Tab 对话框（外壳与 KafkaMessagesDialog 逐行同构）。浏览走临时
+  `DefaultMQPullConsumer` 按 Queue + Offset 定点 pull，**只拉不提交位点**——
+  5.3.x 的 AdminExt 已无 `viewMessage(topic, offset)`（解包 5.3.2/5.5.1 核对），
+  精确浏览只能走 PullConsumer；表格展示 Queue/Offset/MsgId/Tags/Keys/Value/
+  时间/大小， ⓘ 走公共 MessageDetailDialog（解释器区，body 全量随行无需二次
+  现查）。发送走临时 `DefaultMQProducer`（Tags / Keys / 用户属性注入，同步等
+  ack，finally 必 shutdown），单文件可编辑预览 + 多文件批量任务表与 Kafka
+  同款；Kafka 的 HeadersEditor/HeaderDraft 上移 ui-common（文案参数化，
+  hexText 传空隐藏 HEX 勾选），两模块发送页外观 100% 一致。
+- **TLS start 窗口抽取**（同 commit）：AdminClient 的「构造前备证书 + start()
+  窗口注入 `TlsSystemConfig` + 快照还原 + 互斥锁」抽为 `RocketMqTlsStart`，
+  AdminExt / Producer / PullConsumer 三方共用，行为不变。
+- **RocketMQ 卡片「询问 AI」入口**（commit f0bacbb）：Topic / 消费组卡片新增
+  Android 图标（actions 首位，宿主未 Provide 时隐藏），经 `RocketMqAiChainBuilder`
+  组装 chain 数组上下文（NAMESERVER —hosts→ TOPIC —consumed_by→ 组 /
+  NAMESERVER —hosts→ GROUP），与 ibm-mq / kafka / rabbitmq 同契约。为此慢扫 /
+  快扫顺手多采集（同一次 RPC 响应，零额外请求）：组的 consumeMode /
+  subscribedTopics、逐队列 lag 行（降序截前 16 进缓存）。截断三层防 Token 爆炸：
+  缓存每组前 16 → Group 链 consumerProgress 前 10 → Topic 链下游组前 4、单组
+  queueLags 前 8；CODE 17 / 离线组的缺失字段整体省略不报错。
+- **AI 连接级「忽略 SSL 证书校验」**（commit d9b1d32）：`AiConnection` 新增
+  `ignoreSsl`（默认 false，旧 config.toml 向后兼容）。默认客户端（CIO 严格
+  校验）行为零变化；开启的连接走惰性创建的 trust-all 客户端——**Java 引擎**
+  而非 CIO：Ktor 3.2.3 的 CIO 主机名校验公开 API 关不掉（引擎强制
+  `serverName = host`），IP 直连 + CN=localhost 的自签证书会握手失败，而 JDK
+  HttpClient 默认不做主机名校验，`sslContext` 换成 trust-all 即链 + 主机名完整
+  绕过。SSL 异常双层翻译：适配器层 `isAiSslFailure`（类型 + cause 链消息匹配）
+  在 `testQuietly` 里重抛带前缀的 AiException（非 SSL 失败仍吞掉返回 false），
+  ai-ui 的 `AiSslHint` 把面板错误与设置页测试失败统一翻成「开启忽略 SSL」指引
+  （设置页测试失败从纯图标升级为图标 + 可读原因）。三处表单（设置页
+  ConnectionCard + 两个新建向导）加同款 ToggleRow。
+- **RocketMQ 客户端日志重定向**（commit 704103a）：5.x 客户端默认把
+  `rocketmq_client.log` 写到 `~/logs/rocketmqlogs`，污染用户 HOME。
+  `RocketMqClientLogConfigurator`（与 IBM 的同名机制同构）在
+  `RocketMqModule.initialize` 第一行设系统属性——shaded logback 在首个日志类
+  加载时定格配置，模块咽喉点保证早于一切实例化。属性名两套都设：5.x 的
+  `rocketmq.log.root` / `rocketmq.log.file.maxIndex` / `rocketmq.log.level`
+  （解包 rmq.client.logback.xml 实测；`rocketmq.client.logRoot` 是 4.x 老名）
+  + 4.x 兼容名。目录走 `ConfigStore.configDir()`（跟随 `mqclient.config.dir`
+  覆盖），绝对路径 + 自动 mkdirs；幂等，失败只 warn 回落默认目录。
+
+### Changed
+
+- **链路分析系统提示词中立化**（commits f0bacbb / c4cbd27）：「IBM MQ 运维
+  助手」→「MQ 中间件运维助手（IBM MQ / Kafka / RabbitMQ / RocketMQ 等）」，
+  ui-common 两张语言表 + ai-ui 缺键回落文案同步。
+
+### Tests
+
+- `RocketMqAiChainBuilderTest`（11 例）：下游组挑选（订阅过滤 / lag 降序 /
+  截断）+ 两链 JSON 结构（无下游无 consumed_by、routes、queueLags 过滤截断、
+  lag 缓存缺失退化、离线组字段整体省略、Top 10 截断）。
+- `RocketMqClientLogConfiguratorTest`（2 例）：临时 config.dir 下目录创建 +
+  属性生效 / 重复调用幂等。
+- 既有契约测试回归：openai / anthropic 适配器（MockEngine）、AI 面板、
+  AI 连接仓储全绿。
+
 ## [Unreleased] — 2026-10-20
 
 ### Added
