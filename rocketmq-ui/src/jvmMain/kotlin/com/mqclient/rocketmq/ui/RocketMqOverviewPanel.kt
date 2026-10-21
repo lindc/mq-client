@@ -35,8 +35,8 @@ import com.mqclient.mqui.state.LoadStateContent
 import com.mqclient.rocketmq.RocketMqBrokerSnapshot
 import com.mqclient.rocketmq.RocketMqEvents
 import com.mqclient.rocketmq.RocketMqModule
-import com.mqclient.uicommon.PropertyRow
-import com.mqclient.uicommon.PropertySection
+import com.mqclient.uicommon.PropertyItem
+import com.mqclient.uicommon.PropertyTableSection
 import com.mqclient.uicommon.i18n.stringResource
 
 /**
@@ -85,86 +85,67 @@ fun RocketMqOverviewPanel(
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp, vertical = 8.dp),
             ) {
-                // ---- 集群信息：卡片化 label-value（值 + 复制按钮）----
-                PropertySection(title = stringResource("rocketmq_ui_overview_cluster")) {
-                    PropertyRow(
-                        stringResource("rocketmq_ui_overview_cluster_name"),
-                        cluster.clusterName ?: "-",
+                // ---- 集群信息：属性表（斑马纹 + 行尾复制）----
+                PropertyTableSection(
+                    title = stringResource("rocketmq_ui_overview_cluster"),
+                    items = buildList {
+                        add(PropertyItem(stringResource("rocketmq_ui_overview_cluster_name"), cluster.clusterName))
+                        namesrvAddrs.forEach { addr ->
+                            add(PropertyItem(stringResource("rocketmq_ui_overview_nameserver_addr"), addr))
+                        }
+                    },
+                )
+                if (namesrvAddrs.isEmpty()) {
+                    Text(
+                        text = stringResource("rocketmq_ui_overview_no_nameservers"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 12.dp),
                     )
-                    namesrvAddrs.forEach { addr ->
-                        CopyablePropertyRow(stringResource("rocketmq_ui_overview_nameserver_addr"), addr)
-                    }
-                    if (namesrvAddrs.isEmpty()) {
-                        Text(
-                            text = stringResource("rocketmq_ui_overview_no_nameservers"),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
                 }
                 Spacer(Modifier.height(16.dp))
 
-                // ---- Broker 列表：表头 + weight 分列 + 斑马纹 ----
-                PropertySection(title = stringResource("rocketmq_ui_overview_brokers")) {
-                    if (cluster.brokers.isEmpty()) {
-                        Text(
-                            text = stringResource("rocketmq_ui_overview_no_brokers"),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    } else {
-                        BrokerTableHeader()
-                        cluster.brokers.forEachIndexed { index, broker ->
-                            BrokerTableRow(broker, zebra = index % 2 == 1)
+                // ---- Broker 列表：真表格（表头 + weight 分列 + 斑马纹），容器随
+                // PropertySection 删除改用本地标题 + Card，形态不变 ----
+                Text(
+                    text = stringResource("rocketmq_ui_overview_brokers"),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
+                if (cluster.brokers.isEmpty()) {
+                    Text(
+                        text = stringResource("rocketmq_ui_overview_no_brokers"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    androidx.compose.material3.Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = androidx.compose.material3.CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                        ),
+                    ) {
+                        Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
+                            BrokerTableHeader()
+                            cluster.brokers.forEachIndexed { index, broker ->
+                                BrokerTableRow(broker, zebra = index % 2 == 1)
+                            }
                         }
                     }
                 }
                 Spacer(Modifier.height(16.dp))
 
-                // ---- 对象计数：与集群信息同款 label-value 卡片 ----
-                PropertySection(title = stringResource("rocketmq_ui_overview_counts")) {
-                    PropertyRow(stringResource("rocketmq_ui_nav_topics"), state.topicCount.toString())
-                    PropertyRow(stringResource("rocketmq_ui_nav_groups"), state.groupCount.toString())
-                }
+                // ---- 对象计数：与集群信息同款属性表 ----
+                PropertyTableSection(
+                    title = stringResource("rocketmq_ui_overview_counts"),
+                    items = listOf(
+                        PropertyItem(stringResource("rocketmq_ui_nav_topics"), state.topicCount.toString()),
+                        PropertyItem(stringResource("rocketmq_ui_nav_groups"), state.groupCount.toString()),
+                    ),
+                )
                 Spacer(Modifier.height(8.dp))
             }
-        }
-    }
-}
-
-/** NameServer 地址行：label 定宽对齐 + 值 monospace 撑满 + 最右复制按钮（垂直居中）。 */
-@Composable
-private fun CopyablePropertyRow(label: String, value: String) {
-    val clipboard = LocalClipboardManager.current
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.width(110.dp),
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-            fontFamily = FontFamily.Monospace,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-        IconButton(
-            onClick = { clipboard.setText(AnnotatedString(value)) },
-            modifier = Modifier.size(24.dp),
-        ) {
-            Icon(
-                imageVector = Icons.Default.ContentCopy,
-                contentDescription = stringResource("rocketmq_ui_overview_copy_address"),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(14.dp),
-            )
         }
     }
 }

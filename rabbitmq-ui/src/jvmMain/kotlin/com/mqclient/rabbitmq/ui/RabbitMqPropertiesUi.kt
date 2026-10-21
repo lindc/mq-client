@@ -42,7 +42,8 @@ import com.mqclient.rabbitmq.RabbitMqModule
 import com.mqclient.rabbitmq.RabbitMqNodeSnapshot
 import com.mqclient.rabbitmq.RabbitMqEvents
 import com.mqclient.uicommon.dialog.MessageDetailSectionTitle
-import com.mqclient.uicommon.dialog.MessageHeaderRow
+import com.mqclient.uicommon.PropertyItem
+import com.mqclient.uicommon.PropertyTableSection
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 import kotlinx.coroutines.CancellationException
@@ -158,12 +159,15 @@ private fun ReadyPane(clusterInfo: RabbitMqClusterInfoSnapshot?, nodes: List<Rab
             .verticalScroll(rememberScrollState())
             .padding(vertical = 8.dp),
     ) {
-        MessageDetailSectionTitle(text = stringResource("rabbitmq_ui_conn_props_broker"))
-        Spacer(Modifier.height(4.dp))
-        MessageHeaderRow(stringResource("rabbitmq_ui_conn_props_version"), clusterInfo?.rabbitmqVersion)
-        MessageHeaderRow(stringResource("rabbitmq_ui_conn_props_mgmt_version"), "-")
-        MessageHeaderRow(stringResource("rabbitmq_ui_conn_props_cluster_name"), clusterInfo?.clusterName)
-        MessageHeaderRow(stringResource("rabbitmq_ui_conn_props_initial_node"), clusterInfo?.node)
+        PropertyTableSection(
+            title = stringResource("rabbitmq_ui_conn_props_broker"),
+            items = listOf(
+                PropertyItem(stringResource("rabbitmq_ui_conn_props_version"), clusterInfo?.rabbitmqVersion),
+                PropertyItem(stringResource("rabbitmq_ui_conn_props_mgmt_version"), null, copyable = false),
+                PropertyItem(stringResource("rabbitmq_ui_conn_props_cluster_name"), clusterInfo?.clusterName),
+                PropertyItem(stringResource("rabbitmq_ui_conn_props_initial_node"), clusterInfo?.node),
+            ),
+        )
         Spacer(Modifier.height(12.dp))
         MessageDetailSectionTitle(
             text = stringResource("rabbitmq_ui_conn_props_nodes").withArg(nodes.size),

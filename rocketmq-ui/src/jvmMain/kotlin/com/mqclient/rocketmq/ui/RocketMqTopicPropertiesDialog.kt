@@ -1,6 +1,5 @@
 package com.mqclient.rocketmq.ui
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,7 +12,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material3.AlertDialog
@@ -33,7 +31,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -43,18 +40,13 @@ import com.mqclient.rocketmq.RocketMqModule
 import com.mqclient.rocketmq.RocketMqTopicSnapshot
 import com.mqclient.rocketmq.RocketMqTopicRouteSnapshot
 import com.mqclient.uicommon.PressableButton
-import com.mqclient.uicommon.PropertyRow
-import com.mqclient.uicommon.PropertySection
+import com.mqclient.uicommon.PropertyItem
+import com.mqclient.uicommon.PropertyTableSection
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
-
-/** 权限语义色（与 RabbitMqStatusStyle 同一口径：可读可写绿 / 只写橙 / 无权限红）。 */
-private val PermRwGreen = Color(0xFF2E7D32)
-private val PermWOrange = Color(0xFFED6C02)
-private val PermNoneRed = Color(0xFFD32F2F)
 
 /**
  * Topic 属性对话框（主题列表卡片 ⓘ 入口）：ObjectDetailDialog 外壳 + PrimaryTabRow
@@ -231,47 +223,35 @@ private fun OverviewTab(
             .verticalScroll(rememberScrollState())
             .padding(vertical = 8.dp),
     ) {
-        // 与消费组属性对话框同一套 ui-common 排版：浅色卡片 + 次要色 label / 主色值右对齐。
-        PropertySection(title = stringResource("rocketmq_ui_topic_props_section_basic")) {
-            PropertyRow(stringResource("rocketmq_ui_topic_props_name"), topicName)
-            PropertyRow(stringResource("rocketmq_ui_topic_props_message_type"), messageTypeText)
-        }
-        Spacer(Modifier.height(12.dp))
-        PropertySection(title = stringResource("rocketmq_ui_topic_props_section_perm")) {
-            val perm = snapshot?.perm ?: 0
-            val permColor = when {
-                perm and 6 == 6 -> PermRwGreen
-                perm and 4 == 4 -> PermWOrange
-                else -> PermNoneRed
-            }
-            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = stringResource("rocketmq_ui_topic_props_perm"),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Box(Modifier.size(8.dp).background(permColor, CircleShape))
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    text = formatPerm(perm),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.End,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-        }
-        Spacer(Modifier.height(12.dp))
-        PropertySection(title = stringResource("rocketmq_ui_topic_props_section_queues")) {
-            PropertyRow(
-                stringResource("rocketmq_ui_topic_props_read_queues"),
-                (snapshot?.readQueueNums ?: 0).toString(),
-            )
-            PropertyRow(
-                stringResource("rocketmq_ui_topic_props_write_queues"),
-                (snapshot?.writeQueueNums ?: 0).toString(),
-            )
-        }
+        PropertyTableSection(
+            title = stringResource("rocketmq_ui_topic_props_section_basic"),
+            items = listOf(
+                PropertyItem(stringResource("rocketmq_ui_topic_props_name"), topicName),
+                PropertyItem(stringResource("rocketmq_ui_topic_props_message_type"), messageTypeText),
+            ),
+        )
+        Spacer(Modifier.height(16.dp))
+        val perm = snapshot?.perm ?: 0
+        PropertyTableSection(
+            title = stringResource("rocketmq_ui_topic_props_section_perm"),
+            items = listOf(
+                PropertyItem(stringResource("rocketmq_ui_topic_props_perm"), formatPerm(perm)),
+            ),
+        )
+        Spacer(Modifier.height(16.dp))
+        PropertyTableSection(
+            title = stringResource("rocketmq_ui_topic_props_section_queues"),
+            items = listOf(
+                PropertyItem(
+                    stringResource("rocketmq_ui_topic_props_read_queues"),
+                    (snapshot?.readQueueNums ?: 0).toString(),
+                ),
+                PropertyItem(
+                    stringResource("rocketmq_ui_topic_props_write_queues"),
+                    (snapshot?.writeQueueNums ?: 0).toString(),
+                ),
+            ),
+        )
         Spacer(Modifier.height(12.dp))
     }
 }

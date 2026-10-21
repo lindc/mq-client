@@ -46,8 +46,8 @@ import com.mqclient.rocketmq.RocketMqModule
 import com.mqclient.rocketmq.RocketMqOffsetRowSnapshot
 import com.mqclient.rocketmq.RocketMqProgressState
 import com.mqclient.uicommon.PressableButton
-import com.mqclient.uicommon.PropertyRow
-import com.mqclient.uicommon.PropertySection
+import com.mqclient.uicommon.PropertyItem
+import com.mqclient.uicommon.PropertyTableSection
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
@@ -162,42 +162,55 @@ private fun OverviewTab(detail: RocketMqGroupDetailSnapshot) {
             .verticalScroll(rememberScrollState())
             .padding(vertical = 8.dp),
     ) {
-        PropertySection(title = stringResource("rocketmq_ui_group_props_section_basic")) {
-            PropertyRow(stringResource("rocketmq_ui_group_props_name"), detail.name)
-            PropertyRow(
-                stringResource("rocketmq_ui_group_props_consume_enable"),
-                booleanText(detail.consumeEnable),
-            )
-            PropertyRow(
-                stringResource("rocketmq_ui_group_props_orderly"),
-                booleanText(detail.orderly),
-            )
-            PropertyRow(stringResource("rocketmq_ui_group_props_mode"), consumeModeText(detail.consumeMode))
-            PropertyRow(
-                stringResource("rocketmq_ui_group_props_subscriptions"),
-                if (detail.subscriptions.isEmpty()) {
-                    stringResource("rocketmq_ui_group_props_no_subscriptions")
-                } else {
-                    detail.subscriptions.joinToString("、")
-                },
-            )
-        }
+        PropertyTableSection(
+            title = stringResource("rocketmq_ui_group_props_section_basic"),
+            items = listOf(
+                PropertyItem(stringResource("rocketmq_ui_group_props_name"), detail.name),
+                PropertyItem(
+                    stringResource("rocketmq_ui_group_props_consume_enable"),
+                    booleanText(detail.consumeEnable),
+                ),
+                PropertyItem(
+                    stringResource("rocketmq_ui_group_props_orderly"),
+                    booleanText(detail.orderly),
+                ),
+                PropertyItem(
+                    stringResource("rocketmq_ui_group_props_mode"),
+                    consumeModeText(detail.consumeMode),
+                ),
+                PropertyItem(
+                    stringResource("rocketmq_ui_group_props_subscriptions"),
+                    if (detail.subscriptions.isEmpty()) {
+                        stringResource("rocketmq_ui_group_props_no_subscriptions")
+                    } else {
+                        detail.subscriptions.joinToString("、")
+                    },
+                ),
+            ),
+        )
         Spacer(Modifier.height(12.dp))
-        PropertySection(title = stringResource("rocketmq_ui_group_props_section_metrics")) {
-            if (detail.progressState == RocketMqProgressState.OK) {
-                PropertyRow(stringResource("rocketmq_ui_group_props_total_lag"), detail.totalLag.toString())
-                PropertyRow(
-                    stringResource("rocketmq_ui_group_props_members"),
-                    (detail.memberCount ?: 0).toString(),
+        PropertyTableSection(
+            title = stringResource("rocketmq_ui_group_props_section_metrics"),
+            items = if (detail.progressState == RocketMqProgressState.OK) {
+                listOf(
+                    PropertyItem(stringResource("rocketmq_ui_group_props_total_lag"), detail.totalLag.toString()),
+                    PropertyItem(
+                        stringResource("rocketmq_ui_group_props_members"),
+                        (detail.memberCount ?: 0).toString(),
+                    ),
                 )
             } else {
-                Text(
-                    text = stringResource("rocketmq_ui_group_props_metrics_unavailable"),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                // 进度不可用：占位行说明原因（不显示原始错误码）。
+                listOf(
+                    PropertyItem(
+                        stringResource("rocketmq_ui_group_props_total_lag"),
+                        stringResource("rocketmq_ui_group_props_metrics_unavailable"),
+                        copyable = false,
+                    ),
+                    PropertyItem(stringResource("rocketmq_ui_group_props_members"), "0", copyable = false),
                 )
-            }
-        }
+            },
+        )
         Spacer(Modifier.height(12.dp))
     }
 }
