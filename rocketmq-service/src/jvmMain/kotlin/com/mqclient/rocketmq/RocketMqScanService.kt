@@ -170,12 +170,28 @@ class RocketMqScanService(private val context: ServiceContext) {
                                 // 日志留痕，属性对话框现查时会看到真实错误。
                                 runCatching {
                                     val stats = admin.fetchConsumerProgress(group)
+                                    // offsetTable 拍平行（AI 上下文 / 未来队列级展示用）：
+                                    // lag 降序截头（同一次 RPC 响应里的字段，零额外请求）。
+                                    val rows = stats.offsetTable.entries
+                                        .map { (mq, wrapper) ->
+                                            RocketMqOffsetRowSnapshot(
+                                                topic = mq.topic,
+                                                broker = mq.brokerName,
+                                                queueId = mq.queueId,
+                                                maxOffset = wrapper.brokerOffset,
+                                                consumerOffset = wrapper.consumerOffset,
+                                                lag = (wrapper.brokerOffset - wrapper.consumerOffset).coerceAtLeast(0),
+                                            )
+                                        }
+                                        .sortedByDescending { it.lag }
+                                        .take(RocketMqGroupLagSnapshot.LAG_ROWS_CACHE_CAP)
                                     RocketMqGroupLagSnapshot(
                                         group = group,
                                         totalLag = stats.offsetTable.values.sumOf { wrapper ->
                                             (wrapper.brokerOffset - wrapper.consumerOffset).coerceAtLeast(0)
                                         },
                                         queueCount = stats.offsetTable.size,
+                                        rows = rows,
                                     )
                                 }.getOrElse {
                                     rocketMqLog.warn(
@@ -456,7 +472,7 @@ class RocketMqScanService(private val context: ServiceContext) {
             // 逐组容错 + **兜底为 0**：组离线（MQClientException，fetchConsumerConnection
             // 内部已转 null）与其他失败一律落 0 —— 卡片区没有 "未知" 形态；失败原因
             // warn 日志留痕（group + 根因），不让 UI 猜。
-            val memberCount = runCatching { admin.fetchConsumerConnection(group) }
+            val conn = runCatching { admin.fetchConsumerConnection(group) }
                 .onFailure {
                     rocketMqLog.warn(
                         "group member count failed, fallback to 0: group=" + group +
@@ -464,8 +480,14 @@ class RocketMqScanService(private val context: ServiceContext) {
                     )
                 }
                 .getOrNull()
-                ?.connectionSet?.size ?: 0
-            RocketMqGroupSnapshot(name = group, memberCount = memberCount)
+            // 同一次 RPC 响应里顺手带走的字段（零额外请求）：消费模式与订阅列表，
+            // 消费组 AI 上下文的 consumed_by 关联与属性展示用；离线 / 失败为 null / 空。
+            RocketMqGroupSnapshot(
+                name = group,
+                memberCount = conn?.connectionSet?.size ?: 0,
+                consumeMode = conn?.messageModel?.name,
+                subscribedTopics = conn?.subscriptionTable?.keys?.sorted().orEmpty(),
+            )
         }
     }
 

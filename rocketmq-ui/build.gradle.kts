@@ -30,6 +30,8 @@ kotlin {
             // 消息正文解释器：聚合注册表一个依赖带上契约 + 全部实现（ServiceLoader
             // 运行时发现），消息详情对话框的「解释器」窗格用（kafka-ui 同款）。
             implementation(projects.messageInterpreterRegistry)
+            // 「询问 AI」链路上下文的 JSON 组装（RocketMqAiChainBuilder，buildJsonObject）。
+            implementation(libs.kotlinx.serialization.json)
         }
         jvmTest.dependencies {
             implementation(kotlin("test"))

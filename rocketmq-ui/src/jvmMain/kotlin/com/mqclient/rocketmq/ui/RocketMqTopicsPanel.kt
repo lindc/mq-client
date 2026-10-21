@@ -42,8 +42,11 @@ import com.mqclient.mqui.state.LoadStateContent
 import com.mqclient.rocketmq.RocketMqEvents
 import com.mqclient.rocketmq.RocketMqTopicSnapshot
 import com.mqclient.rocketmq.ui.RocketMqTopicPropertiesDialog
+import com.mqclient.rocketmq.ui.ai.RocketMqAiChainBuilder
+import com.mqclient.rocketmq.ui.ai.askAiCardAction
 import kotlinx.coroutines.launch
 import com.mqclient.uicommon.ThemedSnackbarHost
+import com.mqclient.uicommon.LocalAiAsk
 import com.mqclient.uicommon.command.ToolbarButton
 import com.mqclient.uicommon.i18n.stringResource
 
@@ -64,6 +67,8 @@ fun RocketMqTopicsPanel(
     var propsTopic by remember { mutableStateOf<RocketMqTopicSnapshot?>(null) }
     var messagesTopic by remember { mutableStateOf<String?>(null) }
     var showCreate by remember { mutableStateOf(false) }
+    // 「询问 AI」宿主回调：宿主没 Provide（独立预览等）时为 null —— AI 按钮不显示。
+    val aiAsk = LocalAiAsk.current
     LaunchedEffect(connectionId) { state.load() }
     LaunchedEffect(connectionId, connectionStatus) { state.onStatusChanged(connectionStatus) }
     LaunchedEffect(connectionId) {
@@ -123,20 +128,33 @@ fun RocketMqTopicsPanel(
                         title = topic.name,
                         typeIcon = Icons.Default.Description,
                         typeLabel = stringResource("rocketmq_ui_nav_topics"),
-                            actions = listOf(
-                                CardAction(
-                                    id = "messages",
-                                    icon = Icons.Default.Email,
-                                    tooltip = "rocketmq_ui_topic_action_messages",
-                                    onClick = { messagesTopic = topic.name },
-                                ),
-                                CardAction(
-                                    id = "properties",
-                                    icon = Icons.Default.Info,
-                                    tooltip = "rocketmq_ui_topic_props_action",
-                                    onClick = { propsTopic = topic },
-                                ),
-                            ),
+                            actions = buildList {
+                                // AI 绝对最左（与 ibm-mq / kafka / rabbitmq 的拼接顺序一致）。
+                                if (aiAsk != null) {
+                                    add(
+                                        askAiCardAction {
+                                            RocketMqAiChainBuilder.buildForTopic(connectionId, topic.name)
+                                                ?.let(aiAsk::onAsk)
+                                        },
+                                    )
+                                }
+                                add(
+                                    CardAction(
+                                        id = "messages",
+                                        icon = Icons.Default.Email,
+                                        tooltip = "rocketmq_ui_topic_action_messages",
+                                        onClick = { messagesTopic = topic.name },
+                                    ),
+                                )
+                                add(
+                                    CardAction(
+                                        id = "properties",
+                                        icon = Icons.Default.Info,
+                                        tooltip = "rocketmq_ui_topic_props_action",
+                                        onClick = { propsTopic = topic },
+                                    ),
+                                )
+                            },
                             )
                         },
                     onCardClick = {},

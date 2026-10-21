@@ -38,7 +38,10 @@ import com.mqclient.mqui.state.LoadStateContent
 import com.mqclient.rocketmq.RocketMqEvents
 import com.mqclient.rocketmq.RocketMqModule
 import com.mqclient.rocketmq.ui.RocketMqCreateGroupDialog
+import com.mqclient.rocketmq.ui.ai.RocketMqAiChainBuilder
+import com.mqclient.rocketmq.ui.ai.askAiCardAction
 import com.mqclient.uicommon.ThemedSnackbarHost
+import com.mqclient.uicommon.LocalAiAsk
 import com.mqclient.uicommon.command.ToolbarButton
 import com.mqclient.uicommon.i18n.withArg
 import kotlinx.coroutines.launch
@@ -65,6 +68,8 @@ fun RocketMqGroupsPanel(
     val snackbarHostState = remember { SnackbarHostState() }
     var propsGroup by remember { mutableStateOf<RocketMqGroupCardInfo?>(null) }
     var showCreate by remember { mutableStateOf(false) }
+    // 「询问 AI」宿主回调：宿主没 Provide（独立预览等）时为 null —— AI 按钮不显示。
+    val aiAsk = LocalAiAsk.current
     LaunchedEffect(connectionId) { state.load() }
     LaunchedEffect(connectionId, connectionStatus) { state.onStatusChanged(connectionStatus) }
     LaunchedEffect(connectionId) {
@@ -140,14 +145,25 @@ fun RocketMqGroupsPanel(
                                 else -> null
                             },
                             statusText = stringResource("rocketmq_ui_group_members").withArg(members),
-                            actions = listOf(
-                                CardAction(
-                                    id = "properties",
-                                    icon = Icons.Default.Info,
-                                    tooltip = "rocketmq_ui_group_props_action",
-                                    onClick = { propsGroup = info },
-                                ),
-                            ),
+                            actions = buildList {
+                                // AI 绝对最左（与 ibm-mq / kafka / rabbitmq 的拼接顺序一致）。
+                                if (aiAsk != null) {
+                                    add(
+                                        askAiCardAction {
+                                            RocketMqAiChainBuilder.buildForGroup(connectionId, info.name)
+                                                ?.let(aiAsk::onAsk)
+                                        },
+                                    )
+                                }
+                                add(
+                                    CardAction(
+                                        id = "properties",
+                                        icon = Icons.Default.Info,
+                                        tooltip = "rocketmq_ui_group_props_action",
+                                        onClick = { propsGroup = info },
+                                    ),
+                                )
+                            },
                         )
                     },
                 onCardClick = {},

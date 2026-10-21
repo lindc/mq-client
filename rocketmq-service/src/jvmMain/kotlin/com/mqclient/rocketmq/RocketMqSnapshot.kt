@@ -45,16 +45,36 @@ data class RocketMqGroupSnapshot(
     val name: String,
     /** 在线成员数（examineConsumerConnectionInfo，best-effort；组离线为 null）。 */
     val memberCount: Int?,
+    /**
+     * 消费模式原始枚举名（CLUSTERING / BROADCASTING，与组详情快照同口径）；组离线 /
+     * 查询失败为 null —— AI 上下文里整体省略该字段。
+     */
+    val consumeMode: String? = null,
+    /** 订阅的 topic 列表（examineConsumerConnectionInfo 的 subscriptionTable，已排序）；离线 / 失败为空。 */
+    val subscribedTopics: List<String> = emptyList(),
 )
 
-/** 一个消费组的 Lag 快照（快扫产物：examineConsumeStats 的组级投影）。 */
+/**
+ * 一个消费组的 Lag 快照（快扫产物：examineConsumeStats 的组级投影）。
+ *
+ * [rows] 是 offsetTable 的拍平行，**落缓存时已按 lag 降序截前 [LAG_ROWS_CACHE_CAP]**
+ * —— 只为 AI 上下文与未来的队列级展示服务，控制缓存体积（大扇出组的全量行列表
+ * 可能上百条，缓存里留头部就够：积压分析只关心 lag 最大的那些）。
+ */
 data class RocketMqGroupLagSnapshot(
     val group: String,
     /** 组级 Lag：全 MessageQueue 的 brokerOffset - consumerOffset 之和。 */
     val totalLag: Long,
     /** 参与统计的 MessageQueue 数。 */
     val queueCount: Int,
-)
+    /** 按 lag 降序的头部队列行（[LAG_ROWS_CACHE_CAP] 条封顶）；组级查询失败为空。 */
+    val rows: List<RocketMqOffsetRowSnapshot> = emptyList(),
+) {
+    companion object {
+        /** 快扫落缓存的每组行数上限（lag 降序截断；AI 构建时还会再截到自己的更小上限）。 */
+        internal const val LAG_ROWS_CACHE_CAP = 16
+    }
+}
 
 /** 消费组在单个 MessageQueue 上的位点行（ConsumeStats.offsetTable 扁平化投影）。 */
 data class RocketMqOffsetRowSnapshot(
