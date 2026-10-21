@@ -312,6 +312,24 @@ class RocketMqScanService(private val context: ServiceContext) {
         }
     }
 
+    // ---------------------------------------------------------------- 主题创建
+
+    /** 创建 / 更新主题：逐 broker 写 TopicConfig（读 / 写队列数 + 权限位）。 */
+    suspend fun createTopic(
+        connectionId: String,
+        topicName: String,
+        readQueues: Int,
+        writeQueues: Int,
+        perm: Int,
+    ) {
+        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
+        val admin = ctx.adminClient ?: throw IllegalStateException("未连接")
+        withContext(Dispatchers.IO) { admin.createTopic(topicName, readQueues, writeQueues, perm) }
+        rocketMqLog.info(
+            "topic created: connection=$connectionId topic=$topicName read=$readQueues write=$writeQueues perm=$perm",
+        )
+    }
+
     // ---------------------------------------------------------------- 消费组创建
 
     /**

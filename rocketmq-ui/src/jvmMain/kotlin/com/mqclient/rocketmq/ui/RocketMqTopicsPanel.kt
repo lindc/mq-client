@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Info
@@ -61,6 +62,7 @@ fun RocketMqTopicsPanel(
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
     var propsTopic by remember { mutableStateOf<RocketMqTopicSnapshot?>(null) }
+    var showCreate by remember { mutableStateOf(false) }
     LaunchedEffect(connectionId) { state.load() }
     LaunchedEffect(connectionId, connectionStatus) { state.onStatusChanged(connectionStatus) }
     LaunchedEffect(connectionId) {
@@ -82,6 +84,11 @@ fun RocketMqTopicsPanel(
                     onValueChange = { state.search = it },
                     placeholder = stringResource("rocketmq_ui_topic_search"),
                     modifier = Modifier.weight(1f),
+                )
+                ToolbarButton(
+                    icon = Icons.Default.Add,
+                    text = stringResource("rocketmq_ui_topic_add"),
+                    onClick = { showCreate = true },
                 )
                 ToolbarButton(
                     icon = Icons.Default.Refresh,
@@ -150,6 +157,34 @@ fun RocketMqTopicsPanel(
                 topicName = topic.name,
                 onDismiss = { propsTopic = null },
                 onDeleted = { state.requestScan() },
+            )
+        }
+
+        if (showCreate) {
+            RocketMqCreateTopicDialog(
+                connectionId = connectionId,
+                onDismiss = { showCreate = false },
+                onCreated = {
+                    showCreate = false
+                    state.requestScan()
+                    scope.launch {
+                        snackbarHostState.showSnackbar(stringResource("rocketmq_ui_topic_create_success"))
+                    }
+                },
+            )
+        }
+
+        if (showCreate) {
+            RocketMqCreateTopicDialog(
+                connectionId = connectionId,
+                onDismiss = { showCreate = false },
+                onCreated = {
+                    showCreate = false
+                    state.requestScan()
+                    scope.launch {
+                        snackbarHostState.showSnackbar(stringResource("rocketmq_ui_topic_create_success"))
+                    }
+                },
             )
         }
 

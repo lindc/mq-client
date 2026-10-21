@@ -44,6 +44,7 @@ import com.mqclient.rocketmq.RocketMqTopicSnapshot
 import com.mqclient.rocketmq.RocketMqTopicRouteSnapshot
 import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.PropertyItem
+import com.mqclient.uicommon.AppTooltip
 import com.mqclient.uicommon.PropertyTableSection
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.i18n.stringResource
@@ -133,9 +134,15 @@ fun RocketMqTopicPropertiesDialog(
         minWidth = 680.dp,
         minHeight = 440.dp,
         footerActions = {
-            // 系统主题禁止删除：按钮直接隐藏（与 Kafka 内部主题同一约定）。
-            if (!systemTopic) {
-                PressableButton(onClick = { deleteConfirm = true }, danger = true) {
+            // 系统主题禁止删除：按钮置灰 + Tooltip 说明（比隐藏更可发现）。
+            AppTooltip(
+                tooltip = { Text(stringResource("rocketmq_ui_topic_system_delete_tooltip")) },
+            ) {
+                PressableButton(
+                    onClick = { deleteConfirm = true },
+                    enabled = !systemTopic,
+                    danger = true,
+                ) {
                     Text(stringResource("rocketmq_ui_topic_props_delete"))
                 }
             }
@@ -149,6 +156,22 @@ fun RocketMqTopicPropertiesDialog(
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             var tab by remember(topicName) { mutableIntStateOf(0) }
+            if (systemTopic) {
+                androidx.compose.material3.Surface(
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(4.dp),
+                    color = MaterialTheme.colorScheme.tertiaryContainer,
+                    modifier = Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .padding(top = 8.dp),
+                ) {
+                    Text(
+                        text = stringResource("rocketmq_ui_topic_system_badge"),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                    )
+                }
+            }
             PrimaryTabRow(selectedTabIndex = tab) {
                 Tab(
                     selected = tab == 0,

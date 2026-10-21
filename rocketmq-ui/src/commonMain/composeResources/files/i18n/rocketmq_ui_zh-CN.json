@@ -154,5 +154,20 @@
   "rocketmq_ui_group_delete_confirm_title": "确认删除消费组",
   "rocketmq_ui_group_delete_confirm_text": "确定删除消费组 %1$s？将同时移除全部 Broker 上的订阅组配置，此操作不可恢复。",
   "rocketmq_ui_group_deleting": "删除中…",
-  "rocketmq_ui_group_deleted": "消费组已删除"
+  "rocketmq_ui_group_deleted": "消费组已删除",
+  "rocketmq_ui_topic_add": "新建主题",
+  "rocketmq_ui_topic_create_title": "创建主题",
+  "rocketmq_ui_topic_create_name": "主题名称",
+  "rocketmq_ui_topic_create_name_hint": "仅支持字母、数字、点、短横线、下划线和 %，创建后不可修改",
+  "rocketmq_ui_topic_create_read_queues": "读队列数",
+  "rocketmq_ui_topic_create_write_queues": "写队列数",
+  "rocketmq_ui_topic_create_perm": "权限",
+  "rocketmq_ui_topic_create_action": "创建",
+  "rocketmq_ui_topic_create_success": "主题创建成功",
+  "rocketmq_ui_topic_create_name_required": "主题名称不能为空",
+  "rocketmq_ui_topic_create_name_invalid": "名称仅支持字母、数字、点、短横线、下划线和 %，不能含空格或中文",
+  "rocketmq_ui_topic_create_queues_invalid": "队列数必须为大于 0 的整数",
+  "rocketmq_ui_topic_create_failed_prefix": "创建失败：",
+  "rocketmq_ui_topic_system_badge": "系统主题",
+  "rocketmq_ui_topic_system_delete_tooltip": "系统内置主题（重试队列/死信队列等）不允许手动删除"
 }

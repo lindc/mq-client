@@ -154,5 +154,20 @@
   "rocketmq_ui_group_delete_confirm_title": "Confirm Delete Group",
   "rocketmq_ui_group_delete_confirm_text": "Delete consumer group %1$s? This removes the subscription group config from all brokers and cannot be undone.",
   "rocketmq_ui_group_deleting": "Deleting…",
-  "rocketmq_ui_group_deleted": "Consumer group deleted"
+  "rocketmq_ui_group_deleted": "Consumer group deleted",
+  "rocketmq_ui_topic_add": "Create topic",
+  "rocketmq_ui_topic_create_title": "Create topic",
+  "rocketmq_ui_topic_create_name": "Topic name",
+  "rocketmq_ui_topic_create_name_hint": "Letters, digits, dot, dash, underscore and % only; immutable after creation",
+  "rocketmq_ui_topic_create_read_queues": "Read queues",
+  "rocketmq_ui_topic_create_write_queues": "Write queues",
+  "rocketmq_ui_topic_create_perm": "Permission",
+  "rocketmq_ui_topic_create_action": "Create",
+  "rocketmq_ui_topic_create_success": "Topic created",
+  "rocketmq_ui_topic_create_name_required": "Topic name is required",
+  "rocketmq_ui_topic_create_name_invalid": "Name allows letters, digits, dot, dash, underscore and % only; no spaces or non-ASCII",
+  "rocketmq_ui_topic_create_queues_invalid": "Queue count must be an integer greater than 0",
+  "rocketmq_ui_topic_create_failed_prefix": "Create failed: ",
+  "rocketmq_ui_topic_system_badge": "System topic",
+  "rocketmq_ui_topic_system_delete_tooltip": "Built-in system topics (retry / dead-letter queues) cannot be deleted manually"
 }

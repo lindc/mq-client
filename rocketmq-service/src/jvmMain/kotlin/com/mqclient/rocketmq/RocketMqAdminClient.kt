@@ -194,6 +194,27 @@ class RocketMqAdminClient(private val config: RocketMqConfig) : AutoCloseable {
         }
     }
 
+    /**
+     * 创建 / 更新主题：`createAndUpdateTopicConfig` 写入全部 broker 地址（路由经
+     * broker 心跳注册到 NameServer，有秒级延迟）。perm 位：2 读 / 4 写 / 6 读写。
+     */
+    suspend fun createTopic(topicName: String, readQueues: Int, writeQueues: Int, perm: Int) {
+        val cluster = ioCall { admin.examineBrokerClusterInfo() }
+        val brokerAddrs = cluster.brokerAddrTable.values
+            .flatMap { it.brokerAddrs.values }
+            .toSet()
+        ioCall {
+            brokerAddrs.forEach { addr ->
+                val config = org.apache.rocketmq.common.TopicConfig()
+                config.topicName = topicName
+                config.readQueueNums = readQueues
+                config.writeQueueNums = writeQueues
+                config.perm = perm
+                admin.createAndUpdateTopicConfig(addr, config)
+            }
+        }
+    }
+
     override fun close() {
         if (started) {
             runCatching { admin.shutdown() }
