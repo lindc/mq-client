@@ -25,6 +25,15 @@ class RocketMqOverviewState(
         refreshFromCache()
     }
 
+    /**
+     * 读慢扫缓存。三分支显式覆盖全部状态（**绝不停留在 Idle** —— Idle 在
+     * LoadStateContent 里渲染空白）：
+     *  - 缓存有集群数据 → Success；
+     *  - 没数据但慢扫跑完过一轮（扫描标记）→ Error + 真实原因（NameServer 层查询
+     *    失败，取连接的 lastError）；
+     *  - 还没跑过首扫 → **显式 Loading**（居中转圈，首扫完成经 OBJECTS_SCANNED
+     *    事件回到这里翻页）。
+     */
     fun refreshFromCache() {
         val service = RocketMqModule.serviceOrNull() ?: return
         val cluster = service.cachedClusterInfo(connectionId)
@@ -32,8 +41,15 @@ class RocketMqOverviewState(
             loadState = LoadState.Success(cluster)
             topicCount = service.cachedTopics(connectionId).size
             groupCount = service.cachedGroups(connectionId).size
+        } else if (service.hasScannedObjects(connectionId)) {
+            loadState = LoadState.Error(reason())
         } else {
-            loadState = LoadState.Error(stringResource("rocketmq_ui_connect_failed"))
+            loadState = LoadState.Loading
         }
     }
+
+    private fun reason(): String =
+        RocketMqModule.connectionOrNull(connectionId)?.lastError
+            ?.takeIf(String::isNotBlank)
+            ?: stringResource("rocketmq_ui_connect_failed")
 }

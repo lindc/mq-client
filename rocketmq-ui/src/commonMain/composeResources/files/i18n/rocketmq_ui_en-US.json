@@ -98,5 +98,8 @@
   "rocketmq_ui_topic_type_delay": "Delay / Scheduled",
   "rocketmq_ui_topic_type_transaction": "Transaction",
   "rocketmq_ui_topic_type_dlq": "Dead-letter",
-  "rocketmq_ui_topic_type_retry": "Retry"
+  "rocketmq_ui_topic_type_retry": "Retry",
+  "rocketmq_ui_overview_cluster": "Cluster info",
+  "rocketmq_ui_overview_cluster_name": "Cluster name",
+  "rocketmq_ui_overview_nameserver_addr": "NameServer address"
 }

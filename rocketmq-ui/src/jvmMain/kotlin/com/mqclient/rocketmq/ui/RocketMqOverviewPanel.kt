@@ -43,6 +43,9 @@ fun RocketMqOverviewPanel(
     modifier: Modifier = Modifier,
 ) {
     val state = remember(connectionId) { RocketMqOverviewState(connectionId) }
+    // 进页初始读缓存：**事件先于页面订阅到达时**（慢扫早已完成）没有这次调用，
+    // loadState 会永远停在 Idle —— LoadStateContent 对 Idle 渲染空白（纯白根因）。
+    LaunchedEffect(connectionId) { state.refreshFromCache() }
     LaunchedEffect(connectionId) {
         CoreModule.eventBusOrNull?.on(RocketMqEvents.OBJECTS_SCANNED, scope = this) { event ->
             if (event.payload["connectionId"] as? String == connectionId) state.onObjectsScanned()
@@ -69,36 +72,46 @@ fun RocketMqOverviewPanel(
             loadingMessage = stringResource("rocketmq_ui_overview_loading"),
             modifier = Modifier.fillMaxWidth(),
         ) { cluster ->
-            MessageDetailSectionTitle(text = stringResource("rocketmq_ui_overview_brokers"))
-            Spacer(Modifier.height(4.dp))
-            cluster.brokers.forEach { broker ->
-                BrokerRow(broker)
-            }
-            if (cluster.brokers.isEmpty()) {
-                Text(
-                    text = stringResource("rocketmq_ui_overview_no_brokers"),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+            // LoadStateContent 的 content 在 **Box scope** 里执行：多个兄弟
+            // composable 会全部堆叠在左上角（文字重叠根因）—— 必须整体包进一个
+            // Column，三段式只读属性布局（集群信息 / Broker 列表 / 对象计数）。
+            Column {
+                MessageDetailSectionTitle(text = stringResource("rocketmq_ui_overview_cluster"))
+                Spacer(Modifier.height(4.dp))
+                MessageHeaderRow(
+                    stringResource("rocketmq_ui_overview_cluster_name"),
+                    cluster.clusterName ?: "-",
                 )
+                namesrvAddrs.forEach { addr ->
+                    MessageHeaderRow(stringResource("rocketmq_ui_overview_nameserver_addr"), addr)
+                }
+                if (namesrvAddrs.isEmpty()) {
+                    Text(
+                        text = stringResource("rocketmq_ui_overview_no_nameservers"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Spacer(Modifier.height(16.dp))
+                MessageDetailSectionTitle(text = stringResource("rocketmq_ui_overview_brokers"))
+                Spacer(Modifier.height(4.dp))
+                cluster.brokers.forEach { broker ->
+                    BrokerRow(broker)
+                }
+                if (cluster.brokers.isEmpty()) {
+                    Text(
+                        text = stringResource("rocketmq_ui_overview_no_brokers"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Spacer(Modifier.height(16.dp))
+                MessageDetailSectionTitle(text = stringResource("rocketmq_ui_overview_counts"))
+                Spacer(Modifier.height(4.dp))
+                MessageHeaderRow(stringResource("rocketmq_ui_nav_topics"), state.topicCount.toString())
+                MessageHeaderRow(stringResource("rocketmq_ui_nav_groups"), state.groupCount.toString())
+                Spacer(Modifier.height(12.dp))
             }
-            Spacer(Modifier.height(16.dp))
-            MessageDetailSectionTitle(text = stringResource("rocketmq_ui_overview_nameservers"))
-            Spacer(Modifier.height(4.dp))
-            namesrvAddrs.forEach { addr ->
-                MessageHeaderRow("namesrv", addr)
-            }
-            if (namesrvAddrs.isEmpty()) {
-                Text(
-                    text = stringResource("rocketmq_ui_overview_no_nameservers"),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Spacer(Modifier.height(16.dp))
-            MessageDetailSectionTitle(text = stringResource("rocketmq_ui_overview_counts"))
-            Spacer(Modifier.height(4.dp))
-            MessageHeaderRow(stringResource("rocketmq_ui_nav_topics"), state.topicCount.toString())
-            MessageHeaderRow(stringResource("rocketmq_ui_nav_groups"), state.groupCount.toString())
         }
     }
 }
@@ -116,14 +129,14 @@ private fun BrokerRow(broker: RocketMqBrokerSnapshot) {
                 modifier = Modifier.width(180.dp),
             )
             Text(
-                text = broker.role,
+                text = "ID " + broker.brokerId + " · " + broker.role,
                 style = MaterialTheme.typography.bodySmall,
                 color = if (broker.role == "Master") {
                     MaterialTheme.colorScheme.primary
                 } else {
                     MaterialTheme.colorScheme.onSurfaceVariant
                 },
-                modifier = Modifier.width(72.dp),
+                modifier = Modifier.width(110.dp),
             )
             Spacer(Modifier.width(8.dp))
             Text(
