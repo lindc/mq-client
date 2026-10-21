@@ -5,6 +5,8 @@ import com.mqclient.core.ConnectionStore
 import com.mqclient.core.cache.CacheManager
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.emit
+import org.apache.rocketmq.client.exception.MQBrokerException
+import org.apache.rocketmq.client.exception.MQClientException
 import org.apache.rocketmq.remoting.protocol.body.ClusterInfo
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutionException
@@ -66,6 +68,7 @@ class RocketMqScanService(private val context: ServiceContext) {
 
     /** 同一模块内多次扫描串行执行，避免重叠扫描互相覆盖结果。 */
     private val scanLock = Mutex()
+
 
     /**
      * 「至少完成过一轮对象慢扫」标记（connectionId → true）。UI 用它区分「还在等
@@ -236,16 +239,28 @@ class RocketMqScanService(private val context: ServiceContext) {
     // ---------------------------------------------------------------- 消费组详情
 
     /**
-     * 消费组详情现查（属性对话框用，不进缓存）：成员 / 消费模式 / 订阅来自
-     * examineConsumerConnectionInfo（组离线时为 null → 兜底空值）；消费进度来自
-     * examineConsumeStats，**嵌套 offsetTable 在这里拍平**成一行一 queue 的列表
-     * （UI 只接一维数据）。进度查询失败直接抛（对话框 Error + 重试）；成员查询
-     * 失败降级空值不阻塞进度展示。
+     * 消费组详情现查（属性对话框用，不进缓存），**局部降级**设计：
+     *  - 基础配置：examineSubscriptionGroupConfig（broker 本地配置，**不依赖
+     *    %RETRY% 路由**，组从未消费也可得）；
+     *  - 成员 / 订阅 / 消费模式：examineConsumerConnectionInfo，best-effort（离线 /
+     *    17 / 失败 → 空，UI 显示未知）；
+     *  - 进度：examineConsumeStats，CODE 17（MQClientException **或 MQBrokerException**
+     *    —— broker 侧 TOPIC_NOT_EXIST 也会以此形态返回）→ RETRY_TOPIC_NO_ROUTE；
+     *    其他失败 → FAILED。原始错误只进 warn 日志，不进 UI；进度失败不阻塞
+     *    基础信息展示。
+     * 整体只有「未连接 / clusterInfo 失败 / 无可用 Broker」才抛（对话框整页 Error）。
      */
     suspend fun fetchGroupDetail(connectionId: String, group: String): RocketMqGroupDetailSnapshot {
         val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
         val admin = ctx.adminClient ?: throw IllegalStateException("未连接")
         return withContext(Dispatchers.IO) {
+            val config = runCatching { admin.fetchGroupConfig(group) }
+                .onFailure {
+                    rocketMqLog.warn(
+                        "group config failed: group=" + group + " error=" + it.message,
+                    )
+                }
+                .getOrNull()
             val conn = runCatching { admin.fetchConsumerConnection(group) }
                 .onFailure {
                     rocketMqLog.warn(
@@ -253,8 +268,26 @@ class RocketMqScanService(private val context: ServiceContext) {
                     )
                 }
                 .getOrNull()
-            val stats = admin.fetchConsumerProgress(group)
-            val rows = stats.offsetTable.entries.map { (mq, wrapper) ->
+            var progressState = RocketMqProgressState.OK
+            val stats = runCatching { admin.fetchConsumerProgress(group) }
+                .getOrElse { e ->
+                    val noRoute = (e is MQClientException && e.responseCode == 17) ||
+                        (e is MQBrokerException && e.responseCode == 17)
+                    if (noRoute) {
+                        progressState = RocketMqProgressState.RETRY_TOPIC_NO_ROUTE
+                        rocketMqLog.warn(
+                            "group progress unavailable (retry topic no route): group=" + group +
+                                " error=" + e.message,
+                        )
+                    } else {
+                        progressState = RocketMqProgressState.FAILED
+                        rocketMqLog.warn(
+                            "group progress failed: group=" + group + " error=" + e.message,
+                        )
+                    }
+                    null
+                }
+            val rows = stats?.offsetTable?.entries?.map { (mq, wrapper) ->
                 RocketMqOffsetRowSnapshot(
                     topic = mq.topic,
                     broker = mq.brokerName,
@@ -263,16 +296,36 @@ class RocketMqScanService(private val context: ServiceContext) {
                     consumerOffset = wrapper.consumerOffset,
                     lag = (wrapper.brokerOffset - wrapper.consumerOffset).coerceAtLeast(0),
                 )
-            }.sortedWith(compareBy({ it.topic }, { it.broker }, { it.queueId }))
+            }?.sortedWith(compareBy({ it.topic }, { it.broker }, { it.queueId })) ?: emptyList()
             RocketMqGroupDetailSnapshot(
                 name = group,
-                memberCount = conn?.connectionSet?.size ?: 0,
+                configFound = config != null,
+                consumeEnable = config?.isConsumeEnable,
+                orderly = config?.isConsumeMessageOrderly,
                 consumeMode = conn?.messageModel?.name ?: "",
                 subscriptions = conn?.subscriptionTable?.keys?.sorted().orEmpty(),
+                memberCount = conn?.connectionSet?.size,
+                progressState = progressState,
                 rows = rows,
                 totalLag = rows.sumOf { it.lag },
             )
         }
+    }
+
+    // ---------------------------------------------------------------- 消费组创建
+
+    /**
+     * 创建消费组：经 `createAndUpdateSubscriptionGroupConfig` 写入全部 Master
+     * broker 的订阅组配置（update 语义幂等 —— 已存在不会报错，等同"改配置"）。
+     * 成功后由 UI 触发一轮慢扫刷新列表（组列表数据源就是订阅组配置）。
+     */
+    suspend fun createConsumerGroup(connectionId: String, groupName: String, orderly: Boolean) {
+        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
+        val admin = ctx.adminClient ?: throw IllegalStateException("未连接")
+        withContext(Dispatchers.IO) { admin.createSubscriptionGroup(groupName.trim(), orderly) }
+        rocketMqLog.info(
+            "consumer group created: connection=$connectionId group=$groupName orderly=$orderly",
+        )
     }
 
     // ---------------------------------------------------------------- Topic 属性 / 删除

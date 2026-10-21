@@ -69,15 +69,39 @@ data class RocketMqOffsetRowSnapshot(
     val lag: Long,
 )
 
-/** 消费组详情快照（属性对话框现查投影，数据已在 service 层拍平）。 */
+/** 消费进度查询状态：OK = rows 有值；其余两态 UI 走局部降级（警告卡片）。 */
+enum class RocketMqProgressState {
+    OK,
+
+    /** CODE 17：重试 Topic（%RETRY%<group>）在 NameServer 无路由（组从未消费等）。 */
+    RETRY_TOPIC_NO_ROUTE,
+
+    /** 其他失败（权限 / 超时等），原始错误只进日志。 */
+    FAILED,
+}
+
+/**
+ * 消费组详情快照（属性对话框现查投影，数据已在 service 层拍平）。设计为**局部
+ * 可得**：基础配置（订阅组配置，不依赖 %RETRY% 路由）与成员/订阅 best-effort 恒
+ * 尽力填充；进度查询失败不阻塞整个详情（[progressState] 驱动 UI 局部降级）。
+ */
 data class RocketMqGroupDetailSnapshot(
     val name: String,
-    val memberCount: Int,
+    /** broker 订阅组配置是否查到（不依赖 %RETRY% 路由）。 */
+    val configFound: Boolean,
+    /** 消费开关（订阅组配置）；null = 查询失败。 */
+    val consumeEnable: Boolean?,
+    /** 顺序消费（订阅组配置）；null = 查询失败。 */
+    val orderly: Boolean?,
     /** 消费模式原始枚举名（CLUSTERING / BROADCASTING），UI 层翻译；未知为空串。 */
     val consumeMode: String,
-    /** 订阅的 topic 列表（subscriptionTable keys，已排序）。 */
+    /** 订阅的 topic 列表（subscriptionTable keys，已排序）；消费者离线为空。 */
     val subscriptions: List<String>,
-    /** 消费进度行（按 topic / broker / queueId 排序）。 */
+    /** 在线成员数；null = 查询失败（离线为 0）。 */
+    val memberCount: Int?,
+    /** 消费进度查询状态（见 [RocketMqProgressState]）。 */
+    val progressState: RocketMqProgressState,
+    /** 消费进度行（按 topic / broker / queueId 排序）；仅 [RocketMqProgressState.OK] 有值。 */
     val rows: List<RocketMqOffsetRowSnapshot>,
     /** 组级总积压（rows 求和）。 */
     val totalLag: Long,
