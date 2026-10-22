@@ -243,6 +243,5 @@
   "rocketmq_ui_send_summary": "共 %1$d 条，成功 %2$d，失败 %3$d",
   "rocketmq_ui_send_close_confirm_text": "还有消息正在发送，关闭将中断剩余任务。确定关闭？",
   "rocketmq_ui_send_close_confirm_ok": "关闭",
-  "rocketmq_ui_send_service_not_ready": "服务未初始化",
-  "rocketmq_ui_system_object_delete_tooltip": "系统内置保留对象，不允许手动删除。"
+  "rocketmq_ui_send_service_not_ready": "服务未初始化"
 }

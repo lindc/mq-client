@@ -243,6 +243,5 @@
   "rocketmq_ui_send_summary": "Total %1$d, success %2$d, failed %3$d",
   "rocketmq_ui_send_close_confirm_text": "Messages are still being sent; closing will abort the remaining tasks. Close anyway?",
   "rocketmq_ui_send_close_confirm_ok": "Close",
-  "rocketmq_ui_send_service_not_ready": "Service not initialized",
-  "rocketmq_ui_system_object_delete_tooltip": "Built-in system object; manual deletion is not allowed."
+  "rocketmq_ui_send_service_not_ready": "Service not initialized"
 }

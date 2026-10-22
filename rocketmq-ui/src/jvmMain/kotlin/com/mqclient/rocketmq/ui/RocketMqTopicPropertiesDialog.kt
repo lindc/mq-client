@@ -45,7 +45,6 @@ import com.mqclient.rocketmq.RocketMqTopicSnapshot
 import com.mqclient.rocketmq.RocketMqTopicRouteSnapshot
 import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.PropertyItem
-import com.mqclient.uicommon.AppTooltip
 import com.mqclient.uicommon.PropertyTableSection
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.i18n.stringResource
@@ -135,15 +134,9 @@ fun RocketMqTopicPropertiesDialog(
         minWidth = 680.dp,
         minHeight = 440.dp,
         footerActions = {
-            // 系统主题禁止删除：按钮置灰 + Tooltip 说明（比隐藏更可发现）。
-            AppTooltip(
-                tooltip = { Text(stringResource("rocketmq_ui_system_object_delete_tooltip")) },
-            ) {
-                PressableButton(
-                    onClick = { deleteConfirm = true },
-                    enabled = !systemTopic,
-                    danger = true,
-                ) {
+            // 系统内置主题：不渲染删除按钮（service 层 isSystemTopic 第二道防呆保留）。
+            if (!systemTopic) {
+                PressableButton(onClick = { deleteConfirm = true }, danger = true) {
                     Text(stringResource("rocketmq_ui_topic_props_delete"))
                 }
             }
