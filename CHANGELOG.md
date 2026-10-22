@@ -2,6 +2,42 @@
 
 本文件记录 MQClient 的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [Unreleased] — 2026-10-22
+
+### Added
+
+- **拓扑图「导出为图片」**（commit ce5256c）：右上角缩放控件新增下载按钮，
+  导出整张拓扑为 PNG。**离屏渲染而非截屏**——取 `viewerState.layoutedKuiver`
+  （含用户拖动后的手动位置）按全图逻辑包围盒重画一遍，与当前缩放 / 平移
+  完全无关，放大后屏幕外的节点不会再丢；场景 `density = 2`，卡片文字 / 图标 /
+  线宽按 2x 重新栅格化（不是先画 1x 再拉伸），汇报和文档里不会糊。实现走
+  Compose Desktop 的 `ImageComposeScene`（kuiver 0.4.2 的
+  `KuiverViewer` / `KuiverViewerState` 没有 renderToBitmap / export API，已核对
+  sources）：同一套 `TopologyNodeCard` 组合到独立 Skia surface，因此节点卡片
+  仍是真 Composable，而非手绘 Canvas。包围盒 = 节点中心 ± 卡片尺寸 + 贝塞尔边
+  与自环边的几何采样（长 BACK 边外抛的曲线不会被裁）+ 48dp 内边距；导出内容
+  只含节点与连线，工具栏 / 滚动条 / 详情卡 / 选中高亮一律不进图，背景纯白
+  （`background = null` 可得透明底）。
+  OOM 防呆两级：单边 8000px + 总像素 2400 万，超限自动降 scale 而不是裁图，
+  实际倍率随结果返回并在成功提示里带上输出尺寸。连线复刻 kuiver `EdgeRenderer`
+  的端点算法（矩形边界求交 + 4px 间隙），复用库公开的 `EdgePathFactory` /
+  `EdgeStyle` / `DefaultArrowDrawer`，BACK 边橙色与屏幕一致。渲染放
+  `Dispatchers.Default`，保存走 ui-common `saveFileBytes`（FileKit 另存为），
+  文件名 `topology-yyyyMMdd-HHmmss.png`；导出期间按钮置灰防并发，未传
+  `snackbarHostState` 的面板（RocketMQ）由画布兜底本地 host 提示。
+- **i18n**：ui-common 公共表 +4 键（`topology_action_export` /
+  `topology_export_success` / `topology_export_failed` / `topology_export_empty`），
+  中英同步。
+
+### Tests
+
+- `TopologyImageExportTest`（5 例）：包围盒与 2x 像素尺寸（476×152 dp →
+  952×304 px）、超大图自动降 scale 且单边 ≤ 8000px、1x 按 1x 输出、空图拒绝
+  导出、真实离屏渲染产出合法 PNG（尺寸 / 纯白左上角 / 存在非白内容）。
+- `topology-ui` 的 `jvmTest` 补 `compose.desktop.currentOs`（离屏场景需 Skia
+  原生库）与 `skiko.data.path` 指向构建目录（CI / 沙箱 HOME 只读时默认的
+  `~/.skiko` 会失败）。
+
 ## [Unreleased] — 2026-10-21
 
 ### Added
