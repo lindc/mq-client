@@ -2,6 +2,7 @@ package com.mqclient.rabbitmq
 
 import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ConnectionStore
+import com.mqclient.core.concurrent.KeyedMutex
 import com.mqclient.core.db.CommandAudit
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.emit
@@ -9,7 +10,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonPrimitive
@@ -65,8 +65,8 @@ class RabbitMqScanService(private val context: ServiceContext) {
         const val STATUS_TTL_FACTOR = 2f
     }
 
-    /** 同一模块内多次扫描串行执行，避免重叠扫描互相覆盖结果（与 kafka 的 scanLock 同职责）。 */
-    private val scanLock = Mutex()
+    /** 按连接分组的扫描锁：同一条连接串行（防重叠扫描互相覆盖结果），不同连接并发。 */
+    private val scanLocks = KeyedMutex()
 
     // ---------------------------------------------------------------- 对象慢扫
 
@@ -74,7 +74,7 @@ class RabbitMqScanService(private val context: ServiceContext) {
      * 定时任务入口（`rabbitmq.<connectionId>.scan.objects`）：一轮并发扫齐 exchanges /
      * queues / bindings 三类并全量替换。任一失败整轮失败（见类 KDoc 的取舍）。
      */
-    suspend fun scanObjects(connectionId: String) = scanLock.withLock {
+    suspend fun scanObjects(connectionId: String) = scanLocks.withLock(connectionId) {
         val ctx = connectedContext(connectionId) ?: return@withLock
         val admin = ctx.admin ?: return@withLock
         try {
@@ -164,7 +164,7 @@ class RabbitMqScanService(private val context: ServiceContext) {
      * 计数字段全量替换进 `queueStatus`。跑通即保活（reportStatus Connected，核心侧
      * 状态没变时直接忽略）。
      */
-    suspend fun scanStatus(connectionId: String) = scanLock.withLock {
+    suspend fun scanStatus(connectionId: String) = scanLocks.withLock(connectionId) {
         val ctx = connectedContext(connectionId) ?: return@withLock
         val admin = ctx.admin ?: return@withLock
         try {
