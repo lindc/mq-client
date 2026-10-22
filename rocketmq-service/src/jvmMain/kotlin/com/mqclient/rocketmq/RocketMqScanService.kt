@@ -613,3 +613,10 @@ fun isSystemTopic(name: String): Boolean =
         name.startsWith("OFFSET_MOVED_EVENT") ||
         name.startsWith("DEFAULT_TOPIC") ||
         name.startsWith("RMQ_SYS_", ignoreCase = true)
+
+/**
+ * 系统保留消费组判定（消费组属性对话框删除防呆用）：broker 系统组件注册的
+ * 订阅组前缀 —— CID_RMQ_SYS_（服务端内部组件）/ CID_ONS_（云原生组件）。
+ */
+fun isSystemGroup(name: String): Boolean =
+    name.startsWith("CID_RMQ_SYS_") || name.startsWith("CID_ONS_")

@@ -169,11 +169,9 @@
   "rocketmq_ui_topic_create_queues_invalid": "队列数必须为大于 0 的整数",
   "rocketmq_ui_topic_create_failed_prefix": "创建失败：",
   "rocketmq_ui_topic_system_badge": "系统主题",
-  "rocketmq_ui_topic_system_delete_tooltip": "系统内置主题（重试队列/死信队列等）不允许手动删除",
   "rocketmq_ui_messages_title": "主题消息：%1$s",
   "rocketmq_ui_messages_tab_browse": "浏览消息",
   "rocketmq_ui_messages_tab_send": "发送消息",
-
   "rocketmq_ui_msg_browse_queue": "Queue %1$d",
   "rocketmq_ui_msg_browse_offset_hint": "起点 Offset",
   "rocketmq_ui_msg_browse_read": "读取",
@@ -197,7 +195,6 @@
   "rocketmq_ui_msg_browse_search": "搜索 MsgId / Tag / Key / Value",
   "rocketmq_ui_msg_browse_queue_failed": "队列列表获取失败：%1$s",
   "rocketmq_ui_msg_copied": "已复制",
-
   "rocketmq_ui_msg_detail_title": "消息详情：Queue %1$d · Offset %2$d",
   "rocketmq_ui_msg_detail_h_topic": "Topic",
   "rocketmq_ui_msg_detail_h_queue": "Queue",
@@ -211,7 +208,6 @@
   "rocketmq_ui_msg_detail_h_body_size": "消息体大小（字节）",
   "rocketmq_ui_msg_detail_h_user_props": "用户属性（%1$d）",
   "rocketmq_ui_msg_detail_props_empty": "该消息没有用户属性",
-
   "rocketmq_ui_send_topic": "Topic",
   "rocketmq_ui_send_tags": "Tags（可选）",
   "rocketmq_ui_send_keys": "Keys（可选）",
@@ -247,5 +243,6 @@
   "rocketmq_ui_send_summary": "共 %1$d 条，成功 %2$d，失败 %3$d",
   "rocketmq_ui_send_close_confirm_text": "还有消息正在发送，关闭将中断剩余任务。确定关闭？",
   "rocketmq_ui_send_close_confirm_ok": "关闭",
-  "rocketmq_ui_send_service_not_ready": "服务未初始化"
+  "rocketmq_ui_send_service_not_ready": "服务未初始化",
+  "rocketmq_ui_system_object_delete_tooltip": "系统内置保留对象，不允许手动删除。"
 }

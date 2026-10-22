@@ -137,7 +137,7 @@ fun RocketMqTopicPropertiesDialog(
         footerActions = {
             // 系统主题禁止删除：按钮置灰 + Tooltip 说明（比隐藏更可发现）。
             AppTooltip(
-                tooltip = { Text(stringResource("rocketmq_ui_topic_system_delete_tooltip")) },
+                tooltip = { Text(stringResource("rocketmq_ui_system_object_delete_tooltip")) },
             ) {
                 PressableButton(
                     onClick = { deleteConfirm = true },

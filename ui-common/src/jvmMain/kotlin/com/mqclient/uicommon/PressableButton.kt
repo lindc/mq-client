@@ -67,11 +67,18 @@ fun PressableButton(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
-    // danger 优先：走 error / onError 语义色对，忽略传入的 containerColor / contentColor。
-    val resolvedContainerColor =
-        if (danger) MaterialTheme.colorScheme.error else containerColor
-    val resolvedContentColor =
-        if (danger) MaterialTheme.colorScheme.onError else contentColor
+    // 禁用优先：m3 标准 disabled 语义（底 onSurface@12% / 内容 onSurface@38%），
+    // danger 红色在禁用态必须让位（否则禁用按钮依然是高饱和红，误导可点）。
+    val resolvedContainerColor = when {
+        !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+        danger -> MaterialTheme.colorScheme.error
+        else -> containerColor
+    }
+    val resolvedContentColor = when {
+        !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+        danger -> MaterialTheme.colorScheme.onError
+        else -> contentColor
+    }
     val scale by animateFloatAsState(if (pressed) pressedScale else 1f, label = "press-scale")
     val minWidthModifier = if (standardMinWidth) {
         val density = LocalDensity.current
