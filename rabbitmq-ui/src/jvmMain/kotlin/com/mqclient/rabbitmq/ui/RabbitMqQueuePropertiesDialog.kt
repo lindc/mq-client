@@ -56,6 +56,7 @@ import com.mqclient.rabbitmq.RabbitMqModule
 import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
+import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 import kotlinx.coroutines.CancellationException
@@ -188,10 +189,8 @@ fun RabbitMqQueuePropertiesDialog(
                 Text(stringResource("rabbitmq_ui_queue_delete"))
             }
             Spacer(Modifier.weight(1f))
-            PressableButton(
+            SecondaryButton(
                 onClick = onDismiss,
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ) { Text(stringResource("common_close")) }
         },
     ) {
@@ -210,7 +209,7 @@ fun RabbitMqQueuePropertiesDialog(
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.error,
                             )
-                            TextButton(onClick = { load() }) { Text(stringResource("rabbitmq_ui_refresh")) }
+                            SecondaryButton(onClick = { load() }) { Text(stringResource("rabbitmq_ui_refresh")) }
                         }
                     }
                     is LoadState.Success -> {
@@ -267,10 +266,8 @@ fun RabbitMqQueuePropertiesDialog(
                     }
                 },
                 dismissButton = {
-                    PressableButton(
+                    SecondaryButton(
                         onClick = { purgeConfirm = false },
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     ) { Text(stringResource("common_cancel")) }
                 },
             )
@@ -293,10 +290,8 @@ fun RabbitMqQueuePropertiesDialog(
                     }
                 },
                 dismissButton = {
-                    PressableButton(
+                    SecondaryButton(
                         onClick = { deleteConfirm = false },
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     ) { Text(stringResource("common_cancel")) }
                 },
             )
@@ -568,7 +563,7 @@ private fun ConsumersPane(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.error,
                 )
-                TextButton(onClick = onRetry) { Text(stringResource("rabbitmq_ui_refresh")) }
+                SecondaryButton(onClick = onRetry) { Text(stringResource("rabbitmq_ui_refresh")) }
             }
         }
         is LoadState.Success -> {

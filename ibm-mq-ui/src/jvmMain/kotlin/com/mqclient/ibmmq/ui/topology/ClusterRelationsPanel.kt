@@ -493,7 +493,7 @@ private fun ClusterErrorView(reason: String, onRetry: () -> Unit, modifier: Modi
                 color = MaterialTheme.colorScheme.error,
             )
             Spacer(Modifier.height(12.dp))
-            androidx.compose.material3.Button(onClick = onRetry) {
+            com.mqclient.uicommon.PressableButton(onClick = onRetry) {
                 Text(stringResource("ibm_mq_cluster_relations_retry"))
             }
         }

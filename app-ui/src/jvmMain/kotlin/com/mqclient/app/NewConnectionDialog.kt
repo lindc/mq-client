@@ -48,6 +48,7 @@ import com.mqclient.core.ConnectionFormState
 import com.mqclient.core.ModuleRegistry
 import com.mqclient.core.ServiceAdapter
 import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import dev.nucleusframework.application.DecoratedDialog
 import dev.nucleusframework.application.LocalNucleusWindow
@@ -221,11 +222,9 @@ private fun HeaderBar(onClose: () -> Unit) {
             style = MaterialTheme.typography.titleLarge,
             modifier = Modifier.weight(1f),
         )
-        PressableButton(
+        SecondaryButton(
             onClick = onClose,
             standardMinWidth = false, // ✕ 是图标按钮，不套「4 字宽」标准。
-            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
         ) { Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(18.dp)) }
     }
 }
@@ -367,16 +366,12 @@ private fun DialogFooter(
         when (step) {
             NewConnectionStep.SELECT ->
                 // 点卡片即进第二步，这里只需要一个出口。
-                PressableButton(
+                SecondaryButton(
                     onClick = onClose,
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 ) { Text(stringResource("common_cancel")) }
             NewConnectionStep.CREATE -> {
-                PressableButton(
+                SecondaryButton(
                     onClick = onBack,
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 ) { Text(stringResource("common_back")) }
                 if (hasForm) {
                     Spacer(Modifier.width(8.dp))

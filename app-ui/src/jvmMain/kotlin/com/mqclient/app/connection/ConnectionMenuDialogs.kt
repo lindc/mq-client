@@ -34,6 +34,7 @@ import com.mqclient.core.CoreModule
 import com.mqclient.core.ModuleRegistry
 import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.dialog.rememberTwoThirdsScreenSize
+import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import dev.nucleusframework.application.DecoratedDialog
 import kotlinx.coroutines.launch
@@ -119,10 +120,8 @@ private fun DeleteConfirmDialog(connection: ConnectionInfo, onConfirm: () -> Uni
             }
         },
         dismissButton = {
-            PressableButton(
+            SecondaryButton(
                 onClick = onDismiss,
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ) { Text(stringResource("common_cancel")) }
         },
     )
@@ -165,10 +164,8 @@ private fun ConnectFailedDialog(failure: ConnectFailure, onRetry: () -> Unit, on
             PressableButton(onClick = onRetry) { Text(stringResource("common_retry")) }
         },
         dismissButton = {
-            PressableButton(
+            SecondaryButton(
                 onClick = onDismiss,
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ) { Text(stringResource("common_close")) }
         },
     )
@@ -251,11 +248,9 @@ internal fun ConnectionPropertiesDialog(connection: ConnectionInfo, onDismiss: (
                         style = MaterialTheme.typography.titleLarge,
                         modifier = Modifier.weight(1f),
                     )
-                    PressableButton(
+                    SecondaryButton(
                         onClick = onDismiss,
                         standardMinWidth = false,
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     ) { Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(18.dp)) }
                 }
                 HorizontalDivider()
@@ -276,10 +271,8 @@ internal fun ConnectionPropertiesDialog(connection: ConnectionInfo, onDismiss: (
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Spacer(Modifier.weight(1f))
-                    PressableButton(
+                    SecondaryButton(
                         onClick = onDismiss,
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     ) { Text(stringResource("common_close")) }
                 }
             }

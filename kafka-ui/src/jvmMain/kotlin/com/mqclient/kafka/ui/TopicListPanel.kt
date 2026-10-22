@@ -46,6 +46,7 @@ import com.mqclient.mqui.state.LoadStateContent
 import com.mqclient.uicommon.LocalAiAsk
 import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.ThemedSnackbarHost
+import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 import kotlinx.coroutines.launch
@@ -261,10 +262,8 @@ fun TopicListPanel(
                 ) { Text(stringResource("kafka_ui_topic_clear_confirm")) }
             },
             dismissButton = {
-                PressableButton(
+                SecondaryButton(
                     onClick = { clearTopic = null },
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 ) { Text(stringResource("common_cancel")) }
             },
         )

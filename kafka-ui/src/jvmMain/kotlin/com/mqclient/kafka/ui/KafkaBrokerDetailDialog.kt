@@ -31,8 +31,8 @@ import androidx.compose.ui.unit.dp
 import com.mqclient.kafka.KafkaBrokerSnapshot
 import com.mqclient.kafka.KafkaTopicSnapshot
 import com.mqclient.mqui.common.CompactSearchField
-import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
+import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 
@@ -102,10 +102,8 @@ fun KafkaBrokerDetailDialog(
         minWidth = 640.dp,
         minHeight = 420.dp,
         footerActions = {
-            PressableButton(
+            SecondaryButton(
                 onClick = onDismiss,
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ) { Text(stringResource("common_close")) }
         },
     ) {

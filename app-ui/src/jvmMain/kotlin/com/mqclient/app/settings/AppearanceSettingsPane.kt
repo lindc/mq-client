@@ -49,8 +49,8 @@ import com.mqclient.core.FONT_SYSTEM_SANS
 import com.mqclient.core.FONT_SYSTEM_SERIF
 import com.mqclient.core.ThemeConfig
 import com.mqclient.core.ThemeMode
-import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.SettingsDropdownRow
+import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -242,10 +242,8 @@ private fun ColorSeedSection(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.weight(1f),
             )
-            PressableButton(
+            SecondaryButton(
                 onClick = { onChange(Color(DEFAULT_SEED_COLOR)) },
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ) { Text(stringResource("color_reset")) }
         }
     }

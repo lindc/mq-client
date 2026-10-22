@@ -24,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mqclient.uicommon.i18n.stringResource
+import com.mqclient.uicommon.SecondaryButton
 import mq_client.app_ui.generated.resources.Res
 import mq_client.app_ui.generated.resources.ic_menu
 import org.jetbrains.compose.resources.painterResource
@@ -153,7 +154,7 @@ private fun MenuBarItem(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Box(modifier) {
-        TextButton(onClick = { onExpandChange(true) }) {
+        SecondaryButton(onClick = { onExpandChange(true) }) {
             Text(label)
         }
         DropdownMenu(

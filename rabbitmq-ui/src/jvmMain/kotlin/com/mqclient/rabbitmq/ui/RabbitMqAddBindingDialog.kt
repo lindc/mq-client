@@ -26,6 +26,7 @@ import com.mqclient.uicommon.LabeledField
 import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.SettingsDropdownRow
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
+import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 import kotlinx.coroutines.CancellationException
@@ -128,10 +129,8 @@ fun RabbitMqAddBindingDialog(
                 onClick = { submit() },
                 enabled = !submitting && candidates.isNotEmpty(),
             ) { Text(stringResource("rabbitmq_ui_binding_add_confirm")) }
-            PressableButton(
+            SecondaryButton(
                 onClick = onDismiss,
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ) { Text(stringResource("common_cancel")) }
         },
     ) {

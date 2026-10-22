@@ -36,6 +36,7 @@ import com.mqclient.ibmmq.pcf.ChannelStatusDetail
 import com.mqclient.ibmmq.ui.ChannelResetSeqnumDialog
 import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.ThemedSnackbarHost
+import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 import kotlinx.coroutines.CancellationException
@@ -141,11 +142,9 @@ internal fun ChannelRuntimeStatusPane(
                     modifier = Modifier.weight(1f),
                 )
                 Spacer(Modifier.width(12.dp))
-                PressableButton(
+                SecondaryButton(
                     onClick = { refreshTick++ },
                     standardMinWidth = false,
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -257,11 +256,9 @@ private fun RuntimeRows(
             value = metric(a.seq, detail.currentSeqNo),
             trailing = if (a.reset && detail.currentSeqNo != null) {
                 {
-                    PressableButton(
+                    SecondaryButton(
                         onClick = onResetClick,
                         standardMinWidth = false,
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     ) { Text(stringResource("ibm_mq_channel_status_prop_seq_reset")) }
                 }
             } else {

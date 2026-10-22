@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 
@@ -95,11 +96,9 @@ fun ChannelResetSeqnumDialog(
             }
         },
         dismissButton = {
-            PressableButton(
+            SecondaryButton(
                 onClick = onDismiss,
                 enabled = !executing,
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ) { Text(stringResource("common_cancel")) }
         },
     )

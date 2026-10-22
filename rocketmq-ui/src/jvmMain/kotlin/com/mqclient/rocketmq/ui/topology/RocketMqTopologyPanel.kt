@@ -35,6 +35,7 @@ import com.mqclient.rocketmq.RocketMqModule
 import com.mqclient.rocketmq.ui.ensureRocketMqConnecting
 import kotlinx.coroutines.launch
 import com.mqclient.rocketmq.ui.RocketMqTopicPropertiesDialog
+import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.rocketmq.ui.rememberRocketMqConnectionStatus
 import com.mqclient.topology.TopologyCanvas
 import com.mqclient.uicommon.command.ToolbarButton
@@ -113,7 +114,7 @@ fun RocketMqTopologyPanel(
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.error,
                     )
-                    TextButton(
+                    SecondaryButton(
                         onClick = { scope.launch { state.load() } },
                         modifier = Modifier.padding(top = 12.dp),
                     ) {

@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import com.mqclient.rocketmq.RocketMqModule
 import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
+import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -94,10 +95,8 @@ fun RocketMqCreateGroupDialog(
             PressableButton(onClick = { submit() }, enabled = !creating) {
                 Text(stringResource("rocketmq_ui_group_create_action"))
             }
-            PressableButton(
+            SecondaryButton(
                 onClick = onDismiss,
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ) { Text(stringResource("common_cancel")) }
         },
     ) {

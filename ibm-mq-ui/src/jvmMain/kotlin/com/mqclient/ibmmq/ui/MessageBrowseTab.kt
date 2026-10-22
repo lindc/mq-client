@@ -80,6 +80,7 @@ import com.mqclient.uicommon.dialog.DateTimePickerDialog
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.file.saveFileBytes
 import com.mqclient.uicommon.i18n.LanguageResources
+import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 import kotlinx.coroutines.CancellationException
@@ -437,10 +438,8 @@ private fun ConfirmDeleteMessageDialog(
             PressableButton(onClick = onConfirm, danger = true) { Text(stringResource("ibm_mq_msg_browse_delete")) }
         },
         dismissButton = {
-            PressableButton(
+            SecondaryButton(
                 onClick = onDismiss,
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ) { Text(stringResource("common_cancel")) }
         },
     )
@@ -472,11 +471,9 @@ private fun BrowseToolbar(
         )
         // 时间范围下拉（对已加载消息做本地过滤）。
         Box {
-            PressableButton(
+            SecondaryButton(
                 onClick = { menuExpanded = true },
                 standardMinWidth = false,
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ) {
                 Text(stringResource(timeRange.labelKey))
                 Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -849,10 +846,8 @@ private fun CustomTimeRangeDialog(
             }) { Text(stringResource("common_ok")) }
         },
         dismissButton = {
-            PressableButton(
+            SecondaryButton(
                 onClick = onDismiss,
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ) { Text(stringResource("common_cancel")) }
         },
     )
@@ -888,11 +883,9 @@ private fun TimeRangeRow(
             style = MaterialTheme.typography.labelLarge,
             modifier = Modifier.width(64.dp),
         )
-        PressableButton(
+        SecondaryButton(
             onClick = onPick,
             standardMinWidth = false,
-            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
         ) {
             Text(value?.format(DISPLAY_TIME_FORMATTER) ?: stringResource("ibm_mq_msg_time_not_set"))
         }

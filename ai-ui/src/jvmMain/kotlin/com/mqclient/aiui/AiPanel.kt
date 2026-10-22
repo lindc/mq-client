@@ -37,6 +37,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mqclient.uicommon.i18n.stringResource
+import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.withArg
 
 /**
@@ -109,7 +110,7 @@ fun AiPanel(
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f),
                         )
-                        TextButton(onClick = { state.dismissError() }) {
+                        SecondaryButton(onClick = { state.dismissError() }) {
                             Icon(
                                 imageVector = Icons.Default.Close,
                                 contentDescription = null,
@@ -163,7 +164,7 @@ private fun ChainAnalysisBar(chain: AiChainTarget, onClearChainTarget: () -> Uni
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            TextButton(onClick = onClearChainTarget) {
+            SecondaryButton(onClick = onClearChainTarget) {
                 Icon(
                     imageVector = Icons.Default.Close,
                     contentDescription = null,
@@ -173,7 +174,7 @@ private fun ChainAnalysisBar(chain: AiChainTarget, onClearChainTarget: () -> Uni
             }
         }
         var showContext by remember { mutableStateOf(false) }
-        TextButton(
+        SecondaryButton(
             onClick = { showContext = !showContext },
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 0.dp),
         ) {

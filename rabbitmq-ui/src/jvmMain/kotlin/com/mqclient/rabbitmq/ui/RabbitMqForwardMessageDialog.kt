@@ -30,6 +30,7 @@ import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.SettingsDropdownRow
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.ThemedSnackbarHost
+import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 import kotlinx.coroutines.CancellationException
@@ -134,10 +135,8 @@ fun RabbitMqForwardMessageDialog(
             PressableButton(onClick = { submit() }, enabled = !forwarding && destination != null) {
                 Text(stringResource("rabbitmq_ui_msg_action_forward"))
             }
-            PressableButton(
+            SecondaryButton(
                 onClick = onDismiss,
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ) { Text(stringResource("common_cancel")) }
         },
     ) {

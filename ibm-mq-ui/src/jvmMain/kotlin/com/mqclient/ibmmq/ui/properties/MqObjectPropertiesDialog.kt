@@ -17,8 +17,8 @@ import com.mqclient.ibmmq.ui.properties.content.ChannelPropertiesContent
 import com.mqclient.ibmmq.ui.properties.content.MqObjectPropertiesContent
 import com.mqclient.ibmmq.ui.topology.isLocalQueue
 import com.mqclient.uicommon.LocalAiAsk
-import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
+import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 
 /**
@@ -118,9 +118,7 @@ internal fun com.mqclient.graph.TopologyNodeType.toMqObjectType(): MqObjectType?
 
 @Composable
 private fun RowScope.FooterActionButton(label: String, onClick: () -> Unit) {
-    PressableButton(
+    SecondaryButton(
         onClick = onClick,
-        containerColor = MaterialTheme.colorScheme.surfaceVariant,
-        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
     ) { Text(label) }
 }

@@ -54,6 +54,7 @@ import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.file.pickFiles
 import com.mqclient.uicommon.CompactTextField
+import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 import java.util.Base64
@@ -307,10 +308,8 @@ fun RabbitMqSendMessageDialog(
         minHeight = 700.dp,
         maxHeight = 840.dp,
         footerActions = {
-            PressableButton(
+            SecondaryButton(
                 onClick = onDismiss,
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ) { Text(stringResource("common_close")) }
         },
     ) {
@@ -411,11 +410,9 @@ private fun SendPane(
                     textAlign = androidx.compose.ui.text.style.TextAlign.End,
                     modifier = Modifier.weight(1f),
                 )
-                PressableButton(
+                SecondaryButton(
                     onClick = state::clearBatch,
                     enabled = !state.busy && state.tasks.isNotEmpty(),
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 ) { Text(stringResource("rabbitmq_ui_send_clear")) }
             }
             Spacer(Modifier.height(4.dp))
@@ -677,11 +674,9 @@ private fun TableHeader(text: String, modifier: Modifier = Modifier) {
 
 @Composable
 private fun SmallSecondaryButton(text: String, onClick: () -> Unit) {
-    PressableButton(
+    SecondaryButton(
         onClick = onClick,
         standardMinWidth = false,
-        containerColor = MaterialTheme.colorScheme.surfaceVariant,
-        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
     ) { Text(text) }
 }
 

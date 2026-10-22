@@ -126,7 +126,7 @@ private fun ErrorView(
         }
         if (onRetry != null) {
             Spacer(Modifier.height(16.dp))
-            Button(onClick = onRetry) { Text(stringResource("common_retry")) }
+            com.mqclient.uicommon.PressableButton(onClick = onRetry) { Text(stringResource("common_retry")) }
         }
     }
 }

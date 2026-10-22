@@ -52,6 +52,7 @@ import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.dialog.DateTimePickerDialog
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.ThemedSnackbarHost
+import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 import java.time.LocalDateTime
@@ -151,10 +152,8 @@ fun KafkaGroupDetailDialog(
             }
             Spacer(Modifier.weight(1f))
             // 次级（surfaceVariant）：与各确认框取消键同款。
-            PressableButton(
+            SecondaryButton(
                 onClick = onDismiss,
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ) {
                 Text(stringResource("common_close"))
             }
@@ -185,7 +184,7 @@ fun KafkaGroupDetailDialog(
                                     color = MaterialTheme.colorScheme.error,
                                 )
                                 Spacer(Modifier.height(12.dp))
-                                TextButton(onClick = { load() }) {
+                                SecondaryButton(onClick = { load() }) {
                                     Text(stringResource("kafka_ui_refresh"))
                                 }
                             }
@@ -261,11 +260,9 @@ fun KafkaGroupDetailDialog(
                         if (mode == ResetMode.TIMESTAMP) {
                             Spacer(Modifier.height(4.dp))
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                PressableButton(
+                                SecondaryButton(
                                     onClick = { showTimePicker = true },
                                     standardMinWidth = false,
-                                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                                 ) {
                                     Text(
                                         text = pickedTime?.format(RESET_TIME_DISPLAY_FORMATTER)
@@ -320,10 +317,8 @@ fun KafkaGroupDetailDialog(
                     ) { Text(stringResource("kafka_ui_group_detail_reset_confirm")) }
                 },
                 dismissButton = {
-                    PressableButton(
+                    SecondaryButton(
                         onClick = { resetOpen = false },
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     ) { Text(stringResource("common_cancel")) }
                 },
             )
@@ -364,10 +359,8 @@ fun KafkaGroupDetailDialog(
                     ) { Text(stringResource("kafka_ui_group_detail_action_delete")) }
                 },
                 dismissButton = {
-                    PressableButton(
+                    SecondaryButton(
                         onClick = { deleteConfirm = false },
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     ) { Text(stringResource("common_cancel")) }
                 },
             )

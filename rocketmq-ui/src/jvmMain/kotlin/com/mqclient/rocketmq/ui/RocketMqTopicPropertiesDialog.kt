@@ -47,6 +47,7 @@ import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.PropertyItem
 import com.mqclient.uicommon.PropertyTableSection
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
+import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 import kotlinx.coroutines.CancellationException
@@ -141,10 +142,8 @@ fun RocketMqTopicPropertiesDialog(
                 }
             }
             Spacer(Modifier.weight(1f))
-            PressableButton(
+            SecondaryButton(
                 onClick = onDismiss,
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ) { Text(stringResource("common_close")) }
         },
     ) {
@@ -218,10 +217,8 @@ fun RocketMqTopicPropertiesDialog(
                     }
                 },
                 dismissButton = {
-                    PressableButton(
+                    SecondaryButton(
                         onClick = { deleteConfirm = false },
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     ) { Text(stringResource("common_cancel")) }
                 },
             )

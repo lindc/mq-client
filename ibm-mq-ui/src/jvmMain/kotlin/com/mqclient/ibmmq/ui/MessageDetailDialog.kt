@@ -28,7 +28,6 @@ import com.mqclient.ibmmq.messaging.MessageSummary
 import com.mqclient.ibmmq.messaging.sendExpiryTenths
 import com.mqclient.ibmmq.messaging.sendPersistence
 import com.mqclient.ibmmq.messaging.sendPriority
-import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.dialog.MessageDetailDialog
 import com.mqclient.uicommon.dialog.MessageDetailErrorView
@@ -37,6 +36,7 @@ import com.mqclient.uicommon.dialog.MessageHeaderRow
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.file.pickFile
 import com.mqclient.uicommon.file.saveFileBytes
+import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 import kotlinx.coroutines.CancellationException
@@ -280,10 +280,8 @@ private fun RowScope.FooterAction(
     enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
-    PressableButton(
+    SecondaryButton(
         onClick = onClick,
         enabled = enabled,
-        containerColor = MaterialTheme.colorScheme.surfaceVariant,
-        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
     ) { Text(label) }
 }

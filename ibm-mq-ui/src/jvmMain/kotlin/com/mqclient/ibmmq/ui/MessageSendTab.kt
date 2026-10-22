@@ -58,6 +58,7 @@ import com.mqclient.uicommon.AppTooltip
 import com.mqclient.uicommon.CompactTextField
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.file.pickFiles
+import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 import java.time.Instant
@@ -322,11 +323,9 @@ internal fun MessageSendTab(
                 )
             }
             Spacer(Modifier.weight(1f))
-            PressableButton(
+            SecondaryButton(
                 onClick = state::clear,
                 enabled = state.tasks.isNotEmpty(),
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ) { Text(stringResource("ibm_mq_msg_send_clear")) }
         }
         HorizontalDivider()
@@ -499,11 +498,9 @@ private fun DropdownSelector(
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box {
-        PressableButton(
+        SecondaryButton(
             onClick = { expanded = true },
             standardMinWidth = false,
-            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
         ) {
             Text(selected)
             Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -635,11 +632,9 @@ private fun StatusText(text: String) {
 
 @Composable
 private fun SmallSecondaryButton(text: String, onClick: () -> Unit) {
-    PressableButton(
+    SecondaryButton(
         onClick = onClick,
         standardMinWidth = false,
-        containerColor = MaterialTheme.colorScheme.surfaceVariant,
-        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
     ) { Text(text) }
 }
 
@@ -744,10 +739,8 @@ internal fun ConfirmCloseWhileSendingDialog(
             PressableButton(onClick = onConfirm) { Text(stringResource("common_ok")) }
         },
         dismissButton = {
-            PressableButton(
+            SecondaryButton(
                 onClick = onDismiss,
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ) { Text(stringResource("common_cancel")) }
         },
     )

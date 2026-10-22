@@ -40,6 +40,8 @@ import com.mqclient.kafka.KafkaEvents
 import com.mqclient.kafka.KafkaModule
 import com.mqclient.kafka.ui.rememberKafkaConnectionStatus
 import com.mqclient.mqui.state.LoadState
+import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 
@@ -103,7 +105,7 @@ fun KafkaClusterOverviewPanel(
                         color = MaterialTheme.colorScheme.error,
                     )
                     Spacer(Modifier.height(12.dp))
-                    Button(onClick = { state.retry() }) {
+                    PressableButton(onClick = { state.retry() }) {
                         Text(stringResource("kafka_ui_refresh"))
                     }
                 }
@@ -143,7 +145,7 @@ private fun ClusterOverviewPane(
                     style = MaterialTheme.typography.titleSmall,
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = { KafkaModule.scanNow(connectionId) }) {
+                SecondaryButton(onClick = { KafkaModule.scanNow(connectionId) }) {
                     Text(stringResource("kafka_ui_refresh"))
                 }
             }

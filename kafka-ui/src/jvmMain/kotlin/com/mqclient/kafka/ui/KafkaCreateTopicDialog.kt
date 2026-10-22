@@ -24,6 +24,7 @@ import com.mqclient.kafka.KafkaModule
 import com.mqclient.uicommon.LabeledField
 import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
+import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import kotlinx.coroutines.launch
 
@@ -106,10 +107,8 @@ fun KafkaCreateTopicDialog(
                 onClick = { submit() },
                 enabled = !submitting,
             ) { Text(stringResource("kafka_ui_topic_create_confirm")) }
-            PressableButton(
+            SecondaryButton(
                 onClick = onDismiss,
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ) { Text(stringResource("common_cancel")) }
         },
     ) {

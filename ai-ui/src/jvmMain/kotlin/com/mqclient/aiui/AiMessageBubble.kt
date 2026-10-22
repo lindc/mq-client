@@ -2,6 +2,7 @@ package com.mqclient.aiui
 
 import androidx.compose.foundation.background
 import com.mqclient.uicommon.i18n.stringResource
+import com.mqclient.uicommon.SecondaryButton
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -109,7 +110,7 @@ private fun BubbleActions(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        TextButton(
+        SecondaryButton(
             onClick = { clipboard.setText(AnnotatedString(content)) },
             contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
         ) {
@@ -121,7 +122,7 @@ private fun BubbleActions(
             Spacer(Modifier.width(4.dp))
             Text(stringResource("ai_message_copy"), style = MaterialTheme.typography.labelSmall)
         }
-        TextButton(
+        SecondaryButton(
             onClick = { onFeedback(if (feedback == true) null else true) },
             contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
         ) {
@@ -135,7 +136,7 @@ private fun BubbleActions(
             Spacer(Modifier.width(4.dp))
             Text(stringResource("ai_message_helpful"), style = MaterialTheme.typography.labelSmall)
         }
-        TextButton(
+        SecondaryButton(
             onClick = { onFeedback(if (feedback == false) null else false) },
             contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
         ) {

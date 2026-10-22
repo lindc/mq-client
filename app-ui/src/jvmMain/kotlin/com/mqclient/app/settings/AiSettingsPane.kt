@@ -50,6 +50,7 @@ import com.mqclient.openai.ui.openAiIcon
 import com.mqclient.uicommon.LabeledField
 import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.SettingsDropdownRow
+import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import kotlinx.coroutines.launch
 
@@ -401,7 +402,7 @@ private fun ConnectionCard(
         Spacer(Modifier.height(12.dp))
 
         Row(verticalAlignment = Alignment.CenterVertically) {
-            PressableButton(
+            SecondaryButton(
                 onClick = {
                     testing = true
                     testOutcome = null
@@ -423,8 +424,6 @@ private fun ConnectionCard(
                     }
                 },
                 enabled = !testing,
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ) {
                 Text(if (testing) stringResource("ai_testing") else stringResource("conn_test_connection"))
             }

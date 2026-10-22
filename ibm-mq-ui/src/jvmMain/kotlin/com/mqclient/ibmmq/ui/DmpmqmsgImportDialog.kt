@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import com.mqclient.ibmmq.messaging.DmpmqmsgMessage
 import com.mqclient.message.interpreter.MessageCharsets
 import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 
@@ -123,11 +124,9 @@ fun DmpmqmsgImportDialog(
             }
         },
         dismissButton = {
-            PressableButton(
+            SecondaryButton(
                 onClick = onDismiss,
                 enabled = !executing,
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ) { Text(stringResource("common_cancel")) }
         },
     )
@@ -211,11 +210,9 @@ fun DmpmqmsgFallbackDialog(
             }
         },
         dismissButton = {
-            PressableButton(
+            SecondaryButton(
                 onClick = onDismiss,
                 enabled = !executing,
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ) { Text(stringResource("common_cancel")) }
         },
     )

@@ -49,6 +49,7 @@ import com.mqclient.rocketmq.RocketMqProgressState
 import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.PropertyItem
 import com.mqclient.uicommon.PropertyTableSection
+import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
@@ -141,10 +142,8 @@ fun RocketMqGroupPropertiesDialog(
                 }
             }
             Spacer(Modifier.weight(1f))
-            PressableButton(
+            SecondaryButton(
                 onClick = onDismiss,
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ) { Text(stringResource("common_close")) }
         },
     ) {
@@ -217,10 +216,8 @@ fun RocketMqGroupPropertiesDialog(
                         }
                     },
                     dismissButton = {
-                        PressableButton(
+                        SecondaryButton(
                             onClick = { if (!deleting) deleteConfirm = false },
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                         ) { Text(stringResource("common_cancel")) }
                     },
                 )
@@ -418,7 +415,7 @@ private fun ProgressWarningBanner(
                     },
                 )
                 Spacer(Modifier.height(6.dp))
-                TextButton(onClick = onRetry) {
+                SecondaryButton(onClick = onRetry) {
                     Text(stringResource("common_retry"))
                 }
             }

@@ -70,6 +70,7 @@ import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.dialog.DateTimePickerDialog
 import com.mqclient.uicommon.file.saveFileBytes
+import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 import java.time.Instant
@@ -505,11 +506,9 @@ private fun StartSelectorRow(
                 enabled = selectedPartition >= 0,
             )
             StartMode.TIMESTAMP -> {
-                PressableButton(
+                SecondaryButton(
                     onClick = onPickTime,
                     standardMinWidth = false,
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 ) {
                     Text(pickedTime?.format(DISPLAY_TIME_FORMATTER) ?: stringResource("kafka_ui_msg_browse_start_time_hint"))
                 }
@@ -546,11 +545,9 @@ private fun <T> DropdownButton(
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box {
-        PressableButton(
+        SecondaryButton(
             onClick = { expanded = true },
             standardMinWidth = false,
-            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
         ) {
             Text(selected)
             Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp))

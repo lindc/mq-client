@@ -11,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 
 /**
@@ -45,10 +46,8 @@ fun SaveAnywayDialog(
             PressableButton(onClick = onSave) { Text(stringResource("common_save")) }
         },
         dismissButton = {
-            PressableButton(
+            SecondaryButton(
                 onClick = onCancel,
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ) { Text(stringResource("common_cancel")) }
         },
     )

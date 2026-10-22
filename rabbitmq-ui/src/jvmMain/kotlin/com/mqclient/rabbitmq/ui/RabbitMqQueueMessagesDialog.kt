@@ -59,6 +59,7 @@ import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.file.pickFiles
+import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 import java.util.UUID
@@ -307,10 +308,8 @@ fun RabbitMqQueueMessagesDialog(
         minHeight = 580.dp,
         footerActions = {
             Spacer(Modifier.weight(1f))
-            PressableButton(
+            SecondaryButton(
                 onClick = onDismiss,
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ) { Text(stringResource("common_close")) }
         },
     ) {
@@ -425,17 +424,13 @@ private fun BrowsePane(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             PressableButton(onClick = onFetch, enabled = !fetching) { Text(stringResource("rabbitmq_ui_msg_fetch")) }
-            PressableButton(
+            SecondaryButton(
                 onClick = onRefresh,
                 enabled = !fetching,
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ) { Text(stringResource("rabbitmq_ui_msg_refetch")) }
-            PressableButton(
+            SecondaryButton(
                 onClick = onForwardAll,
                 enabled = !fetching && messages.isNotEmpty(),
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ) { Text(stringResource("rabbitmq_ui_msg_forward_all")) }
             OutlinedTextField(
                 value = limit,
@@ -622,18 +617,14 @@ private fun SendPane(
                     Box(modifier = Modifier.width(72.dp)) {
                         when {
                             task.status == BatchStatus.WAITING && !busy ->
-                                PressableButton(
+                                SecondaryButton(
                                     onClick = { onRemoveTask(task.id) },
                                     standardMinWidth = false,
-                                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                                 ) { Text(stringResource("rabbitmq_ui_send_remove")) }
                             task.status == BatchStatus.FAILED && !busy ->
-                                PressableButton(
+                                SecondaryButton(
                                     onClick = { onRetryTask(task) },
                                     standardMinWidth = false,
-                                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                                 ) { Text(stringResource("rabbitmq_ui_send_retry")) }
                         }
                     }
@@ -668,7 +659,7 @@ private fun SendPane(
 /** 「重试」文本按钮（会话失败态）。 */
 @Composable
 private fun TextButtonCompat(onClick: () -> Unit) {
-    androidx.compose.material3.TextButton(onClick = onClick) {
+    SecondaryButton(onClick = onClick) {
         Text(stringResource("rabbitmq_ui_refresh"))
     }
 }

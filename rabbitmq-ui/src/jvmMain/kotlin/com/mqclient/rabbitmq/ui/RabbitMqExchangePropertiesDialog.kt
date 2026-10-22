@@ -42,6 +42,7 @@ import com.mqclient.rabbitmq.RabbitMqBindingSnapshot
 import com.mqclient.rabbitmq.RabbitMqModule
 import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
+import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 import kotlinx.coroutines.CancellationException
@@ -160,10 +161,8 @@ fun RabbitMqExchangePropertiesDialog(
                 }
             }
             Spacer(Modifier.weight(1f))
-            PressableButton(
+            SecondaryButton(
                 onClick = onDismiss,
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ) { Text(stringResource("common_close")) }
         },
     ) {
@@ -228,7 +227,7 @@ fun RabbitMqExchangePropertiesDialog(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error,
                         )
-                        TextButton(onClick = { load() }) { Text(stringResource("rabbitmq_ui_refresh")) }
+                        SecondaryButton(onClick = { load() }) { Text(stringResource("rabbitmq_ui_refresh")) }
                     }
                 }
                 is LoadState.Success<List<RabbitMqBindingSnapshot>> -> {
@@ -281,10 +280,8 @@ fun RabbitMqExchangePropertiesDialog(
                     }
                 },
                 dismissButton = {
-                    PressableButton(
+                    SecondaryButton(
                         onClick = { exchangeDeleteConfirm = false },
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     ) { Text(stringResource("common_cancel")) }
                 },
             )
@@ -310,10 +307,8 @@ fun RabbitMqExchangePropertiesDialog(
                     ) { Text(stringResource("rabbitmq_ui_exchange_delete_confirm")) }
                 },
                 dismissButton = {
-                    PressableButton(
+                    SecondaryButton(
                         onClick = { deleteConfirm = null },
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     ) { Text(stringResource("common_cancel")) }
                 },
             )

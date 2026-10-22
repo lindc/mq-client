@@ -27,6 +27,7 @@ import com.mqclient.ibmmq.IbmMQModule
 import com.mqclient.ibmmq.pcf.MqObjectSnapshot
 import com.mqclient.ibmmq.ui.properties.content.PropertyGroupsPane
 import com.mqclient.ibmmq.ui.properties.resolveQmgrPropertyGroups
+import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.i18n.stringResource
 import kotlinx.coroutines.CancellationException
 
@@ -116,6 +117,6 @@ private fun ErrorState(message: String, onRetry: () -> Unit, modifier: Modifier 
             textAlign = TextAlign.Center,
         )
         Spacer(Modifier.padding(vertical = 8.dp))
-        Button(onClick = onRetry) { Text(stringResource("common_retry")) }
+        PressableButton(onClick = onRetry) { Text(stringResource("common_retry")) }
     }
 }

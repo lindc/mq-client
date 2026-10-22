@@ -62,6 +62,7 @@ import com.mqclient.rocketmq.RocketMqMessage
 import com.mqclient.rocketmq.RocketMqModule
 import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.ThemedSnackbarHost
+import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 import java.time.Instant
@@ -443,11 +444,9 @@ private fun QueueDropdown(
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box {
-        PressableButton(
+        SecondaryButton(
             onClick = { expanded = true },
             standardMinWidth = false,
-            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
         ) {
             Text(stringResource("rocketmq_ui_msg_browse_queue").withArg(selected))
             Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp))

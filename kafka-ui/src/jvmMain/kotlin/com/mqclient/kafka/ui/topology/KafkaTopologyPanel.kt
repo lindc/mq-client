@@ -41,6 +41,7 @@ import com.mqclient.kafka.ui.rememberKafkaConnectionStatus
 import com.mqclient.mqui.state.LoadState
 import com.mqclient.uicommon.command.ToolbarButton
 import com.mqclient.topology.TopologyCanvas
+import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 import kotlinx.coroutines.launch
@@ -150,7 +151,7 @@ fun KafkaTopologyPanel(
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.error,
                     )
-                    TextButton(
+                    SecondaryButton(
                         onClick = { scope.launch { state.load() } },
                         modifier = Modifier.padding(top = 12.dp),
                     ) {

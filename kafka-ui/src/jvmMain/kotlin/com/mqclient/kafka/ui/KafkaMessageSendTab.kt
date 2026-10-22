@@ -58,6 +58,7 @@ import com.mqclient.uicommon.dialog.HeaderDraft
 import com.mqclient.uicommon.dialog.HeadersEditor
 import com.mqclient.uicommon.file.pickFile
 import com.mqclient.uicommon.file.pickFiles
+import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 import java.time.Instant
@@ -345,11 +346,9 @@ internal fun KafkaMessageSendTab(
                 )
             }
             Spacer(Modifier.weight(1f))
-            PressableButton(
+            SecondaryButton(
                 onClick = state::clear,
                 enabled = state.tasks.isNotEmpty(),
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ) { Text(stringResource("kafka_ui_send_clear")) }
         }
         HorizontalDivider()
@@ -451,7 +450,7 @@ private fun SingleSendPane(state: KafkaSendMessagesState) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.weight(1f))
-            PressableButton(
+            SecondaryButton(
                 onClick = {
                     // 「从文件加载」：选文件读字节进编辑缓冲（大文件同样截断预览）。
                     scope.launch {
@@ -464,8 +463,6 @@ private fun SingleSendPane(state: KafkaSendMessagesState) {
                     }
                 },
                 standardMinWidth = false,
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ) { Text(stringResource("kafka_ui_send_load_file")) }
         }
         OutlinedTextField(
@@ -632,11 +629,9 @@ private fun StatusText(text: String) {
 
 @Composable
 private fun SmallSecondaryButton(text: String, onClick: () -> Unit) {
-    PressableButton(
+    SecondaryButton(
         onClick = onClick,
         standardMinWidth = false,
-        containerColor = MaterialTheme.colorScheme.surfaceVariant,
-        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
     ) { Text(text) }
 }
 

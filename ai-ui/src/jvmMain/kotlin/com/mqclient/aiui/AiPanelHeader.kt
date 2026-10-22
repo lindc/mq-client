@@ -32,6 +32,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.mqclient.core.AiConnection
 import com.mqclient.uicommon.i18n.stringResource
+import com.mqclient.uicommon.SecondaryButton
 
 /**
  * Header band: title + provider dropdown + close, plus a single info row
@@ -85,7 +86,7 @@ fun AiPanelHeader(
                 activeConnectionId = activeConnectionId,
                 onConnectionSelected = onConnectionSelected,
             )
-            TextButton(onClick = onDismiss) {
+            SecondaryButton(onClick = onDismiss) {
                 Icon(
                     imageVector = Icons.Default.Close,
                     contentDescription = null,
@@ -114,7 +115,7 @@ private fun ConnectionDropdownButton(
     var expanded by remember { mutableStateOf(false) }
     val activeLabel = connections.firstOrNull { it.id == activeConnectionId }?.name
         ?: if (connections.isEmpty()) stringResource("ai_no_connections") else stringResource("ai_connection_pick")
-    TextButton(onClick = { expanded = true }) {
+    SecondaryButton(onClick = { expanded = true }) {
         Text(activeLabel, style = MaterialTheme.typography.labelLarge)
         Text(" ▼", style = MaterialTheme.typography.labelLarge)
     }

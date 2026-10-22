@@ -49,6 +49,7 @@ import androidx.compose.ui.window.rememberDialogState
 import com.mqclient.core.Config
 import dev.nucleusframework.application.LocalNucleusWindow
 import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import dev.nucleusframework.application.DecoratedDialog
 import dev.nucleusframework.window.windowDragArea
@@ -168,10 +169,8 @@ fun SettingsDialog(
                 },
                 dismissButton = {
                     Row {
-                        PressableButton(
+                        SecondaryButton(
                             onClick = closeGuard::keepEditing,
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                         ) { Text(stringResource("settings_unsaved_keep")) }
                         Spacer(Modifier.width(8.dp))
                         PressableButton(
@@ -208,11 +207,9 @@ private fun HeaderBar(selectedTab: SettingsTab, onClose: () -> Unit) {
             style = MaterialTheme.typography.titleLarge,
             modifier = Modifier.weight(1f),
         )
-        PressableButton(
+        SecondaryButton(
             onClick = onClose,
             standardMinWidth = false, // ✕ 是图标按钮，不套「4 字宽」标准。
-            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
         ) { Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(18.dp)) }
     }
 }
@@ -334,10 +331,8 @@ private fun FooterActions(
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            PressableButton(
+            SecondaryButton(
                 onClick = onCancel,
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ) { Text(stringResource("common_cancel")) }
             Spacer(Modifier.width(8.dp))
             PressableButton(onClick = onSave) { Text(stringResource("common_save")) }
