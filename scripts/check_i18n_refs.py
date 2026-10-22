@@ -4,28 +4,44 @@
 编译和单测抓不到下面这些 —— 它们都不报错，只是界面上直接显示 key 字符串或原始数字：
 
   1. **静态引用漏改** —— key 改了名但调用点没跟着改；
-  2. **运行时拼接的键查不到**，共三条拼法：
+  2. **运行时拼接的键查不到**，共三条拼法（IBM MQ 属性表专有）：
      - `valueConstMap` 常量名 → 策展键 `queue_value_*` → 兜底键 `<CONST>.title`
      - DM 枚举归属 `MqAttributeDisplay.constNameFor` → `<CONST>.title`
        （队列 / 队列管理器先走这条，命中即遮蔽 `valuePrefix`）
      - `valuePrefix` → `MqAttributeNameMapper.lookupName` 反射 jar → `<CONST>.title`
 
-表：ibm_mq 模块表 + ibm_mq_attrs 属性名表 + ui-common 公共表。
-后端常量名的解析链必须与 ObjectPropertiesResolver / QueuePropertyGroups 保持一致
-（见 CURATED_PREFIXES 与 SHADOWING_FILES）。
+**扫描范围是全仓**：所有模块的 `src/` 下的 `.kt` 与各模块 `composeResources/files/i18n/
+*_<lang>.json` 都参与（此前只扫 ibm-mq-ui / ibm-mq-service，Kafka / RabbitMQ /
+RocketMQ / app-ui / ui-common / topology-ui 里的键写错只会在界面上冒出裸 key）。
+
+IBM MQ 的三条运行时拼接路径仍限定在 ibm-mq 的两个源码根（常量名的解析链必须与
+ObjectPropertiesResolver / QueuePropertyGroups 保持一致，见 CURATED_PREFIXES 与
+SHADOWING_FILES）。
 """
+import glob
 import json
 import os
 import re
 import sys
 
 LANG = sys.argv[1] if len(sys.argv) > 1 else "zh-CN"
-MODULE_TABLE = "ibm-mq-ui/src/commonMain/composeResources/files/i18n/ibm_mq_%s.json" % LANG
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 COMMON_TABLE = "ui-common/src/commonMain/composeResources/files/i18n/strings_%s.json" % LANG
-# 属性名表：`MQXXX.title` 全在这儿（脚本从 MQ Explorer 生成，手工写的键别放进去）
-ATTRS_TABLE = "ibm-mq-ui/src/commonMain/composeResources/files/i18n/ibm_mq_attrs_%s.json" % LANG
-# 两个源码根都要扫：导航项的 titleKey 住在 ibm-mq-service，而不是 -ui。
-KT_ROOTS = ["ibm-mq-ui/src", "ibm-mq-service/src"]
+
+# 静态引用 + 键表的扫描范围：仓库根下每个模块的 src/（跳过 build 产物）。
+SCAN_ROOTS = sorted(
+    os.path.join(REPO, path, "src")
+    for path in os.listdir(REPO)
+    if os.path.isdir(os.path.join(REPO, path, "src"))
+)
+
+# 所有模块私有表 + 公共表 + 属性名表（合成一张「已知键」集合）。
+TABLE_FILES = sorted(
+    glob.glob(os.path.join(REPO, "*", "src", "*", "composeResources", "files", "i18n", "*_%s.json" % LANG))
+)
+
+# IBM MQ 运行时拼接路径的扫描根（常量名解析链只在这里成立）。
+KT_ROOTS = [os.path.join(REPO, p) for p in ("ibm-mq-ui/src", "ibm-mq-service/src")]
 
 # 静态引用点：直接调用 + 属性组数据里的键字段 + 卡片操作 tooltip 等
 # 注意别收 `label = "..."`：Compose 的 rememberInfiniteTransition(label=) /
@@ -37,9 +53,29 @@ PATTERNS = [
 # 属性名表（ibm_mq_attrs_*.json）的键：`MQXXX.title`，常量名自带命名空间，豁免
 ATTR_KEY = re.compile(r"^(MQ[A-Z0-9_]+)\.title$")
 
-module = set(json.load(open(MODULE_TABLE, encoding="utf-8")))
-common = set(json.load(open(COMMON_TABLE, encoding="utf-8")))
-attrs = set(json.load(open(ATTRS_TABLE, encoding="utf-8")))
+# 键的合法形状：小写字母 / 数字 / 下划线 / 点。
+# 用于滤掉两类误报：KDoc 里举例的 `stringResource("…")`（省略号不是 ASCII），
+# 以及拼接表达式漏进正则的碎片。
+KEY_SHAPE = re.compile(r"^[a-z0-9][a-z0-9_.]*$")
+
+# 测试源集不复扫：测试**故意**引用不存在的键（验证回落语义），
+# 例如 ModuleI18nMergeTest 的 nav_not_a_real_key / LanguageResourcesTest 的
+# some_missing_key。把它们算进覆盖率只会逼着往表里加假键。
+TEST_DIR_NAMES = {"jvmTest", "commonTest", "jvmMainTest"}
+
+
+def is_test_source(path, root):
+    parts = os.path.relpath(path, root).split(os.sep)
+    return any(part in TEST_DIR_NAMES for part in parts)
+
+module = set()
+for table_file in TABLE_FILES:
+    module.update(json.load(open(table_file, encoding="utf-8")))
+common = set(json.load(open(os.path.join(REPO, COMMON_TABLE), encoding="utf-8")))
+attrs = set()
+for table_file in TABLE_FILES:
+    if "ibm_mq_attrs" in table_file:
+        attrs.update(json.load(open(table_file, encoding="utf-8")))
 
 # 命名空间规则：模块表里**不得**出现「加了前缀的常量名键」（如 ibm_mq_MQXXX.title）。
 # 这类键按常量名在运行时拼出来（valueConstMap → `<CONST>.title`），加前缀就再也查不到 ——
@@ -52,17 +88,21 @@ if misprefixed:
     sys.exit(1)
 
 referenced = {}
-for kt_root in KT_ROOTS:
+for kt_root in SCAN_ROOTS:
     for root, _, names in os.walk(kt_root):
         for name in names:
             if not name.endswith(".kt"):
                 continue
             path = os.path.join(root, name)
+            if is_test_source(path, kt_root):
+                continue
             text = open(path, encoding="utf-8").read()
             for pattern in PATTERNS:
                 for match in pattern.finditer(text):
                     key = match.groups()[-1]
-                    referenced.setdefault(key, []).append(path)
+                    if not KEY_SHAPE.match(key):
+                        continue
+                    referenced.setdefault(key, []).append(os.path.relpath(path, REPO))
 
 unresolved = {}
 exempt = 0
@@ -136,7 +176,7 @@ CONST_LITERAL = re.compile(r'"(MQ[A-Z0-9_]+)"')
 
 enum_by_attr = {}
 for enum_path in ENUM_TABLES:
-    for attr, members in ENUM_ENTRY.findall(open(enum_path, encoding="utf-8").read()):
+    for attr, members in ENUM_ENTRY.findall(open(os.path.join(REPO, enum_path), encoding="utf-8").read()):
         enum_by_attr.setdefault(attr, []).extend(CONST_LITERAL.findall(members))
 
 enum_consts = {name for members in enum_by_attr.values() for name in members}

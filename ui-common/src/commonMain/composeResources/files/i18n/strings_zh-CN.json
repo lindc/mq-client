@@ -141,6 +141,8 @@
   "qmgr_error_module_unavailable": "IBM MQ 模块未初始化",
   "qmgr_load_failed": "查询失败：%1$s",
   "common_coming_soon": "功能开发中...",
+  "common_select_connection": "请从左侧栏选择一个连接",
+  "module_ui_missing": "模块界面未就绪（%1$s），请检查该模块是否已启用",
   "console_execute": "执行",
   "console_cancel": "取消",
   "console_clear": "清空",
