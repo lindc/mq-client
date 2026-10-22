@@ -33,6 +33,8 @@ object CommandAudit {
         response: String?,
         requestTime: Long,
         responseTime: Long,
+        /** 底层协议的数字原因码（如 RocketMQ 17/29）；无数字码的模块不传。 */
+        reasonCode: String? = null,
     ) {
         val bus = CoreModule.eventBusOrNull ?: return
         runCatching {
@@ -44,8 +46,7 @@ object CommandAudit {
                     "command" to command,
                     "response" to response,
                     "status" to status,
-                    // Kafka / RabbitMQ 没有数字原因码；错误详情进 response。
-                    "reasonCode" to null,
+                    reasonCode?.let { "reasonCode" to it } ?: ("reasonCode" to null),
                     "requestTime" to requestTime,
                     "responseTime" to responseTime,
                     "durationMs" to responseTime - requestTime,

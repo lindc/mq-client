@@ -2,6 +2,7 @@ package com.mqclient.rocketmq
 
 import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ConnectionStore
+import com.mqclient.core.db.CommandAudit
 import com.mqclient.core.cache.CacheManager
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.emit
@@ -67,6 +68,49 @@ class RocketMqScanService(private val context: ServiceContext) {
     }
 
     /** 同一模块内多次扫描串行执行，避免重叠扫描互相覆盖结果。 */
+    /**
+     * 写操作审计包裹（照 RabbitMQ 的 audited 模板 + RocketMQ 特有的数字原因码）：
+     * 计时 → 执行 → 成功 / 失败各发一条 core.mq.command.executed（CommandAudit
+     * 内部 runCatching，审计失败不影响本操作）。失败提取 MQClientException /
+     * MQBrokerException 的 responseCode 进 reasonCode 列（17 / 29 等），错误详情进
+     * response，随后重抛让 UI 层弹错误框。读操作 / 现查不经此包裹；用户取消确认框
+     * 时根本不会走到这里。
+     */
+    private suspend fun <T> audited(
+        connectionId: String,
+        command: String,
+        block: suspend () -> T,
+    ): T {
+        val start = System.currentTimeMillis()
+        return try {
+            val result = block()
+            CommandAudit.emit(
+                connectionId = connectionId,
+                command = command,
+                status = "SUCCESS",
+                response = null,
+                requestTime = start,
+                responseTime = System.currentTimeMillis(),
+            )
+            result
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            val code = (e as? MQClientException)?.responseCode
+                ?: (e as? MQBrokerException)?.responseCode
+            CommandAudit.emit(
+                connectionId = connectionId,
+                command = command,
+                status = "FAILED",
+                response = CommandAudit.describeError(e),
+                requestTime = start,
+                responseTime = System.currentTimeMillis(),
+                reasonCode = code?.toString(),
+            )
+            throw e
+        }
+    }
+
     private val scanLock = Mutex()
 
 
@@ -341,7 +385,9 @@ class RocketMqScanService(private val context: ServiceContext) {
     ) {
         val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
         val admin = ctx.adminClient ?: throw IllegalStateException("未连接")
-        withContext(Dispatchers.IO) { admin.createTopic(topicName, readQueues, writeQueues, perm) }
+        audited(connectionId, "CREATE TOPIC $topicName (read: $readQueues, write: $writeQueues, perm: $perm)") {
+            withContext(Dispatchers.IO) { admin.createTopic(topicName, readQueues, writeQueues, perm) }
+        }
         rocketMqLog.info(
             "topic created: connection=$connectionId topic=$topicName read=$readQueues write=$writeQueues perm=$perm",
         )
@@ -357,7 +403,9 @@ class RocketMqScanService(private val context: ServiceContext) {
     suspend fun createConsumerGroup(connectionId: String, groupName: String, orderly: Boolean) {
         val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
         val admin = ctx.adminClient ?: throw IllegalStateException("未连接")
-        withContext(Dispatchers.IO) { admin.createSubscriptionGroup(groupName.trim(), orderly) }
+        audited(connectionId, "CREATE GROUP " + groupName.trim() + orderly.takeIf { it }?.let { " [orderly]" }.orEmpty()) {
+            withContext(Dispatchers.IO) { admin.createSubscriptionGroup(groupName.trim(), orderly) }
+        }
         rocketMqLog.info(
             "consumer group created: connection=$connectionId group=$groupName orderly=$orderly",
         )
@@ -371,7 +419,9 @@ class RocketMqScanService(private val context: ServiceContext) {
     suspend fun deleteConsumerGroup(connectionId: String, group: String) {
         val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
         val admin = ctx.adminClient ?: throw IllegalStateException("未连接")
-        withContext(Dispatchers.IO) { admin.deleteSubscriptionGroup(group) }
+        audited(connectionId, "DELETE GROUP $group") {
+            withContext(Dispatchers.IO) { admin.deleteSubscriptionGroup(group) }
+        }
         ctx.cache?.let { cache ->
             cache.getAs<List<RocketMqGroupSnapshot>>(KEY_GROUPS).orEmpty()
                 .filter { it.name != group }
@@ -417,9 +467,9 @@ class RocketMqScanService(private val context: ServiceContext) {
         }
         val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
         val admin = ctx.adminClient ?: throw IllegalStateException("未连接")
-        // 命令历史审计：RocketMQ 阶段 1 未接入（与 kafka/rabbitmq 的 audited 同款，
-        // 后续按 f25cc1a 的 CommandAudit 模式补）。
-        withContext(Dispatchers.IO) { admin.deleteTopic(topic) }
+        audited(connectionId, "DELETE TOPIC $topic") {
+            withContext(Dispatchers.IO) { admin.deleteTopic(topic) }
+        }
         // 缓存剪除 + 事件驱动刷新（与 RabbitMQ 的 deleteExchange 同一模式）。
         ctx.cache?.let { cache ->
             cache.getAs<List<RocketMqTopicSnapshot>>(KEY_TOPICS).orEmpty()
