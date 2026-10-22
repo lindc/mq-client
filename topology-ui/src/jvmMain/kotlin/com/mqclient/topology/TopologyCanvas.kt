@@ -167,6 +167,8 @@ fun TopologyCanvas(
                         displayName = displayName,
                         scale = TOPOLOGY_EXPORT_DEFAULT_SCALE,
                         background = Color.White,
+                        // 与屏幕同一份按边定制（Kafka 副本虚线边等），否则导出图与界面不一致。
+                        edgeCustomize = edgeCustomize,
                     )
                 }
                 val suggested = "topology-${LocalDateTime.now().format(exportFileStamp)}.png"

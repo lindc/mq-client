@@ -7,6 +7,7 @@ import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import java.io.ByteArrayInputStream
 import javax.imageio.ImageIO
+import kotlin.test.assertFailsWith
 import com.dk.kuiver.model.Kuiver
 import com.dk.kuiver.model.KuiverEdge
 import com.dk.kuiver.model.KuiverNode
@@ -127,5 +128,51 @@ class TopologyImageExportTest {
             }
         }
         assertTrue(nonWhite > 0, "render produced a blank image")
+    }
+
+    /**
+     * 锚点盲区：边带 `fromAnchor` / `toAnchor` 时导出必须**直接失败**。
+     *
+     * 锚点位置在图库组合期注册进 internal 的 AnchorRegistry，离屏场景读不到 ——
+     * 静默降级到几何端点会画出一条「看起来正常、接点却错了」的边。
+     */
+    @Test
+    fun `render - 带锚点的边拒绝导出 - 不静默画错接点`() {
+        val anchored = buildKuiver {
+            addNode(KuiverNode("A", NodeDimensions(CARD_WIDTH.dp, CARD_HEIGHT.dp), DpOffset(0.dp, 0.dp)))
+            addNode(KuiverNode("B", NodeDimensions(CARD_WIDTH.dp, CARD_HEIGHT.dp), DpOffset(200.dp, 0.dp)))
+            addEdge(KuiverEdge(fromId = "A", toId = "B", fromAnchor = "right", toAnchor = "left"))
+        }
+
+        val error = assertFailsWith<IllegalStateException> {
+            renderTopologyPng(
+                graph = anchored,
+                nodeTypes = mapOf("A" to TopologyNodeType.LOCAL_QUEUE, "B" to TopologyNodeType.CHANNEL),
+                fallbackType = TopologyNodeType.LOCAL_QUEUE,
+                theme = theme(),
+                scale = 1f,
+            )
+        }
+        // 错误信息要能让用户/开发者知道是锚点导致的，而不是「导出坏了」。
+        assertTrue(error.message?.contains("KuiverAnchor") == true, "实际文案：${error.message}")
+        assertTrue(error.message?.contains("A → B") == true, "应指出具体边：${error.message}")
+    }
+
+    @Test
+    fun `render - edgeCustomize 传入的定制被真正应用`() {
+        var invoked = 0
+        renderTopologyPng(
+            graph = graph(),
+            nodeTypes = mapOf("A" to TopologyNodeType.LOCAL_QUEUE, "B" to TopologyNodeType.CHANNEL),
+            fallbackType = TopologyNodeType.LOCAL_QUEUE,
+            theme = theme(),
+            scale = 1f,
+            // 与 TopologyCanvas 的 edgeCustomize 同名同义：面板的按边定制必须进导出图。
+            edgeCustomize = { _, base ->
+                invoked++
+                base.copy(dashed = true)
+            },
+        )
+        assertEquals(1, invoked, "图里有 1 条边，edgeCustomize 应被调用一次")
     }
 }

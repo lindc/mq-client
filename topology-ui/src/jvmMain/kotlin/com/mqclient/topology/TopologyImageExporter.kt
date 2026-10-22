@@ -123,6 +123,11 @@ class TopologyExportImage(
  * @param scale 期望倍率；超过安全上限时自动降低，实际值见结果。
  * @param padding 逻辑包围盒内边距。
  * @param background 背景色；默认纯白（不用界面浅灰），传 null 得到透明背景。
+ * @param edgeCustomize 按边定制样式（与 [TopologyCanvas] 的同名参数一致）：
+ *   Kafka 副本关系虚线边这类定制必须一起传进来，否则导出图与屏幕不一致。
+ * @throws IllegalStateException 图中存在带 `fromAnchor` / `toAnchor` 的边时——
+ *   锚点位置由图库在组合期注册（`KuiverAnchor` + internal 的 AnchorRegistry），
+ *   离屏场景拿不到。**宁可直接失败，也不静默画出指向错误位置的边。**
  */
 @OptIn(ExperimentalComposeUiApi::class)
 fun renderTopologyPng(
@@ -136,9 +141,11 @@ fun renderTopologyPng(
     scale: Float = TOPOLOGY_EXPORT_DEFAULT_SCALE,
     padding: Dp = EXPORT_PADDING,
     background: Color? = Color.White,
+    edgeCustomize: ((KuiverEdge, EdgeStyle) -> EdgeStyle)? = null,
 ): TopologyExportImage {
     require(graph.nodes.isNotEmpty()) { "topology graph is empty" }
     require(scale > 0f && scale.isFinite()) { "export scale must be positive and finite" }
+    requireResolvableEdgeEndpoints(graph)
 
     val plan = planTopologyExport(graph, padding, scale)
     val bitmap = renderOffscreen(
@@ -151,6 +158,7 @@ fun renderTopologyPng(
         displayName = displayName,
         plan = plan,
         background = background,
+        edgeCustomize = edgeCustomize,
     )
 
     val output = ByteArrayOutputStream()
@@ -166,6 +174,24 @@ fun renderTopologyPng(
 // ---------------------------------------------------------------------------------------------
 // 尺寸计算
 // ---------------------------------------------------------------------------------------------
+
+/**
+ * 拒绝导出带锚点的图：`KuiverAnchor` 的位置由图库在**组合期**经
+ * `onGloballyPositioned` 注册进 internal 的 AnchorRegistry，离屏场景无法读取。
+ *
+ * 真遇到时的表现：几何端点会落在节点中心与边界的连线上，而不是用户定义的锚点 ——
+ * 导出图和屏幕看起来差不多，但连线接点错了，属于「不报错但错」的那类。
+ * 所以这里直接失败，由 UI 层把异常文案弹给用户（导出入口已统一 try/catch）。
+ */
+internal fun requireResolvableEdgeEndpoints(graph: Kuiver) {
+    val anchored = graph.edges.filter { it.fromAnchor != null || it.toAnchor != null }
+    if (anchored.isEmpty()) return
+    val sample = anchored.first()
+    throw IllegalStateException(
+        "该拓扑使用了自定义连接点（KuiverAnchor），导出暂不支持：" +
+            "${sample.fromId} → ${sample.toId}（共 ${anchored.size} 条边带锚点）",
+    )
+}
 
 /** 离屏导出的尺寸计划：逻辑原点、逻辑尺寸、有效倍率、物理像素尺寸。 */
 internal data class TopologyExportPlan(
@@ -260,6 +286,7 @@ private fun renderOffscreen(
     displayName: (String) -> String,
     plan: TopologyExportPlan,
     background: Color?,
+    edgeCustomize: ((KuiverEdge, EdgeStyle) -> EdgeStyle)?,
 ): BufferedImage {
     // density = 输出倍率：所有 dp 尺寸（卡片、文字、线宽、箭头）按 2x 重新栅格化。
     // 不是先画 1x 再放大，所以文字边缘是清晰的。
@@ -282,6 +309,7 @@ private fun renderOffscreen(
                 displayName = displayName,
                 plan = plan,
                 background = background,
+                edgeCustomize = edgeCustomize,
             )
         }
     }
@@ -304,6 +332,7 @@ private fun TopologyExportContent(
     displayName: (String) -> String,
     plan: TopologyExportPlan,
     background: Color?,
+    edgeCustomize: ((KuiverEdge, EdgeStyle) -> EdgeStyle)?,
 ) {
     val scheme = MaterialTheme.colorScheme
     val backgroundModifier = if (background != null) Modifier.background(background) else Modifier
@@ -318,11 +347,13 @@ private fun TopologyExportContent(
                     val fromNode = graph.nodes[edge.fromId] ?: return@forEach
                     val toNode = graph.nodes[edge.toId] ?: return@forEach
                     // 与屏幕同一套样式工厂：CURVED + 1.5dp + 箭头，BACK 边橙色。
-                    val style = topologyEdgeStyle(
+                    var style = topologyEdgeStyle(
                         edge = edge,
                         normalColor = scheme.outlineVariant,
                         cycleColor = CYCLE_EDGE_COLOR,
                     )
+                    // 与屏幕一致：面板的按边定制（如 Kafka 副本虚线边）也要叠加。
+                    edgeCustomize?.let { style = it(edge, style) }
                     drawTopologyEdge(edge, fromNode, toNode, style)
                 }
             }
