@@ -61,6 +61,8 @@ import com.mqclient.uicommon.file.pickFiles
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
+import com.mqclient.uicommon.table.TableHeaderText
+import com.mqclient.uicommon.table.formatSize
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter

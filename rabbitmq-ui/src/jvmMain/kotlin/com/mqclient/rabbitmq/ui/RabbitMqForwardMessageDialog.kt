@@ -33,6 +33,7 @@ import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
+import com.mqclient.uicommon.table.formatSize
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -245,8 +246,3 @@ private fun failureText(error: Throwable): String =
         ?: error::class.simpleName
         ?: "unknown"
 
-private fun formatSizeOf(bytes: Long): String = when {
-    bytes >= 1_048_576 -> "%.1f MB".format(bytes / 1_048_576.0)
-    bytes >= 1024 -> "%.1f KB".format(bytes / 1024.0)
-    else -> "$bytes B"
-}

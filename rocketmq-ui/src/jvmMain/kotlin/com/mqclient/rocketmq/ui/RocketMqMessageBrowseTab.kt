@@ -65,10 +65,11 @@ import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
-import java.time.Instant
-import java.time.ZoneId
+import com.mqclient.uicommon.table.TableHeaderText
+import com.mqclient.uicommon.table.TableRowActionIcon
+import com.mqclient.uicommon.table.formatSize
+import com.mqclient.uicommon.table.formatTimestamp
 import java.time.format.DateTimeFormatter
-import java.util.Locale
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -87,51 +88,6 @@ internal val RMSG_ROW_HPADDING = 16.dp
 /** 表格时间列的展示格式（epoch millis → 本地时区，毫秒粒度）。 */
 internal val RMSG_TIME_FORMATTER: DateTimeFormatter =
     DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS")
-
-/** 大小列：< 1KB 显示字节，否则 KB（1 位小数）。 */
-internal fun rmsgFormatSize(bytes: Long): String = when {
-    bytes < 1024 -> "$bytes B"
-    else -> String.format(Locale.ROOT, "%.1f KB", bytes / 1024.0)
-}
-
-/** 时间戳列展示：epoch millis → 本地时区文本；<= 0（无时间戳）显示 "-"。 */
-internal fun rmsgFormatTimestamp(millis: Long): String =
-    if (millis <= 0) {
-        "-"
-    } else {
-        RMSG_TIME_FORMATTER.format(Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()))
-    }
-
-/** 表格表头单元格文本。 */
-@Composable
-internal fun RmsgTableHeaderText(text: String, modifier: Modifier = Modifier) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.labelLarge,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        maxLines = 1,
-        modifier = modifier,
-    )
-}
-
-/** 表格行内的 24dp 图标操作钮（KafkaMessageBrowseTab 的 RowActionIcon 同款）。 */
-@Composable
-internal fun RmsgRowActionIcon(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    tooltip: String,
-    onClick: () -> Unit = {},
-) {
-    com.mqclient.uicommon.AppTooltip(text = tooltip) {
-        IconButton(onClick = onClick, modifier = Modifier.size(24.dp)) {
-            Icon(
-                imageVector = icon,
-                contentDescription = tooltip,
-                modifier = Modifier.size(16.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
 
 /** 浏览页三态：初始加载 / 失败（带原因 + 重试）/ 就绪。 */
 private sealed interface BrowseUiState {
@@ -481,15 +437,15 @@ private fun MessageTable(
                 .padding(horizontal = RMSG_ROW_HPADDING, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            RmsgTableHeaderText(stringResource("rocketmq_ui_msg_browse_col_queue"), Modifier.width(RMSG_COL_QUEUE))
-            RmsgTableHeaderText(stringResource("rocketmq_ui_msg_browse_col_offset"), Modifier.width(RMSG_COL_OFFSET))
-            RmsgTableHeaderText(stringResource("rocketmq_ui_msg_browse_col_msgid"), Modifier.width(RMSG_COL_MSGID))
-            RmsgTableHeaderText(stringResource("rocketmq_ui_msg_browse_col_tags"), Modifier.width(RMSG_COL_TAGS))
-            RmsgTableHeaderText(stringResource("rocketmq_ui_msg_browse_col_keys"), Modifier.width(RMSG_COL_KEYS))
-            RmsgTableHeaderText(stringResource("rocketmq_ui_msg_browse_col_value"), Modifier.weight(1f))
-            RmsgTableHeaderText(stringResource("rocketmq_ui_msg_browse_col_timestamp"), Modifier.width(RMSG_COL_TIMESTAMP))
-            RmsgTableHeaderText(stringResource("rocketmq_ui_msg_browse_col_size"), Modifier.width(RMSG_COL_SIZE))
-            RmsgTableHeaderText(stringResource("rocketmq_ui_msg_browse_col_actions"), Modifier.width(RMSG_COL_ACTIONS))
+            TableHeaderText(stringResource("rocketmq_ui_msg_browse_col_queue"), Modifier.width(RMSG_COL_QUEUE))
+            TableHeaderText(stringResource("rocketmq_ui_msg_browse_col_offset"), Modifier.width(RMSG_COL_OFFSET))
+            TableHeaderText(stringResource("rocketmq_ui_msg_browse_col_msgid"), Modifier.width(RMSG_COL_MSGID))
+            TableHeaderText(stringResource("rocketmq_ui_msg_browse_col_tags"), Modifier.width(RMSG_COL_TAGS))
+            TableHeaderText(stringResource("rocketmq_ui_msg_browse_col_keys"), Modifier.width(RMSG_COL_KEYS))
+            TableHeaderText(stringResource("rocketmq_ui_msg_browse_col_value"), Modifier.weight(1f))
+            TableHeaderText(stringResource("rocketmq_ui_msg_browse_col_timestamp"), Modifier.width(RMSG_COL_TIMESTAMP))
+            TableHeaderText(stringResource("rocketmq_ui_msg_browse_col_size"), Modifier.width(RMSG_COL_SIZE))
+            TableHeaderText(stringResource("rocketmq_ui_msg_browse_col_actions"), Modifier.width(RMSG_COL_ACTIONS))
         }
         HorizontalDivider()
         LazyColumn(modifier = Modifier.weight(1f)) {
@@ -567,19 +523,19 @@ private fun MessageRow(
             )
         }
         Text(
-            text = rmsgFormatTimestamp(message.storeTimestamp),
+            text = formatTimestamp(message.storeTimestamp),
             style = MaterialTheme.typography.bodySmall,
             maxLines = 1,
             modifier = Modifier.width(RMSG_COL_TIMESTAMP),
         )
         Text(
-            text = rmsgFormatSize(message.valueSize.toLong()),
+            text = formatSize(message.valueSize.toLong()),
             style = MaterialTheme.typography.bodySmall,
             maxLines = 1,
             modifier = Modifier.width(RMSG_COL_SIZE),
         )
         Row(modifier = Modifier.width(RMSG_COL_ACTIONS)) {
-            RmsgRowActionIcon(
+            TableRowActionIcon(
                 icon = Icons.Default.Info,
                 tooltip = stringResource("rocketmq_ui_msg_browse_col_detail"),
                 onClick = { onDetail(message) },
@@ -697,7 +653,7 @@ private fun filterMessages(
             message.keys?.contains(query, ignoreCase = true) == true ||
             message.valuePreview.contains(query, ignoreCase = true) ||
             message.valueHex.contains(query, ignoreCase = true) ||
-            rmsgFormatTimestamp(message.storeTimestamp).contains(query, ignoreCase = true) ||
+            formatTimestamp(message.storeTimestamp).contains(query, ignoreCase = true) ||
             message.offset.toString().contains(query)
     }
 }

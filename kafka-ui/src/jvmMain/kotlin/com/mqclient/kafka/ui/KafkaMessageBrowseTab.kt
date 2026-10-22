@@ -73,13 +73,15 @@ import com.mqclient.uicommon.file.saveFileBytes
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
-import java.time.Instant
+import com.mqclient.uicommon.table.TableHeaderText
+import com.mqclient.uicommon.table.TableRowActionIcon
+import com.mqclient.uicommon.table.formatSize
+import com.mqclient.uicommon.table.formatTimestamp
 import java.time.LocalDateTime
 import java.time.LocalTime
-import java.time.ZoneId
 import java.time.ZoneOffset
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.util.Locale
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -97,20 +99,6 @@ internal val ROW_HPADDING = 16.dp
 internal val TIME_FORMATTER: DateTimeFormatter =
     DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS")
 
-/** 大小列：< 1KB 显示字节，否则 KB（1 位小数）；浏览 / 发送两页共用。 */
-internal fun formatSize(bytes: Long): String = when {
-    bytes < 1024 -> "$bytes B"
-    else -> String.format(Locale.ROOT, "%.1f KB", bytes / 1024.0)
-}
-
-/** 时间戳列展示：epoch millis → 本地时区文本；<= 0（无时间戳 / epoch 0）显示 "-"。 */
-internal fun formatTimestamp(millis: Long): String =
-    if (millis <= 0) {
-        "-"
-    } else {
-        TIME_FORMATTER.format(Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()))
-    }
-
 /**
  * 轻量 hover 提示（同 ObjectCard 的 ActionIconButton 样式）；浏览 / 发送 / 详情共用。
  */
@@ -121,52 +109,6 @@ internal fun HoverTooltip(
     content: @Composable () -> Unit,
 ) {
     com.mqclient.uicommon.AppTooltip(text = text, modifier = modifier, content = content)
-}
-
-/** 表格表头单元格文本。 */
-@Composable
-internal fun TableHeaderText(text: String, modifier: Modifier = Modifier) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.labelLarge,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        maxLines = 1,
-        modifier = modifier,
-    )
-}
-
-/** 表格行内的 24dp 图标操作钮（ObjectCard 的 ActionIconButton 同款尺寸与禁用降透明）。 */
-@Composable
-internal fun RowActionIcon(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    tooltip: String,
-    enabled: Boolean = true,
-    executing: Boolean = false,
-    onClick: () -> Unit = {},
-) {
-    HoverTooltip(tooltip) {
-        IconButton(
-            onClick = onClick,
-            enabled = enabled && !executing,
-            modifier = Modifier.size(24.dp),
-        ) {
-            if (executing) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(16.dp),
-                    strokeWidth = 2.dp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = tooltip,
-                    modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        .copy(alpha = if (enabled) 1f else 0.38f),
-                )
-            }
-        }
-    }
 }
 
 /**
@@ -687,13 +629,13 @@ private fun MessageRow(
             modifier = Modifier.width(MSG_COL_PARTITION),
         )
         Row(modifier = Modifier.width(MSG_COL_ACTIONS)) {
-            RowActionIcon(
+            TableRowActionIcon(
                 icon = Icons.Default.Info,
                 tooltip = stringResource("kafka_ui_msg_browse_col_detail"),
                 enabled = !anyActionInProgress,
                 onClick = { onDetail(message) },
             )
-            RowActionIcon(
+            TableRowActionIcon(
                 icon = Icons.Default.Download,
                 tooltip = stringResource("kafka_ui_msg_browse_download"),
                 enabled = !anyActionInProgress,
