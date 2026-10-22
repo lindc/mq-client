@@ -17,6 +17,11 @@ RocketMQ / app-ui / ui-common / topology-ui 里的键写错只会在界面上冒
 IBM MQ 的三条运行时拼接路径仍限定在 ibm-mq 的两个源码根（常量名的解析链必须与
 ObjectPropertiesResolver / QueuePropertyGroups 保持一致，见 CURATED_PREFIXES 与
 SHADOWING_FILES）。
+
+**第三道：语种对齐（防漏译漂移）**。引用检查只能回答「键能不能解析」——在
+「中文基底 + 英文覆盖」的回落链下，英文缺键永远能解析（显示中文），所以漏译
+可以无限期潜伏（实测：88 条 QMGR / 队列属性描述只有中文，属性名却两边全译）。
+最后一段强制**同一张表的两个语种键集合相等**，给「该译哪些」一个永不失效的口径。
 """
 import glob
 import json
@@ -43,9 +48,10 @@ def table_files(lang):
 
 
 # 中文是**基底表**，英文只覆盖它自己提供的键（见 LanguageResources.load）。
-# 所以「英文缺键」不是 bug —— 运行时会回落到中文，界面不会冒裸 key。
-# 已知键集合必须复刻这条链（模块中文 → 模块英文），否则 en-US 检查会把
-# 合法的回落全部当成错误（实测：142 个 ibm_mq_qmgr/queue_prop 描述只有中文）。
+# 所以「英文缺键」本身不会冒裸 key —— 运行时会回落到中文。
+# 已知键集合必须复刻这条回落链（模块中文 → 模块英文），否则 en-US 检查会把
+# 合法的回落当成错误。注意：这**不是**对漏译的容忍 —— 完整性由文件末尾的
+# 「语种对齐」一段单独把关（两侧键集合必须相等）。
 TABLE_FILES = table_files(LANG)
 BASE_TABLE_FILES = table_files("zh-CN") if LANG != "zh-CN" else []
 
@@ -251,6 +257,57 @@ if broken_prefixes:
     for prefix, sites in sorted(broken_prefixes.items()):
         print("   %-12s %s" % (prefix, ", ".join(sites)))
 
-if unresolved or unresolved_consts or missing_enum or broken_prefixes:
+# ---- 语言对齐（机制性检查，防漂移）-------------------------------------------------
+# 上面的引用检查只能回答「键能不能解析」——在 zh-CN 基底 + 英文覆盖的回落链下，
+# 英文缺键永远「能解析」（显示中文），于是描述类文案漏译可以无限期潜伏。
+# 实测就发生过：88 条 QMGR/队列属性描述只有中文，属性名却两边都有（87 + 56 全译）。
+# 所以这里额外要求**同一张表的两个语种键集合相等**，让「该译哪些」有永不失效的口径。
+#
+# 注意这不是回退上面的回落容忍：解析检查仍按回落链算（否则合法的部分翻译会误报），
+# 对齐检查是更高一层的完整度要求，两者互补。
+BASE_NAME = re.compile(r"^(?P<base>.+)_(?P<lang>[a-z]{2}-[A-Z]{2})\.json$")
+
+
+def tables_by_language():
+    """同一个 (目录, 表名) 下的各语种文件：{(dir, base): {lang: path}}。"""
+    grouped = {}
+    pattern = os.path.join(REPO, "*", "src", "*", "composeResources", "files", "i18n", "*.json")
+    for path in glob.glob(pattern):
+        name = os.path.basename(path)
+        found = BASE_NAME.match(name)
+        if not found:
+            continue
+        grouped.setdefault((os.path.dirname(path), found.group("base")), {})[
+            found.group("lang")
+        ] = path
+    return grouped
+
+
+parity_missing_en, parity_missing_zh = {}, {}
+for (directory, base), langs in sorted(tables_by_language().items()):
+    if "zh-CN" not in langs or "en-US" not in langs:
+        continue
+    zh_keys = set(json.load(open(langs["zh-CN"], encoding="utf-8")))
+    en_keys = set(json.load(open(langs["en-US"], encoding="utf-8")))
+    table = os.path.relpath(langs["zh-CN"], REPO)
+    for key in sorted(zh_keys - en_keys):
+        parity_missing_en.setdefault(table, []).append(key)
+    for key in sorted(en_keys - zh_keys):
+        parity_missing_zh.setdefault(table, []).append(key)
+
+total_missing_en = sum(len(v) for v in parity_missing_en.values())
+total_missing_zh = sum(len(v) for v in parity_missing_zh.values())
+print("语种对齐：缺英文 %d 条，缺中文 %d 条" % (total_missing_en, total_missing_zh))
+if parity_missing_en:
+    print("\n!! 以下键只有中文（英文界面会回落到中文，描述类文案漏译）：")
+    for table, keys in sorted(parity_missing_en.items()):
+        print("   %-58s %d 条，如 %s" % (table, len(keys), keys[0]))
+if parity_missing_zh:
+    print("\n!! 以下键只有英文（中文界面会显示裸 key）：")
+    for table, keys in sorted(parity_missing_zh.items()):
+        print("   %-58s %d 条，如 %s" % (table, len(keys), keys[0]))
+
+if unresolved or unresolved_consts or missing_enum or broken_prefixes \
+        or parity_missing_en or parity_missing_zh:
     sys.exit(1)
-print("OK：静态引用与三条运行时拼接路径全部可解析")
+print("OK：静态引用、三条运行时拼接路径、语种对齐全部通过")
