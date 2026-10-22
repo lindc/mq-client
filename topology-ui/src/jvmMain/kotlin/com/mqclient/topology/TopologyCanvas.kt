@@ -15,6 +15,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -38,6 +39,15 @@ import com.mqclient.graph.NodeSeverity
 import com.mqclient.graph.TopologyData
 import com.mqclient.graph.TopologyNodeType
 import com.mqclient.uicommon.ThemedSnackbarHost
+import com.mqclient.uicommon.file.saveFileBytes
+import com.mqclient.uicommon.i18n.stringResource
+import com.mqclient.uicommon.i18n.withArg
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 
 /**
  * 拓扑图通用画布：kuiver viewer 组装 + 选中链路高亮 + 高亮边流动动画 + 双击检测 +
@@ -88,6 +98,8 @@ fun TopologyCanvas(
 ) {
     val (kuiver, nodeTypes, severities) = data
     val scheme = MaterialTheme.colorScheme
+    val typography = MaterialTheme.typography
+    val shapes = MaterialTheme.shapes
 
     // 双击检测器是 remember 的稳定实例，回调里读业务状态必须经 rememberUpdatedState 的
     // **最新**回调——否则图重建后新增节点的双击可能命中旧闭包。
@@ -110,6 +122,63 @@ fun TopologyCanvas(
     }
 
     var selectedId by remember { mutableStateOf<String?>(null) }
+
+    // ---- 「导出为图片」：离屏渲染整图，不截当前视口 ----
+    // 导出反馈必须有落点：RocketMQ 等面板没传 snackbarHostState，这里兜底一个本地 host。
+    // fallback 无条件 remember，避免 snackbarHostState 由 null ↔ 非 null 时破坏槽位。
+    val fallbackHostState = remember { SnackbarHostState() }
+    val exportHostState = snackbarHostState ?: fallbackHostState
+    val exportScope = rememberCoroutineScope()
+    var exporting by remember { mutableStateOf(false) }
+    val exportSuccessTemplate = stringResource("topology_export_success")
+    val exportFailedTemplate = stringResource("topology_export_failed")
+    val exportEmpty = stringResource("topology_export_empty")
+    val exportFileStamp = remember { DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss") }
+
+    fun exportImage() {
+        if (exporting) return
+        // 用 layoutedKuiver：布局落定 + 用户拖动后的手动位置都已在里面。
+        val graph = viewerState.layoutedKuiver
+        if (graph.nodes.isEmpty()) {
+            exportScope.launch { exportHostState.showSnackbar(exportEmpty) }
+            return
+        }
+        exporting = true
+        exportScope.launch {
+            // showSnackbar 会挂起到提示消失；先收尾 exporting 再弹，否则导出按钮会被
+            // 一条 4 秒的提示连带禁用 4 秒。
+            var message: String? = null
+            try {
+                // 离屏场景是自包含的（独立 recomposer + Skia surface），放到后台线程渲染，
+                // 避免大图把 UI 卡住；渲染完回 Main 再弹 FileKit 保存框。
+                val image = withContext(Dispatchers.Default) {
+                    renderTopologyPng(
+                        graph = graph,
+                        nodeTypes = nodeTypes,
+                        severities = severities,
+                        badges = data.badges,
+                        fallbackType = fallbackType,
+                        theme = TopologyExportTheme(scheme, typography, shapes),
+                        displayName = displayName,
+                        scale = TOPOLOGY_EXPORT_DEFAULT_SCALE,
+                        background = Color.White,
+                    )
+                }
+                val suggested = "topology-${LocalDateTime.now().format(exportFileStamp)}.png"
+                val saved = saveFileBytes(suggested, "png", image.pngBytes)
+                if (saved != null) {
+                    message = exportSuccessTemplate.withArg(saved, image.widthPx, image.heightPx)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                message = exportFailedTemplate.withArg(e.message ?: e::class.simpleName ?: "unknown")
+            } finally {
+                exporting = false
+            }
+            message?.let { exportHostState.showSnackbar(it) }
+        }
+    }
 
     /** 统一选中入口：selectedId 驱动详情卡，同时写 kuiver 自己的选中态（图内高亮的可靠来源）。 */
     fun select(id: String?) {
@@ -260,7 +329,8 @@ fun TopologyCanvas(
         // 覆盖式滚动条：图超出视口时显示，可拖拽平移（见 TopologyScrollbars）。
         TopologyScrollbars(viewerState)
 
-        // 右上角控件：重新扫描（强制刷新数据）+ 缩放（放大 / 缩小 / 适应视图 / 重置）。
+        // 右上角控件：重新扫描（强制刷新数据）+ 缩放（放大 / 缩小 / 适应视图 / 重置）
+        // + 导出整图为 PNG（离屏渲染，不受当前缩放 / 平移影响）。
         TopologyZoomControls(
             onRescan = onRescan,
             onZoomIn = { viewerState.zoomIn() },
@@ -270,17 +340,17 @@ fun TopologyCanvas(
                 viewerState.clearManualPositions()
                 viewerState.centerGraph(animated = true)
             },
+            onExport = ::exportImage,
+            exportEnabled = !exporting,
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .padding(12.dp),
         )
 
-        snackbarHostState?.let { hostState ->
-            ThemedSnackbarHost(
-                hostState = hostState,
-                modifier = Modifier.align(Alignment.BottomCenter),
-            )
-        }
+        ThemedSnackbarHost(
+            hostState = exportHostState,
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
 
         selectedId?.let { id ->
             val type = nodeTypes[id] ?: return@let
@@ -298,7 +368,7 @@ fun TopologyCanvas(
 }
 
 /** 环（BACK 边）的固定语义色：橙色（需求指定，异常信号不随主题翻转）。 */
-private val CYCLE_EDGE_COLOR = Color(0xFFFF9800)
+internal val CYCLE_EDGE_COLOR = Color(0xFFFF9800)
 
 /** 选中链路高亮集：闭包节点 id + 闭包内边（fromId to id）。 */
 private data class Highlight(val nodes: Set<String>, val edges: Set<Pair<String, String>>)

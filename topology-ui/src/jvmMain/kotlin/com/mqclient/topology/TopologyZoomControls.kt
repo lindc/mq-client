@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FitScreen
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Sync
@@ -24,13 +25,14 @@ import androidx.compose.ui.unit.dp
 import com.mqclient.uicommon.i18n.stringResource
 
 /**
- * 右上角控件：重新扫描（数据强制刷新）+ 放大 / 缩小 / 适应视图 / 重置。
+ * 右上角控件：重新扫描（数据强制刷新）+ 放大 / 缩小 / 适应视图 / 重置 + 导出图片。
  *
  * 动作接线（kuiver 0.4.2 真实 API，`KuiverViewerState` 没有 fitToContent/resetZoom）：
  *  - 重新扫描 → 面板触一次数据重取（扫完经各自事件重建）；
  *  - 放大 / 缩小 → `zoomIn()` / `zoomOut()`（步长走 config.zoomStep）；
  *  - 适应视图 → `centerGraph(animated = true)`（按当前图内容居中适配）；
- *  - 重置 → `clearManualPositions()` + `centerGraph()`（回到布局初始态）。
+ *  - 重置 → `clearManualPositions()` + `centerGraph()`（回到布局初始态）；
+ *  - 导出 → 离屏渲染全图为 PNG（由 [TopologyCanvas] 接线，不受当前缩放 / 平移影响）。
  *
  * 文案走 ui-common 公共 i18n 表（`topology_action_*`）：本模块是纯渲染库，不注册
  * 模块私有表（AdapterUI 是业务模块的 SPI），公共词汇进公共表。
@@ -42,6 +44,9 @@ fun TopologyZoomControls(
     onZoomOut: () -> Unit,
     onFitContent: () -> Unit,
     onReset: () -> Unit,
+    onExport: (() -> Unit)? = null,
+    /** 导出进行中时置灰，避免重复点击并发渲染。 */
+    exportEnabled: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -53,6 +58,14 @@ fun TopologyZoomControls(
         ZoomButton(Icons.Filled.ZoomOut, stringResource("topology_action_zoom_out"), onZoomOut)
         ZoomButton(Icons.Filled.FitScreen, stringResource("topology_action_fit"), onFitContent)
         ZoomButton(Icons.Filled.Refresh, stringResource("topology_action_reset"), onReset)
+        onExport?.let { export ->
+            ZoomButton(
+                icon = Icons.Filled.FileDownload,
+                contentDescription = stringResource("topology_action_export"),
+                onClick = export,
+                enabled = exportEnabled,
+            )
+        }
     }
 }
 
@@ -61,6 +74,7 @@ private fun ZoomButton(
     icon: ImageVector,
     contentDescription: String,
     onClick: () -> Unit,
+    enabled: Boolean = true,
 ) {
     Surface(
         modifier = Modifier.size(36.dp),
@@ -68,6 +82,7 @@ private fun ZoomButton(
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         shadowElevation = 2.dp,
+        enabled = enabled,
         onClick = onClick,
     ) {
         Box(contentAlignment = Alignment.Center) {
@@ -75,7 +90,9 @@ private fun ZoomButton(
                 imageVector = icon,
                 contentDescription = contentDescription,
                 modifier = Modifier.size(18.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(
+                    alpha = if (enabled) 1f else 0.38f,
+                ),
             )
         }
     }

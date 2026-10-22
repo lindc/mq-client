@@ -24,6 +24,18 @@ kotlin {
         }
         jvmTest.dependencies {
             implementation(kotlin("test"))
+            // 离屏导出测试要加载 Skia 原生库（ImageComposeScene → skiko）；
+            // 同 ibm-mq-ui 的 UI 测试，声明当前桌面平台的 runtime。
+            implementation(compose.desktop.currentOs)
         }
     }
+}
+
+// Skiko 默认把解压后的原生库放到 ~/.skiko；CI / 沙箱的 home 可能只读。
+// 测试时改放构建目录，避免离屏渲染测试因环境权限失败。
+tasks.named<Test>("jvmTest") {
+    systemProperty(
+        "skiko.data.path",
+        layout.buildDirectory.dir("skiko").get().asFile.absolutePath,
+    )
 }
