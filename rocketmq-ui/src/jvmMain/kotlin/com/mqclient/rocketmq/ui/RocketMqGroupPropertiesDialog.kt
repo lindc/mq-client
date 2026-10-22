@@ -180,6 +180,47 @@ fun RocketMqGroupPropertiesDialog(
                     ) { }
                 }
             }
+
+            // 删除二次确认（AlertDialog 独立窗口，必然在属性对话框之上）。失败
+            // 原因在确认框内直出，绝不静默；成功走 onDeleted（scanNow + Snackbar）。
+            if (deleteConfirm) {
+                androidx.compose.material3.AlertDialog(
+                    onDismissRequest = { if (!deleting) deleteConfirm = false },
+                    title = { Text(stringResource("rocketmq_ui_group_delete_confirm_title")) },
+                    text = {
+                        Column {
+                            Text(
+                                text = stringResource("rocketmq_ui_group_delete_confirm_text").withArg(groupName),
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            deleteError?.let { err ->
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    text = err,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        PressableButton(onClick = { delete() }, enabled = !deleting, danger = true) {
+                            Text(
+                                stringResource(
+                                    if (deleting) "rocketmq_ui_group_deleting" else "rocketmq_ui_group_delete",
+                                ),
+                            )
+                        }
+                    },
+                    dismissButton = {
+                        PressableButton(
+                            onClick = { if (!deleting) deleteConfirm = false },
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        ) { Text(stringResource("common_cancel")) }
+                    },
+                )
+            }
         }
     }
 }
