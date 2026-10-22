@@ -29,7 +29,6 @@ import com.dk.kuiver.SelectionMode
 import com.dk.kuiver.model.Kuiver
 import com.dk.kuiver.model.KuiverEdge
 import com.dk.kuiver.model.layout.LayoutConfig
-import com.dk.kuiver.model.layout.LayoutProvider
 import com.dk.kuiver.rememberKuiverViewerState
 import com.dk.kuiver.renderer.KuiverInteractionCallbacks
 import com.dk.kuiver.renderer.KuiverViewer
@@ -61,10 +60,8 @@ import java.time.format.DateTimeFormatter
  *  - [fallbackType]：类型表缺失时的兜底类型（builder 保证齐全，防御性取值）；
  *  - [onNodeDoubleClick]：双击节点回调（kuiver 0.4.2 无原生双击，内部用
  *    [NodeDoubleClick] 检测）；画布空白点击会自动打断，业务侧无需处理；
- *  - [onBeforeLayout]：布局前的钩子。**kuiver 的 LayoutProvider 只看得到通用节点**，
- *    固定列布局需要类型语义 —— 面板经此钩子把最新 nodeTypes 写进自己的查找表
- *    （模块级变量）。写入与紧随的 relayout 必须保持主线程相邻语句（本组件已保证：
- *    同一 LaunchedEffect 内、中间无挂起点），面板侧不得再拆散时序；
+ *  - [layoutProvider]：带类型语义的布局（[TopologyLayoutProvider]）。类型表由本
+ *    组件按图捕获进 provider 闭包，面板**不需要**再维护任何模块级查找表；
  *  - [snackbarHostState]：非空时在画布底部中央挂 SnackbarHost（双击无属性节点等
  *    业务提示由面板自己 show）。
  *
@@ -76,7 +73,7 @@ import java.time.format.DateTimeFormatter
 @Composable
 fun TopologyCanvas(
     data: TopologyData,
-    layoutProvider: LayoutProvider,
+    layoutProvider: TopologyLayoutProvider,
     onRescan: () -> Unit,
     onNodeDoubleClick: (String) -> Unit,
     modifier: Modifier = Modifier,
@@ -84,7 +81,6 @@ fun TopologyCanvas(
     fallbackType: TopologyNodeType,
     focusName: String? = null,
     onFocusApplied: () -> Unit = {},
-    onBeforeLayout: ((TopologyData) -> Unit)? = null,
     snackbarHostState: SnackbarHostState? = null,
     /**
      * 按边定制样式（如 Kafka 的副本关系虚线边）：在基础曲线边样式之上做修改，
@@ -108,14 +104,23 @@ fun TopologyCanvas(
         NodeDoubleClick { id -> currentDoubleClick(id) }
     }
 
+    // 类型表随图捕获进 provider 闭包（见 [TopologyLayoutProvider]）：布局在 kuiver 的
+    // 后台线程执行、由 resize 等事件重跑，读到的都是**这张图**的不可变快照，不再是
+    // 「模块级变量最后一次写入的值」。layoutConfig 按 (图, 类型表) remember，换图时
+    // 身份变化会让 kuiver 重新走一次布局。
+    val layoutConfig = remember(kuiver, nodeTypes) {
+        LayoutConfig.Custom(
+            provider = { graph, config -> layoutProvider(graph, config, nodeTypes) },
+        )
+    }
+
     val viewerState = rememberKuiverViewerState(
         initialKuiver = Kuiver(),
-        layoutConfig = LayoutConfig.Custom(provider = layoutProvider),
+        layoutConfig = layoutConfig,
     )
 
     var pendingFit by remember { mutableStateOf(false) }
     LaunchedEffect(kuiver) {
-        onBeforeLayout?.invoke(data)
         viewerState.updateKuiver(kuiver)
         viewerState.relayout()
         pendingFit = true

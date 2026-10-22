@@ -40,6 +40,7 @@ import com.mqclient.rabbitmq.ui.RabbitMqExchangePropertiesDialog
 import com.mqclient.rabbitmq.ui.ensureRabbitMqConnecting
 import com.mqclient.rabbitmq.ui.rememberRabbitMqConnectionStatus
 import com.mqclient.topology.TopologyCanvas
+import com.mqclient.topology.exchangeQueueLayout
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
@@ -172,7 +173,7 @@ fun RabbitMqTopologyPanel(
 
                 TopologyCanvas(
                     data = current,
-                    layoutProvider = rabbitMqColumnLayoutProvider,
+                    layoutProvider = exchangeQueueLayout,
                     // 节点可拖拽：位置仅会话内有效（kuiver manualPositions，内存态）。
                     nodeDragEnabled = true,
                     // 手动扫描：一轮对象慢扫，扫完经 OBJECTS_SCANNED 事件回到 onObjectsScanned。
@@ -198,9 +199,6 @@ fun RabbitMqTopologyPanel(
                         .weight(1f)
                         .fillMaxSize(),
                     fallbackType = TopologyNodeType.RABBIT_QUEUE,
-                    // 布局 provider 在布局阶段读模块级类型查找表：写入与 relayout 由
-                    // TopologyCanvas 保证主线程相邻（时序不变量见 TopologyCanvas 文档）。
-                    onBeforeLayout = { rabbitMqTopologyNodeTypes = it.nodeTypes },
                     snackbarHostState = snackbarHostState,
                 )
             }

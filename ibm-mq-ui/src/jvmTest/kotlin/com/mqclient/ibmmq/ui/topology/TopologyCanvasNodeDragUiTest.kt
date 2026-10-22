@@ -65,8 +65,6 @@ class TopologyCanvasNodeDragUiTest {
                     onRescan = {},
                     onNodeDoubleClick = {},
                     fallbackType = TopologyNodeType.LOCAL_QUEUE,
-                    // 与 TopologyPanel 一致：固定列布局靠模块级类型查找表。
-                    onBeforeLayout = { topologyNodeTypes = it.nodeTypes },
                     nodeDragEnabled = nodeDragEnabled,
                 )
             }

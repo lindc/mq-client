@@ -15,6 +15,7 @@ import com.mqclient.graph.TopologyNodeType
 import com.mqclient.topology.CARD_HEIGHT
 import com.mqclient.topology.CARD_WIDTH
 import com.mqclient.topology.TopologyCanvas
+import com.mqclient.topology.topicBrokerLayout
 import com.mqclient.uitestkit.centerOf
 import com.mqclient.uitestkit.dragAt
 import com.mqclient.uitestkit.panIntoView
@@ -31,7 +32,7 @@ import kotlin.test.assertTrue
  *  - Kafka 特有的 id 形态覆盖：聚合图 topic 直连 leader broker（t1 / b:0 / b:1）+
  *    展开图带冒号的分区 id（p:t1:0）—— testTag / manualPositions 都以完整 id 为键。
  *
- * 面板本体与 AdminClient 查询耦合，这里用真实 [kafkaColumnLayoutProvider] + 同 id
+ * 面板本体与 AdminClient 查询耦合，这里用真实 [topicBrokerLayout] + 同 id
  * 规范 + 同卡片尺寸的 Kafka 形态数据驱动共享画布 [TopologyCanvas]。
  */
 @OptIn(ExperimentalTestApi::class)
@@ -57,12 +58,10 @@ class KafkaTopologyCanvasNodeDragUiTest {
             MaterialTheme {
                 TopologyCanvas(
                     data = data,
-                    layoutProvider = kafkaColumnLayoutProvider,
+                    layoutProvider = topicBrokerLayout,
                     onRescan = {},
                     onNodeDoubleClick = {},
                     fallbackType = TopologyNodeType.BROKER,
-                    // 与 KafkaTopologyPanel 一致：固定列布局靠模块级类型查找表。
-                    onBeforeLayout = { kafkaTopologyNodeTypes = it.nodeTypes },
                     nodeDragEnabled = true,
                 )
             }

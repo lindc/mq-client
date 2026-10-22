@@ -246,6 +246,7 @@
   "rabbitmq_ui_conn_props_timeout": "数据加载超时，请重试",
   "rabbitmq_ui_conn_props_no_service": "服务未初始化",
   "rabbitmq_ui_conn_props_no_nodes": "暂无节点数据",
+  "rabbitmq_ui_exchange_delete_failed": "删除交换机失败：%1$s",
   "rabbitmq_ui_binding_add_arguments_hint": "值会自动判型（整数 → 数字、true/false → 布尔）；headers 交换机的路由匹配依赖这里的 Arguments",
   "rabbitmq_ui_field_truststore_path": "TLS 信任库路径",
   "rabbitmq_ui_hint_truststore_path": "PKCS12 信任库文件（自签 CA 场景）；留空 = JVM 默认信任链",

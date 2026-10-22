@@ -229,9 +229,6 @@ private fun MqTopologyContent(
         fallbackType = TopologyNodeType.LOCAL_QUEUE,
         focusName = focusName,
         onFocusApplied = onFocusApplied,
-        // 固定列布局 provider 在布局阶段读模块级类型查找表：写入与 relayout 由
-        // TopologyCanvas 保证主线程相邻（时序不变量见 TopologyCanvas 文档）。
-        onBeforeLayout = { topologyNodeTypes = it.nodeTypes },
         snackbarHostState = snackbarHostState,
     )
 
