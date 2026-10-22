@@ -36,9 +36,18 @@ SCAN_ROOTS = sorted(
 )
 
 # 所有模块私有表 + 公共表 + 属性名表（合成一张「已知键」集合）。
-TABLE_FILES = sorted(
-    glob.glob(os.path.join(REPO, "*", "src", "*", "composeResources", "files", "i18n", "*_%s.json" % LANG))
-)
+def table_files(lang):
+    return sorted(
+        glob.glob(os.path.join(REPO, "*", "src", "*", "composeResources", "files", "i18n", "*_%s.json" % lang))
+    )
+
+
+# 中文是**基底表**，英文只覆盖它自己提供的键（见 LanguageResources.load）。
+# 所以「英文缺键」不是 bug —— 运行时会回落到中文，界面不会冒裸 key。
+# 已知键集合必须复刻这条链（模块中文 → 模块英文），否则 en-US 检查会把
+# 合法的回落全部当成错误（实测：142 个 ibm_mq_qmgr/queue_prop 描述只有中文）。
+TABLE_FILES = table_files(LANG)
+BASE_TABLE_FILES = table_files("zh-CN") if LANG != "zh-CN" else []
 
 # IBM MQ 运行时拼接路径的扫描根（常量名解析链只在这里成立）。
 KT_ROOTS = [os.path.join(REPO, p) for p in ("ibm-mq-ui/src", "ibm-mq-service/src")]
@@ -69,11 +78,11 @@ def is_test_source(path, root):
     return any(part in TEST_DIR_NAMES for part in parts)
 
 module = set()
-for table_file in TABLE_FILES:
+for table_file in BASE_TABLE_FILES + TABLE_FILES:
     module.update(json.load(open(table_file, encoding="utf-8")))
 common = set(json.load(open(os.path.join(REPO, COMMON_TABLE), encoding="utf-8")))
 attrs = set()
-for table_file in TABLE_FILES:
+for table_file in BASE_TABLE_FILES + TABLE_FILES:
     if "ibm_mq_attrs" in table_file:
         attrs.update(json.load(open(table_file, encoding="utf-8")))
 
