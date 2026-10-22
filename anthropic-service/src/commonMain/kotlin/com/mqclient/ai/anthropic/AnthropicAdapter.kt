@@ -6,7 +6,6 @@ import com.mqclient.ai.AiResponse
 import com.mqclient.ai.AiRole
 import com.mqclient.ai.AiStreamChunk
 import com.mqclient.ai.AiException
-import com.mqclient.ai.adapter.AiHttp
 import com.mqclient.ai.adapter.aiJson
 import com.mqclient.ai.adapter.baseUrlOrThrow
 import com.mqclient.ai.adapter.sseData
@@ -58,7 +57,7 @@ private const val DEFAULT_MAX_TOKENS = 4096
  * 也不支持 prompt caching / extended thinking。
  *
  * HTTP 客户端经 [clientFor] 按连接取：`ignoreSsl=true` 的连接走 trust-all 客户端
- * （见 openai-service 的 AiHttp.clientFor），默认走严格校验的共享客户端。旧构造
+ * （见 openai-service jvmMain 的 AiHttp.clientFor），默认走严格校验的共享客户端。旧构造
  * （固定 client）保留 —— 适配器契约测试的 MockEngine 注入路径不变。
  */
 class AnthropicAdapter(private val clientFor: (AiConnection) -> HttpClient) : AiAdapter {

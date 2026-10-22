@@ -8,6 +8,7 @@ import com.mqclient.aiservice.handler.AiConnectionSnapshotHandler
 import com.mqclient.core.ConfigStore
 import com.mqclient.core.CoreModule
 import com.mqclient.core.database.DatabaseManager
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 
@@ -34,13 +35,22 @@ object AiChatPersistence {
     suspend fun register(scope: CoroutineScope): List<Job> {
         // DatabaseManager 未初始化（如某些测试环境）就不启动落库，也不订阅 ——
         // 与其让 handler 每条都报错，不如整块缺席。
-        runCatching { DatabaseManager.withDriver { AiChatDatabase.Schema.create(it) } }
-            .onFailure { error ->
-                CoreModule.reportError(message = "AI 数据库初始化失败，对话不落库", source = SOURCE, error = error)
-                return emptyList()
-            }
-        runCatching { pruneByRetention() }
-            .onFailure { error -> CoreModule.reportError(message = "AI 对话清理失败", source = SOURCE, error = error) }
+        // 不用 runCatching：它会把 CancellationException 也当成失败吞掉。
+        try {
+            DatabaseManager.withDriver { AiChatDatabase.Schema.create(it) }
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (error: Throwable) {
+            CoreModule.reportError(message = "AI 数据库初始化失败，对话不落库", source = SOURCE, error = error)
+            return emptyList()
+        }
+        try {
+            pruneByRetention()
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (error: Throwable) {
+            CoreModule.reportError(message = "AI 对话清理失败", source = SOURCE, error = error)
+        }
 
         val snapshotHandler = AiConnectionSnapshotHandler(AiConnectionSnapshotRepository)
         val chatHandler = AiChatHistoryHandler(ChatHistoryRepository)

@@ -8,6 +8,7 @@ import com.mqclient.core.event.AppEvent
 import com.mqclient.core.event.getInt
 import com.mqclient.core.event.getLong
 import com.mqclient.core.event.getString
+import kotlinx.coroutines.CancellationException
 
 /**
  * 处理 [AiEvents.AI_CHAT_HISTORY_SAVE]：把一条已完成的对话（成功或失败）写进 chat_history 表。
@@ -24,7 +25,9 @@ class AiChatHistoryHandler(private val repository: ChatHistoryRepository) {
         val connectionId = event.getString(AiPayloadKeys.CONNECTION_ID) ?: return
         val modelName = event.getString(AiPayloadKeys.MODEL_NAME) ?: return
 
-        runCatching {
+        // 不用 runCatching：它连 CancellationException 一起吞，协程取消失效
+        //（模块卸载 / 进程退出时写入会被当成「失败」上报，而不是安静中止）。
+        try {
             repository.saveWithLatestSnapshot(
                 connectionId = connectionId,
                 modelName = modelName,
@@ -40,7 +43,9 @@ class AiChatHistoryHandler(private val repository: ChatHistoryRepository) {
                 errorMessage = event.getString(AiPayloadKeys.ERROR_MESSAGE),
                 finishReason = event.getString(AiPayloadKeys.FINISH_REASON),
             )
-        }.onFailure { error ->
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (error: Throwable) {
             CoreModule.reportError(
                 message = "AI 对话记录写入失败（connectionId=$connectionId）",
                 source = "ai-panel",

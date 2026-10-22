@@ -9,12 +9,18 @@ import kotlinx.coroutines.flow.update
 /**
  * Provider + 适配器的注册表（替代旧 `app-core` 的 `AiProviderRegistry` SPI 方案）。
  *
- * 为什么不用 ServiceLoader：它是 JVM-only，会把适配器层逼进 jvmMain；注册表让整个
- * AI 栈留在 commonMain。内置的 `openai-compatible` 在对象初始化时登记，[register]
- * 对外公开 —— 想加新 Provider，写一个 [AiAdapter] 实现 + 一行注册即可，注册表零改动。
+ * 为什么不用 ServiceLoader：它是 JVM-only。注册表本身不依赖 ServiceLoader，
+ * 内置的 `openai-compatible` 在对象初始化时登记，[register] 对外公开 ——
+ * 想加新 Provider，写一个 [AiAdapter] 实现 + 一行注册即可，注册表零改动。
+ *
+ * **为什么在本模块的 jvmMain**：注册表的 `init` 要给内置适配器传入
+ * `AiHttp::clientFor`，而 `AiHttp` 构造 Ktor 客户端要 `io.ktor.client.engine.java`
+ * 与 `javax.net.ssl.SSLContext` —— 这些是 JVM 专用，放在 commonMain 只是假装跨平台
+ * （项目当前也只有 `jvm()` 一个 target）。配套地，`AiAdapter` / `AiProvider` /
+ * `AiChatMessage` / `AiException` 等**纯契约**仍在 commonMain，没有 Java 依赖。
  *
  * 并发姿势与 `EventBus` / `JobScheduler` / `CacheManager` 一致：
- * StateFlow + CAS 整表替换（commonMain 拿不到 java.util.concurrent）。
+ * StateFlow + CAS 整表替换。
  */
 object AiAdapterRegistry {
 
