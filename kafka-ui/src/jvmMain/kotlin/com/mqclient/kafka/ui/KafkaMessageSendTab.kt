@@ -50,7 +50,9 @@ import com.mqclient.kafka.KafkaMessageHeader
 import com.mqclient.kafka.KafkaModule
 import com.mqclient.kafka.KafkaSendResult
 import com.mqclient.mqui.objectlist.ObjectListEmptyState
+import com.mqclient.uicommon.CompactTextField
 import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.CompactTextField
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.dialog.HeaderDraft
 import com.mqclient.uicommon.dialog.HeadersEditor
@@ -388,29 +390,23 @@ private fun TargetRow(state: KafkaSendMessagesState) {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            OutlinedTextField(
+            CompactTextField(
                 value = state.targetTopic,
                 onValueChange = { state.targetTopic = it },
-                label = { Text(stringResource("kafka_ui_send_topic")) },
-                singleLine = true,
-                textStyle = MaterialTheme.typography.bodySmall,
+                label = stringResource("kafka_ui_send_topic"),
                 modifier = Modifier.weight(1.4f),
             )
-            OutlinedTextField(
+            CompactTextField(
                 value = state.targetPartition,
                 onValueChange = { state.targetPartition = it.filter(Char::isDigit).take(3) },
-                label = { Text(stringResource("kafka_ui_send_partition")) },
-                placeholder = { Text(stringResource("kafka_ui_send_partition_hint")) },
-                singleLine = true,
-                textStyle = MaterialTheme.typography.bodySmall,
+                label = stringResource("kafka_ui_send_partition"),
+                placeholder = stringResource("kafka_ui_send_partition_hint"),
                 modifier = Modifier.weight(0.6f),
             )
-            OutlinedTextField(
+            CompactTextField(
                 value = state.keyText,
                 onValueChange = { state.keyText = it },
-                label = { Text(stringResource("kafka_ui_send_key")) },
-                singleLine = true,
-                textStyle = MaterialTheme.typography.bodySmall,
+                label = stringResource("kafka_ui_send_key"),
                 modifier = Modifier.weight(1f),
             )
         }

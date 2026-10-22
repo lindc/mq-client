@@ -1,5 +1,7 @@
 package com.mqclient.uicommon.dialog
 
+import com.mqclient.uicommon.CompactTextField
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -79,20 +81,16 @@ fun HeadersEditor(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                OutlinedTextField(
+                CompactTextField(
                     value = draft.key,
                     onValueChange = { onHeadersChange(headers.mapIndexed { i, h -> if (i == index) h.copy(key = it) else h }) },
-                    placeholder = { Text(keyPlaceholder) },
-                    singleLine = true,
-                    textStyle = MaterialTheme.typography.bodySmall,
+                    placeholder = keyPlaceholder,
                     modifier = Modifier.weight(0.8f),
                 )
-                OutlinedTextField(
+                CompactTextField(
                     value = draft.value,
                     onValueChange = { onHeadersChange(headers.mapIndexed { i, h -> if (i == index) h.copy(value = it) else h }) },
-                    placeholder = { Text(valuePlaceholder) },
-                    singleLine = true,
-                    textStyle = MaterialTheme.typography.bodySmall,
+                    placeholder = valuePlaceholder,
                     modifier = Modifier.weight(1.2f),
                 )
                 if (hexText.isNotEmpty()) {

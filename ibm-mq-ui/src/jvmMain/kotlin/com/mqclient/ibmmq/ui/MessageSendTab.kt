@@ -55,6 +55,7 @@ import com.mqclient.ibmmq.messaging.SendResult
 import com.mqclient.mqui.objectlist.ObjectListEmptyState
 import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.AppTooltip
+import com.mqclient.uicommon.CompactTextField
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.file.pickFiles
 import com.mqclient.uicommon.i18n.stringResource
@@ -416,18 +417,16 @@ private fun AdvancedPropsSection(state: SendMessagesState) {
                 modifier = Modifier.padding(top = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                OutlinedTextField(
+                CompactTextField(
                     value = state.correlationId,
                     onValueChange = { state.correlationId = it },
-                    label = { Text(stringResource("ibm_mq_msg_send_correlation_id")) },
-                    singleLine = true,
+                    label = stringResource("ibm_mq_msg_send_correlation_id"),
                     modifier = Modifier.fillMaxWidth(),
                 )
-                OutlinedTextField(
+                CompactTextField(
                     value = state.replyToQueue,
                     onValueChange = { state.replyToQueue = it },
-                    label = { Text(stringResource("ibm_mq_msg_send_reply_to_queue")) },
-                    singleLine = true,
+                    label = stringResource("ibm_mq_msg_send_reply_to_queue"),
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Row(
@@ -466,10 +465,9 @@ private fun AdvancedPropsSection(state: SendMessagesState) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     PropLabel(stringResource("ibm_mq_msg_send_expiry"))
-                    OutlinedTextField(
+                    CompactTextField(
                         value = state.expirySeconds,
                         onValueChange = { state.expirySeconds = it.filter(Char::isDigit).take(9) },
-                        singleLine = true,
                         modifier = Modifier.width(120.dp),
                     )
                     Text(

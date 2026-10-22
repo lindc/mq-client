@@ -13,10 +13,13 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -47,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import com.mqclient.mqui.objectlist.ObjectListEmptyState
 import com.mqclient.rocketmq.RocketMqModule
 import com.mqclient.rocketmq.RocketMqSendResult
+import com.mqclient.uicommon.CompactTextField
 import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.dialog.HeaderDraft
@@ -371,45 +375,48 @@ private fun TargetRow(state: RocketMqSendMessagesState) {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            OutlinedTextField(
+            CompactTextField(
                 value = state.topicName,
                 onValueChange = {},
-                label = { Text(stringResource("rocketmq_ui_send_topic")) },
+                label = stringResource("rocketmq_ui_send_topic"),
                 readOnly = true,
-                singleLine = true,
-                textStyle = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.weight(1.4f),
             )
-            OutlinedTextField(
+            CompactTextField(
                 value = state.tags,
                 onValueChange = { state.tags = it },
-                label = { Text(stringResource("rocketmq_ui_send_tags")) },
-                singleLine = true,
-                textStyle = MaterialTheme.typography.bodySmall,
+                label = stringResource("rocketmq_ui_send_tags"),
                 modifier = Modifier.weight(1f),
             )
-            OutlinedTextField(
+            CompactTextField(
                 value = state.keysText,
                 onValueChange = { state.keysText = it },
-                label = { Text(stringResource("rocketmq_ui_send_keys")) },
-                singleLine = true,
-                textStyle = MaterialTheme.typography.bodySmall,
+                label = stringResource("rocketmq_ui_send_keys"),
                 modifier = Modifier.weight(1f),
             )
         }
         // 用户属性编辑器（可增删键值行）—— ui-common 公共组件（Kafka Headers 同款；
         // RocketMQ 用户属性是纯字符串，hexText 传空隐藏 HEX 勾选）。
         if (state.tasks.size <= 1) {
-            HeadersEditor(
-                headers = state.headers,
-                onHeadersChange = { state.headers = it },
-                title = stringResource("rocketmq_ui_send_headers"),
-                addText = stringResource("rocketmq_ui_send_header_add"),
-                keyPlaceholder = stringResource("rocketmq_ui_send_header_key"),
-                valuePlaceholder = stringResource("rocketmq_ui_send_header_value"),
-                hexText = "",
-                removeText = stringResource("rocketmq_ui_send_remove"),
-            )
+            // HeadersEditor 行数随用户增删无上限：**有界化**（180dp 上限 + 内部滚动），
+            // 否则顶部固定区无界膨胀，把 weight(1f) 内容区与底部发送栏顶出视口。
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 180.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                HeadersEditor(
+                    headers = state.headers,
+                    onHeadersChange = { state.headers = it },
+                    title = stringResource("rocketmq_ui_send_headers"),
+                    addText = stringResource("rocketmq_ui_send_header_add"),
+                    keyPlaceholder = stringResource("rocketmq_ui_send_header_key"),
+                    valuePlaceholder = stringResource("rocketmq_ui_send_header_value"),
+                    hexText = "",
+                    removeText = stringResource("rocketmq_ui_send_remove"),
+                )
+            }
         }
     }
 }

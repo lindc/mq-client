@@ -6,6 +6,7 @@
 package com.mqclient.rocketmq.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -276,20 +277,16 @@ internal fun RocketMqMessageBrowseTab(
                 options = queueIds,
                 onSelect = { selectedQueue = it },
             )
-            androidx.compose.material3.OutlinedTextField(
+            CompactNumberField(
                 value = offsetText,
                 onValueChange = { offsetText = it.filter(Char::isDigit).take(19) },
-                placeholder = { Text(stringResource("rocketmq_ui_msg_browse_offset_hint")) },
-                singleLine = true,
-                textStyle = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.width(140.dp),
+                width = 140.dp,
+                hint = stringResource("rocketmq_ui_msg_browse_offset_hint"),
             )
-            androidx.compose.material3.OutlinedTextField(
+            CompactNumberField(
                 value = countText,
                 onValueChange = { countText = it.filter(Char::isDigit).take(4) },
-                singleLine = true,
-                textStyle = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.width(84.dp),
+                width = 84.dp,
             )
             PressableButton(
                 onClick = { retryKey++ },
@@ -393,6 +390,48 @@ internal fun RocketMqMessageBrowseTab(
             onDismiss = { detailMessage = null },
         )
     }
+}
+
+/**
+ * 紧凑数字输入框（36dp 高，BasicTextField 自绘边框）：m3 OutlinedTextField 默认
+ * 56dp，与同行的 Queue 下拉按钮（约 36dp）比例失衡 —— 这里压到同高并垂直居中。
+ */
+@Composable
+private fun CompactNumberField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    width: androidx.compose.ui.unit.Dp,
+    hint: String? = null,
+) {
+    androidx.compose.foundation.text.BasicTextField(
+        value = value,
+        onValueChange = onValueChange,
+        singleLine = true,
+        textStyle = MaterialTheme.typography.bodySmall.copy(
+            color = MaterialTheme.colorScheme.onSurface,
+        ),
+        cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
+        modifier = Modifier
+            .width(width)
+            .height(36.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(6.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+            .padding(horizontal = 8.dp),
+        decorationBox = { inner ->
+            Box(contentAlignment = Alignment.CenterStart) {
+                if (value.isEmpty() && hint != null) {
+                    Text(
+                        text = hint,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        maxLines = 1,
+                    )
+                }
+                inner()
+            }
+        },
+    )
 }
 
 /** Queue 下拉（PressableButton + DropdownMenu，与 KafkaMessageBrowseTab 的 DropdownButton 同款）。 */

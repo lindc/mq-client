@@ -53,6 +53,7 @@ import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.file.pickFiles
+import com.mqclient.uicommon.CompactTextField
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 import java.util.Base64
@@ -328,26 +329,18 @@ fun RabbitMqSendMessageDialog(
                     fontFamily = FontFamily.Monospace,
                 )
             }
-            OutlinedTextField(
+            CompactTextField(
                 value = routingKey,
                 onValueChange = {
                     routingKey = it
                     routingKeyError = null
                 },
-                label = { Text(stringResource("rabbitmq_ui_send_routing_key")) },
+                label = stringResource("rabbitmq_ui_send_routing_key"),
                 isError = routingKeyError != null,
+                supportingText = routingKeyError,
                 enabled = !state.busy,
-                singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
-            if (routingKeyError != null) {
-                Text(
-                    text = routingKeyError!!,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-            }
             Spacer(Modifier.height(8.dp))
 
             // ---- 发送页（单页融合，无 Tab）----
@@ -490,21 +483,19 @@ internal fun HeadersEditor(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-            OutlinedTextField(
+            CompactTextField(
                 value = pair.first,
                 onValueChange = { onChange(headers.toMutableList().also { list -> list[index] = it to pair.second }) },
-                singleLine = true,
                 enabled = enabled,
-                placeholder = { Text(stringResource("rabbitmq_ui_send_header_name")) },
+                placeholder = stringResource("rabbitmq_ui_send_header_name"),
                 modifier = Modifier.weight(1f),
             )
             Spacer(Modifier.width(8.dp))
-            OutlinedTextField(
+            CompactTextField(
                 value = pair.second,
                 onValueChange = { onChange(headers.toMutableList().also { list -> list[index] = pair.first to it }) },
-                singleLine = true,
                 enabled = enabled,
-                placeholder = { Text(stringResource("rabbitmq_ui_send_header_value")) },
+                placeholder = stringResource("rabbitmq_ui_send_header_value"),
                 modifier = Modifier.weight(1.4f),
             )
             IconButton(
