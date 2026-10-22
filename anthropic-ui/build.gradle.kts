@@ -12,9 +12,10 @@ kotlin {
         commonMain.dependencies {
             implementation(projects.appCore)
             // Provider 预置（AnthropicProviders）与品牌归属本模块；AiAdapterRegistry
-            // 的类型引用在 openai-service。
+            // 的类型引用在 ai-core。
             implementation(projects.anthropicService)
-            implementation(projects.openaiService)
+            // 注册表 / 契约在 ai-core；不再依赖 openai-service。
+            implementation(projects.aiCore)
             // 新建连接表单复用 openai-ui 的 ModelComboBox（AI 专属控件，与 openai-service
             // 同理：公共件先归第一个用户，出现第三处再抽 ui-common）。
             implementation(projects.openaiUi)

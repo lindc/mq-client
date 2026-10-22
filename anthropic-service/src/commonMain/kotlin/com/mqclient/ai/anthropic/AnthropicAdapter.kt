@@ -33,8 +33,7 @@ import kotlinx.serialization.Serializable
 private const val PROVIDER_LABEL = "Anthropic"
 
 /**
- * 日志 tag：与 openai-service 的 `AI_ADAPTER_LOG_TAG` 同值 —— 适配器层日志共用一个
- * tag（该常量在 openai-service 是 internal，跨模块取不到，这里只能各写一份）。
+ * 日志 tag：与 ai-core 的 `AI_ADAPTER_LOG_TAG` 同值 —— 适配器层日志共用一个 tag。
  */
 private const val LOG_TAG = "ai-adapter"
 
@@ -57,7 +56,7 @@ private const val DEFAULT_MAX_TOKENS = 4096
  * 也不支持 prompt caching / extended thinking。
  *
  * HTTP 客户端经 [clientFor] 按连接取：`ignoreSsl=true` 的连接走 trust-all 客户端
- * （见 openai-service jvmMain 的 AiHttp.clientFor），默认走严格校验的共享客户端。旧构造
+ * （见 ai-core jvmMain 的 AiHttp.clientFor），默认走严格校验的共享客户端。旧构造
  * （固定 client）保留 —— 适配器契约测试的 MockEngine 注入路径不变。
  */
 class AnthropicAdapter(private val clientFor: (AiConnection) -> HttpClient) : AiAdapter {

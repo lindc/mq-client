@@ -7,7 +7,7 @@ import mq_client.openai_ui.generated.resources.ic_openai
 import org.jetbrains.compose.resources.painterResource
 
 /**
- * openai-service 的品牌资源与界面件。
+ * openai-service（OpenAI 兼容 provider）的品牌资源与界面件。
  *
  * 品牌素材放这里而不是 app-ui 的 `ModuleIcons`：`*-service` 模块没有 Compose 插件、
  * 携带不了 composeResources，而 `*-ui` 模块可以 —— 谁的品牌归谁的 *-ui 模块管。

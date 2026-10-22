@@ -38,6 +38,9 @@ include(
     ":ui-common",
     // Compose UI 测试工具（画布手势 / 语义定位），各 UI 模块 jvmTest 共用。
     ":ui-test-kit",
+    // AI 核心层（契约 + 基建 + 注册表），不认识任何具体 provider。
+    ":ai-core",
+    // 每个 provider 一个模块，平级：删掉某个 provider 不影响 AI 栈其余部分。
     ":openai-service",
     ":openai-ui",
     ":anthropic-service",

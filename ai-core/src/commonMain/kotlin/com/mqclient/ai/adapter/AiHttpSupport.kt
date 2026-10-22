@@ -27,8 +27,11 @@ import kotlinx.serialization.json.contentOrNull
  * 这里应改成 expect/actual。
  */
 
-/** 适配器层统一日志 tag。 */
-internal const val AI_ADAPTER_LOG_TAG = "ai-adapter"
+/**
+ * 适配器层统一日志 tag（public：provider 模块的适配器也要用它，`internal` 只在
+ * 本模块内可见）。
+ */
+const val AI_ADAPTER_LOG_TAG = "ai-adapter"
 
 /**
  * 适配器层共享的 JSON 解析器：宽松（服务端多加字段、格式小偏差都不致命）。

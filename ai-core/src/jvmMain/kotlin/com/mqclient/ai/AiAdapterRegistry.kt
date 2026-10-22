@@ -1,7 +1,5 @@
 package com.mqclient.ai
 
-import com.mqclient.ai.adapter.AiHttp
-import com.mqclient.ai.adapter.OpenAiCompatibleAdapter
 import com.mqclient.core.AiConnection
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
@@ -9,15 +7,21 @@ import kotlinx.coroutines.flow.update
 /**
  * Provider + 适配器的注册表（替代旧 `app-core` 的 `AiProviderRegistry` SPI 方案）。
  *
- * 为什么不用 ServiceLoader：它是 JVM-only。注册表本身不依赖 ServiceLoader，
- * 内置的 `openai-compatible` 在对象初始化时登记，[register] 对外公开 ——
- * 想加新 Provider，写一个 [AiAdapter] 实现 + 一行注册即可，注册表零改动。
+ * **本模块不认识任何具体 provider**：注册表只提供 [register] / 查询，谁提供适配器
+ * 谁负责登记 —— 每个 `*-service` 模块在自己的 `ServiceAdapter.initialize` 里登记
+ * （启动期 [com.mqclient.core.ModuleRegistry.initializeServices] 统一调用）。
+ * 这样「删掉某个 provider」才真的是删一个模块，而不是掏空整个 AI 栈。
  *
- * **为什么在本模块的 jvmMain**：注册表的 `init` 要给内置适配器传入
- * `AiHttp::clientFor`，而 `AiHttp` 构造 Ktor 客户端要 `io.ktor.client.engine.java`
- * 与 `javax.net.ssl.SSLContext` —— 这些是 JVM 专用，放在 commonMain 只是假装跨平台
- * （项目当前也只有 `jvm()` 一个 target）。配套地，`AiAdapter` / `AiProvider` /
- * `AiChatMessage` / `AiException` 等**纯契约**仍在 commonMain，没有 Java 依赖。
+ * 为什么不用 ServiceLoader 发现适配器：它只能加载 JVM 类，注册表需要保持可在
+ * commonMain 被引用（[AiAdapter] 契约也在那里）。SPI 仍然负责**模块**发现，
+ * initialize 就是登记时机。
+ *
+ * **为什么在 jvmMain**：[AiAdapterRegistry] 本身没有 Java 依赖，但它唯一的写入方
+ * （各 service 模块的 initialize）要传 `AiHttp::clientFor`，而 `AiHttp` 构造 Ktor
+ * 客户端要 `io.ktor.client.engine.java` 与 `javax.net.ssl.SSLContext`。项目当前只有
+ * `jvm()` 一个 target；把注册表放在同一侧，避免 commonMain 出现半套抽象。
+ * 纯契约（[AiAdapter] / [AiProvider] / [AiChatMessage] / [AiException]）仍在
+ * commonMain。
  *
  * 并发姿势与 `EventBus` / `JobScheduler` / `CacheManager` 一致：
  * StateFlow + CAS 整表替换。
@@ -27,11 +31,6 @@ object AiAdapterRegistry {
     private data class Entry(val provider: AiProvider, val adapter: AiAdapter)
 
     private val registry = MutableStateFlow<Map<String, Entry>>(emptyMap())
-
-    init {
-        // clientFor 按连接分发：默认严格 CIO，ignoreSsl=true 走 trust-all（见 AiHttp）。
-        register(AiProviders.OPENAI_COMPATIBLE, OpenAiCompatibleAdapter(AiHttp::clientFor))
-    }
 
     /** 登记（或同名替换）一个 Provider 及其适配器。id 不一致直接拒绝 —— 那是接线错误。 */
     fun register(provider: AiProvider, adapter: AiAdapter) {

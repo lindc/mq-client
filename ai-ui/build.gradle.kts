@@ -14,7 +14,8 @@ kotlin {
             implementation(projects.appCore)
             // 面板历史 / 审计记录的读写（chat_history 表归 ai-service 管）。
             implementation(projects.aiService)
-            implementation(projects.openaiService)
+            // AI 契约 / 注册表（发送链路只用契约，不需要具体 provider）。
+            implementation(projects.aiCore)
             implementation(projects.uiCommon)
             implementation(libs.compose.runtime)
             implementation(libs.compose.foundation)

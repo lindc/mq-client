@@ -14,6 +14,8 @@ kotlin {
             // 新建连接表单（ConnectionFormUi 实现）用本模块对应的 service：
             // Provider 列表来自 AiAdapterRegistry。
             implementation(projects.openaiService)
+            // 注册表 / 契约（openai-service 已 api 传递，这里显式声明表明直接使用）。
+            implementation(projects.aiCore)
             // 连接落盘（AiConnectionRepository）现在归 AI 模块（ai-service）。
             implementation(projects.aiService)
             implementation(libs.compose.runtime)
