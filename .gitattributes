@@ -1,0 +1,20 @@
+# 换行符策略：只钉住 CI 依赖的几类文件，不动 .kt / .kts（避免全仓重规范化）。
+#
+# 为什么需要这个文件：仓库在 Windows 上开发、在 Linux 上跑 CI。core.autocrlf=true
+# 只能在**提交方**的机器上生效，而 checkout 的行为取决于检出方的配置。一个 CRLF 的
+# shell 脚本在 Linux 上会直接失败：
+#     /usr/bin/env: 'bash\r': No such file or directory
+# 把它钉在 .gitattributes 里，才不依赖每个人（和每台 CI）的本地设置。
+
+* text=auto
+
+# Shell 脚本必须 LF。
+*.sh text eol=lf
+
+# GitHub Actions / 其他 CI 配置：LF（YAML 解析器对 CRLF 宽容，但保持与脚本一致）。
+*.yml  text eol=lf
+*.yaml text eol=lf
+
+# PowerShell 脚本：CRLF 是 Windows 惯例；文件本身带 UTF-8 BOM（PowerShell 5.1
+# 靠 BOM 判断 UTF-8，否则中文输出会变乱码，见 doc/git-commit-encoding.md）。
+*.ps1 text eol=crlf
