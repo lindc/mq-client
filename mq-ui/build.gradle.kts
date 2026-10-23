@@ -30,5 +30,9 @@ kotlin {
             implementation(libs.filekit.dialogs)
             implementation(libs.filekit.dialogs.compose)
         }
+        jvmTest.dependencies {
+            // pollUntil 的取消语义契约测试（纯协程，不需要 Compose 运行时）。
+            implementation(kotlin("test"))
+        }
     }
 }

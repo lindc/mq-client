@@ -1,6 +1,7 @@
 package com.mqclient.mqui
 
 import kotlin.coroutines.coroutineContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 
@@ -40,9 +41,17 @@ suspend fun <T> pollUntil(
     var pollError: String? = null
     while (true) {
         coroutineContext.ensureActive()
-        val status = runCatching { query() }
-            .onFailure { pollError = it.message ?: it::class.simpleName ?: "unknown" }
-            .getOrNull()
+        // 显式 try/catch 而不是 `runCatching`：后者的 onFailure 会把 CancellationException
+        // 一并吞掉（取消被当成「查询失败」继续轮询），与项目其他地方的纪律不一致
+        //（JobScheduler / EventBus 都是「取消必须原样上抛」）。
+        val status = try {
+            query()
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (e: Throwable) {
+            pollError = e.message ?: e::class.simpleName ?: "unknown"
+            null
+        }
         if (status != null && isTarget(status)) return PollOutcome.Reached(status)
         if (System.currentTimeMillis() >= deadline) return PollOutcome.Timeout(pollError)
         delay(intervalMs)
