@@ -58,6 +58,7 @@ import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 import com.mqclient.uicommon.table.formatSize
+import com.mqclient.uicommon.failureText
 import java.util.Base64
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
@@ -127,7 +128,6 @@ private class RabbitMqSendState(
     var headers by mutableStateOf(listOf<Pair<String, String>>())
 
     /* ------------------------------ 批量任务管理 ------------------------------ */
-
 
     /**
      * 选完文件后装配任务列表（**替换**语义），IO 线程读文件；读失败的文件跳过，
@@ -680,11 +680,4 @@ private fun SmallSecondaryButton(text: String, onClick: () -> Unit) {
         standardMinWidth = false,
     ) { Text(text) }
 }
-
-/** 失败原因：解 ExecutionException 包装（与其他对话框调用处同一简化版）。 */
-private fun failureText(error: Throwable): String =
-    (error as? java.util.concurrent.ExecutionException)?.cause?.message
-        ?: error.message
-        ?: error::class.simpleName
-        ?: "unknown"
 

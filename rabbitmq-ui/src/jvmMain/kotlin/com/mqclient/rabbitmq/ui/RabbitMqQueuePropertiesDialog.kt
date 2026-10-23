@@ -59,6 +59,7 @@ import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
+import com.mqclient.uicommon.failureText
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -679,9 +680,3 @@ private fun PropertyLine(label: String, value: String, valueColor: Color? = null
     }
 }
 
-/** 失败原因：解 ExecutionException 包装（与其他对话框调用处同一简化版）。 */
-private fun failureText(error: Throwable): String =
-    (error as? java.util.concurrent.ExecutionException)?.cause?.message
-        ?: error.message
-        ?: error::class.simpleName
-        ?: "unknown"

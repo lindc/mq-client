@@ -64,6 +64,7 @@ import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 import com.mqclient.uicommon.table.formatSize
+import com.mqclient.uicommon.failureText
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -686,13 +687,6 @@ private fun TextButtonCompat(onClick: () -> Unit) {
         Text(stringResource("rabbitmq_ui_refresh"))
     }
 }
-
-/** 失败原因：解 ExecutionException 包装（与其他对话框调用处同一简化版）。 */
-private fun failureText(error: Throwable): String =
-    (error as? java.util.concurrent.ExecutionException)?.cause?.message
-        ?: error.message
-        ?: error::class.simpleName
-        ?: "unknown"
 
 /**
  * 会话槽：**唯一**持有当前队列消息会话的容器，开新的必然先关旧的。

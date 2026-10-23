@@ -56,6 +56,7 @@ import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
+import com.mqclient.uicommon.failureText
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -555,13 +556,6 @@ private enum class ResetMode { EARLIEST, LATEST, TIMESTAMP }
 /** 时间档回显格式（选择器粒度到分钟，与浏览 Tab 的起点时间同款）。 */
 private val RESET_TIME_DISPLAY_FORMATTER: DateTimeFormatter =
     DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
-
-/** 失败原因：解 ExecutionException 包装（与表单 failureMessage 同思路的简化版）。 */
-private fun failureText(error: Throwable): String =
-    (error as? java.util.concurrent.ExecutionException)?.cause?.message
-        ?: error.message
-        ?: error::class.simpleName
-        ?: "unknown"
 
 private val COL_PARTITION = 80.dp
 private val COL_OFFSET = 110.dp
