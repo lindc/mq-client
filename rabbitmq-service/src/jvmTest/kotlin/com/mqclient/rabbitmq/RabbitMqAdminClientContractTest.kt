@@ -264,6 +264,31 @@ class RabbitMqAdminClientContractTest {
     }
 
     @Test
+    fun `错误映射 - 401 区分凭据错与 tag 不足`() = runBlocking {
+        // 凭据真错：没有 not_authorised，不该叫用户去查 tag。
+        val (badCreds, _) = client { HttpStatusCode.Unauthorized to """{"reason":"Login was refused"}""" }
+        val credsError = assertFailsWith<IllegalStateException> { badCreds.deleteQueue("q") }
+        assertTrue(
+            credsError.message?.contains("认证失败") == true,
+            "凭据错应提示认证失败，实际 '${credsError.message}'",
+        )
+
+        // tag 不够（实测原文）：密码是对的，提示必须指向 tag，否则用户会去改密码。
+        val (noTag, _) = client {
+            HttpStatusCode.Unauthorized to """{"error":"not_authorised","reason":"Not monitor user"}"""
+        }
+        val tagError = assertFailsWith<IllegalStateException> { noTag.nodes() }
+        assertTrue(
+            tagError.message?.contains("权限不足") == true,
+            "tag 不足应提示权限不足，实际 '${tagError.message}'",
+        )
+        assertTrue(
+            tagError.message?.contains("Not monitor user") == true,
+            "服务端的 reason 要带进文案（用户才知道缺哪个 tag），实际 '${tagError.message}'",
+        )
+    }
+
+    @Test
     fun `错误映射 - 2xx 不抛 但 201 与 204 都算成功`() = runBlocking {
         val (created, _) = client { HttpStatusCode.Created to "" }
         created.createQueue("q", durable = true, autoDelete = false, exclusive = false, arguments = buildJsonObject { })

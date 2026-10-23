@@ -238,11 +238,36 @@ class RabbitMqAdminClient internal constructor(
         val reason = reasonOf(body)
         when (status) {
             in 200..299 -> Unit
-            401 -> throw IllegalStateException("认证失败（401）：检查用户名 / 密码$reason")
+            // 401 有两种完全不同的原因，不能合并成一句「认证失败」：
+            //  - 凭据不对 → {"error":"not_authorised", ...}？不是 —— 那种是下面的情况；
+            //  - **tag 不够** → {"error":"not_authorised","reason":"Not monitor user"}。
+            //    密码是对的，去改密码只会白忙。实测：只带 management tag 的账号请求
+            //    /api/nodes 就是这条（见 RabbitMqScanPartialLiveTest）。
+            401 -> throw IllegalStateException(
+                if (isTagInsufficient(body)) {
+                    "权限不足（401）：账号缺少所需 tag$reason"
+                } else {
+                    "认证失败（401）：检查用户名 / 密码$reason"
+                },
+            )
             403 -> throw IllegalStateException("授权失败（403）：账号权限不足$reason")
             404 -> throw IllegalStateException("未找到（404）：检查管理端口与 vhost 是否正确$reason")
             else -> throw IllegalStateException("管理 API 返回 HTTP $status$reason")
         }
+    }
+
+    /**
+     * 401 是否由「tag 不够」引起（而非凭据错）。
+     *
+     * RabbitMQ 对这两种都回 401，只能从响应体区分：tag 不够时带
+     * `"error":"not_authorised"` 与 `"reason":"Not monitor user"` 这类理由。
+     */
+    private fun isTagInsufficient(body: String?): Boolean {
+        val text = body.orEmpty()
+        if (!text.contains("not_authorised")) return false
+        // 凭据真的错时 RabbitMQ 回 "Login was refused using authentication mechanism PLAIN"，
+        // 那时没有 not_authorised，也就不会走到这里。
+        return true
     }
 
     companion object {
