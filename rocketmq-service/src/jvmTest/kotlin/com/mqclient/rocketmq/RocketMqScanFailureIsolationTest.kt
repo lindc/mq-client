@@ -27,24 +27,24 @@ class RocketMqScanFailureIsolationTest {
 
     @Test
     fun `scanKindOr records the failure and returns the fallback`() = runBlocking {
-        val failures = java.util.concurrent.ConcurrentHashMap<RocketMqScanService.RocketMqScanKind, String>()
+        val failures = java.util.concurrent.ConcurrentHashMap<RocketMqScanKind, String>()
         val service = RocketMqScanService(context())
 
-        val rows = service.scanKindOr(failures, RocketMqScanService.RocketMqScanKind.TOPICS, emptyList<String>()) {
+        val rows = service.scanKindOr(failures, RocketMqScanKind.TOPICS, emptyList<String>()) {
             throw IllegalStateException("ACL 拒绝列出主题")
         }
 
         assertTrue(rows.isEmpty(), "兜底应当给空列表，不往上抛")
-        assertEquals("ACL 拒绝列出主题", failures[RocketMqScanService.RocketMqScanKind.TOPICS])
+        assertEquals("ACL 拒绝列出主题", failures[RocketMqScanKind.TOPICS])
     }
 
     @Test
     fun `scanKindOr does not swallow cancellation`() = runBlocking {
-        val failures = java.util.concurrent.ConcurrentHashMap<RocketMqScanService.RocketMqScanKind, String>()
+        val failures = java.util.concurrent.ConcurrentHashMap<RocketMqScanKind, String>()
         val service = RocketMqScanService(context())
 
         assertFailsWith<CancellationException> {
-            service.scanKindOr(failures, RocketMqScanService.RocketMqScanKind.GROUPS, emptyList<String>()) {
+            service.scanKindOr(failures, RocketMqScanKind.GROUPS, emptyList<String>()) {
                 throw CancellationException("用户点了停止")
             }
         }
@@ -53,10 +53,10 @@ class RocketMqScanFailureIsolationTest {
 
     @Test
     fun `successful scanKindOr records nothing`() = runBlocking {
-        val failures = java.util.concurrent.ConcurrentHashMap<RocketMqScanService.RocketMqScanKind, String>()
+        val failures = java.util.concurrent.ConcurrentHashMap<RocketMqScanKind, String>()
         val service = RocketMqScanService(context())
 
-        val rows = service.scanKindOr(failures, RocketMqScanService.RocketMqScanKind.TOPICS, emptyList<String>()) {
+        val rows = service.scanKindOr(failures, RocketMqScanKind.TOPICS, emptyList<String>()) {
             listOf("TopicTest")
         }
 

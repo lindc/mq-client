@@ -160,6 +160,8 @@ class RocketMqConnectionManager(
             ctx.cleanup()
             // 扫描完成标记与缓存同生命周期：断开清掉，重连后重新等首扫。
             service.clearScanState(connectionId)
+            // 「部分数据未刷新」的旧结论同样不能诈尸到重连后（新连接可能权限不同）。
+            RocketMqModule.clearScanFailures(connectionId)
             setStatus(ctx, ConnectionStatus.Disconnected)
             context.emit(
                 name = RocketMqEvents.DISCONNECTED,

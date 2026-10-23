@@ -162,10 +162,6 @@ class RocketMqScanService(private val context: ServiceContext) {
      * 单独分类是因为它们必须**按类**兑现到缓存上：topics 失败了就不能拿空表覆盖
      * `topics` 缓存 —— 那等于告诉 UI「这个集群里没有 topic」。
      */
-    internal enum class RocketMqScanKind(val label: String) {
-        TOPICS("topics"),
-        GROUPS("groups"),
-    }
 
     /**
      * 单类查询的兜底：失败 → [fallback] 并登记到 [failures]。
@@ -237,6 +233,10 @@ class RocketMqScanService(private val context: ServiceContext) {
             // 永远转圈 —— 而连接状态已不再因此转 Failed，没有别的路径去兑现 Error。
             // 部分失败时缓存没被覆盖，所以已有数据仍在，页面显示的是上一轮。
             objectsScannedOnce[connectionId] = true
+
+            // 把「哪几类没取到」交给模块存起来：UI 的提示条要能在页面切来切去后
+            // 仍然知道「这份数据是残的」，而事件是瞬时的。
+            RocketMqModule.reportScanFailures(connectionId, failures.keys.toSet())
 
             context.emit(
                 name = RocketMqEvents.OBJECTS_SCANNED,
@@ -702,3 +702,14 @@ fun isSystemTopic(name: String): Boolean =
  */
 fun isSystemGroup(name: String): Boolean =
     name.startsWith("CID_RMQ_SYS_") || name.startsWith("CID_ONS_")
+/**
+ * 对象慢扫里两类**可局部失败**的查询（cluster 不属于它：NameServer 不可达等于连接
+ * 已断，直接让整轮失败）。
+ *
+ * 顶层公开（不再是 `RocketMqScanService` 的 internal 嵌套）：UI 的「部分数据未刷新」
+ * 提示条要按类型拼文案。枚举不含实现，暴露它比在 UI 里用字符串标签匹配安全。
+ */
+enum class RocketMqScanKind(val label: String) {
+    TOPICS("topics"),
+    GROUPS("groups"),
+}

@@ -1,7 +1,9 @@
 package com.mqclient.rocketmq.ui
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -46,33 +48,47 @@ class RocketMqUI : AdapterUI {
      * 模块未初始化（拿不到连接上下文）时回落 null —— 宿主显示「coming soon」占位页。
      */
     override fun contentFor(objectType: String, connectionId: String): (@Composable () -> Unit)? {
-        val connected = RocketMqModule.connectionOrNull(connectionId) != null
+        if (RocketMqModule.connectionOrNull(connectionId) == null) return null
+        // 四个页都是「读同一份慢扫缓存」的视图，所以「部分数据未刷新」提示在**同一处**
+        // 统一包上（contentFor 是四个面板的唯一入口）—— 各面板各写一份是同类提示
+        // 四处漏三处的温床。
         return when (objectType) {
-            "topics" ->
-                if (connected) {
-                    { RocketMqTopicsPanel(connectionId = connectionId, modifier = Modifier.fillMaxSize()) }
-                } else {
-                    null
+            "topics" -> {
+                { RocketMqPanelHost(connectionId) { RocketMqTopicsPanel(connectionId, Modifier.fillMaxSize()) } }
+            }
+            "groups" -> {
+                { RocketMqPanelHost(connectionId) { RocketMqGroupsPanel(connectionId, Modifier.fillMaxSize()) } }
+            }
+            "overview" -> {
+                { RocketMqPanelHost(connectionId) { RocketMqOverviewPanel(connectionId, Modifier.fillMaxSize()) } }
+            }
+            "topology" -> {
+                {
+                    RocketMqPanelHost(connectionId) {
+                        com.mqclient.rocketmq.ui.topology.RocketMqTopologyPanel(
+                            connectionId = connectionId,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
                 }
-            "groups" ->
-                if (connected) {
-                    { RocketMqGroupsPanel(connectionId = connectionId, modifier = Modifier.fillMaxSize()) }
-                } else {
-                    null
-                }
-            "overview" ->
-                if (connected) {
-                    { RocketMqOverviewPanel(connectionId = connectionId, modifier = Modifier.fillMaxSize()) }
-                } else {
-                    null
-                }
-            "topology" ->
-                if (connected) {
-                    { com.mqclient.rocketmq.ui.topology.RocketMqTopologyPanel(connectionId = connectionId, modifier = Modifier.fillMaxSize()) }
-                } else {
-                    null
-                }
+            }
             else -> null
         }
+    }
+}
+
+/**
+ * 面板外壳：顶部「部分数据未刷新」提示（有的话）+ 剩余空间给面板本体。
+ *
+ * `weight(1f)` 而不是 `fillMaxSize()`：提示条占高后内容必须缩，不能溢出到窗口外。
+ */
+@Composable
+private fun RocketMqPanelHost(
+    connectionId: String,
+    content: @Composable () -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        RocketMqPartialScanBanner(connectionId)
+        Box(modifier = Modifier.weight(1f).fillMaxWidth()) { content() }
     }
 }
