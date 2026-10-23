@@ -336,6 +336,8 @@ python scripts/check_i18n_refs.py   # 新增文案键必须中英文都补
 - UI 层不展示原始错误码，service 层负责翻译
 - 挂起调用不要用 `runCatching`（用 `runCatchingCancellable`）
 
+📐 **UI 组件契约**：属性表与按钮的视觉 / 语义规范见 [doc/ui-conventions.md](doc/ui-conventions.md)。
+
 ---
 
 ## 📄 License

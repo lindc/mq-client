@@ -336,6 +336,8 @@ python scripts/check_i18n_refs.py   # new i18n keys need both zh-CN and en-US
 - The UI layer never shows raw error codes; the service layer translates them
 - Don't wrap suspend calls in `runCatching` (use `runCatchingCancellable`)
 
+📐 **UI component contracts**: visual and semantic rules for property tables and buttons live in [doc/ui-conventions.md](doc/ui-conventions.md).
+
 ---
 
 ## 📄 License
