@@ -1,125 +1,351 @@
-# MQClient
+# MQ Client Desktop
 
-KMP 桌面端的中间件管理工具（当前主打 IBM MQ），Compose Multiplatform for Desktop + Material 3。
+> **本地优先 · 多协议统一管理 · AI 智能诊断工作台**
+> 基于 Kotlin Multiplatform + Compose Desktop 构建，一套 UI 同时管理 IBM MQ、Kafka、RabbitMQ、RocketMQ。
 
-## 功能概览
+[![Kotlin](https://img.shields.io/badge/Kotlin-2.x-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org)
+[![Compose](https://img.shields.io/badge/Compose%20Desktop-Material%203-4285F4)](https://www.jetbrains.com/lp/compose-multiplatform/)
+[![JDK](https://img.shields.io/badge/JDK-25-orange)](https://openjdk.org/)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-- **IBM MQ 连接管理**：显式连接模型 —— 新建 / 编辑 / 删除连接，点击才建连；侧栏树形导航，右键菜单（连接 / 断开 / 测试 / 查看属性 / 删除）
-- **MQSC 命令控制台**：类 DBeaver SQL 控制台的交互体验，MQSC 命令经 PCF 送达队列管理器（详见下文）
-- **队列管理器属性面板**：PCF 查询 QMGR 配置与运行状态
-- **AI 助手面板**：多连接切换的会话面板，聊天历史落库（SQLDelight）
-- **RabbitMQ 支持**：连接管理（AMQP + 管理 API 双端口）、概览（健康度 / 集群节点）/ 队列 / 交换机 / 拓扑面板、消息浏览（basicGet 只读）与转发搬移（AMQP 直发）、队列 / 交换机创建与 Arguments、命令历史审计、「询问 AI」链路分析
-- **通用能力**：中英文 i18n（设置内切换）、主题 / 字号 / 字体设置、日志统一落 `~/.mqclient/logs/`、Material Icons 全量替代 Emoji（Linux 下无字体依赖）、四个 MQ 模块拓扑图一键导出 PNG
+[简体中文](README.md) · **English**
 
-## 构建与运行
+---
+
+## 🎯 为什么是它？
+
+运维中间件的人都经历过：IBM MQ 用 MQ Explorer、Kafka 用 kafka-tool、RabbitMQ 开浏览器、RocketMQ 再装一套控制台。四个工具、四套心智模型、四份散落的连接配置 —— 而当你终于看到「队列在堆积」时，真正的问题往往在**另一端的通道**上。
+
+MQ Client Desktop 把这些收进一个本地桌面应用，并且做了一件别处没有的事：**把整条消息链路交给 AI 看**。
+
+---
+
+## 🔥 核心杀手锏
+
+### 🧠 AI 链路诊断 —— 「图即上下文」
+
+这不是「给 AI 一个聊天框」。点击任意对象页的「询问 AI」，应用会把**当前连接该对象的完整图景**打包成结构化上下文：
+
+```
+对象属性 + 上下游拓扑（谁生产、谁消费、经哪条通道）
+        + 实时积压数据（队列深度 / 消费者数 / 通道状态）
+        + 聚类关系（是否集群成员、仓库角色）
+                    ↓
+      OpenAI 兼容 / Anthropic 适配器
+                    ↓
+   「XMITQ 堆积 3200 条，DOWNSTREAM.CHL 状态 RETRYING，
+     对端 QM2 集群接收通道未运行」← 根因定位
+```
+
+四个 MQ 模块各有专属的链路构建器（`IbmMqAiChainBuilder` / `KafkaAiChainBuilder` / …），把「表格里看不出来的东西」变成 AI 能推理的文本。**秒级定位消息堆积、通道断裂的根因。**
+
+### 🚀 多协议深度抽象 —— SPI 零耦合
+
+基于 `ServiceAdapter` SPI 机制，新增一个 MQ 协议只需实现接口并注册，**不需要改动主程序任何一行**：
+
+```kotlin
+interface ServiceAdapter {
+    val id: String                          // 模块标识，事件名前缀
+    fun initialize(context: ServiceContext) // 拿到总线 + 调度器 + 自己的 scope
+}
+```
+
+每个 `*-service` 模块只依赖 `app-core` 的接口，每个 `*-ui` 模块只依赖 `ui-common` 的组件 —— **业务模块之间零互相依赖**。
+
+### 🕸️ 交互式拓扑图
+
+基于 `graph-core` 的关系模型与 Kuiver 渲染引擎，自动发现对象关系：
+
+- **自动布局**：IBM MQ 按消息流向固定列（alias → topic → sub → remote → xmitq → channel → 远程 QMGR），Kafka / RabbitMQ / RocketMQ 各有专属布局策略
+- **节点拖拽**：按住节点拖动，不干扰其他节点；关闭拖拽则整画布平移
+- **双击弹窗**：直接打开该节点的属性面板，含实时运行状态
+- **高清导出**：2x 离屏渲染导出 PNG，可以直接贴进故障报告
+
+### 🛠️ 硬核原生协议 —— 拒绝阉割
+
+| 协议 | 底层实现 | 不妥协的地方 |
+| :--- | :--- | :--- |
+| IBM MQ | **PCF + MQSC**（`com.ibm.mq.allclient`） | 直接发 PCF INQUIRE，拿全量属性；MQSC 控制台走 `MQCMD_ESCAPE` |
+| Kafka | **AdminClient + Consumer/Producer** | `listOffsets` 多起点定位、`alterConsumerGroupOffsets` 重置位移 |
+| RabbitMQ | **AMQP 0.9.1 + 管理 HTTP API** | `basicGet` 只读浏览 + `basicNack(requeue)` 防吞机制 |
+| RocketMQ | **Remoting 协议**（`DefaultMQAdminExt`） | `examineConsumeStats` 组级 Lag、Tag/Keys 过滤 |
+
+没有一层「我们帮你简化了」的 REST 中间层 —— **看到的就是 broker 说的**。
+
+---
+
+## 📸 界面预览
+
+![拓扑图](docs/images/topology.png)
+*交互式拓扑图：自动布局 + 节点拖拽 + 双击查看属性*
+
+![队列列表](docs/images/queues.png)
+*队列列表：深度/消费者实时徽章 + 状态色点 + 一键 AI 诊断*
+
+![命令控制台](docs/images/console.png)
+*MQSC 控制台：类 DBeaver 体验，缩写展开 + 危险命令确认 + 逐行状态*
+
+---
+
+## 📊 核心功能矩阵
+
+| 核心模块 | IBM MQ | Kafka | RabbitMQ | RocketMQ |
+| :--- | :---: | :---: | :---: | :---: |
+| 连接管理 | ✅ (PCF/MQSC) | ✅ (SASL/SSL) | ✅ (AMQP/HTTP) | ✅ (TLS/ACL) |
+| 对象管理 | ✅ | ✅ | ✅ | ✅ |
+| 消息浏览与发送 | ✅ (原生浏览游标) | ✅ (多起点定位) | ✅ (防吞机制) | ✅ (Tag/Keys) |
+| 交互式拓扑图 | ✅ | ✅ | ✅ | ✅ |
+| AI 链路诊断 | ✅ | ✅ | ✅ | ✅ |
+
+---
+
+## 🏗️ 系统架构
+
+```mermaid
+graph TB
+    subgraph HOST["🖥️ 宿主层"]
+        APPUI["app-ui<br/>主窗口 · 侧栏 · Tab 导航"]
+    end
+
+    subgraph COMMON["📦 公共层"]
+        UIC["ui-common<br/>PropertyTable · Snackbar<br/>FailureText · 主题"]
+        CORE["app-core<br/>EventBus · JobScheduler<br/>SQLite · SPI 定义<br/>CacheManager · 加密"]
+    end
+
+    subgraph BIZ["🔌 业务模块层"]
+        subgraph IBMMQ["IBM MQ"]
+            IBM_S["ibm-mq-service<br/>PCF · MQSC · PCF Agent"]
+            IBM_U["ibm-mq-ui<br/>队列/通道/订阅/拓扑"]
+        end
+        subgraph KAFKA["Kafka"]
+            KAF_S["kafka-service<br/>AdminClient · Consumer"]
+            KAF_U["kafka-ui<br/>主题/消费组/集群"]
+        end
+        subgraph RMQ["RabbitMQ"]
+            RAB_S["rabbitmq-service<br/>AMQP · 管理 API"]
+            RAB_U["rabbitmq-ui<br/>队列/交换机/绑定"]
+        end
+        subgraph ROCKET["RocketMQ"]
+            ROC_S["rocketmq-service<br/>Remoting · AdminExt"]
+            ROC_U["rocketmq-ui<br/>主题/消费组/路由"]
+        end
+    end
+
+    subgraph AI["🧠 AI 栈"]
+        AICORE["ai-core<br/>适配器契约 · HTTP 基建"]
+        AIPROV["openai-service · anthropic-service<br/>OpenAI 兼容 · Anthropic"]
+        AIUI["ai-ui<br/>会话面板 · 多连接切换"]
+    end
+
+    subgraph GRAPH["🕸️ 图能力"]
+        GCORE["graph-core<br/>节点/边模型 · 严重度"]
+        TUI["topology-ui<br/>TopologyCanvas · 拖拽 · 导出"]
+    end
+
+    subgraph PERSIST["💾 本地存储"]
+        TOML["config.toml<br/>加密连接配置"]
+        SQLITE[("SQLite<br/>会话历史 · 命令审计")]
+        LOGS["logs/<br/>统一日志"]
+    end
+
+    APPUI --> UIC
+    APPUI --> CORE
+    APPUI -->|SPI 加载| BIZ
+    APPUI -->|SPI 加载| AIUI
+
+    IBM_U --> IBM_S
+    KAF_U --> KAF_S
+    RAB_U --> RAB_S
+    ROC_U --> ROC_S
+
+    IBM_S --> CORE
+    KAF_S --> CORE
+    RAB_S --> CORE
+    ROC_S --> CORE
+
+    IBM_U --> TUI
+    KAF_U --> TUI
+    RAB_U --> TUI
+    ROC_U --> TUI
+    TUI --> GCORE
+    TUI --> UIC
+
+    IBM_S --> AICORE
+    KAF_S --> AICORE
+    RAB_S --> AICORE
+    ROC_S --> AICORE
+    AICORE --> AIPROV
+    AIUI --> AICORE
+    AIUI --> UIC
+
+    CORE --> TOML
+    CORE --> SQLITE
+    CORE --> LOGS
+
+    classDef host fill:#4285F4,stroke:#1a73e8,color:#fff
+    classDef common fill:#34A853,stroke:#1e8e3e,color:#fff
+    classDef biz fill:#FBBC04,stroke:#f9ab00,color:#000
+    classDef ai fill:#EA4335,stroke:#c5221f,color:#fff
+    classDef graph fill:#9334E6,stroke:#7627bb,color:#fff
+    classDef persist fill:#5F6368,stroke:#3c4043,color:#fff
+
+    class APPUI host
+    class UIC,CORE common
+    class IBM_S,IBM_U,KAF_S,KAF_U,RAB_S,RAB_U,ROC_S,ROC_U biz
+    class AICORE,AIPROV,AIUI ai
+    class GCORE,TUI graph
+    class TOML,SQLITE,LOGS persist
+```
+
+**分层原则**：`*-service` 不依赖 Compose，`*-ui` 不依赖具体协议实现，两者只通过 `app-core` 的 SPI 契约与事件总线通信。**删除任意一个 MQ 模块，其余部分照常启动。**
+
+---
+
+## ✨ 工程亮点
+
+### 统一视觉规范
+
+全模块采用无边框斑马纹 `PropertyTable`，Key 定宽 120dp、Value 左对齐可拖选，超长两行截断，空值显示 `-` 且不渲染复制按钮。**13 个对话框的 `failureText` 已合并为一份实现**，顺带解包 `CompletionException`（`CompletableFuture` 异步链抛的就是它）。
+
+### 类 DBeaver 的 MQSC 控制台
+
+```
+dis q(*)                   →  DISPLAY QLOCAL(*)          ✅ 12ms
+def ql(Q1) MAXDEPTH(5000)  →  自动展开                    ⚠️ 确认
+del chl(CH1)               →  DELETE CHANNEL(CH1)         ⏸️ 等待确认
+```
+
+- 缩写按 runmqsc 习惯自动展开（`dis`/`disp`、`def`、`del`、`alt`、`clr`、`sta`、`sto`、`res`、`ref`、`sus`）
+- 危险动词（`DELETE`/`CLEAR`/`ALTER`/`STOP`/`RESET`）**在展开之后**判定，缩写绕不过去
+- 逐行状态：未执行（灰线）/ 执行中（进度圈）/ 成功 / 失败，MQRC 原因码已翻译成中文
+
+### 安全至上
+
+- **敏感数据 AES-256-GCM 加密落盘**，密钥独立存于 `~/.mqclient/secret.key`，按 `password` / `secret` 等键名自动识别
+- **自签 CA 完美适配**：JKS / PKCS12 / PEM 三种信任库格式，RabbitMQ 的 AMQP 与管理 API 双端口各自挂定制信任链
+- **UI 层严格隔离原始异常码**：service 层把 `CODE: 17 DESC: ...` 翻译成友好文案，原始异常只进日志
+
+### 数据管理
+
+统一存储于 `~/.mqclient/`：
+
+```
+~/.mqclient/
+├── config.toml      # 连接配置（敏感字段加密）
+├── secret.key       # AES 密钥
+├── logs/            # 统一日志（自动重定向 RocketMQ 等散落日志）
+└── *.db             # SQLite（会话历史 / 命令审计 / 连接快照）
+```
+
+---
+
+## 🚦 快速开始
+
+### 环境要求
+
+- **JDK 25**（`jvmToolchain(25)`）
+- 无需预装 Gradle，仓库自带 wrapper
+
+### 运行
 
 ```bash
-./gradlew run                 # 启动桌面应用
-./gradlew jvmTest             # 全量单元测试
-./gradlew compileKotlinJvm    # 仅编译
+./gradlew run
 ```
 
-配置与数据目录：`~/.mqclient/`（`config.toml`、`secret.key`、`logs/`、SQLite）。
+### 测试
 
-## MQSC 命令控制台
-
-**入口**：侧栏展开连接 → 「命令控制台」节点（未连接时点击会先隐式建连）。
-
-### 编辑器
-
-- 多行输入，逐条顺序执行（后一条常依赖前一条）
-- `*` 开头的行为注释，空行跳过，两者不参与执行但保留行号
-- 状态列逐行标记：未执行（灰线）/ 执行中（进度圈）/ 成功 / 失败
-- 输出区展示每条命令的回显（`AMQ8409: ...`）、耗时与错误详情（MQRC 原因码已翻译成中文）
-
-### 命令缩写
-
-支持 runmqsc 习惯的缩写，发送前自动展开为完整命令（结果与历史记录展开后的文本）：
-
-| 输入 | 实际执行 |
-|------|---------|
-| `dis q(*)` | `DISPLAY QLOCAL(*)` |
-| `def ql(Q1) MAXDEPTH(5000)` | `DEFINE QLOCAL(Q1) MAXDEPTH(5000)` |
-| `del chl(CH1)` | `DELETE CHANNEL(CH1)` |
-| `ping qmgr` | `PING QMGR` |
-
-常用缩写：`dis`/`disp`、`def`、`del`、`alt`、`clr`、`sta`、`sto`、`res`(RESET)、`ref`、`sus`；对象类型 `q`/`ql`、`qr`、`qa`、`qm`、`chl`/`ch`、`t`、`prc`、`nl`、`srv`、`auth`、`comm`。全称大小写不敏感；参数区大小写不做转换。
-
-### 危险命令确认
-
-`DELETE / CLEAR / ALTER / STOP / RESET` 开头的命令会先弹确认框，确认后才真正执行；执行中可随时点「取消」（当前这条跑完后停止后续命令）。
-
-判定用的是**展开缩写之后**的动词，所以 `del q(Q1)` / `clr q(Q1)` / `alt` / `sto` / `res` 与全称同样会弹确认框 —— 缩写不会绕过这一步。
-
-## RabbitMQ 连接与 TLS
-
-RabbitMQ 连接涉及**两套端口**：AMQP 0.9.1（默认 5672，消息收发）与管理 API（默认 15672，扫描 / 属性面板 / 拓扑）。勾选「启用 TLS」后两者分别走 5671 / https。
-
-### 自签 CA 配置
-
-勾选「启用 TLS」后表单会出现两个附加字段：
-
-| 字段 | 说明 |
-|------|------|
-| TLS 信任库路径 | PKCS12 信任库文件（需包含 broker 证书链），如 `/path/truststore.p12` |
-| 信任库密码 | 信任库密码（落盘自动加密） |
-
-- 两个都填写：AMQP 会话与管理 API 挂定制信任链（自签 CA 可用）
-- 路径留空：使用 JVM 默认信任链（公共 CA 签发的证书场景）
-- 信任库加载失败会在连接时报出具体原因
-
-## UI 属性表规范（PropertyTable）
-
-各 MQ 模块的属性面板/对话框统一用 `ui-common` 的 `PropertyTable` 展示 Key-Value 属性（连接属性、队列管理器、主题/消费组属性、集群概览等）：
-
-```kotlin
-data class PropertyItem(val key: String, val value: String?, val copyable: Boolean = true)
-
-@Composable
-fun PropertyTable(items: List<PropertyItem>, modifier: Modifier = Modifier)
-@Composable
-fun PropertyTableSection(title: String, items: List<PropertyItem>, modifier: Modifier = Modifier)
+```bash
+./gradlew jvmTest                    # 全量单元测试
+./gradlew compileKotlinJvm           # 仅编译
+./gradlew :ibm-mq-service:jvmTest    # 单个模块
 ```
 
-视觉与交互约定：
+### 真机诊断测试（可选）
 
-- **斑马纹**：奇数行 `surfaceVariant.copy(alpha = 0.3f)` + 4dp 圆角，偶数行透明；行高最小 40dp，行距 8dp
-- **对齐**：Key 定宽 120dp 左对齐（次要色）；Value `weight(1f)` **左对齐**（不右对齐），超长两行后省略，包在 `SelectionContainer` 里可拖选
-- **空值**：`null` / 空串显示 `-`，且不渲染复制按钮
-- **复制**：行尾 24dp IconButton（ContentCopy 图标），点击写剪贴板并弹「已复制」Snackbar（host 内置在组件里，调用方无需接入）
-- **分组**：小标题 + `PropertyTable`（用 `PropertyTableSection`），不再套卡片背景（避免与斑马纹叠色）
+部分测试会连真实 broker，无环境时自动 SKIP：
 
-范围边界：`MessageHeaderRow`（消息详情 Header 的元数据表）与 IBM MQ 的 `PropertyGroupsPane`（队列管理器分组管线）不在该组件范围内；UI 层禁止直接展示 `CODE: 17 DESC: ...` 一类的原始错误码——service 层转友好文案，原始异常只进日志。
+```bash
+# IBM MQ：走 ~/.mqclient/config.toml 里第一条 IBM MQ 连接
+./gradlew :ibm-mq-service:jvmTest --tests "*PcfScanBudgetLiveTest"
 
-## 按钮规范（PrimaryButton / SecondaryButton / DangerButton）
-
-各模块的普通操作按钮统一用 `ui-common` 的 `com.mqclient.uicommon` 按钮组件，调用方不再自行拼 `colors` / `border`：
-
-```kotlin
-PrimaryButton(onClick = ::submit, enabled = !busy) { Text(stringResource("common_save")) }
-SecondaryButton(onClick = onDismiss) { Text(stringResource("common_cancel")) }
-DangerButton(onClick = ::delete, enabled = !busy) { Text(stringResource("common_delete")) }
+# RabbitMQ：传受限账号可验证部分失败分支
+./gradlew :rabbitmq-service:jvmTest \
+  --tests "*RabbitMqScanPartialLiveTest" \
+  "-Drabbitmqdiag.user=your_user" \
+  "-Drabbitmqdiag.pass=your_password"
 ```
 
-语义与配色：
+### 首次使用
 
-- **PrimaryButton**：主操作（创建 / 保存 / 发送 / 确定 / 重试）。标准 `Button`，可用态 `primary` 底 + `onPrimary` 文字；禁用态 `onSurface@12%` 底 + `onSurface@38%` 文字；**无边框**
-- **SecondaryButton**：次要操作（取消 / 关闭 / 返回 / 刷新）。标准 `OutlinedButton`，透明底 + `outline` 细边框 + `primary` 文字；禁用态透明底 + **无边框** + `onSurface@38%` 文字
-- **DangerButton**：破坏性操作（删除 / 清空 / 重置）。标准 `Button`，可用态 `error` 底 + `onError` 文字；禁用态同 Primary 的灰色让位；**无边框**
+1. 启动后从侧栏右键 → **新建连接**
+2. 选择协议、填写地址与凭据（密码落盘自动加密）
+3. 右键 → **连接**（显式连接模型，不会自动建连）
+4. 展开连接树，浏览队列 / 主题 / 拓扑
 
-约定：
+> 💡 **AI 诊断**需要先在「设置 → AI」中配置一个 provider（OpenAI 兼容或 Anthropic）。
 
-- 主操作一律实心 `Button`，禁止用 `OutlinedButton` / `SecondaryButton` 承担创建、保存、发送
-- 弹窗底部的「取消」「关闭」「返回」一律 `SecondaryButton`
-- **禁用态绝对无边框**：`PrimaryButton` / `DangerButton` 本身无边框；`SecondaryButton` 禁用时必须显式 `border = null`，不能使用 `OutlinedButton` 默认的 `outline@12%` 禁用轮廓
-- 禁止在调用处传 `containerColor` / `contentColor` / `border` / `BorderStroke`；语义色由组件内部决定
-- 形状统一 `MaterialTheme.shapes.small`，内边距默认 `ButtonDefaults.TextButtonContentPadding`（紧凑弹窗密度）；纯图标按钮传 `standardMinWidth = false`
-- 工具栏动作仍用 `ToolbarButton`（见 `CLAUDE.md`），不属于这三个组件的范围
+---
 
-## 架构
+## 🧭 设计决策备忘
 
-- `app-core`：配置 / 事件总线 / 加密 / 日志 / 数据库 / 调度 / SPI 定义（不依赖 Compose）
-- `app-ui`：宿主（窗口、侧栏树、Tab、设置、AI 面板挂载）
-- `ibm-mq-service` / `ibm-mq-ui` 等业务模块经 SPI（`ServiceAdapter` / `AdapterUI`）接入；UI 模块可按 `objectType` 贡献 Tab 内容（如命令控制台），无贡献时宿主回落占位页
+有些选择看起来反直觉，但都有原因：
 
-各模块私有 i18n 表放各自 `composeResources/files/i18n/`，公共表在 `ui-common`。
+| 决策 | 原因 |
+| :--- | :--- |
+| **显式连接模型** | 启动时不主动连任何 broker。侧栏的连接是「配置」，点「连接」才建 TCP。避免开机瞬间大量连接打向生产环境。 |
+| **缓存优先渲染** | 进页面先读缓存（零延迟），后台扫描完成后经事件驱动刷新。切换 Tab 不转圈。 |
+| **部分扫描失败不清空缓存** | 单类查询失败（权限 / 超时）时保留上一轮数据 + 顶部提示条，而不是写空表。用户能区分「这里本来就没有」和「这次没读到」。 |
+| **单类失败不判断连** | RabbitMQ 的 `/api/nodes` 要 `monitor` tag，只读账号读不到是常态。四类全失败才标连接断开。 |
+| **协作式超时** | `PCFMessageAgent.send` 与 `disconnect` 同锁、`interrupt()` 对 socket 等待无效 —— 所以超时只拒绝**下一次**请求，从不试图打断在飞的那次。 |
+
+---
+
+## 📁 模块地图
+
+```
+mq-client/
+├── app-ui/              宿主：主窗口、侧栏、Tab 路由
+├── app-core/            公共内核：SPI · EventBus · JobScheduler · SQLite · 加密 · Cache
+├── ui-common/           通用组件：PropertyTable · 按钮 · FailureText · i18n
+├── ui-test-kit/         Compose UI 测试替身（UiThreadHarness / RecordingPersistence）
+├── mq-base/ · mq-ui/    MQ 公共基类与命令控制台框架
+├── graph-core/ · topology-ui/   拓扑模型与画布渲染
+├── ai-core/             AI 适配器契约 + HTTP 基建
+├── openai-service/ · anthropic-service/ · ai-ui/
+├── ibm-mq-service/ · ibm-mq-ui/
+├── kafka-service/ · kafka-ui/
+├── rabbitmq-service/ · rabbitmq-ui/
+├── rocketmq-service/ · rocketmq-ui/
+└── scripts/             i18n 引用检查 · MQ 属性表生成 · SSL 诊断
+```
+
+---
+
+## 🤝 参与贡献
+
+```bash
+# 提交前跑一遍
+./gradlew assemble jvmTest
+python scripts/check_i18n_refs.py   # 新增文案键必须中英文都补
+```
+
+**约定**：
+
+- `*-service` 模块**不得**依赖 Compose
+- 新增 i18n 键必须同时补 `zh-CN` 与 `en-US`（脚本会失败）
+- UI 层不展示原始错误码，service 层负责翻译
+- 挂起调用不要用 `runCatching`（用 `runCatchingCancellable`）
+
+---
+
+## 📄 License
+
+[Apache-2.0](LICENSE)
+
+---
+
+<div align="center">
+
+**如果这个项目帮你少装了一个客户端，给个 ⭐ 吧**
+
+</div>
