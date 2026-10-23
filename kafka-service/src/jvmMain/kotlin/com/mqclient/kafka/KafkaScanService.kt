@@ -4,10 +4,13 @@ import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.db.CommandAudit
 import com.mqclient.core.cache.CacheManager
+import com.mqclient.core.cache.allKindsFailed
+import com.mqclient.core.cache.putIfScanned
 import com.mqclient.core.concurrent.KeyedJobRegistry
 import com.mqclient.core.concurrent.KeyedMutex
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.emit
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -31,8 +34,8 @@ import org.apache.kafka.common.TopicPartition
  *
  *  - **对象慢扫** [scanObjects]（默认 10min）：brokers / topics（分区明细）/
  *    groups（状态 + assignment 订阅的 topic）三类**并发**查询；**单类失败只跳过记
- *    日志**（受限账号 ACL 是预期内的），describeCluster 失败才整轮失败 —— 连接转
- *    FAILED。结果全量替换写缓存（顺带清掉集群里已删除的对象）。
+ *    日志**（受限账号 ACL 是预期内的），并**保留该类的上一轮缓存**；三类全失败才
+ *    整轮失败 —— 连接转 FAILED。结果全量替换写缓存（顺带清掉集群里已删除的对象）。
  *  - **Lag 心跳** [scanGroupLags]（默认 30s）：每组 current offset（已提交）+
  *    latest offset（listOffsets）→ 分区 / 组级 lag；**单组失败只跳过**；顺带做
  *    topic 名单 / 分区数变化检测（add-or-update 进 `topics` 缓存，全属性等慢扫）。
@@ -47,6 +50,18 @@ import org.apache.kafka.common.TopicPartition
  * （AdminClient 调用在 Dispatchers.IO）。
  */
 class KafkaScanService(private val context: ServiceContext) {
+
+    /**
+     * 对象慢扫的三类查询。
+     *
+     * 失败必须**按类记**：不能因为 topics 失败了就拿空表覆盖 `topics` 缓存 ——
+     * 那等于告诉 UI「这个集群没有 topic」。
+     */
+    internal enum class KafkaScanKind(val label: String) {
+        BROKERS("brokers"),
+        TOPICS("topics"),
+        GROUPS("groups"),
+    }
 
     private companion object {
         /** 缓存 key：broker 列表。 */
@@ -107,54 +122,89 @@ class KafkaScanService(private val context: ServiceContext) {
 
     /**
      * 定时任务入口（`kafka.<connectionId>.scan.objects`）：一轮扫齐 brokers / topics /
-     * groups 三类。单类失败跳过；describeCluster 失败（连接大概率已断）整轮失败。
+     * groups 三类。
+     *
+     * 失败语义：单类失败跳过该类并**保留它的上一轮缓存**（空列表写进去等于告诉 UI
+     * 「这个集群没有 topic」，列表会被清空）；三类**全**失败才判定连接已断。
      *
      * topic 的 configs 不取（describeConfigs 每主题一调用太重），第一版只要布局快照。
      */
     suspend fun scanObjects(connectionId: String) = scanLocks.withLock(connectionId) {
         val ctx = connectedContext(connectionId) ?: return@withLock
         val admin = ctx.adminClient ?: return@withLock
+        val timeoutMs = ctx.config.connectionTimeout * 1_000L
+        val objectsTtl = objectsTtlMs(ctx)
+        // 三路 async 并发写，用线程安全容器（每类只写自己的 key）。
+        val failures = ConcurrentHashMap<KafkaScanKind, String>()
         try {
-            val timeoutMs = ctx.config.connectionTimeout * 1_000L
-            val objectsTtl = objectsTtlMs(ctx)
             // 三类并发：各自独立 try 兜底，单类失败不影响其他类（coroutineScope 保证
             // 取消语义 —— CancellationException 在 safely 里原样上抛，带动整组退出）。
             val result = withContext(Dispatchers.IO) {
                 coroutineScope {
                     val brokers = async {
-                        safely("brokers", ClusterScan(emptyList(), KafkaClusterSnapshot(null, null))) {
-                            scanBrokers(admin, timeoutMs)
-                        }
+                        val empty = ClusterScan(emptyList(), KafkaClusterSnapshot(null, null))
+                        safely(failures, KafkaScanKind.BROKERS, empty) { scanBrokers(admin, timeoutMs) }
                     }
-                    val topics = async { safely("topics", emptyList()) { scanTopics(admin, timeoutMs) } }
-                    val groups = async { safely("groups", emptyList()) { scanGroups(admin, timeoutMs) } }
+                    val topics = async {
+                        safely(failures, KafkaScanKind.TOPICS, emptyList()) { scanTopics(admin, timeoutMs) }
+                    }
+                    val groups = async {
+                        safely(failures, KafkaScanKind.GROUPS, emptyList()) { scanGroups(admin, timeoutMs) }
+                    }
                     ScanResult(brokers.await(), topics.await(), groups.await())
                 }
             }
 
             val cache = ctx.cache
-            cache?.put(KEY_BROKERS, result.brokerScan.brokers, ttlMs = objectsTtl)
-            cache?.put(KEY_TOPICS, result.topics, ttlMs = objectsTtl)
-            cache?.put(KEY_GROUPS, result.groups, ttlMs = objectsTtl)
-            // 集群元信息只在 broker 扫到货时落缓存：describeCluster 整体失败（safely
-            // 兜底的空 Scan）不覆盖上一轮的 Cluster ID。
-            if (result.brokerScan.brokers.isNotEmpty()) {
+            // 只为**本轮真的扫到了**的类型写缓存（实现见 app-core 的 putIfScanned）。
+            cache.putIfScanned(KEY_BROKERS, KafkaScanKind.BROKERS, failures, result.brokerScan.brokers, objectsTtl)
+            cache.putIfScanned(KEY_TOPICS, KafkaScanKind.TOPICS, failures, result.topics, objectsTtl)
+            cache.putIfScanned(KEY_GROUPS, KafkaScanKind.GROUPS, failures, result.groups, objectsTtl)
+            // 集群元信息跟着 broker 一起落：只在扫到货时写，不让兜底的空快照
+            // 覆盖上一轮的 Cluster ID。
+            if (!failures.containsKey(KafkaScanKind.BROKERS) && result.brokerScan.brokers.isNotEmpty()) {
                 cache?.put(KEY_CLUSTER, result.brokerScan.cluster, ttlMs = objectsTtl)
+            }
+
+            // 三类全失败：AdminClient 一条都读不通，连接大概率真的断了。
+            if (isConnectionBroken(failures.keys)) {
+                val message = failures.values.firstOrNull() ?: "Admin API 全部请求均失败"
+                kafkaLog.error(
+                    "objects scan failed (all kinds): connection=$connectionId " +
+                        "errors=" + failures.entries.joinToString(", ") { "${it.key.label}=${it.value}" },
+                )
+                context.emit(
+                    name = KafkaEvents.OBJECTS_SCAN_FAILED,
+                    payload = mapOf("connectionId" to connectionId, "message" to message),
+                )
+                markFailed(connectionId, message)
+                return@withLock
             }
 
             context.emit(
                 name = KafkaEvents.OBJECTS_SCANNED,
                 payload = mapOf(
                     "connectionId" to connectionId,
+                    // 部分结果：UI / 日志据此区分「扫全了」和「缺了几类」。
+                    "partial" to failures.isNotEmpty(),
+                    "failedKinds" to failures.keys.map { it.label },
                     "brokerCount" to result.brokerScan.brokers.size,
                     "topicCount" to result.topics.size,
                     "groupCount" to result.groups.size,
                 ),
             )
-            kafkaLog.info(
-                "objects scanned: connection=$connectionId brokers=${result.brokerScan.brokers.size} " +
-                    "topics=${result.topics.size} groups=${result.groups.size}",
-            )
+            if (failures.isEmpty()) {
+                kafkaLog.info(
+                    "objects scanned: connection=$connectionId brokers=${result.brokerScan.brokers.size} " +
+                        "topics=${result.topics.size} groups=${result.groups.size}",
+                )
+            } else {
+                kafkaLog.warn(
+                    "objects scanned (partial): connection=$connectionId " +
+                        "brokers=${result.brokerScan.brokers.size} topics=${result.topics.size} " +
+                        "groups=${result.groups.size} failed=${failures.keys.map { it.label }}",
+                )
+            }
         } catch (cancellation: CancellationException) {
             throw cancellation
         } catch (error: Throwable) {
@@ -850,16 +900,22 @@ class KafkaScanService(private val context: ServiceContext) {
         val groups: List<KafkaGroupSnapshot>,
     )
 
-    /** 单类扫描兜底：任何失败 → [empty]（取消除外），分级记日志。 */
-    private suspend fun <T> safely(kind: String, empty: T, block: suspend () -> T): T =
-        try {
-            block()
-        } catch (cancellation: CancellationException) {
-            throw cancellation
-        } catch (error: Throwable) {
-            kafkaLog.warn("objects scan type skipped: kind=$kind error=${errorMessage(error)}")
-            empty
-        }
+    /** 单类扫描兜底：任何失败 → [empty]（取消除外），并把该类登记进 [failures]。 */
+    internal suspend fun <T> safely(
+        failures: MutableMap<KafkaScanKind, String>,
+        kind: KafkaScanKind,
+        empty: T,
+        block: suspend () -> T,
+    ): T = try {
+        block()
+    } catch (cancellation: CancellationException) {
+        throw cancellation
+    } catch (error: Throwable) {
+        val message = errorMessage(error)
+        failures[kind] = message
+        kafkaLog.warn("objects scan kind skipped: kind=${kind.label} error=$message")
+        empty
+    }
 
     /** 慢扫数据 TTL：配置的慢扫间隔 × 1.5。 */
     private fun objectsTtlMs(ctx: KafkaConnectionContext): Long =
@@ -932,6 +988,15 @@ class KafkaScanService(private val context: ServiceContext) {
             }
         }
     }
+
+    /**
+     * 三类全失败才算连接断了。
+     *
+     * 单类失败不改连接状态：受限账号的 ACL / 某个 broker 临时不答都是局部问题，
+     * 不是「连不上集群」。真正的断连还会被 30s 一条的 lag 心跳捕获。
+     */
+    internal fun isConnectionBroken(failedKinds: Collection<KafkaScanKind>): Boolean =
+        allKindsFailed(failedKinds, KafkaScanKind.entries)
 
     /** 给日志 / 事件的失败原因：解掉 ExecutionException 包装，拿根因的消息。 */
     private fun errorMessage(error: Throwable): String =

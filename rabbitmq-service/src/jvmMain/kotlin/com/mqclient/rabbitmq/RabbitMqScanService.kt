@@ -4,9 +4,12 @@ import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.concurrent.KeyedJobRegistry
 import com.mqclient.core.concurrent.KeyedMutex
+import com.mqclient.core.cache.allKindsFailed
+import com.mqclient.core.cache.putIfScanned
 import com.mqclient.core.db.CommandAudit
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.emit
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -21,9 +24,15 @@ import kotlinx.serialization.json.buildJsonObject
  * KafkaScanService 同一套模式（write-through 缓存、事件驱动 UI、失败分级）。
  *
  *  - **对象慢扫** [scanObjects]（默认 5min）：exchanges / queues（静态属性）/
- *    bindings / nodes 四类查询（前三类**并发**），全量替换写缓存 —— 全量替换的语义
- *    即「顺带清理已删除的对象」。任一类失败整轮失败（管理 API 是同一个端口的同一套
- *    权限，单类失败大概率意味着连接已断或权限缺口）。
+ *    bindings / nodes 四类查询**并发**，每类**独立兜底**并全量替换自己的缓存键
+ *    —— 全量替换的语义即「顺带清理已删除的对象」。
+ *
+ *    四类为什么不能共用一条成败线：管理 API 的四类端点权限要求**不同**。最典型的是
+ *    `GET /api/nodes` 要 `monitor` / `administrator` tag，而只带 `management` tag 的
+ *    账号（标准的只读账号）能读 exchanges / queues / bindings，读 nodes 会 403。
+ *    曾经的写法是任一类失败就整轮失败 → 一个完全可用的只读账号被标成
+ *    `ConnectionStatus.Failed`，界面全红、点重连也没用。现在只有四类**全**失败
+ *    才判定为连接真的断了（那时才标 Failed），单类失败只跳过该类并保留上一轮缓存。
  *  - **状态快扫** [scanStatus]（默认 10s）：`GET /api/queues` 的计数字段全量替换
  *    进 `queueStatus`，发事件通知 UI 刷新队列卡片。跑通 → reportStatus(Connected)
  *    保活（与 Kafka 的 lag 心跳同款）。
@@ -40,6 +49,32 @@ import kotlinx.serialization.json.buildJsonObject
 /** 缓存 key：集群元信息（建连时 overview 的投影，永不过期、断开随缓存清空）。
  *  文件级 internal：RabbitMqConnectionManager 建连时也要写它。 */
 internal const val KEY_CLUSTER_INFO = "clusterInfo"
+
+/**
+ * 对象慢扫的四类查询。
+ *
+ * 彼此的权限要求并不相同（`/api/nodes` 要 `monitor` / `administrator` tag，其余三类
+ * 要 `management` tag），所以失败必须**按类记**、按类兑现到缓存与连接状态上。
+ */
+internal enum class RabbitMqScanType(val label: String) {
+    EXCHANGES("exchanges"),
+    QUEUES("queues"),
+    BINDINGS("bindings"),
+    NODES("nodes"),
+}
+
+/**
+ * 四类全失败才算连接断了（见 [allKindsFailed] 的说明）。
+ *
+ * 单类失败不改连接状态：四类端点的权限要求不同（`/api/nodes` 要 `monitor` tag），
+ * 只读账号读不到节点是**正常现象**，不是连接故障。真正的「连接已断」还会被 10s
+ * 一条的队列心跳（[RabbitMqScanService.scanStatus]）捕获——那条跑不通才是真断。
+ */
+internal fun isConnectionBroken(failedTypes: Collection<RabbitMqScanType>): Boolean =
+    allKindsFailed(failedTypes, RabbitMqScanType.entries)
+
+/** 四元组（Kotlin 只有 Triple；四类并发结果 + 折叠成一个）。 */
+private data class Quad<A, B, C, D>(val a: A, val b: B, val c: C, val d: D)
 
 class RabbitMqScanService(private val context: ServiceContext) {
 
@@ -99,23 +134,38 @@ class RabbitMqScanService(private val context: ServiceContext) {
 
     /**
      * 定时任务入口（`rabbitmq.<connectionId>.scan.objects`）：一轮并发扫齐 exchanges /
-     * queues / bindings 三类并全量替换。任一失败整轮失败（见类 KDoc 的取舍）。
+     * queues / bindings / nodes 四类，**各自**全量替换自己的缓存键。
+     *
+     * 失败语义（与之前「任一失败整轮失败」相反，原因见类 KDoc）：
+     *  - 单类失败 → 跳过该类（**不写**它的缓存键，保留上一轮结果），发
+     *    `OBJECTS_SCANNED` 带 `partial=true`；连接状态不动。
+     *  - 四类全失败 → 管理 API 一条都读不通，判定连接真的断了：发
+     *    `OBJECTS_SCAN_FAILED` 并 `markFailed`，让界面给「重连」。
      */
     suspend fun scanObjects(connectionId: String) = scanLocks.withLock(connectionId) {
         val ctx = connectedContext(connectionId) ?: return@withLock
         val admin = ctx.admin ?: return@withLock
+        val objectsTtl = objectsTtlMs(ctx)
+        // 四路 async 并发写，用线程安全容器（每类只写自己的 key）。
+        val failures = ConcurrentHashMap<RabbitMqScanType, String>()
         try {
-            val objectsTtl = objectsTtlMs(ctx)
-            val (exchangeDtos, queueDtos, bindingDtos) = withContext(Dispatchers.IO) {
+            val (exchangeDtos, queueDtos, bindingDtos, nodeDtos) = withContext(Dispatchers.IO) {
                 coroutineScope {
-                    val exchanges = async { admin.exchanges() }
-                    val queues = async { admin.queues() }
-                    val bindings = async { admin.bindings() }
-                    Triple(exchanges.await(), queues.await(), bindings.await())
+                    val exchanges = async {
+                        scanTypeOr(failures, RabbitMqScanType.EXCHANGES, emptyList()) { admin.exchanges() }
+                    }
+                    val queues = async {
+                        scanTypeOr(failures, RabbitMqScanType.QUEUES, emptyList()) { admin.queues() }
+                    }
+                    val bindings = async {
+                        scanTypeOr(failures, RabbitMqScanType.BINDINGS, emptyList()) { admin.bindings() }
+                    }
+                    val nodes = async {
+                        scanTypeOr(failures, RabbitMqScanType.NODES, emptyList()) { admin.nodes() }
+                    }
+                    Quad(exchanges.await(), queues.await(), bindings.await(), nodes.await())
                 }
             }
-
-            val nodeDtos = withContext(Dispatchers.IO) { admin.nodes() }
 
             val exchangeSnapshots = exchangeDtos
                 .map { RabbitMqExchangeSnapshot(it.name, it.type, it.durable, it.autoDelete, it.internal) }
@@ -151,36 +201,66 @@ class RabbitMqScanService(private val context: ServiceContext) {
                 .sortedBy { it.name }
 
             val cache = ctx.cache
-            cache?.put(KEY_EXCHANGES, exchangeSnapshots, ttlMs = objectsTtl)
-            cache?.put(KEY_QUEUES, queueSnapshots, ttlMs = objectsTtl)
-            cache?.put(KEY_BINDINGS, bindingSnapshots, ttlMs = objectsTtl)
-            cache?.put(KEY_NODES, nodeSnapshots, ttlMs = objectsTtl)
+            // 只为**本轮真的扫到了**的类型写缓存。
+            cache.putIfScanned(KEY_EXCHANGES, RabbitMqScanType.EXCHANGES, failures, exchangeSnapshots, objectsTtl)
+            cache.putIfScanned(KEY_QUEUES, RabbitMqScanType.QUEUES, failures, queueSnapshots, objectsTtl)
+            cache.putIfScanned(KEY_BINDINGS, RabbitMqScanType.BINDINGS, failures, bindingSnapshots, objectsTtl)
+            cache.putIfScanned(KEY_NODES, RabbitMqScanType.NODES, failures, nodeSnapshots, objectsTtl)
+
+            // 四类全失败：管理 API 一条都读不通，连接大概率真的断了（或者凭据失效）。
+            // 只有这种情况才动连接状态 —— 单类（尤其是只为 `monitor` tag 才有的 nodes）
+            // 失败是权限缺口，不是连接坏了。
+            if (isConnectionBroken(failures.keys)) {
+                val message = failures.values.firstOrNull() ?: "管理 API 全部端点均不可达"
+                rabbitMqLog.error(
+                    "objects scan failed (all endpoints): connection=$connectionId " +
+                        "errors=" + failures.entries.joinToString(", ") { "${it.key.label}=${it.value}" },
+                )
+                context.emit(
+                    name = RabbitMqEvents.OBJECTS_SCAN_FAILED,
+                    payload = mapOf("connectionId" to connectionId, "message" to message),
+                )
+                markFailed(connectionId, message)
+                return@withLock
+            }
 
             context.emit(
                 name = RabbitMqEvents.OBJECTS_SCANNED,
                 payload = mapOf(
                     "connectionId" to connectionId,
+                    // 部分结果：UI / 日志据此区分「扫全了」和「缺了几类」。
+                    "partial" to failures.isNotEmpty(),
+                    "failedKinds" to failures.keys.map { it.label },
                     "exchangeCount" to exchangeSnapshots.size,
                     "queueCount" to queueSnapshots.size,
                     "bindingCount" to bindingSnapshots.size,
                     "nodeCount" to nodeSnapshots.size,
                 ),
             )
-            rabbitMqLog.info(
-                "objects scanned: connection=$connectionId exchanges=${exchangeSnapshots.size} " +
-                    "queues=${queueSnapshots.size} bindings=${bindingSnapshots.size} " +
-                    "nodes=${nodeSnapshots.size}",
-            )
+            if (failures.isEmpty()) {
+                rabbitMqLog.info(
+                    "objects scanned: connection=$connectionId exchanges=${exchangeSnapshots.size} " +
+                        "queues=${queueSnapshots.size} bindings=${bindingSnapshots.size} " +
+                        "nodes=${nodeSnapshots.size}",
+                )
+            } else {
+                rabbitMqLog.warn(
+                    "objects scanned (partial): connection=$connectionId exchanges=${exchangeSnapshots.size} " +
+                        "queues=${queueSnapshots.size} bindings=${bindingSnapshots.size} " +
+                        "nodes=${nodeSnapshots.size} failed=${failures.keys.map { it.label }}",
+                )
+            }
         } catch (cancellation: CancellationException) {
             throw cancellation
         } catch (error: Throwable) {
+            // 四类都已各自兜住，走到这里的是「没预期到的」错误（编码 / 内存 / 编程错误）：
+            // 不冒充连接故障，只报错并记 fail，不改连接状态。
             val message = errorMessage(error)
-            rabbitMqLog.error("objects scan failed: connection=$connectionId error=$message")
+            rabbitMqLog.error("objects scan crashed: connection=$connectionId error=$message")
             context.emit(
                 name = RabbitMqEvents.OBJECTS_SCAN_FAILED,
                 payload = mapOf("connectionId" to connectionId, "message" to message),
             )
-            markFailed(connectionId, message)
         }
     }
 
@@ -662,4 +742,27 @@ class RabbitMqScanService(private val context: ServiceContext) {
         error.message
             ?: error::class.simpleName
             ?: "unknown"
+
+    /**
+     * 单类查询的兜底：失败 → [fallback] 且把该类登记进 [failures]（带错误文案）。
+     *
+     * 取消除外：取消不是「这个类失败了」，原样上抛让整轮退出。
+     */
+    internal suspend fun <T> scanTypeOr(
+        failures: MutableMap<RabbitMqScanType, String>,
+        type: RabbitMqScanType,
+        fallback: T,
+        block: suspend () -> T,
+    ): T = try {
+        block()
+    } catch (cancellation: CancellationException) {
+        throw cancellation
+    } catch (error: Throwable) {
+        val message = errorMessage(error)
+        failures[type] = message
+        // WARN 而不是 ERROR：单类失败很可能是权限缺口（预期内的，比如只读账号读 nodes），
+        // 真正「整轮不可用」由调用方在四类全失败时升为 ERROR。
+        rabbitMqLog.warn("objects scan type skipped: kind=${type.label} error=$message")
+        fallback
+    }
 }

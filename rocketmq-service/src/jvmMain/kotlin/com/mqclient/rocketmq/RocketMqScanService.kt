@@ -4,6 +4,7 @@ import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.db.CommandAudit
 import com.mqclient.core.cache.CacheManager
+import com.mqclient.core.cache.putIfScanned
 import com.mqclient.core.concurrent.KeyedJobRegistry
 import com.mqclient.core.concurrent.KeyedMutex
 import com.mqclient.core.spi.ServiceContext
@@ -29,8 +30,8 @@ import kotlinx.coroutines.withContext
  *
  *  - **对象慢扫** [scanObjects]（默认 5min）：clusterInfo / topics（逐 topic 路由，
  *    受限并发 8）/ groups（含在线成员数，best-effort）三类并发查询；单类失败跳过
- *    （受限账号 ACL 是预期内现象），clusterInfo 失败（连接大概率已断）才整轮失败。
- *    结果全量替换写缓存。
+ *    （受限账号 ACL 是预期内现象）并**保留该类的上一轮缓存**，clusterInfo 失败
+ *    （连接大概率已断）才整轮失败。结果全量替换写缓存。
  *  - **心跳快扫** [scanGroupLags]（默认 15s）：全部组的 examineConsumeStats → 组级
  *    Lag；**单组失败只跳过**；整轮失败 → 连接转 FAILED；跑通 → reportStatus(Connected)
  *    保活（与 kafka / MQ 心跳同款）。
@@ -154,6 +155,41 @@ class RocketMqScanService(private val context: ServiceContext) {
     fun hasScannedObjects(connectionId: String): Boolean =
         objectsScannedOnce.containsKey(connectionId)
 
+    /**
+     * 对象慢扫的两类**可局部失败**的查询（cluster 不属于它：NameServer 不可达等于
+     * 连接已断，直接让整轮失败）。
+     *
+     * 单独分类是因为它们必须**按类**兑现到缓存上：topics 失败了就不能拿空表覆盖
+     * `topics` 缓存 —— 那等于告诉 UI「这个集群里没有 topic」。
+     */
+    internal enum class RocketMqScanKind(val label: String) {
+        TOPICS("topics"),
+        GROUPS("groups"),
+    }
+
+    /**
+     * 单类查询的兜底：失败 → [fallback] 并登记到 [failures]。
+     *
+     * 取消除外，原样上抛 —— 以前的写法是 `runCatching { ... }.getOrElse { emptyList() }`，
+     * 它连 CancellationException 一起吞，于是「用户点停止 / 模块关闭」会被当成「这一类
+     * 扫空了」，还要继续跑完剩下的请求。
+     */
+    internal suspend fun <T> scanKindOr(
+        failures: MutableMap<RocketMqScanKind, String>,
+        kind: RocketMqScanKind,
+        fallback: T,
+        block: suspend () -> T,
+    ): T = try {
+        block()
+    } catch (cancellation: CancellationException) {
+        throw cancellation
+    } catch (error: Throwable) {
+        val message = errorMessage(error)
+        failures[kind] = message
+        rocketMqLog.warn("objects scan kind skipped: kind=${kind.label} error=$message")
+        fallback
+    }
+
     /** 断开 / 清缓存时同步清除扫描标记（ConnectionManager.disconnectNow 调用）。 */
     fun clearScanState(connectionId: String) {
         objectsScannedOnce.remove(connectionId)
@@ -165,8 +201,10 @@ class RocketMqScanService(private val context: ServiceContext) {
     suspend fun scanObjects(connectionId: String) = scanLocks.withLock(connectionId) {
         val ctx = connectedContext(connectionId) ?: return@withLock
         val admin = ctx.adminClient ?: return@withLock
+        val objectsTtl = objectsTtlMs(ctx)
+        // 两路 async 并发写，用线程安全容器（每类只写自己的 key）。
+        val failures = ConcurrentHashMap<RocketMqScanKind, String>()
         try {
-            val objectsTtl = objectsTtlMs(ctx)
             val result = withContext(Dispatchers.IO) {
                 coroutineScope {
                     val cluster = async {
@@ -176,10 +214,10 @@ class RocketMqScanService(private val context: ServiceContext) {
                         clusterSnapshot(admin.fetchClusterInfo())
                     }
                     val topics = async {
-                        runCatching { scanTopics(admin) }.getOrElse { emptyList() }
+                        scanKindOr(failures, RocketMqScanKind.TOPICS, emptyList()) { scanTopics(admin) }
                     }
                     val groups = async {
-                        runCatching { scanGroups(admin) }.getOrElse { emptyList() }
+                        scanKindOr(failures, RocketMqScanKind.GROUPS, emptyList()) { scanGroups(admin) }
                     }
                     Triple(cluster.await(), topics.await(), groups.await())
                 }
@@ -191,23 +229,39 @@ class RocketMqScanService(private val context: ServiceContext) {
             if (cluster.brokers.isNotEmpty() || cluster.clusterName != null) {
                 cache?.put(KEY_CLUSTER, cluster, ttlMs = objectsTtl)
             }
-            cache?.put(KEY_TOPICS, topics, ttlMs = objectsTtl)
-            cache?.put(KEY_GROUPS, groups, ttlMs = objectsTtl)
+            // 失败的类不写：空表写进去等于告诉 UI「这个集群里没有 topic / group」。
+            cache.putIfScanned(KEY_TOPICS, RocketMqScanKind.TOPICS, failures, topics, objectsTtl)
+            cache.putIfScanned(KEY_GROUPS, RocketMqScanKind.GROUPS, failures, groups, objectsTtl)
+            // 首扫标记：部分失败也置位（保持原有契约）。理由：页面靠它区分「扫完了但确实
+            // 没有对象（空态）」与「还在等首扫（Loading）」。不置位的话，部分失败会让页面
+            // 永远转圈 —— 而连接状态已不再因此转 Failed，没有别的路径去兑现 Error。
+            // 部分失败时缓存没被覆盖，所以已有数据仍在，页面显示的是上一轮。
             objectsScannedOnce[connectionId] = true
 
             context.emit(
                 name = RocketMqEvents.OBJECTS_SCANNED,
                 payload = mapOf(
                     "connectionId" to connectionId,
+                    // 部分结果：UI / 日志据此区分「扫全了」和「缺了几类」。
+                    "partial" to failures.isNotEmpty(),
+                    "failedKinds" to failures.keys.map { it.label },
                     "brokerCount" to cluster.brokers.size,
                     "topicCount" to topics.size,
                     "groupCount" to groups.size,
                 ),
             )
-            rocketMqLog.info(
-                "objects scanned: connection=$connectionId brokers=" + cluster.brokers.size +
-                    " topics=" + topics.size + " groups=" + groups.size,
-            )
+            if (failures.isEmpty()) {
+                rocketMqLog.info(
+                    "objects scanned: connection=$connectionId brokers=" + cluster.brokers.size +
+                        " topics=" + topics.size + " groups=" + groups.size,
+                )
+            } else {
+                rocketMqLog.warn(
+                    "objects scanned (partial): connection=$connectionId brokers=" + cluster.brokers.size +
+                        " topics=" + topics.size + " groups=" + groups.size +
+                        " failed=" + failures.keys.map { it.label },
+                )
+            }
         } catch (cancellation: CancellationException) {
             throw cancellation
         } catch (error: Throwable) {
