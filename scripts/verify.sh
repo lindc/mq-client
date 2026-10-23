@@ -55,7 +55,13 @@ fi
 # `jvmTest` 跑全仓 508 个用例。真机测试（*LiveTest）在没有 config.toml 时自行 SKIP，
 # 所以这条在干净环境里也能过 —— 不会因为 CI 没有 broker 而红。
 echo "--- assemble + jvmTest ---"
-./gradlew assemble jvmTest --console=plain
+# GRADLE_CMD overrides the wrapper, for CI images that pre-install Gradle:
+#   GRADLE_CMD=gradle ./scripts/verify.sh
+# It must stay one executable (a name or a path), no arguments. Keep the version
+# in sync with gradle/wrapper/gradle-wrapper.properties.
+GRADLE_CMD="${GRADLE_CMD:-./gradlew}"
+echo "gradle: $GRADLE_CMD"
+"$GRADLE_CMD" assemble jvmTest --console=plain
 
 # ---------- i18n ----------
 run_i18n_check

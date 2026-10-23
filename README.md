@@ -260,6 +260,18 @@ del chl(CH1)               →  DELETE CHANNEL(CH1)         ⏸️ 等待确认
 ./gradlew :ibm-mq-service:jvmTest    # 单个模块
 ```
 
+### 质量门禁
+
+一条命令跑完「编译 + 全部单测 + i18n 键引用检查」，本地与 CI 共用同一份：
+
+```bash
+./scripts/verify.sh              # 全量：assemble + jvmTest + i18n
+./scripts/verify.sh --i18n-only  # 只查 i18n，几秒钟
+```
+
+CI 走 Gitee 流水线（该平台没有仓库内配置文件，需在网页上编排一次），配置步骤见
+[doc/ci-gitee.md](doc/ci-gitee.md)。
+
 ### 真机诊断测试（可选）
 
 部分测试会连真实 broker，无环境时自动 SKIP：

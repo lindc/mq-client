@@ -260,6 +260,19 @@ Everything lives under `~/.mqclient/`:
 ./gradlew :ibm-mq-service:jvmTest    # a single module
 ```
 
+### Quality gate
+
+One command runs compile + the whole unit suite + the i18n key checks, shared by
+local runs and CI:
+
+```bash
+./scripts/verify.sh              # full: assemble + jvmTest + i18n
+./scripts/verify.sh --i18n-only  # i18n only, a few seconds
+```
+
+CI runs on Gitee Pipelines (that platform has no in-repo config file — the pipeline
+is composed once in the web console); see [doc/ci-gitee.md](doc/ci-gitee.md).
+
 ### Live diagnostics (optional)
 
 Some tests hit a real broker and skip automatically when none is reachable:
