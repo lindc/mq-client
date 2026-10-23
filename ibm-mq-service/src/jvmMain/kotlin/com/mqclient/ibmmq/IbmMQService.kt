@@ -5,6 +5,8 @@ import com.ibm.mq.constants.MQConstants
 import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.cache.CacheManager
+import com.mqclient.core.concurrent.KeyedJobRegistry
+import com.mqclient.core.concurrent.KeyedMutex
 import com.mqclient.core.event.EventNames
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.emit
@@ -15,7 +17,6 @@ import com.mqclient.ibmmq.messaging.SendResult
 import com.mqclient.ibmmq.messaging.deleteMessageById
 import com.mqclient.ibmmq.messaging.downloadMessageBody
 import com.mqclient.ibmmq.messaging.getMessageDetail
-import com.mqclient.core.concurrent.KeyedMutex
 import com.mqclient.ibmmq.messaging.sendMessageToQueue
 import com.mqclient.ibmmq.pcf.ChannelStatusDetail
 import com.mqclient.ibmmq.pcf.ClusterRelations
@@ -29,15 +30,12 @@ import com.mqclient.ibmmq.pcf.listenerStatusName
 import java.io.FileInputStream
 import java.security.KeyStore
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicReference
 import javax.net.ssl.KeyManagerFactory
 import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManagerFactory
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -125,13 +123,17 @@ class IbmMQService(private val context: ServiceContext) {
     private val objectScanner = PcfObjectScanner()
 
     /**
-     * 当前手动扫描的协程。
+     * 手动扫描（[startScan]）的协程：`connectionId → 协程`，同一连接只留一条。
      *
-     * 用 [AtomicReference] 而不是裸 `var`：[startScan] 从界面线程调、[close] 从退出线程
-     * 调，「读旧值 → 写新值」这种 check-then-act 没有同步时会丢更新（旧协程漏取消，
-     * 继续在后台扫）。
+     * 为什么按连接登记、而不是共用一个槽位：手动扫描是「刷新这条连接」的动作，不同连接
+     * 之间没有任何关系 —— 单槽位时，在 A 上点刷新会把 B 正在跑的刷新取消掉（B 的列表停在
+     * 上一次结果，且窗口期内不再收到完成事件）。
+     *
+     * 断开连接时必须经 [cancelScan] 收掉：[scanLocks] 的 key 还握在扫描协程手里，不取消
+     * 的话重连后的第一次刷新要排在它后面等（表现是「点刷新没反应」），而且它手里的 MQ
+     * 句柄已经由 [IbmMQConnectionManager] 断掉了。
      */
-    private val scanJob = AtomicReference<Job?>(null)
+    private val scanJobs = KeyedJobRegistry()
 
     /**
      * 需要显式释放的句柄（真实连接 / 会话 / 消费者 / 通道），key 通常用 connectionId。
@@ -141,10 +143,10 @@ class IbmMQService(private val context: ServiceContext) {
      */
     private val resources = ConcurrentHashMap<String, AutoCloseable>()
 
-    /** 触发一次扫描；重复调用会取消上一次未完成的扫描。 */
+    /** 触发一次扫描；同一连接重复调用会取消上一次未完成的扫描。 */
     fun startScan(connectionId: String) {
         ibmMqLog.debug("manual scan requested: connection=$connectionId")
-        val started = context.coroutineScope.launch {
+        scanJobs.launch(context.coroutineScope, connectionId) {
             scanLocks.withLock(connectionId) {
                 // 显式连接模型：没连上就没有 cache 可写，也没有 MQ 句柄可查。
                 if (connectedContext(connectionId) == null) {
@@ -190,9 +192,19 @@ class IbmMQService(private val context: ServiceContext) {
                 }
             }
         }
-        // 先登记新协程、再取消旧的：getAndSet 是原子的，两个线程同时调 startScan 也
-        // 只有一方能拿到「上一个」并取消它，不会留下两条并行扫描。
-        scanJob.getAndSet(started)?.cancel()
+    }
+
+    /**
+     * 取消某条连接上正在进行的手动扫描（断开 / 删除连接时由
+     * [IbmMQConnectionManager] 调用）。只 cancel 不 join，理由见 [KeyedJobRegistry.cancel]。
+     */
+    fun cancelScan(connectionId: String) {
+        scanJobs.cancel(connectionId)
+    }
+
+    /** 取消全部手动扫描（模块关闭）。 */
+    fun cancelAllScans() {
+        scanJobs.cancelAll()
     }
 
     /**
@@ -208,21 +220,28 @@ class IbmMQService(private val context: ServiceContext) {
         val statuses = objectScanner.queryChannelStatus(connectionId, name)
         val cache = cacheOf(connectionId) ?: return null
         val key = objectsKey(MqObjectType.CHANNEL)
-        val existing = cache.getAs<List<MqObjectSnapshot>>(key) ?: emptyList()
-        val idx = existing.indexOfFirst { it.name == name }
-        if (idx < 0) {
+        val resolved = statuses.firstOrNull()?.let { channelStatusName(it.second) } ?: "STOPPED"
+        val statusValue = statuses.firstOrNull()?.second
+        // 原子读-改-写：并发的慢扫 / 心跳在这两步之间可能已经整表替换过，先读后写会把
+        // 它们的结果整段覆盖（新扫到的通道凭空消失）。updateIfPresent 同时表达了
+        // 「表里还没有这一条」= 不改缓存、也不算写过 —— 与原来的 return null 语义一致。
+        val applied = cache.updateIfPresentAs<List<MqObjectSnapshot>>(key, OBJECTS_FULL_TTL_MS) { rows ->
+            val idx = rows.indexOfFirst { it.name == name }
+            if (idx < 0) {
+                rows // 原样返回 = 不动缓存（也不会留下空壳条目）
+            } else {
+                rows.toMutableList().also { updated ->
+                    updated[idx] = rows[idx].copy(
+                        channelStatus = resolved,
+                        attributes = rows[idx].attributes + ("MQIACH_CHANNEL_STATUS" to (statusValue ?: -1)),
+                    )
+                }
+            }
+        }
+        if (!applied) {
             ibmMqLog.debug("channel status poll unresolved (not in cache yet): channel=$name")
             return null // 列表尚未扫描到该通道，无法确认状态，交给轮询下一轮
         }
-        val resolved = statuses.firstOrNull()?.let { channelStatusName(it.second) } ?: "STOPPED"
-        val statusValue = statuses.firstOrNull()?.second
-        val updated = existing.toMutableList().apply {
-            this[idx] = existing[idx].copy(
-                channelStatus = resolved,
-                attributes = existing[idx].attributes + ("MQIACH_CHANNEL_STATUS" to (statusValue ?: -1)),
-            )
-        }
-        cache.put(key, updated, ttlMs = OBJECTS_FULL_TTL_MS)
         ibmMqLog.debug("channel status polled: channel=$name status=$resolved")
         context.emit(
             name = IbmMQEvents.MESSAGES_SCANNED,
@@ -248,21 +267,26 @@ class IbmMQService(private val context: ServiceContext) {
         val statuses = objectScanner.queryListenerStatus(connectionId, name)
         val cache = cacheOf(connectionId) ?: return null
         val key = objectsKey(MqObjectType.LISTENER)
-        val existing = cache.getAs<List<MqObjectSnapshot>>(key) ?: emptyList()
-        val idx = existing.indexOfFirst { it.name == name }
-        if (idx < 0) {
+        val resolved = statuses.firstOrNull()?.let { listenerStatusName(it.second) } ?: "NOT_RUNNING"
+        val statusValue = statuses.firstOrNull()?.second
+        // 原子读-改-写，理由同 [pollChannelStatus]：先读后写会覆盖并发扫描的结果。
+        val applied = cache.updateIfPresentAs<List<MqObjectSnapshot>>(key, OBJECTS_FULL_TTL_MS) { rows ->
+            val idx = rows.indexOfFirst { it.name == name }
+            if (idx < 0) {
+                rows // 原样返回 = 不动缓存
+            } else {
+                rows.toMutableList().also { updated ->
+                    updated[idx] = rows[idx].copy(
+                        listenerStatus = resolved,
+                        attributes = rows[idx].attributes + ("MQIACH_LISTENER_STATUS" to (statusValue ?: -1)),
+                    )
+                }
+            }
+        }
+        if (!applied) {
             ibmMqLog.debug("listener status poll unresolved (not in cache yet): listener=$name")
             return null // 列表尚未扫描到该监听器，无法确认状态，交给轮询下一轮
         }
-        val resolved = statuses.firstOrNull()?.let { listenerStatusName(it.second) } ?: "NOT_RUNNING"
-        val statusValue = statuses.firstOrNull()?.second
-        val updated = existing.toMutableList().apply {
-            this[idx] = existing[idx].copy(
-                listenerStatus = resolved,
-                attributes = existing[idx].attributes + ("MQIACH_LISTENER_STATUS" to (statusValue ?: -1)),
-            )
-        }
-        cache.put(key, updated, ttlMs = OBJECTS_FULL_TTL_MS)
         ibmMqLog.debug("listener status polled: listener=$name status=$resolved")
         context.emit(
             name = IbmMQEvents.MESSAGES_SCANNED,
@@ -587,33 +611,39 @@ class IbmMQService(private val context: ServiceContext) {
     private fun syncQueueDepths(connectionId: String, counts: List<Pair<String, Int>>) {
         val cache = cacheOf(connectionId) ?: return
         val key = objectsKey(MqObjectType.QUEUE)
-        val existing = cache.getAs<List<MqObjectSnapshot>>(key) ?: emptyList()
+        // 原子读-改-写：心跳与慢扫 / 手动刷新、通道轮询是并发的，「先读整表 → 改 → 写回」
+        // 会让后写的那次抹掉先写的结果（新队列凭空消失，直到下轮慢扫）。
         // 真·add-or-update：以既有列表为基础，只更新 / 追加，**绝不删除**没有状态行的对象
         // （INQUIRE_Q_STATUS 覆盖不到别名 / 远程队列等，全量替换会把它们误删；已删除对象
         // 由慢扫全量替换负责）。同名计数多行（理论上不会，但兜底）只取一次。
-        val updated = existing.toMutableList()
-        val seen = mutableSetOf<String>()
-        for ((name, depth) in counts) {
-            if (!seen.add(name)) continue
-            val idx = updated.indexOfFirst { it.name == name }
-            if (idx >= 0) {
-                val prev = updated[idx]
-                updated[idx] = prev.copy(
-                    currentDepth = depth,
-                    messageCount = depth,
-                    attributes = prev.attributes + ("MQIA_CURRENT_Q_DEPTH" to depth),
-                )
-            } else {
-                updated += MqObjectSnapshot(
-                    name = name,
-                    type = MqObjectType.QUEUE,
-                    currentDepth = depth,
-                    messageCount = depth,
-                    attributes = mapOf("MQIA_CURRENT_Q_DEPTH" to depth),
-                )
+        //
+        // transform 会被 CAS 重试，所以它只做纯计算：外部可见的副作用（日志 / 事件）
+        // 一律留在外面。
+        cache.updateAs<List<MqObjectSnapshot>>(key, OBJECTS_FULL_TTL_MS) { current ->
+            val updated = (current ?: emptyList()).toMutableList()
+            val seen = mutableSetOf<String>()
+            for ((name, depth) in counts) {
+                if (!seen.add(name)) continue
+                val idx = updated.indexOfFirst { it.name == name }
+                if (idx >= 0) {
+                    val prev = updated[idx]
+                    updated[idx] = prev.copy(
+                        currentDepth = depth,
+                        messageCount = depth,
+                        attributes = prev.attributes + ("MQIA_CURRENT_Q_DEPTH" to depth),
+                    )
+                } else {
+                    updated += MqObjectSnapshot(
+                        name = name,
+                        type = MqObjectType.QUEUE,
+                        currentDepth = depth,
+                        messageCount = depth,
+                        attributes = mapOf("MQIA_CURRENT_Q_DEPTH" to depth),
+                    )
+                }
             }
+            updated.toList()
         }
-        cache.put(key, updated, ttlMs = OBJECTS_FULL_TTL_MS)
     }
 
     /**
@@ -624,34 +654,36 @@ class IbmMQService(private val context: ServiceContext) {
     private fun syncChannelStatuses(connectionId: String, statuses: List<Pair<String, Int>>) {
         val cache = cacheOf(connectionId) ?: return
         val key = objectsKey(MqObjectType.CHANNEL)
-        val existing = cache.getAs<List<MqObjectSnapshot>>(key) ?: emptyList()
         // INQUIRE_CHANNEL_STATUS 一个通道**定义**会返回多行（如 SVRCONN 上多个活动连接），
         // 同名去重只取一次，否则列表里出现重复 name → ObjectCardData.id 重复 → LazyGrid
         // 抛 IllegalArgumentException("Key ... was already used")。
         // 同时是真正的 add-or-update：保留既有通道（停掉的通道没有状态行也不该被删），
         // 只更新已有项的状态、追加本次新出现的通道，绝不整体替换掉慢扫扫到的列表。
-        val updated = existing.toMutableList()
-        val seen = mutableSetOf<String>()
-        for ((name, statusValue) in statuses) {
-            if (!seen.add(name)) continue
-            val statusName = channelStatusName(statusValue)
-            val idx = updated.indexOfFirst { it.name == name }
-            if (idx >= 0) {
-                val prev = updated[idx]
-                updated[idx] = prev.copy(
-                    channelStatus = statusName,
-                    attributes = prev.attributes + ("MQIACH_CHANNEL_STATUS" to statusValue),
-                )
-            } else {
-                updated += MqObjectSnapshot(
-                    name = name,
-                    type = MqObjectType.CHANNEL,
-                    channelStatus = statusName,
-                    attributes = mapOf("MQIACH_CHANNEL_STATUS" to statusValue),
-                )
+        // 原子读-改-写：理由同 [syncQueueDepths]（并发扫描会互相覆盖）。
+        cache.updateAs<List<MqObjectSnapshot>>(key, OBJECTS_FULL_TTL_MS) { current ->
+            val updated = (current ?: emptyList()).toMutableList()
+            val seen = mutableSetOf<String>()
+            for ((name, statusValue) in statuses) {
+                if (!seen.add(name)) continue
+                val statusName = channelStatusName(statusValue)
+                val idx = updated.indexOfFirst { it.name == name }
+                if (idx >= 0) {
+                    val prev = updated[idx]
+                    updated[idx] = prev.copy(
+                        channelStatus = statusName,
+                        attributes = prev.attributes + ("MQIACH_CHANNEL_STATUS" to statusValue),
+                    )
+                } else {
+                    updated += MqObjectSnapshot(
+                        name = name,
+                        type = MqObjectType.CHANNEL,
+                        channelStatus = statusName,
+                        attributes = mapOf("MQIACH_CHANNEL_STATUS" to statusValue),
+                    )
+                }
             }
+            updated.toList()
         }
-        cache.put(key, updated, ttlMs = OBJECTS_FULL_TTL_MS)
     }
 
     /** 连接处于 CONNECTED 时的上下文；否则 null —— 显式连接模型的扫描守卫。 */
@@ -688,7 +720,7 @@ class IbmMQService(private val context: ServiceContext) {
      */
     fun close() {
         ibmMqLog.debug("service closing: resources=${resources.size}")
-        scanJob.getAndSet(null)?.cancel()
+        cancelAllScans()
         resources.keys.toList().forEach { key ->
             val handle = resources.remove(key) ?: return@forEach
             try {

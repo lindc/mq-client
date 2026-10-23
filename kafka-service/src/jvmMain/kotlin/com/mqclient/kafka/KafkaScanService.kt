@@ -4,6 +4,7 @@ import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.db.CommandAudit
 import com.mqclient.core.cache.CacheManager
+import com.mqclient.core.concurrent.KeyedJobRegistry
 import com.mqclient.core.concurrent.KeyedMutex
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.emit
@@ -75,6 +76,32 @@ class KafkaScanService(private val context: ServiceContext) {
 
     /** 按连接分组的扫描锁：同一条连接串行（防重叠扫描互相覆盖结果），不同连接并发。 */
     private val scanLocks = KeyedMutex()
+
+    /**
+     * 手动刷新（UI 的「重新扫描」按钮）的协程：同一连接只留一条。
+     *
+     * 定时任务的协程归 `JobScheduler` 管，这里只收「用户点出来的那一次」。断开 / 删除
+     * 连接时必须经 [cancelScan] 收掉 —— 否则它会拿着已经 `close()` 的 AdminClient
+     * 继续跑，而且一直占着 [scanLocks] 的 key，重连后的第一次刷新要排在它后面等
+     * （表现是「点刷新没反应」）。
+     */
+    private val manualScans = KeyedJobRegistry()
+
+    /**
+     * 启动一次手动对象扫描：与定时慢扫共用 [scanLocks]，所以不会与正在跑的那一轮重叠；
+     * 同一连接重复点击顶掉上一轮（与 JobScheduler 的「同 ID 重注册」同口径）。
+     */
+    fun launchManualScan(connectionId: String) {
+        manualScans.launch(context.coroutineScope, connectionId) { scanObjects(connectionId) }
+    }
+
+    /**
+     * 取消该连接上正在进行的手动扫描（断开 / 删除连接时由连接管理器调用）。
+     * 只 cancel 不 join：阻塞中的 AdminClient 调用不会被立刻打断，断开路径不能被一次慢查询拖住。
+     */
+    fun cancelScan(connectionId: String) {
+        manualScans.cancel(connectionId)
+    }
 
     // ---------------------------------------------------------------- 对象慢扫
 
@@ -266,13 +293,15 @@ class KafkaScanService(private val context: ServiceContext) {
                             }
                             .sortedBy { it.id },
                     )
-                    val existing = cache.getAs<List<KafkaTopicSnapshot>>(KEY_TOPICS) ?: emptyList()
-                    if (existing.none { it.name == name }) {
-                        cache.put(
-                            KEY_TOPICS,
-                            (existing + snapshot).sortedBy { it.name },
-                            ttlMs = objectsTtlMs(ctx),
-                        )
+                    // 原子读-改-写：慢扫在这一步前后可能整表替换过，先读后写会把刚扫到的
+                    // 其它 topic 一起抹掉。已存在则原样返回 = 不写（与原 `if none` 等价）。
+                    cache.updateAs<List<KafkaTopicSnapshot>>(KEY_TOPICS, objectsTtlMs(ctx)) { current ->
+                        val existing = current ?: emptyList()
+                        if (existing.any { it.name == name }) {
+                            existing
+                        } else {
+                            (existing + snapshot).sortedBy { it.name }
+                        }
                     }
                     context.emit(
                         name = KafkaEvents.OBJECTS_SCANNED,
@@ -802,7 +831,14 @@ class KafkaScanService(private val context: ServiceContext) {
                 }
             }
         if (appended.isEmpty()) return 0
-        cache.put(KEY_TOPICS, (existing + appended).sortedBy { it.name }, ttlMs = objectsTtl)
+        // 原子追加：前面的 `existing` 只用于「该查哪些」的决策（跨两次 RPC，必然可能过时），
+        // 真正的写入以写入时的最新快照为基础，并按名字去重 —— 否则会把并发的慢扫 /
+        // 另一个 createTopic 刚写进去的条目整段覆盖。
+        cache.updateAs<List<KafkaTopicSnapshot>>(KEY_TOPICS, objectsTtl) { current ->
+            val base = current ?: emptyList()
+            val present = base.mapTo(mutableSetOf()) { it.name }
+            (base + appended.filter { present.add(it.name) }).sortedBy { it.name }
+        }
         return appended.size
     }
 

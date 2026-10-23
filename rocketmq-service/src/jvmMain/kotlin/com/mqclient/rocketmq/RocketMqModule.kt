@@ -135,10 +135,12 @@ object RocketMqModule {
     /**
      * 手动扫描入口（UI 刷新按钮）：在模块 scope 里跑一轮**对象慢扫**（按连接的 scanLocks
      * 串行）；扫完经 OBJECTS_SCANNED 事件驱动 UI 刷新。
+     *
+     * 协程按连接登记在 [RocketMqScanService] 里，断开连接时由连接管理器取消 —— 否则它会
+     * 拿着已 shutdown 的 AdminExt 继续跑、并占着该连接的扫描锁。
      */
     fun scanNow(connectionId: String) {
-        val scanService = service ?: return
-        moduleContext?.coroutineScope?.launch { scanService.scanObjects(connectionId) }
+        service?.launchManualScan(connectionId)
     }
 
     /**

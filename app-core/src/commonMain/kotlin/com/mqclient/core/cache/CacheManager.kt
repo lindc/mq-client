@@ -67,6 +67,101 @@ class CacheManager {
     }
 
     /**
+     * 原子「读-改-写」：把「取当前值 → 算新值 → 写回」收进一次 CAS。
+     *
+     * 为什么需要它：[get] 与 [put] 各自原子，但**两者之间不是**。扫描链路与 UI 动作
+     * （通道启停后轮询状态、创建对象后补缓存）都是「先读整张表 → 改几行 → 再写回」，
+     * 中间只要插进另一笔写入，后写的那次就会把先写的那次**整段抹掉** —— 表现为列表里
+     * 刚出现的对象凭空消失，直到下一轮慢扫（默认几十分钟）才回来。
+     *
+     * [transform] 拿到 key 当前的有效值（不存在或已过期时为 `null`），返回新值：
+     *  - 返回新值 → 写入（[ttlMs] 重新计时）；
+     *  - 返回 `null` → 删除该 key（本来就不存在时是 no-op）；
+     *  - **原样返回传进来的那个实例** → 视为「不动」：不写入，也不刷新 TTL 与
+     *    [getLastUpdatedAt]。调用方用它表达「这一条我已经看过了，不用改」。
+     *
+     * ⚠️ CAS 失败会重跑 [transform]，所以它必须是**纯函数**：不能改外部状态、不能有
+     * 副作用（与 `EventBus` / `JobScheduler` 的 CAS 循环同一纪律）。需要在外面观察
+     * 结果时，用返回值，或者事后再 [get] 一次。
+     *
+     * @param ttlMs 新值的过期时间（毫秒），0（默认）表示**永不过期**（与 [put] 同口径）。
+     * @return 缓存内容确实变了返回 true。
+     */
+    fun update(key: String, ttlMs: Long = 0, transform: (Any?) -> Any?): Boolean {
+        require(key.isNotBlank()) { "缓存 key 不能为空白：它是条目的唯一标识" }
+        val now = systemTimeMillis()
+        while (true) {
+            val current = cache.value
+            val entry = current[key]
+            val live = entry?.takeIf { it.expiresAt == 0L || now <= it.expiresAt }
+            val next = transform(live?.value)
+            // 「原样返回」= 不动：既不是删除也不是写入（不刷新 TTL，也不算新鲜度变化）。
+            if (live != null && next === live.value) return false
+            val updated = if (next == null) {
+                if (entry == null) current else current - key
+            } else {
+                current + (key to CacheEntry(next, expiresAt = if (ttlMs > 0) now + ttlMs else 0))
+            }
+            if (!cache.compareAndSet(current, updated)) continue
+            if (updated == current) return false
+            lastUpdatedAt = now
+            return true
+        }
+    }
+
+    /**
+     * 只在 key 存在（且未过期）时原子改写；不存在时**什么都不做** —— 不会顺手创建
+     * 一条空壳条目，也不会刷新 [isFresh]。
+     *
+     * 这是轮询类更新的专用口：像 `pollChannelStatus` 那种「列表里还没扫到这个对象」
+     * 属于正常中间态，用 [update] 会留下一条空条目并污染整体新鲜度。
+     *
+     * [transform] 的约定与 [update] 相同（含「原样返回 = 不动」与「必须是纯函数」两条）。
+     *
+     * @return key 存在并应用了 [transform] 时返回 true；key 不存在 / 已过期返回 false。
+     */
+    fun updateIfPresent(key: String, ttlMs: Long = 0, transform: (Any?) -> Any?): Boolean {
+        require(key.isNotBlank()) { "缓存 key 不能为空白：它是条目的唯一标识" }
+        val now = systemTimeMillis()
+        while (true) {
+            val current = cache.value
+            val entry = current[key] ?: return false
+            if (entry.expiresAt > 0 && now > entry.expiresAt) {
+                // 过期条目按「不存在」处理，顺手摘掉（与 [get] 的惰性删除同一口径）。
+                if (cache.compareAndSet(current, current - key)) return false
+                continue
+            }
+            val next = transform(entry.value)
+            if (next === entry.value) return false
+            val updated = if (next == null) {
+                current - key
+            } else {
+                current + (key to CacheEntry(next, expiresAt = if (ttlMs > 0) now + ttlMs else 0))
+            }
+            if (!cache.compareAndSet(current, updated)) continue
+            lastUpdatedAt = now
+            return true
+        }
+    }
+
+    /** [update] 的泛型版：存的类型不符按「当前值不存在」处理（`transform` 收到 null）。 */
+    inline fun <reified T> updateAs(
+        key: String,
+        ttlMs: Long = 0,
+        crossinline transform: (T?) -> T?,
+    ): Boolean = update(key, ttlMs) { current -> transform(current as? T) }
+
+    /** [updateIfPresent] 的泛型版：存的类型不符按「不存在」处理（`transform` 不会被调用）。 */
+    inline fun <reified T> updateIfPresentAs(
+        key: String,
+        ttlMs: Long = 0,
+        crossinline transform: (T) -> T?,
+    ): Boolean = updateIfPresent(key, ttlMs) { current ->
+        val typed = current as? T ?: return@updateIfPresent current
+        transform(typed)
+    }
+
+    /**
      * 读取缓存：过期返回 null，并**顺手删掉**这一条（惰性删除，不需要扫描线程）。
      */
     fun get(key: String): Any? {

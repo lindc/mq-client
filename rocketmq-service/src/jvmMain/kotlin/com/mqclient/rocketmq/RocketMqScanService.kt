@@ -4,6 +4,7 @@ import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.db.CommandAudit
 import com.mqclient.core.cache.CacheManager
+import com.mqclient.core.concurrent.KeyedJobRegistry
 import com.mqclient.core.concurrent.KeyedMutex
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.emit
@@ -114,7 +115,31 @@ class RocketMqScanService(private val context: ServiceContext) {
     /** 按连接分组的扫描锁：同一条连接串行（防重叠扫描互相覆盖结果），不同连接并发。 */
     private val scanLocks = KeyedMutex()
 
+    /**
+     * 手动刷新（UI 的「重新扫描」按钮）的协程：同一连接只留一条。
+     *
+     * 定时任务的协程归 `JobScheduler` 管，这里只收「用户点出来的那一次」。断开 / 删除
+     * 连接时必须经 [cancelScan] 收掉 —— 否则它会拿着已经 `shutdown()` 的 AdminExt
+     * 继续跑，而且一直占着 [scanLocks] 的 key，重连后的第一次刷新要排在它后面等
+     * （表现是「点刷新没反应」）。
+     */
+    private val manualScans = KeyedJobRegistry()
 
+    /**
+     * 启动一次手动对象扫描：与定时慢扫共用 [scanLocks]，所以不会与正在跑的那一轮重叠；
+     * 同一连接重复点击顶掉上一轮（与 JobScheduler 的「同 ID 重注册」同口径）。
+     */
+    fun launchManualScan(connectionId: String) {
+        manualScans.launch(context.coroutineScope, connectionId) { scanObjects(connectionId) }
+    }
+
+    /**
+     * 取消该连接上正在进行的手动扫描（断开 / 删除连接时由连接管理器调用）。
+     * 只 cancel 不 join：阻塞中的 Remoting 调用不会被立刻打断，断开路径不能被一次慢查询拖住。
+     */
+    fun cancelScan(connectionId: String) {
+        manualScans.cancel(connectionId)
+    }
 
     /**
      * 「至少完成过一轮对象慢扫」标记（connectionId → true）。UI 用它区分「还在等
@@ -424,12 +449,13 @@ class RocketMqScanService(private val context: ServiceContext) {
             withContext(Dispatchers.IO) { admin.deleteSubscriptionGroup(group) }
         }
         ctx.cache?.let { cache ->
-            cache.getAs<List<RocketMqGroupSnapshot>>(KEY_GROUPS).orEmpty()
-                .filter { it.name != group }
-                .let { cache.put(KEY_GROUPS, it, ttlMs = objectsTtlMs(ctx)) }
-            cache.getAs<Map<String, RocketMqGroupLagSnapshot>>(KEY_GROUP_LAGS).orEmpty()
-                .filterKeys { it != group }
-                .let { cache.put(KEY_GROUP_LAGS, it, ttlMs = lagTtlMs(ctx)) }
+            // 原子读-改-写：与慢扫 / 心跳并发时，先读后写会把对方刚写入的组整段抹掉。
+            cache.updateIfPresentAs<List<RocketMqGroupSnapshot>>(KEY_GROUPS, objectsTtlMs(ctx)) { groups ->
+                groups.filter { it.name != group }
+            }
+            cache.updateIfPresentAs<Map<String, RocketMqGroupLagSnapshot>>(KEY_GROUP_LAGS, lagTtlMs(ctx)) { lags ->
+                lags.filterKeys { it != group }
+            }
         }
         context.emit(
             name = RocketMqEvents.OBJECTS_SCANNED,
@@ -473,9 +499,10 @@ class RocketMqScanService(private val context: ServiceContext) {
         }
         // 缓存剪除 + 事件驱动刷新（与 RabbitMQ 的 deleteExchange 同一模式）。
         ctx.cache?.let { cache ->
-            cache.getAs<List<RocketMqTopicSnapshot>>(KEY_TOPICS).orEmpty()
-                .filter { it.name != topic }
-                .let { cache.put(KEY_TOPICS, it, ttlMs = objectsTtlMs(ctx)) }
+            // 原子读-改-写：理由同 deleteConsumerGroup（并发慢扫整表替换会覆盖这次剪除）。
+            cache.updateIfPresentAs<List<RocketMqTopicSnapshot>>(KEY_TOPICS, objectsTtlMs(ctx)) { topics ->
+                topics.filter { it.name != topic }
+            }
             // groupLags 不动：消费组与 topic 删除解耦（组仍可能存在，只是无订阅）。
         }
         context.emit(

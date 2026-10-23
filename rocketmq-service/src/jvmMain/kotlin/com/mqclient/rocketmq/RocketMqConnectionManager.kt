@@ -154,6 +154,8 @@ class RocketMqConnectionManager(
             if (ctx.status == ConnectionStatus.Disconnected) return@withLock
 
             unregisterScanJobs(connectionId)
+            // 手动刷新（UI 按钮）的协程也要收：它占着该连接的 scanLocks，句柄又要关了。
+            service.cancelScan(connectionId)
             closeQuietly(ctx)
             ctx.cleanup()
             // 扫描完成标记与缓存同生命周期：断开清掉，重连后重新等首扫。

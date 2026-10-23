@@ -144,10 +144,12 @@ object RabbitMqModule {
     /**
      * 手动扫描入口（UI 刷新按钮）：在模块 scope 里跑一轮**对象慢扫**（按连接的 scanLocks 串行，
      * 与定时任务排队不重叠）；扫完经 OBJECTS_SCANNED 事件驱动 UI 刷新缓存数据。
+     *
+     * 协程按连接登记在 [RabbitMqScanService] 里，断开连接时由连接管理器取消 —— 否则它会
+     * 拿着已关闭的 HTTP 客户端继续跑、并占着该连接的扫描锁。
      */
     fun scanNow(connectionId: String) {
-        val scanService = service ?: return
-        moduleContext?.coroutineScope?.launch { scanService.scanObjects(connectionId) }
+        service?.launchManualScan(connectionId)
     }
 
     /**

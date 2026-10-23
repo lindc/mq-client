@@ -2,6 +2,7 @@ package com.mqclient.rabbitmq
 
 import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ConnectionStore
+import com.mqclient.core.concurrent.KeyedJobRegistry
 import com.mqclient.core.concurrent.KeyedMutex
 import com.mqclient.core.db.CommandAudit
 import com.mqclient.core.spi.ServiceContext
@@ -67,6 +68,32 @@ class RabbitMqScanService(private val context: ServiceContext) {
 
     /** 按连接分组的扫描锁：同一条连接串行（防重叠扫描互相覆盖结果），不同连接并发。 */
     private val scanLocks = KeyedMutex()
+
+    /**
+     * 手动刷新（UI 的「重新扫描」按钮）的协程：同一连接只留一条。
+     *
+     * 定时任务的协程归 `JobScheduler` 管，这里只收「用户点出来的那一次」。断开 / 删除
+     * 连接时必须经 [cancelScan] 收掉 —— 否则它会拿着已经 `close()` 的 HttpClient
+     * 继续跑，而且一直占着 [scanLocks] 的 key，重连后的第一次刷新要排在它后面等
+     * （表现是「点刷新没反应」）。
+     */
+    private val manualScans = KeyedJobRegistry()
+
+    /**
+     * 启动一次手动对象扫描：与定时慢扫共用 [scanLocks]，所以不会与正在跑的那一轮重叠；
+     * 同一连接重复点击顶掉上一轮（与 JobScheduler 的「同 ID 重注册」同口径）。
+     */
+    fun launchManualScan(connectionId: String) {
+        manualScans.launch(context.coroutineScope, connectionId) { scanObjects(connectionId) }
+    }
+
+    /**
+     * 取消该连接上正在进行的手动扫描（断开 / 删除连接时由连接管理器调用）。
+     * 只 cancel 不 join：阻塞中的 HTTP 调用不会被立刻打断，断开路径不能被一次慢查询拖住。
+     */
+    fun cancelScan(connectionId: String) {
+        manualScans.cancel(connectionId)
+    }
 
     // ---------------------------------------------------------------- 对象慢扫
 
@@ -277,15 +304,14 @@ class RabbitMqScanService(private val context: ServiceContext) {
             withContext(Dispatchers.IO) { admin.createExchange(name, type, durable, autoDelete, args) }
         }
         // 同步补缓存：新交换机立即出现在列表（OBJECTS_SCANNED 事件驱动 UI 重读）。
+        // 原子读-改-写：慢扫 / 状态快扫在这两步之间可能整表替换过，先读后写会把刚扫到的
+        // 其它交换机（含另一次创建）整段抹掉。
         ctx.cache?.let { cache ->
-            val current = cache.getAs<List<RabbitMqExchangeSnapshot>>(KEY_EXCHANGES).orEmpty()
-                .filter { it.name != name }
-            cache.put(
-                KEY_EXCHANGES,
-                (current + RabbitMqExchangeSnapshot(name, type, durable, autoDelete, internal = false))
-                    .sortedBy { it.name },
-                ttlMs = objectsTtlMs(ctx),
-            )
+            cache.updateAs<List<RabbitMqExchangeSnapshot>>(KEY_EXCHANGES, objectsTtlMs(ctx)) { current ->
+                (current.orEmpty().filter { it.name != name } +
+                    RabbitMqExchangeSnapshot(name, type, durable, autoDelete, internal = false))
+                    .sortedBy { it.name }
+            }
         }
         context.emit(
             name = RabbitMqEvents.OBJECTS_SCANNED,
@@ -308,12 +334,13 @@ class RabbitMqScanService(private val context: ServiceContext) {
             withContext(Dispatchers.IO) { admin.deleteExchange(name) }
         }
         ctx.cache?.let { cache ->
-            cache.getAs<List<RabbitMqExchangeSnapshot>>(KEY_EXCHANGES).orEmpty()
-                .filter { it.name != name }
-                .let { cache.put(KEY_EXCHANGES, it, ttlMs = objectsTtlMs(ctx)) }
-            cache.getAs<List<RabbitMqBindingSnapshot>>(KEY_BINDINGS).orEmpty()
-                .filter { it.source != name }
-                .let { cache.put(KEY_BINDINGS, it, ttlMs = objectsTtlMs(ctx)) }
+            // 原子读-改-写：两处剪除各自一次 CAS，不与并发的慢扫互相覆盖。
+            cache.updateIfPresentAs<List<RabbitMqExchangeSnapshot>>(KEY_EXCHANGES, objectsTtlMs(ctx)) { rows ->
+                rows.filter { it.name != name }
+            }
+            cache.updateIfPresentAs<List<RabbitMqBindingSnapshot>>(KEY_BINDINGS, objectsTtlMs(ctx)) { rows ->
+                rows.filter { it.source != name }
+            }
             // queues / queueStatus 不受交换机删除影响（队列对象本身还在）。
         }
         context.emit(
@@ -520,14 +547,12 @@ class RabbitMqScanService(private val context: ServiceContext) {
             withContext(Dispatchers.IO) { admin.createQueue(name, durable, autoDelete, exclusive, args) }
         }
         ctx.cache?.let { cache ->
-            val current = cache.getAs<List<RabbitMqQueueSnapshot>>(KEY_QUEUES).orEmpty()
-                .filter { it.name != name }
-            cache.put(
-                KEY_QUEUES,
-                (current + RabbitMqQueueSnapshot(name, state = null, durable, autoDelete, exclusive))
-                    .sortedBy { it.name },
-                ttlMs = objectsTtlMs(ctx),
-            )
+            // 原子读-改-写：理由同 createExchange（并发扫描会覆盖这次插入）。
+            cache.updateAs<List<RabbitMqQueueSnapshot>>(KEY_QUEUES, objectsTtlMs(ctx)) { current ->
+                (current.orEmpty().filter { it.name != name } +
+                    RabbitMqQueueSnapshot(name, state = null, durable, autoDelete, exclusive))
+                    .sortedBy { it.name }
+            }
         }
         context.emit(
             name = RabbitMqEvents.OBJECTS_SCANNED,
@@ -548,12 +573,14 @@ class RabbitMqScanService(private val context: ServiceContext) {
             withContext(Dispatchers.IO) { admin.deleteQueue(name) }
         }
         ctx.cache?.let { cache ->
-            cache.getAs<List<RabbitMqQueueSnapshot>>(KEY_QUEUES).orEmpty()
-                .filter { it.name != name }
-                .let { cache.put(KEY_QUEUES, it, ttlMs = objectsTtlMs(ctx)) }
-            cache.getAs<Map<String, RabbitMqQueueStatusSnapshot>>(KEY_QUEUE_STATUS).orEmpty()
-                .filterKeys { it != name }
-                .let { cache.put(KEY_QUEUE_STATUS, it, ttlMs = statusTtlMs(ctx)) }
+            // 原子读-改-写：queues 与 queueStatus 各一次 CAS；慢扫的全量替换不再能
+            // 「读到旧表 → 写回」把这次删除抹掉。
+            cache.updateIfPresentAs<List<RabbitMqQueueSnapshot>>(KEY_QUEUES, objectsTtlMs(ctx)) { rows ->
+                rows.filter { it.name != name }
+            }
+            cache.updateIfPresentAs<Map<String, RabbitMqQueueStatusSnapshot>>(KEY_QUEUE_STATUS, statusTtlMs(ctx)) { rows ->
+                rows.filterKeys { it != name }
+            }
         }
         context.emit(
             name = RabbitMqEvents.OBJECTS_SCANNED,
