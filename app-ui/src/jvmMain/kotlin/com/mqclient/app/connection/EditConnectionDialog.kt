@@ -31,7 +31,7 @@ import androidx.compose.ui.window.rememberDialogState
 import com.mqclient.core.ConnectionInfo
 import com.mqclient.core.ConnectionFormState
 import com.mqclient.core.ModuleRegistry
-import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import dev.nucleusframework.application.DecoratedDialog
@@ -69,7 +69,7 @@ internal fun EditConnectionDialog(
             title = { Text(stringResource("menu_edit_connection")) },
             text = { Text(connection.name) },
             confirmButton = {
-                PressableButton(onClick = onDismiss) { Text(stringResource("common_close")) }
+                SecondaryButton(onClick = onDismiss) { Text(stringResource("common_close")) }
             },
         )
         return
@@ -139,7 +139,7 @@ internal fun EditConnectionDialog(
                         onClick = onDismiss,
                     ) { Text(stringResource("common_close")) }
                     Spacer(Modifier.width(8.dp))
-                    PressableButton(onClick = onFinish(formState, onConnectionUpdated, onDismiss), enabled = !formState.busy) {
+                    PrimaryButton(onClick = onFinish(formState, onConnectionUpdated, onDismiss), enabled = !formState.busy) {
                         Text(stringResource("common_save"))
                     }
                 }

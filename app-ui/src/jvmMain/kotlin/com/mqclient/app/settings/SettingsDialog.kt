@@ -48,7 +48,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.rememberDialogState
 import com.mqclient.core.Config
 import dev.nucleusframework.application.LocalNucleusWindow
-import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.DangerButton
+import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import dev.nucleusframework.application.DecoratedDialog
@@ -161,10 +162,8 @@ fun SettingsDialog(
                 title = { Text(stringResource("settings_unsaved_title")) },
                 text = { Text(stringResource("settings_unsaved_text")) },
                 confirmButton = {
-                    PressableButton(
+                    DangerButton(
                         onClick = closeGuard::discardChanges,
-                        containerColor = MaterialTheme.colorScheme.errorContainer,
-                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
                     ) { Text(stringResource("settings_unsaved_discard")) }
                 },
                 dismissButton = {
@@ -173,7 +172,7 @@ fun SettingsDialog(
                             onClick = closeGuard::keepEditing,
                         ) { Text(stringResource("settings_unsaved_keep")) }
                         Spacer(Modifier.width(8.dp))
-                        PressableButton(
+                        PrimaryButton(
                             onClick = {
                                 val error = onSave(draft)
                                 if (error == null) {
@@ -335,7 +334,7 @@ private fun FooterActions(
                 onClick = onCancel,
             ) { Text(stringResource("common_cancel")) }
             Spacer(Modifier.width(8.dp))
-            PressableButton(onClick = onSave) { Text(stringResource("common_save")) }
+            PrimaryButton(onClick = onSave) { Text(stringResource("common_save")) }
         }
     }
 }

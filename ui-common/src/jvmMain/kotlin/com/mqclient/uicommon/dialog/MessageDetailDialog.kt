@@ -60,7 +60,8 @@ import com.mqclient.message.interpreter.MessageInterpreters
 import com.mqclient.message.interpreter.ParamKind
 import com.mqclient.message.interpreter.hexPreview
 import com.mqclient.message.interpreter.isProbablyBinary
-import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.PrimaryButton
+import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.file.saveFileBytes
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.i18n.stringResource
@@ -191,7 +192,7 @@ fun MessageDetailDialog(
         minHeight = minHeight,
         footerActions = {
             extraBottomActions()
-            PressableButton(
+            SecondaryButton(
                 onClick = {
                     scope.launch {
                         try {
@@ -215,10 +216,8 @@ fun MessageDetailDialog(
                     }
                 },
                 enabled = rawBody.isNotEmpty(),
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ) { Text(stringResource("msg_detail_download")) }
-            PressableButton(
+            SecondaryButton(
                 onClick = {
                     // 复制当前展示的文本：hex 模式复制 hex；解释器模式复制全量 formatted
                     // （显示截断不影响复制）；未就绪 / 解析失败回退全量原文解码。
@@ -232,14 +231,10 @@ fun MessageDetailDialog(
                     showCopied()
                 },
                 enabled = rawBody.isNotEmpty(),
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ) { Text(stringResource("msg_detail_copy_body")) }
             Spacer(Modifier.weight(1f))
-            PressableButton(
+            SecondaryButton(
                 onClick = onDismiss,
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ) { Text(stringResource("common_close")) }
         },
     ) {
@@ -721,7 +716,7 @@ fun MessageDetailErrorView(reason: String, onRetry: () -> Unit, modifier: Modifi
             color = MaterialTheme.colorScheme.error,
         )
         Spacer(Modifier.height(12.dp))
-        PressableButton(onClick = onRetry) { Text(stringResource("common_retry")) }
+        PrimaryButton(onClick = onRetry) { Text(stringResource("common_retry")) }
     }
 }
 

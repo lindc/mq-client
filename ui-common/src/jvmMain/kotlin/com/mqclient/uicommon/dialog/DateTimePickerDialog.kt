@@ -19,7 +19,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.PrimaryButton
+import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.LanguageResources
 import com.mqclient.uicommon.i18n.stringResource
 import java.time.Instant
@@ -71,12 +72,12 @@ fun DateTimePickerDialog(
         },
         confirmButton = {
             when (phase) {
-                PickerPhase.DATE -> PressableButton(
+                PickerPhase.DATE -> PrimaryButton(
                     onClick = { phase = PickerPhase.TIME },
                     enabled = dateState.selectedDateMillis != null,
                 ) { Text(stringResource("common_next")) }
-                PickerPhase.TIME -> PressableButton(onClick = {
-                    val millis = dateState.selectedDateMillis ?: return@PressableButton
+                PickerPhase.TIME -> PrimaryButton(onClick = {
+                    val millis = dateState.selectedDateMillis ?: return@PrimaryButton
                     val date = Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate()
                     onConfirm(LocalDateTime.of(date, LocalTime.of(timeState.hour, timeState.minute)))
                 }) { Text(stringResource("common_ok")) }
@@ -86,16 +87,12 @@ fun DateTimePickerDialog(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 // 时间步可退回改日期；日期步只有取消。
                 if (phase == PickerPhase.TIME) {
-                    PressableButton(
+                    SecondaryButton(
                         onClick = { phase = PickerPhase.DATE },
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     ) { Text(stringResource("common_back")) }
                 }
-                PressableButton(
+                SecondaryButton(
                     onClick = onDismiss,
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 ) { Text(stringResource("common_cancel")) }
             }
         },

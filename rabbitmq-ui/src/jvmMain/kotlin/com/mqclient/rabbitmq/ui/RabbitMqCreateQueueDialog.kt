@@ -26,7 +26,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mqclient.rabbitmq.RabbitMqModule
 import com.mqclient.uicommon.LabeledField
-import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
@@ -118,7 +118,7 @@ fun RabbitMqCreateQueueDialog(
         minWidth = 480.dp,
         minHeight = 460.dp,
         footerActions = {
-            PressableButton(
+            PrimaryButton(
                 onClick = { submit() },
                 enabled = !submitting,
             ) { Text(stringResource("rabbitmq_ui_queue_create_confirm")) }

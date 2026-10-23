@@ -26,7 +26,6 @@ import com.mqclient.kafka.KafkaMessageDetail
 import com.mqclient.kafka.KafkaMessageSummary
 import com.mqclient.kafka.KafkaModule
 import com.mqclient.message.interpreter.MessageCharsets
-import com.mqclient.uicommon.PressableButton
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.dialog.MessageDetailDialog
 import com.mqclient.uicommon.dialog.MessageDetailErrorView

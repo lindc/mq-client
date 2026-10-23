@@ -53,7 +53,7 @@ import com.mqclient.ibmmq.IbmMQModule
 import com.mqclient.ibmmq.messaging.SendDefaults
 import com.mqclient.ibmmq.messaging.SendResult
 import com.mqclient.mqui.objectlist.ObjectListEmptyState
-import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.AppTooltip
 import com.mqclient.uicommon.CompactTextField
 import com.mqclient.uicommon.ThemedSnackbarHost
@@ -314,7 +314,7 @@ internal fun MessageSendTab(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            PressableButton(onClick = ::pickAndLoad) { Text(stringResource("ibm_mq_msg_send_pick_file")) }
+            PrimaryButton(onClick = ::pickAndLoad) { Text(stringResource("ibm_mq_msg_send_pick_file")) }
             if (state.tasks.isNotEmpty()) {
                 Text(
                     text = stringResource("ibm_mq_msg_send_files_selected").withArg(state.tasks.size),
@@ -704,7 +704,7 @@ private fun SendBottomBar(
         ) {
             Spacer(Modifier.weight(1f))
             val noWaiting = !single && state.tasks.none { it.status == SendStatus.WAITING }
-            PressableButton(
+            PrimaryButton(
                 onClick = {
                     if (single) state.sendSingle(onEmptyBodyWarning) else state.sendAll()
                 },
@@ -736,7 +736,7 @@ internal fun ConfirmCloseWhileSendingDialog(
         onDismissRequest = onDismiss,
         text = { Text(stringResource("ibm_mq_msg_send_close_confirm")) },
         confirmButton = {
-            PressableButton(onClick = onConfirm) { Text(stringResource("common_ok")) }
+            PrimaryButton(onClick = onConfirm) { Text(stringResource("common_ok")) }
         },
         dismissButton = {
             SecondaryButton(

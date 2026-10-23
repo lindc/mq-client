@@ -66,7 +66,7 @@ import com.mqclient.kafka.KafkaMessageSummary
 import com.mqclient.kafka.KafkaReadStart
 import com.mqclient.mqui.common.CompactSearchField
 import com.mqclient.mqui.objectlist.ObjectListEmptyState
-import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.dialog.DateTimePickerDialog
 import com.mqclient.uicommon.file.saveFileBytes
@@ -526,7 +526,7 @@ private fun StartSelectorRow(
             enabled = true,
             modifier = Modifier.width(84.dp),
         )
-        PressableButton(onClick = onRead, enabled = !reading) {
+        PrimaryButton(onClick = onRead, enabled = !reading) {
             Text(
                 stringResource(
                     if (reading) "kafka_ui_msg_browse_loading" else "kafka_ui_msg_browse_read",
@@ -536,7 +536,7 @@ private fun StartSelectorRow(
     }
 }
 
-/** 选择区通用下拉（PressableButton + DropdownMenu，与 MQ 的 DropdownSelector 同款）。 */
+/** 选择区通用下拉（PrimaryButton + DropdownMenu，与 MQ 的 DropdownSelector 同款）。 */
 @Composable
 private fun <T> DropdownButton(
     selected: String,
@@ -762,7 +762,7 @@ private fun BrowseBottomBar(
         )
         Spacer(modifier = Modifier.weight(1f))
         if (nextCursor != null) {
-            PressableButton(onClick = onLoadMore, enabled = !loadingMore) {
+            PrimaryButton(onClick = onLoadMore, enabled = !loadingMore) {
                 Text(
                     stringResource(
                         if (loadingMore) "kafka_ui_msg_browse_loading" else "kafka_ui_msg_browse_load_more",
@@ -817,7 +817,7 @@ private fun BrowseErrorView(
             textAlign = TextAlign.Center,
         )
         Spacer(Modifier.height(16.dp))
-        PressableButton(onClick = onRetry) { Text(stringResource("common_retry")) }
+        PrimaryButton(onClick = onRetry) { Text(stringResource("common_retry")) }
     }
 }
 

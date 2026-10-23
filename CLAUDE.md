@@ -17,6 +17,8 @@ KMP 桌面端中间件管理工具（IBM MQ / Kafka / RabbitMQ / RocketMQ），C
 - 数据流约定：**缓存优先 + 事件驱动**——扫描服务写 per-connection `CacheManager` + 发 `<module>.scan.*.completed` 事件，UI 进页读缓存、订阅事件刷新。
 - 连接管理：显式连接模型（登记 DISCONNECTED，用户动作才建连），参照 `KafkaConnectionManager`。
 - **ToolbarButton**（ui-common `uicommon/command/`）是三模块工具栏的统一按钮：扁平 / hover 浅底 / `isActive` 激活变主色；内部 pointerInput 手写点击（不用 clickable——会抢 CommandConsole 焦点）。新增工具栏动作一律用它。
+- **普通操作按钮**统一用 ui-common `uicommon/Buttons.kt` 的 `PrimaryButton`（创建 / 保存 / 发送）、`SecondaryButton`（取消 / 关闭 / 返回）、`DangerButton`（删除 / 清空 / 重置）；禁用态由组件内统一处理，调用方不要再传 `containerColor` / `contentColor` / `border`（详见 README「按钮规范」）。
+- **拓扑图**统一用 topology-ui 的 `TopologyCanvas`；右上角缩放控件内建「导出图片」（GraphicsLayer 只录 `KuiverViewer`，不含工具栏 / 滚动条 / 详情卡；PNG 经 ui-common 的 FileKit 保存）。
 - 嵌套 AlertDialog 必须声明在外壳的 content lambda 内（窗口归属，见 ObjectDetailDialog KDoc）。
 - 敏感配置（password 等）经 `SensitiveOptionsSerializer` 自动加密落盘，模块内不做手工加密。
 - 语义色约定：告警橙 `0xFFED6C02`、健康绿 `0xFF2E7D32`，不随主题翻转。

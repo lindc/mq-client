@@ -43,7 +43,7 @@ import com.mqclient.rocketmq.isSystemTopic
 import com.mqclient.rocketmq.RocketMqModule
 import com.mqclient.rocketmq.RocketMqTopicSnapshot
 import com.mqclient.rocketmq.RocketMqTopicRouteSnapshot
-import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.DangerButton
 import com.mqclient.uicommon.PropertyItem
 import com.mqclient.uicommon.PropertyTableSection
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
@@ -137,7 +137,7 @@ fun RocketMqTopicPropertiesDialog(
         footerActions = {
             // 系统内置主题：不渲染删除按钮（service 层 isSystemTopic 第二道防呆保留）。
             if (!systemTopic) {
-                PressableButton(onClick = { deleteConfirm = true }, danger = true) {
+                DangerButton(onClick = { deleteConfirm = true }) {
                     Text(stringResource("rocketmq_ui_topic_props_delete"))
                 }
             }
@@ -208,7 +208,7 @@ fun RocketMqTopicPropertiesDialog(
                     }
                 },
                 confirmButton = {
-                    PressableButton(onClick = { delete() }, enabled = !deleting, danger = true) {
+                    DangerButton(onClick = { delete() }, enabled = !deleting) {
                         Text(
                             stringResource(
                                 if (deleting) "rocketmq_ui_topic_deleting" else "rocketmq_ui_topic_props_delete",

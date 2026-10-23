@@ -34,7 +34,7 @@ import com.mqclient.ibmmq.IbmMQModule
 import com.mqclient.ibmmq.command.MqrcTranslator
 import com.mqclient.ibmmq.pcf.ChannelStatusDetail
 import com.mqclient.ibmmq.ui.ChannelResetSeqnumDialog
-import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
@@ -183,7 +183,7 @@ internal fun ChannelRuntimeStatusPane(
                             textAlign = TextAlign.Center,
                         )
                         Spacer(Modifier.height(8.dp))
-                        PressableButton(onClick = { refreshTick++ }) {
+                        PrimaryButton(onClick = { refreshTick++ }) {
                             Text(stringResource("ibm_mq_channel_status_retry"))
                         }
                     }

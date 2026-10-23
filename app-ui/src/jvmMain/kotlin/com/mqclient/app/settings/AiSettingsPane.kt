@@ -48,7 +48,7 @@ import com.mqclient.aiui.AiSslHint
 import com.mqclient.openai.ui.ModelComboBox
 import com.mqclient.openai.ui.openAiIcon
 import com.mqclient.uicommon.LabeledField
-import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.DangerButton
 import com.mqclient.uicommon.SettingsDropdownRow
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
@@ -464,10 +464,8 @@ private fun ConnectionCard(
                 }
             }
             Spacer(Modifier.weight(1f))
-            PressableButton(
+            DangerButton(
                 onClick = onDelete,
-                containerColor = MaterialTheme.colorScheme.errorContainer,
-                contentColor = MaterialTheme.colorScheme.onErrorContainer,
             ) { Text(stringResource("common_delete")) }
         }
     }

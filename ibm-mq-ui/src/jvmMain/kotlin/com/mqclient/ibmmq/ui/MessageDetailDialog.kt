@@ -273,7 +273,7 @@ internal fun MessageDetailDialog(
     }
 }
 
-/** 底部操作栏的文本按钮（extraBottomActions 用），尺寸走 PressableButton 的全项目约定。 */
+/** 底部操作栏的文本按钮（extraBottomActions 用），尺寸走 PrimaryButton / SecondaryButton 的全项目约定。 */
 @Composable
 private fun RowScope.FooterAction(
     label: String,

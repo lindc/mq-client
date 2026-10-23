@@ -22,7 +22,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mqclient.kafka.KafkaModule
 import com.mqclient.uicommon.LabeledField
-import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
@@ -103,7 +103,7 @@ fun KafkaCreateTopicDialog(
         minWidth = 480.dp,
         minHeight = 320.dp,
         footerActions = {
-            PressableButton(
+            PrimaryButton(
                 onClick = { submit() },
                 enabled = !submitting,
             ) { Text(stringResource("kafka_ui_topic_create_confirm")) }

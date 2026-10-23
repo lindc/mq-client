@@ -46,7 +46,7 @@ import com.mqclient.rocketmq.RocketMqGroupDetailSnapshot
 import com.mqclient.rocketmq.RocketMqModule
 import com.mqclient.rocketmq.RocketMqOffsetRowSnapshot
 import com.mqclient.rocketmq.RocketMqProgressState
-import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.DangerButton
 import com.mqclient.uicommon.PropertyItem
 import com.mqclient.uicommon.PropertyTableSection
 import com.mqclient.uicommon.SecondaryButton
@@ -137,7 +137,7 @@ fun RocketMqGroupPropertiesDialog(
         footerActions = {
             // 系统保留消费组：不渲染删除按钮（service 层 isSystemGroup 防呆保留）。
             if (!systemGroup) {
-                PressableButton(onClick = { deleteConfirm = true; deleteError = null }, danger = true) {
+                DangerButton(onClick = { deleteConfirm = true; deleteError = null }) {
                     Text(stringResource("rocketmq_ui_group_delete"))
                 }
             }
@@ -207,7 +207,7 @@ fun RocketMqGroupPropertiesDialog(
                         }
                     },
                     confirmButton = {
-                        PressableButton(onClick = { delete() }, enabled = !deleting, danger = true) {
+                        DangerButton(onClick = { delete() }, enabled = !deleting) {
                             Text(
                                 stringResource(
                                     if (deleting) "rocketmq_ui_group_deleting" else "rocketmq_ui_group_delete",

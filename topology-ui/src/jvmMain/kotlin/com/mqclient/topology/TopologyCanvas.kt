@@ -16,13 +16,18 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.dk.kuiver.SelectionMode
 import com.dk.kuiver.model.Kuiver
@@ -38,10 +43,17 @@ import com.mqclient.graph.NodeSeverity
 import com.mqclient.graph.TopologyData
 import com.mqclient.graph.TopologyNodeType
 import com.mqclient.uicommon.ThemedSnackbarHost
+import com.mqclient.uicommon.file.saveFileBytes
+import com.mqclient.uicommon.i18n.stringResource
+import com.mqclient.uicommon.i18n.withArg
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 
 /**
  * 拓扑图通用画布：kuiver viewer 组装 + 选中链路高亮 + 高亮边流动动画 + 双击检测 +
- * 右上角缩放控件 + 底部详情卡。原为 IBM MQ 面板私有的 `MqTopologyCanvas`，泛化后
+ * 右上角缩放/导出控件 + 底部详情卡。原为 IBM MQ 面板私有的 `MqTopologyCanvas`，泛化后
  * 各中间件拓扑面板共用；面板只提供数据（[TopologyData]）、布局（[layoutProvider]）
  * 与业务行为（双击回调 / 重扫回调），交互视觉全部由此封装。
  *
@@ -55,8 +67,10 @@ import com.mqclient.uicommon.ThemedSnackbarHost
  *    固定列布局需要类型语义 —— 面板经此钩子把最新 nodeTypes 写进自己的查找表
  *    （模块级变量）。写入与紧随的 relayout 必须保持主线程相邻语句（本组件已保证：
  *    同一 LaunchedEffect 内、中间无挂起点），面板侧不得再拆散时序；
- *  - [snackbarHostState]：非空时在画布底部中央挂 SnackbarHost（双击无属性节点等
- *    业务提示由面板自己 show）。
+ *  - [snackbarHostState]：双击无属性节点 / 导出结果等提示共用；为 null 时画布自建
+ *    一个 host（导出成功提示不依赖面板接线）。
+ *  - 导出：GraphicsLayer 只挂在 KuiverViewer 上（不是外层 Box），截图不含右上角
+ *    缩放/导出工具栏、滚动条、详情卡与 Snackbar；PNG 经 ui-common 的 FileKit 保存。
  *
  * 图数据变化经 updateKuiver + relayout 换入（updateKuiver 不触发布局，必须跟一次
  * relayout）；viewer state 只建一次，缩放 / 平移在重建间保留。布局落定且画布已测量
@@ -100,6 +114,42 @@ fun TopologyCanvas(
         initialKuiver = Kuiver(),
         layoutConfig = LayoutConfig.Custom(provider = layoutProvider),
     )
+
+    // 导出：GraphicsLayer 只挂在 KuiverViewer 上（不是外层 Box），因此录到的是
+    // 纯画布内容，不含右上角缩放/导出工具栏、滚动条、详情卡与 Snackbar。
+    val graphicsLayer = rememberGraphicsLayer()
+    val scope = rememberCoroutineScope()
+    val fallbackSnackbarHostState = remember { SnackbarHostState() }
+    val effectiveSnackbarHostState = snackbarHostState ?: fallbackSnackbarHostState
+    val exportSavedMessage = stringResource("topology_export_saved")
+    val exportFailedTemplate = stringResource("topology_export_failed")
+    val exportTopology: () -> Unit = {
+        scope.launch {
+            try {
+                val bitmap = graphicsLayer.toImageBitmap()
+                val bytes = bitmap.toPngByteArray()
+                val fileName = "topology_" +
+                    LocalDateTime.now().format(EXPORT_FILE_NAME_FORMAT) + ".png"
+                val savedPath = saveFileBytes(
+                    suggestedName = fileName,
+                    defaultExtension = "png",
+                    contents = bytes,
+                )
+                // null = 用户在保存对话框里取消；不提示成功。
+                if (savedPath != null) {
+                    effectiveSnackbarHostState.showSnackbar(exportSavedMessage)
+                }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Exception) {
+                effectiveSnackbarHostState.showSnackbar(
+                    exportFailedTemplate.withArg(
+                        error.message ?: error::class.simpleName ?: "unknown",
+                    ),
+                )
+            }
+        }
+    }
 
     var pendingFit by remember { mutableStateOf(false) }
     LaunchedEffect(kuiver) {
@@ -183,7 +233,18 @@ fun TopologyCanvas(
     Box(modifier.fillMaxSize()) {
         KuiverViewer(
             state = viewerState,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .drawWithContent {
+                    graphicsLayer.record(
+                        size = IntSize(size.width.toInt(), size.height.toInt()),
+                    ) {
+                        // 导出图垫主题表面色，避免 PNG 出现透明底。
+                        drawRect(scheme.surface)
+                        this@drawWithContent.drawContent()
+                    }
+                    drawLayer(graphicsLayer)
+                },
             config = KuiverViewerConfig(
                 hoverEnabled = true,
                 selectionMode = SelectionMode.NONE,
@@ -270,17 +331,16 @@ fun TopologyCanvas(
                 viewerState.clearManualPositions()
                 viewerState.centerGraph(animated = true)
             },
+            onExport = exportTopology,
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .padding(12.dp),
         )
 
-        snackbarHostState?.let { hostState ->
-            ThemedSnackbarHost(
-                hostState = hostState,
-                modifier = Modifier.align(Alignment.BottomCenter),
-            )
-        }
+        ThemedSnackbarHost(
+            hostState = effectiveSnackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
 
         selectedId?.let { id ->
             val type = nodeTypes[id] ?: return@let
@@ -308,3 +368,6 @@ private const val FLOW_DASH = 10f
 
 /** 流动动画一个完整位移周期的时长（ms）。 */
 private const val FLOW_PERIOD_MS = 700
+
+/** 导出文件名的时间戳格式（本地时区，秒级）。 */
+private val EXPORT_FILE_NAME_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss")

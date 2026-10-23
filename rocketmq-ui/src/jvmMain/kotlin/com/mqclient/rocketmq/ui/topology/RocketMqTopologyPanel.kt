@@ -34,6 +34,7 @@ import com.mqclient.rocketmq.RocketMqEvents
 import com.mqclient.rocketmq.RocketMqModule
 import com.mqclient.rocketmq.ui.ensureRocketMqConnecting
 import kotlinx.coroutines.launch
+import com.mqclient.rocketmq.ui.RocketMqBrokerPropertiesDialog
 import com.mqclient.rocketmq.ui.RocketMqTopicPropertiesDialog
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.rocketmq.ui.rememberRocketMqConnectionStatus
@@ -67,6 +68,7 @@ fun RocketMqTopologyPanel(
 
     var showSystemTopics by remember { mutableStateOf(false) }
     var propsTopic by remember { mutableStateOf<String?>(null) }
+    var propsBroker by remember { mutableStateOf<String?>(null) }
     var data by remember(connectionId) { mutableStateOf<TopologyData?>(null) }
 
     // badge 文案模板（builder 在组合外执行，模板在此解析、builder 里替换参数）。
@@ -161,10 +163,18 @@ fun RocketMqTopologyPanel(
                     nodeDragEnabled = true,
                     // 手动扫描：一轮对象慢扫，扫完经 OBJECTS_SCANNED 事件回到 onObjectsScanned。
                     onRescan = { RocketMqModule.scanNow(connectionId) },
-                    // 双击节点：TOPIC（id = 主题原名）打开属性对话框；BROKER（b: 前缀）
-                    // 无详情对话框，不响应。拖拽由 NodeDoubleClick 的两击窗口机制隔离。
+                    // 双击节点：TOPIC（id = 主题原名）打开主题属性；BROKER（`b:` 前缀）
+                    // 打开 Broker 属性。节点的拖拽由 kuiver 原生手势的 touch slop
+                    // （距离阈值）隔离，只有未超阈值的点击才会进 onNodeClick，本回调
+                    // 只消费点击结果，不需要再自行判定拖拽。
                     onNodeDoubleClick = { nodeId ->
-                        if (!nodeId.startsWith("b:")) propsTopic = nodeId
+                        if (current.nodeTypes[nodeId] == TopologyNodeType.BROKER) {
+                            propsTopic = null
+                            propsBroker = nodeId.removePrefix("b:")
+                        } else {
+                            propsBroker = null
+                            propsTopic = nodeId
+                        }
                     },
                     modifier = Modifier
                         .weight(1f)
@@ -183,6 +193,14 @@ fun RocketMqTopologyPanel(
             connectionId = connectionId,
             topicName = name,
             onDismiss = { propsTopic = null },
+        )
+    }
+
+    propsBroker?.let { brokerName ->
+        RocketMqBrokerPropertiesDialog(
+            connectionId = connectionId,
+            brokerName = brokerName,
+            onDismiss = { propsBroker = null },
         )
     }
 }

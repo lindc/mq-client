@@ -60,7 +60,7 @@ import com.mqclient.mqui.common.CompactSearchField
 import com.mqclient.mqui.objectlist.ObjectListEmptyState
 import com.mqclient.rocketmq.RocketMqMessage
 import com.mqclient.rocketmq.RocketMqModule
-import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
@@ -289,7 +289,7 @@ internal fun RocketMqMessageBrowseTab(
                 onValueChange = { countText = it.filter(Char::isDigit).take(4) },
                 width = 84.dp,
             )
-            PressableButton(
+            PrimaryButton(
                 onClick = { retryKey++ },
                 enabled = uiState != BrowseUiState.Loading,
             ) {
@@ -369,7 +369,7 @@ internal fun RocketMqMessageBrowseTab(
                 )
                 Spacer(modifier = Modifier.weight(1f))
                 if (ready.nextBeginOffset != null) {
-                    PressableButton(onClick = ::loadMore, enabled = !ready.loadingMore) {
+                    PrimaryButton(onClick = ::loadMore, enabled = !ready.loadingMore) {
                         Text(
                             stringResource(
                                 if (ready.loadingMore) {
@@ -435,7 +435,7 @@ private fun CompactNumberField(
     )
 }
 
-/** Queue 下拉（PressableButton + DropdownMenu，与 KafkaMessageBrowseTab 的 DropdownButton 同款）。 */
+/** Queue 下拉（PrimaryButton + DropdownMenu，与 KafkaMessageBrowseTab 的 DropdownButton 同款）。 */
 @Composable
 private fun QueueDropdown(
     selected: Int,
@@ -678,7 +678,7 @@ private fun BrowseErrorView(
             textAlign = TextAlign.Center,
         )
         Spacer(Modifier.height(16.dp))
-        PressableButton(onClick = onRetry) { Text(stringResource("common_retry")) }
+        PrimaryButton(onClick = onRetry) { Text(stringResource("common_retry")) }
     }
 }
 

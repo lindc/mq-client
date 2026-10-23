@@ -53,7 +53,7 @@ import com.mqclient.core.event.EventNames
 import com.mqclient.rabbitmq.RabbitMqConsumerSnapshot
 import com.mqclient.rabbitmq.RabbitMqQueueDetailSnapshot
 import com.mqclient.rabbitmq.RabbitMqModule
-import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.DangerButton
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.SecondaryButton
@@ -181,11 +181,11 @@ fun RabbitMqQueuePropertiesDialog(
         minWidth = 660.dp,
         minHeight = 560.dp,
         footerActions = {
-            PressableButton(onClick = { purgeConfirm = true }, enabled = !operating, danger = true) {
+            DangerButton(onClick = { purgeConfirm = true }, enabled = !operating) {
                 Text(stringResource("rabbitmq_ui_queue_purge"))
             }
             Spacer(Modifier.width(12.dp))
-            PressableButton(onClick = { deleteConfirm = true }, enabled = !operating, danger = true) {
+            DangerButton(onClick = { deleteConfirm = true }, enabled = !operating) {
                 Text(stringResource("rabbitmq_ui_queue_delete"))
             }
             Spacer(Modifier.weight(1f))
@@ -261,7 +261,7 @@ fun RabbitMqQueuePropertiesDialog(
                     )
                 },
                 confirmButton = {
-                    PressableButton(onClick = { purge() }, enabled = !operating, danger = true) {
+                    DangerButton(onClick = { purge() }, enabled = !operating) {
                         Text(stringResource("rabbitmq_ui_queue_purge"))
                     }
                 },
@@ -285,7 +285,7 @@ fun RabbitMqQueuePropertiesDialog(
                     )
                 },
                 confirmButton = {
-                    PressableButton(onClick = { delete() }, enabled = !operating, danger = true) {
+                    DangerButton(onClick = { delete() }, enabled = !operating) {
                         Text(stringResource("rabbitmq_ui_queue_delete"))
                     }
                 },

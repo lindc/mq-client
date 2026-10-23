@@ -72,6 +72,7 @@ import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
+import com.mqclient.uicommon.PrimaryButton
 
 /** 集群关系面板的三态：加载中 / 失败（带原因，可重试）/ 就绪。 */
 private sealed interface ClusterUiState {
@@ -493,7 +494,7 @@ private fun ClusterErrorView(reason: String, onRetry: () -> Unit, modifier: Modi
                 color = MaterialTheme.colorScheme.error,
             )
             Spacer(Modifier.height(12.dp))
-            com.mqclient.uicommon.PressableButton(onClick = onRetry) {
+            PrimaryButton(onClick = onRetry) {
                 Text(stringResource("ibm_mq_cluster_relations_retry"))
             }
         }

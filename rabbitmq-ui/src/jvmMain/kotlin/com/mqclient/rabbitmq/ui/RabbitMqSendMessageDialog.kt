@@ -49,7 +49,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mqclient.mqui.objectlist.ObjectListEmptyState
 import com.mqclient.rabbitmq.RabbitMqModule
-import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.file.pickFiles
@@ -391,7 +391,7 @@ private fun SendPane(
                 horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                PressableButton(onClick = onPickFiles, enabled = !state.busy) {
+                PrimaryButton(onClick = onPickFiles, enabled = !state.busy) {
                     Text(stringResource("rabbitmq_ui_send_pick_file"))
                 }
                 if (state.tasks.isNotEmpty()) {
@@ -510,7 +510,7 @@ internal fun HeadersEditor(
         }
     }
     }
-    PressableButton(
+    PrimaryButton(
         onClick = { onChange(headers + ("" to "")) },
         enabled = enabled,
     ) {
@@ -643,7 +643,7 @@ private fun SendBottomBar(
         ) {
             Spacer(Modifier.weight(1f))
             // 只看待发送文件：有 WAITING 项即可点，无文件/全发完则禁用。
-            PressableButton(
+            PrimaryButton(
                 onClick = onSubmit,
                 enabled = !state.busy && state.tasks.any { it.status == SendStatus.WAITING },
             ) {

@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FitScreen
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Sync
@@ -24,13 +25,14 @@ import androidx.compose.ui.unit.dp
 import com.mqclient.uicommon.i18n.stringResource
 
 /**
- * 右上角控件：重新扫描（数据强制刷新）+ 放大 / 缩小 / 适应视图 / 重置。
+ * 右上角控件：重新扫描（数据强制刷新）+ 放大 / 缩小 / 适应视图 / 重置 + 导出图片。
  *
  * 动作接线（kuiver 0.4.2 真实 API，`KuiverViewerState` 没有 fitToContent/resetZoom）：
  *  - 重新扫描 → 面板触一次数据重取（扫完经各自事件重建）；
  *  - 放大 / 缩小 → `zoomIn()` / `zoomOut()`（步长走 config.zoomStep）；
  *  - 适应视图 → `centerGraph(animated = true)`（按当前图内容居中适配）；
- *  - 重置 → `clearManualPositions()` + `centerGraph()`（回到布局初始态）。
+ *  - 重置 → `clearManualPositions()` + `centerGraph()`（回到布局初始态）；
+ *  - 导出图片 → [onExport]（非空时渲染 Download 按钮；截图与保存由画布注入）。
  *
  * 文案走 ui-common 公共 i18n 表（`topology_action_*`）：本模块是纯渲染库，不注册
  * 模块私有表（AdapterUI 是业务模块的 SPI），公共词汇进公共表。
@@ -42,6 +44,7 @@ fun TopologyZoomControls(
     onZoomOut: () -> Unit,
     onFitContent: () -> Unit,
     onReset: () -> Unit,
+    onExport: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -53,6 +56,9 @@ fun TopologyZoomControls(
         ZoomButton(Icons.Filled.ZoomOut, stringResource("topology_action_zoom_out"), onZoomOut)
         ZoomButton(Icons.Filled.FitScreen, stringResource("topology_action_fit"), onFitContent)
         ZoomButton(Icons.Filled.Refresh, stringResource("topology_action_reset"), onReset)
+        if (onExport != null) {
+            ZoomButton(Icons.Filled.Download, stringResource("topology_action_export"), onExport)
+        }
     }
 }
 

@@ -48,7 +48,8 @@ import com.mqclient.kafka.KafkaGroupDetailSnapshot
 import com.mqclient.kafka.KafkaGroupResetTo
 import com.mqclient.kafka.KafkaModule
 import com.mqclient.mqui.state.LoadState
-import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.DangerButton
+import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.dialog.DateTimePickerDialog
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.ThemedSnackbarHost
@@ -135,7 +136,7 @@ fun KafkaGroupDetailDialog(
             val ready = (detail as? LoadState.Success)?.data
             // 主操作（主色）：比关闭突出。重置要求组无活跃成员（EMPTY/DEAD）—— 与
             // 服务端前置检查双保险（活跃消费者会重新提交位移覆盖重置结果）。
-            PressableButton(
+            PrimaryButton(
                 onClick = { resetOpen = true },
                 enabled = ready != null &&
                     (ready.state.equals("EMPTY", ignoreCase = true) || ready.state.equals("DEAD", ignoreCase = true)),
@@ -143,10 +144,9 @@ fun KafkaGroupDetailDialog(
                 Text(stringResource("kafka_ui_group_detail_action_reset"))
             }
             // 危险操作：与删除连接 / 危险命令同一 danger 档（error 底 + onError 字）。
-            PressableButton(
+            DangerButton(
                 onClick = { deleteConfirm = true },
                 enabled = ready != null && ready.state.equals("EMPTY", ignoreCase = true),
-                danger = true,
             ) {
                 Text(stringResource("kafka_ui_group_detail_action_delete"))
             }
@@ -296,7 +296,7 @@ fun KafkaGroupDetailDialog(
                 },
                 confirmButton = {
                     // 重置会覆盖位点：确认键走 danger 档（同 MQ ChannelResetSeqnumDialog）。
-                    PressableButton(
+                    DangerButton(
                         onClick = {
                             resetOpen = false
                             when (mode) {
@@ -312,7 +312,6 @@ fun KafkaGroupDetailDialog(
                                 }
                             }
                         },
-                        danger = true,
                         enabled = mode != ResetMode.TIMESTAMP || pickedTime != null,
                     ) { Text(stringResource("kafka_ui_group_detail_reset_confirm")) }
                 },
@@ -350,12 +349,11 @@ fun KafkaGroupDetailDialog(
                     )
                 },
                 confirmButton = {
-                    PressableButton(
+                    DangerButton(
                         onClick = {
                             deleteConfirm = false
                             delete()
                         },
-                        danger = true,
                     ) { Text(stringResource("kafka_ui_group_detail_action_delete")) }
                 },
                 dismissButton = {

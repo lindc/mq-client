@@ -23,7 +23,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mqclient.rabbitmq.RabbitMqModule
 import com.mqclient.uicommon.LabeledField
-import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.SettingsDropdownRow
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.SecondaryButton
@@ -125,7 +125,7 @@ fun RabbitMqAddBindingDialog(
         minWidth = 480.dp,
         minHeight = 340.dp,
         footerActions = {
-            PressableButton(
+            PrimaryButton(
                 onClick = { submit() },
                 enabled = !submitting && candidates.isNotEmpty(),
             ) { Text(stringResource("rabbitmq_ui_binding_add_confirm")) }

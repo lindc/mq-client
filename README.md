@@ -9,7 +9,7 @@ KMP 桌面端的中间件管理工具（当前主打 IBM MQ），Compose Multipl
 - **队列管理器属性面板**：PCF 查询 QMGR 配置与运行状态
 - **AI 助手面板**：多连接切换的会话面板，聊天历史落库（SQLDelight）
 - **RabbitMQ 支持**：连接管理（AMQP + 管理 API 双端口）、概览（健康度 / 集群节点）/ 队列 / 交换机 / 拓扑面板、消息浏览（basicGet 只读）与转发搬移（AMQP 直发）、队列 / 交换机创建与 Arguments、命令历史审计、「询问 AI」链路分析
-- **通用能力**：中英文 i18n（设置内切换）、主题 / 字号 / 字体设置、日志统一落 `~/.mqclient/logs/`、Material Icons 全量替代 Emoji（Linux 下无字体依赖）
+- **通用能力**：中英文 i18n（设置内切换）、主题 / 字号 / 字体设置、日志统一落 `~/.mqclient/logs/`、Material Icons 全量替代 Emoji（Linux 下无字体依赖）、四个 MQ 模块拓扑图一键导出 PNG
 
 ## 构建与运行
 
@@ -88,6 +88,31 @@ fun PropertyTableSection(title: String, items: List<PropertyItem>, modifier: Mod
 - **分组**：小标题 + `PropertyTable`（用 `PropertyTableSection`），不再套卡片背景（避免与斑马纹叠色）
 
 范围边界：`MessageHeaderRow`（消息详情 Header 的元数据表）与 IBM MQ 的 `PropertyGroupsPane`（队列管理器分组管线）不在该组件范围内；UI 层禁止直接展示 `CODE: 17 DESC: ...` 一类的原始错误码——service 层转友好文案，原始异常只进日志。
+
+## 按钮规范（PrimaryButton / SecondaryButton / DangerButton）
+
+各模块的普通操作按钮统一用 `ui-common` 的 `com.mqclient.uicommon` 按钮组件，调用方不再自行拼 `colors` / `border`：
+
+```kotlin
+PrimaryButton(onClick = ::submit, enabled = !busy) { Text(stringResource("common_save")) }
+SecondaryButton(onClick = onDismiss) { Text(stringResource("common_cancel")) }
+DangerButton(onClick = ::delete, enabled = !busy) { Text(stringResource("common_delete")) }
+```
+
+语义与配色：
+
+- **PrimaryButton**：主操作（创建 / 保存 / 发送 / 确定 / 重试）。标准 `Button`，可用态 `primary` 底 + `onPrimary` 文字；禁用态 `onSurface@12%` 底 + `onSurface@38%` 文字；**无边框**
+- **SecondaryButton**：次要操作（取消 / 关闭 / 返回 / 刷新）。标准 `OutlinedButton`，透明底 + `outline` 细边框 + `primary` 文字；禁用态透明底 + **无边框** + `onSurface@38%` 文字
+- **DangerButton**：破坏性操作（删除 / 清空 / 重置）。标准 `Button`，可用态 `error` 底 + `onError` 文字；禁用态同 Primary 的灰色让位；**无边框**
+
+约定：
+
+- 主操作一律实心 `Button`，禁止用 `OutlinedButton` / `SecondaryButton` 承担创建、保存、发送
+- 弹窗底部的「取消」「关闭」「返回」一律 `SecondaryButton`
+- **禁用态绝对无边框**：`PrimaryButton` / `DangerButton` 本身无边框；`SecondaryButton` 禁用时必须显式 `border = null`，不能使用 `OutlinedButton` 默认的 `outline@12%` 禁用轮廓
+- 禁止在调用处传 `containerColor` / `contentColor` / `border` / `BorderStroke`；语义色由组件内部决定
+- 形状统一 `MaterialTheme.shapes.small`，内边距默认 `ButtonDefaults.TextButtonContentPadding`（紧凑弹窗密度）；纯图标按钮传 `standardMinWidth = false`
+- 工具栏动作仍用 `ToolbarButton`（见 `CLAUDE.md`），不属于这三个组件的范围
 
 ## 架构
 

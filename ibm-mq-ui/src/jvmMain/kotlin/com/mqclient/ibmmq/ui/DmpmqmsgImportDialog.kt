@@ -32,7 +32,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.mqclient.ibmmq.messaging.DmpmqmsgMessage
 import com.mqclient.message.interpreter.MessageCharsets
-import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
@@ -119,7 +119,7 @@ fun DmpmqmsgImportDialog(
             }
         },
         confirmButton = {
-            PressableButton(onClick = onImport, enabled = !executing) {
+            PrimaryButton(onClick = onImport, enabled = !executing) {
                 Text(if (executing) stringResource("ibm_mq_msg_import_executing") else stringResource("ibm_mq_msg_import_confirm"))
             }
         },
@@ -205,7 +205,7 @@ fun DmpmqmsgFallbackDialog(
             }
         },
         confirmButton = {
-            PressableButton(onClick = onSendPlain, enabled = !executing) {
+            PrimaryButton(onClick = onSendPlain, enabled = !executing) {
                 Text(if (executing) stringResource("ibm_mq_msg_import_executing") else stringResource("ibm_mq_msg_import_fallback_send"))
             }
         },

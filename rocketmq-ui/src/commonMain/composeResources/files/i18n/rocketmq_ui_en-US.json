@@ -243,5 +243,12 @@
   "rocketmq_ui_send_summary": "Total %1$d, success %2$d, failed %3$d",
   "rocketmq_ui_send_close_confirm_text": "Messages are still being sent; closing will abort the remaining tasks. Close anyway?",
   "rocketmq_ui_send_close_confirm_ok": "Close",
-  "rocketmq_ui_send_service_not_ready": "Service not initialized"
+  "rocketmq_ui_send_service_not_ready": "Service not initialized",
+  "rocketmq_ui_broker_props_title": "Broker properties: %1$s",
+  "rocketmq_ui_broker_props_instances": "Instances",
+  "rocketmq_ui_broker_props_section_instance": "Broker instance (%1$s)",
+  "rocketmq_ui_broker_props_id": "Broker ID",
+  "rocketmq_ui_broker_props_ip": "IP address",
+  "rocketmq_ui_broker_props_port": "Port",
+  "rocketmq_ui_broker_props_no_data": "No cached details for this broker. Rescan to refresh."
 }

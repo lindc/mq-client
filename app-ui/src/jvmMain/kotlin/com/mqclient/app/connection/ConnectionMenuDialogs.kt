@@ -32,7 +32,8 @@ import com.mqclient.core.ConnectionInfo
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.CoreModule
 import com.mqclient.core.ModuleRegistry
-import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.DangerButton
+import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.dialog.rememberTwoThirdsScreenSize
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
@@ -115,7 +116,7 @@ private fun DeleteConfirmDialog(connection: ConnectionInfo, onConfirm: () -> Uni
         title = { Text(stringResource("delete_confirm_title")) },
         text = { Text(stringResource("delete_confirm_text").format(connection.name)) },
         confirmButton = {
-            PressableButton(onClick = onConfirm, danger = true) {
+            DangerButton(onClick = onConfirm) {
                 Text(stringResource("common_delete"))
             }
         },
@@ -161,7 +162,7 @@ private fun ConnectFailedDialog(failure: ConnectFailure, onRetry: () -> Unit, on
             }
         },
         confirmButton = {
-            PressableButton(onClick = onRetry) { Text(stringResource("common_retry")) }
+            PrimaryButton(onClick = onRetry) { Text(stringResource("common_retry")) }
         },
         dismissButton = {
             SecondaryButton(
@@ -202,7 +203,7 @@ private fun TestResultDialog(result: TestResultData, onDismiss: () -> Unit) {
             }
         },
         confirmButton = {
-            PressableButton(onClick = onDismiss) { Text(stringResource("common_close")) }
+            SecondaryButton(onClick = onDismiss) { Text(stringResource("common_close")) }
         },
     )
 }

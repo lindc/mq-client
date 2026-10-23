@@ -44,7 +44,7 @@ import com.mqclient.mqui.objectlist.ObjectListEmptyState
 import com.mqclient.mqui.objectlist.ObjectListPanel
 import com.mqclient.mqui.state.LoadStateContent
 import com.mqclient.uicommon.LocalAiAsk
-import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.DangerButton
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
@@ -241,7 +241,7 @@ fun TopicListPanel(
                 )
             },
             confirmButton = {
-                PressableButton(
+                DangerButton(
                     onClick = {
                         clearTopic = null
                         scope.launch {
@@ -258,7 +258,6 @@ fun TopicListPanel(
                             }
                         }
                     },
-                    danger = true,
                 ) { Text(stringResource("kafka_ui_topic_clear_confirm")) }
             },
             dismissButton = {

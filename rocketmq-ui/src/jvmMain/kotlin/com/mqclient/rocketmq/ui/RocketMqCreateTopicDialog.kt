@@ -18,7 +18,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.mqclient.rocketmq.RocketMqModule
-import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.SettingsDropdownRow
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.SecondaryButton
@@ -96,7 +96,7 @@ fun RocketMqCreateTopicDialog(
         minWidth = 480.dp,
         minHeight = 420.dp,
         footerActions = {
-            PressableButton(onClick = { submit() }, enabled = !creating) {
+            PrimaryButton(onClick = { submit() }, enabled = !creating) {
                 Text(stringResource("rocketmq_ui_topic_create_action"))
             }
             SecondaryButton(

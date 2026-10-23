@@ -44,7 +44,7 @@ import com.mqclient.kafka.KafkaTopicOffsetRange
 import com.mqclient.kafka.KafkaTopicSnapshot
 import com.mqclient.mqui.common.CompactSearchField
 import com.mqclient.mqui.state.LoadState
-import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.DangerButton
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
@@ -124,7 +124,7 @@ fun KafkaTopicPropertiesDialog(
         footerActions = {
             // 内部主题（__consumer_offsets 等）禁止删除：按钮直接隐藏，概览徽标即提示。
             if (snapshot != null && !snapshot.internal) {
-                PressableButton(onClick = { deleteConfirm = true }, danger = true) {
+                DangerButton(onClick = { deleteConfirm = true }) {
                     Text(stringResource("kafka_ui_topic_props_delete"))
                 }
             }
@@ -186,13 +186,12 @@ fun KafkaTopicPropertiesDialog(
                     )
                 },
                 confirmButton = {
-                    PressableButton(
+                    DangerButton(
                         onClick = {
                             deleteConfirm = false
                             delete()
                         },
                         enabled = !deleting,
-                        danger = true,
                     ) {
                         Text(
                             text = stringResource(

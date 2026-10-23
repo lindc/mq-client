@@ -31,7 +31,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.rememberDialogState
-import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import dev.nucleusframework.application.DecoratedDialog
 import dev.nucleusframework.application.LocalNucleusWindow
@@ -121,11 +121,9 @@ fun ObjectDetailDialog(
                         style = MaterialTheme.typography.titleLarge,
                         modifier = Modifier.weight(1f),
                     )
-                    PressableButton(
+                    SecondaryButton(
                         onClick = onDismiss,
                         standardMinWidth = false, // ✕ 是图标按钮，不套「4 字宽」标准。
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     ) {
                         Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(18.dp))
                     }
@@ -150,10 +148,8 @@ fun ObjectDetailDialog(
                     if (footerActions != null) {
                         footerActions()
                     } else {
-                        PressableButton(
+                        SecondaryButton(
                             onClick = onDismiss,
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                         ) { Text(stringResource("common_close")) }
                     }
                 }

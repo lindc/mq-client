@@ -24,6 +24,9 @@ kotlin {
         }
         jvmTest.dependencies {
             implementation(kotlin("test"))
+            // 真实 Compose/Skia 运行时，用于验证 GraphicsLayer 截图 + PNG 编码。
+            implementation(projects.uiTestKit)
+            implementation(compose.desktop.currentOs)
         }
     }
 }

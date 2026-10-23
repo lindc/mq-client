@@ -10,7 +10,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.mqclient.core.AppError
-import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 
 /**
@@ -22,7 +22,7 @@ internal fun ErrorDialog(error: AppError, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
-            PressableButton(onClick = onDismiss) { Text(stringResource("common_close")) }
+            SecondaryButton(onClick = onDismiss) { Text(stringResource("common_close")) }
         },
         title = { Text(stringResource("error_dialog_title")) },
         text = {

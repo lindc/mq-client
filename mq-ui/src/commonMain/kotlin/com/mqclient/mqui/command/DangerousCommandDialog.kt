@@ -18,7 +18,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
-import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.DangerButton
 
 /**
  * 危险命令（由注入的 [com.mqclient.mqui.command.api.CommandParser.isDangerous]
@@ -49,8 +49,8 @@ fun DangerousCommandDialog(
             }
         },
         confirmButton = {
-            // PressableButton(danger)：与项目其余确认弹窗同一按钮体系（error 语义色）。
-            PressableButton(onClick = onConfirm, danger = true) {
+            // DangerButton：与项目其余确认弹窗同一按钮体系（error 语义色）。
+            DangerButton(onClick = onConfirm) {
                 Text(stringResource("console_dangerous_confirm"))
             }
         },

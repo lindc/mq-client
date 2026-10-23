@@ -21,6 +21,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.mqclient.mqui.objectlist.ObjectListEmptyState
 import com.mqclient.uicommon.i18n.stringResource
+import com.mqclient.uicommon.PrimaryButton
 
 /**
  * 通用「加载状态」展示组件（mq-ui 的 UI 层）：把 [LoadState] 四态映射到界面。
@@ -126,7 +127,7 @@ private fun ErrorView(
         }
         if (onRetry != null) {
             Spacer(Modifier.height(16.dp))
-            com.mqclient.uicommon.PressableButton(onClick = onRetry) { Text(stringResource("common_retry")) }
+            PrimaryButton(onClick = onRetry) { Text(stringResource("common_retry")) }
         }
     }
 }

@@ -1,11 +1,20 @@
 package com.mqclient.app
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -21,10 +30,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mqclient.uicommon.i18n.stringResource
-import com.mqclient.uicommon.SecondaryButton
 import mq_client.app_ui.generated.resources.Res
 import mq_client.app_ui.generated.resources.ic_menu
 import org.jetbrains.compose.resources.painterResource
@@ -153,9 +162,33 @@ private fun MenuBarItem(
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val hovered by interactionSource.collectIsHoveredAsState()
+    val hoverShape = MaterialTheme.shapes.small
     Box(modifier) {
-        SecondaryButton(onClick = { onExpandChange(true) }) {
+        TextButton(
+            onClick = { onExpandChange(true) },
+            modifier = Modifier.background(
+                color = if (hovered || expanded) {
+                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                } else {
+                    Color.Transparent
+                },
+                shape = hoverShape,
+            ),
+            shape = hoverShape,
+            colors = ButtonDefaults.textButtonColors(
+                contentColor = MaterialTheme.colorScheme.onSurface,
+            ),
+            interactionSource = interactionSource,
+        ) {
             Text(label)
+            Spacer(Modifier.width(2.dp))
+            Icon(
+                imageVector = Icons.Default.ArrowDropDown,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+            )
         }
         DropdownMenu(
             expanded = expanded,

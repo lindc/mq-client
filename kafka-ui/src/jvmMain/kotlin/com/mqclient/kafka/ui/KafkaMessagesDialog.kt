@@ -14,7 +14,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.PrimaryButton
+import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
@@ -85,13 +86,11 @@ fun KafkaMessagesDialog(
                 onDismissRequest = { confirmCloseWhileSending = false },
                 text = { Text(stringResource("kafka_ui_send_close_confirm_text")) },
                 confirmButton = {
-                    PressableButton(onClick = onDismiss) { Text(stringResource("kafka_ui_send_close_confirm_ok")) }
+                    PrimaryButton(onClick = onDismiss) { Text(stringResource("kafka_ui_send_close_confirm_ok")) }
                 },
                 dismissButton = {
-                    PressableButton(
+                    SecondaryButton(
                         onClick = { confirmCloseWhileSending = false },
-                        containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant,
-                        contentColor = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                     ) { Text(stringResource("common_cancel")) }
                 },
             )

@@ -55,7 +55,7 @@ import com.mqclient.mqui.state.LoadState
 import com.mqclient.rabbitmq.RabbitMqFetchedMessage
 import com.mqclient.rabbitmq.RabbitMqModule
 import com.mqclient.rabbitmq.RabbitMqMessageSession
-import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.file.pickFiles
@@ -423,7 +423,7 @@ private fun BrowsePane(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            PressableButton(onClick = onFetch, enabled = !fetching) { Text(stringResource("rabbitmq_ui_msg_fetch")) }
+            PrimaryButton(onClick = onFetch, enabled = !fetching) { Text(stringResource("rabbitmq_ui_msg_fetch")) }
             SecondaryButton(
                 onClick = onRefresh,
                 enabled = !fetching,
@@ -555,7 +555,7 @@ private fun SendPane(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                PressableButton(onClick = onPickFiles, enabled = !busy) { Text(stringResource("rabbitmq_ui_send_pick_file")) }
+                PrimaryButton(onClick = onPickFiles, enabled = !busy) { Text(stringResource("rabbitmq_ui_send_pick_file")) }
                 if (hasBatch) {
                     Text(
                         text = stringResource("rabbitmq_ui_send_files_selected").withArg(batchTasks.size),
@@ -644,7 +644,7 @@ private fun SendPane(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Spacer(Modifier.weight(1f))
-            PressableButton(
+            PrimaryButton(
                 onClick = onSendBatch,
                 enabled = !busy && batchTasks.any { it.status == BatchStatus.WAITING },
             ) {

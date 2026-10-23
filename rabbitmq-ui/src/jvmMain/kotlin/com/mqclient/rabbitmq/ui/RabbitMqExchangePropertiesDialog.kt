@@ -40,7 +40,7 @@ import com.mqclient.uicommon.command.ToolbarButton
 import com.mqclient.mqui.state.LoadState
 import com.mqclient.rabbitmq.RabbitMqBindingSnapshot
 import com.mqclient.rabbitmq.RabbitMqModule
-import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.DangerButton
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
@@ -156,7 +156,7 @@ fun RabbitMqExchangePropertiesDialog(
         footerActions = {
             // 默认交换机 / amq.* / internal 禁止删除：按钮直接隐藏（与 Kafka 内部主题同一约定）。
             if (!systemExchange && !internal) {
-                PressableButton(onClick = { exchangeDeleteConfirm = true }, danger = true) {
+                DangerButton(onClick = { exchangeDeleteConfirm = true }) {
                     Text(stringResource("rabbitmq_ui_exchange_props_delete"))
                 }
             }
@@ -264,13 +264,12 @@ fun RabbitMqExchangePropertiesDialog(
                     )
                 },
                 confirmButton = {
-                    PressableButton(
+                    DangerButton(
                         onClick = {
                             exchangeDeleteConfirm = false
                             deleteExchangeEntry()
                         },
                         enabled = !deleting,
-                        danger = true,
                     ) {
                         Text(
                             text = stringResource(
@@ -300,10 +299,9 @@ fun RabbitMqExchangePropertiesDialog(
                     )
                 },
                 confirmButton = {
-                    PressableButton(
+                    DangerButton(
                         onClick = { deleteBinding(binding) },
                         enabled = !deleting,
-                        danger = true,
                     ) { Text(stringResource("rabbitmq_ui_exchange_delete_confirm")) }
                 },
                 dismissButton = {

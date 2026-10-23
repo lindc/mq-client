@@ -73,7 +73,8 @@ import com.mqclient.ibmmq.messaging.MessageSummary
 import com.mqclient.ibmmq.messaging.browseErrorText
 import com.mqclient.mqui.common.CompactSearchField
 import com.mqclient.mqui.objectlist.ObjectListEmptyState
-import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.DangerButton
+import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.AppTooltip
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.dialog.DateTimePickerDialog
@@ -435,7 +436,7 @@ private fun ConfirmDeleteMessageDialog(
         title = { Text(stringResource("ibm_mq_msg_browse_delete")) },
         text = { Text(stringResource("ibm_mq_msg_browse_delete_confirm")) },
         confirmButton = {
-            PressableButton(onClick = onConfirm, danger = true) { Text(stringResource("ibm_mq_msg_browse_delete")) }
+            DangerButton(onClick = onConfirm) { Text(stringResource("ibm_mq_msg_browse_delete")) }
         },
         dismissButton = {
             SecondaryButton(
@@ -739,7 +740,7 @@ private fun BrowseBottomBar(
         )
         Spacer(modifier = Modifier.weight(1f))
         if (!exhausted && loadedCount < depth) {
-            PressableButton(onClick = onLoadMore, enabled = !loadingMore) {
+            PrimaryButton(onClick = onLoadMore, enabled = !loadingMore) {
                 Text(
                     stringResource(
                         if (loadingMore) "ibm_mq_msg_browse_loading_more" else "ibm_mq_msg_browse_load_more",
@@ -794,7 +795,7 @@ private fun BrowseErrorView(
             textAlign = TextAlign.Center,
         )
         Spacer(Modifier.height(16.dp))
-        PressableButton(onClick = onRetry) { Text(stringResource("common_retry")) }
+        PrimaryButton(onClick = onRetry) { Text(stringResource("common_retry")) }
     }
 }
 
@@ -840,7 +841,7 @@ private fun CustomTimeRangeDialog(
             }
         },
         confirmButton = {
-            PressableButton(onClick = {
+            PrimaryButton(onClick = {
                 // 结束时间取整到该分钟的最后一秒，含端点；两侧都空 = 不限制。
                 onConfirm(start?.withSecond(0), end?.withSecond(59))
             }) { Text(stringResource("common_ok")) }

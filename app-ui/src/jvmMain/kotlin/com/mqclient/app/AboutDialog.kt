@@ -48,7 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.mqclient.core.CoreModule
 import com.mqclient.core.ModuleRegistry
-import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import java.time.LocalTime
 import kotlin.math.cos
@@ -207,12 +207,12 @@ internal fun AboutDialog(onDismiss: () -> Unit) {
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.End,
                             ) {
-                                PressableButton(
+                                SecondaryButton(
                                     onClick = { showLicense = true },
                                     modifier = Modifier.weight(1f),
                                 ) { Text(stringResource("license_view")) }
                                 Spacer(Modifier.width(12.dp))
-                                PressableButton(
+                                SecondaryButton(
                                     onClick = onDismiss,
                                     modifier = Modifier.weight(1f),
                                 ) { Text(stringResource("common_close")) }
@@ -271,7 +271,7 @@ private fun LicenseDialog(onDismiss: () -> Unit) {
     }
     AlertDialog(
         onDismissRequest = onDismiss,
-        confirmButton = { PressableButton(onClick = onDismiss) { Text(stringResource("common_close")) } },
+        confirmButton = { SecondaryButton(onClick = onDismiss) { Text(stringResource("common_close")) } },
         title = { Text(stringResource("license_title")) },
         text = { LibraryList(components, Modifier.size(380.dp, 300.dp)) },
     )

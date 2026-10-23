@@ -51,7 +51,7 @@ import com.mqclient.mqui.objectlist.ObjectListEmptyState
 import com.mqclient.rocketmq.RocketMqModule
 import com.mqclient.rocketmq.RocketMqSendResult
 import com.mqclient.uicommon.CompactTextField
-import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.dialog.HeaderDraft
 import com.mqclient.uicommon.dialog.HeadersEditor
@@ -322,7 +322,7 @@ internal fun RocketMqMessageSendTab(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            PressableButton(onClick = ::pickAndLoad) { Text(stringResource("rocketmq_ui_send_files_pick")) }
+            PrimaryButton(onClick = ::pickAndLoad) { Text(stringResource("rocketmq_ui_send_files_pick")) }
             if (state.tasks.isNotEmpty()) {
                 Text(
                     text = stringResource("rocketmq_ui_send_files_selected").withArg(state.tasks.size),
@@ -709,7 +709,7 @@ private fun SendBottomBar(
         ) {
             Spacer(Modifier.weight(1f))
             val noWaiting = !single && state.tasks.none { it.status == SendStatus.WAITING }
-            PressableButton(
+            PrimaryButton(
                 onClick = {
                     if (single) state.sendSingle(onEmptyBodyWarning) else state.sendAll()
                 },

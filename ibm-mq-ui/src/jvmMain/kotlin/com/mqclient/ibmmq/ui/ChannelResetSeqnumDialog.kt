@@ -18,7 +18,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.DangerButton
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
@@ -86,11 +86,10 @@ fun ChannelResetSeqnumDialog(
             }
         },
         confirmButton = {
-            // PressableButton(danger)：与项目其余危险确认弹窗同一按钮体系（error 语义色）。
-            PressableButton(
+            // DangerButton：与项目其余危险确认弹窗同一按钮体系（error 语义色）。
+            DangerButton(
                 onClick = { parsed?.let(onConfirm) },
                 enabled = parsed != null && !executing,
-                danger = true,
             ) {
                 Text(if (executing) stringResource("ibm_mq_channel_reset_executing") else stringResource("ibm_mq_channel_reset_confirm"))
             }

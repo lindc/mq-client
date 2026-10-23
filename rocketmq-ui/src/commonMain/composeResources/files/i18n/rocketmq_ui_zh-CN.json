@@ -243,5 +243,12 @@
   "rocketmq_ui_send_summary": "共 %1$d 条，成功 %2$d，失败 %3$d",
   "rocketmq_ui_send_close_confirm_text": "还有消息正在发送，关闭将中断剩余任务。确定关闭？",
   "rocketmq_ui_send_close_confirm_ok": "关闭",
-  "rocketmq_ui_send_service_not_ready": "服务未初始化"
+  "rocketmq_ui_send_service_not_ready": "服务未初始化",
+  "rocketmq_ui_broker_props_title": "Broker 属性：%1$s",
+  "rocketmq_ui_broker_props_instances": "实例数",
+  "rocketmq_ui_broker_props_section_instance": "Broker 实例（%1$s）",
+  "rocketmq_ui_broker_props_id": "Broker ID",
+  "rocketmq_ui_broker_props_ip": "IP 地址",
+  "rocketmq_ui_broker_props_port": "端口",
+  "rocketmq_ui_broker_props_no_data": "缓存中没有该 Broker 的详细信息，请重新扫描。"
 }

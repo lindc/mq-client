@@ -47,7 +47,7 @@ import com.mqclient.app.connection.toMiddlewareType
 import com.mqclient.core.ConnectionFormState
 import com.mqclient.core.ModuleRegistry
 import com.mqclient.core.ServiceAdapter
-import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import dev.nucleusframework.application.DecoratedDialog
@@ -375,7 +375,7 @@ private fun DialogFooter(
                 ) { Text(stringResource("common_back")) }
                 if (hasForm) {
                     Spacer(Modifier.width(8.dp))
-                    PressableButton(onClick = onFinish, enabled = !busy) {
+                    PrimaryButton(onClick = onFinish, enabled = !busy) {
                         Text(stringResource("common_finish"))
                     }
                 }

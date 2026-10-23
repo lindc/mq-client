@@ -24,7 +24,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mqclient.rabbitmq.RabbitMqModule
 import com.mqclient.uicommon.LabeledField
-import com.mqclient.uicommon.PressableButton
+import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.SettingsDropdownRow
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.SecondaryButton
@@ -115,7 +115,7 @@ fun RabbitMqCreateExchangeDialog(
         minWidth = 480.dp,
         minHeight = 360.dp,
         footerActions = {
-            PressableButton(
+            PrimaryButton(
                 onClick = { submit() },
                 enabled = !submitting,
             ) { Text(stringResource("rabbitmq_ui_exchange_create_confirm")) }
