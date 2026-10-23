@@ -73,16 +73,25 @@ object IbmMQModule {
     /**
      * 各连接的对象数量（慢扫产物）：connectionId → (对象类型 → 数量)。导航树二级
      * 菜单的数量徽章数据源 —— [IbmMqServiceAdapter.badgeCounts] 从它派生（翻译成
-     * 导航项 id）。[IbmMQService.scanObjects] 成功后**全量替换**该连接的条目（与
-     * 缓存同语义），连接删除时摘除。
+     * 导航项 id）。[IbmMQService.scanObjects] 成功后按类型**覆盖**该连接的条目，
+     * 连接删除时摘除。
      */
     private val objectCounts = MutableStateFlow<Map<String, Map<MqObjectType, Int>>>(emptyMap())
 
     /** 徽章数据源的只读视图：adapter 按连接派生（map + 翻译键），不经快照。 */
     val objectCountsFlow: StateFlow<Map<String, Map<MqObjectType, Int>>> = objectCounts
 
-    internal fun updateObjectCounts(connectionId: String, counts: Map<MqObjectType, Int>) {
-        objectCounts.update { current -> current + (connectionId to counts) }
+    /**
+     * 只覆盖 [counts] 里**真的指定到的**类型，其余保留上一轮的数字。
+     *
+     * 刻意不做「全量替换」：扫描可能是部分结果（预算耗尽 / 某类无权限），而
+     * [counts] 里没有的类型不代表归零。全量替换的写法（`current + (id to counts)`）
+     * 会让一次超时把徽章集体清零，而点进去看到的却是上一轮的数据。
+     */
+    internal fun mergeObjectCounts(connectionId: String, counts: Map<MqObjectType, Int>) {
+        objectCounts.update { current ->
+            current + (connectionId to (current[connectionId].orEmpty() + counts))
+        }
     }
 
     internal fun clearObjectCounts(connectionId: String) {

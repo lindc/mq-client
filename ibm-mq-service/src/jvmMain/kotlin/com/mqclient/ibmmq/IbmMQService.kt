@@ -511,22 +511,32 @@ class IbmMQService(private val context: ServiceContext) {
             val result = objectScanner.scanAll(connectionId)
 
             val cache = cacheOf(connectionId)
-            cache?.put(objectsKey(MqObjectType.QUEUE_MANAGER), result.queueManager, ttlMs = OBJECTS_FULL_TTL_MS)
-            cache?.put(objectsKey(MqObjectType.QUEUE), result.queues, ttlMs = OBJECTS_FULL_TTL_MS)
-            cache?.put(objectsKey(MqObjectType.CHANNEL), result.channels, ttlMs = OBJECTS_FULL_TTL_MS)
-            cache?.put(objectsKey(MqObjectType.TOPIC), result.topics, ttlMs = OBJECTS_FULL_TTL_MS)
-            cache?.put(objectsKey(MqObjectType.SUBSCRIPTION), result.subscriptions, ttlMs = OBJECTS_FULL_TTL_MS)
-            cache?.put(objectsKey(MqObjectType.LISTENER), result.listeners, ttlMs = OBJECTS_FULL_TTL_MS)
-            cache?.put(objectsKey(MqObjectType.SERVICE), result.services, ttlMs = OBJECTS_FULL_TTL_MS)
-            cache?.put(objectsKey(MqObjectType.PROCESS), result.processes, ttlMs = OBJECTS_FULL_TTL_MS)
-            cache?.put(objectsKey(MqObjectType.NAMELIST), result.namelists, ttlMs = OBJECTS_FULL_TTL_MS)
-            cache?.put(objectsKey(MqObjectType.AUTH_INFO), result.authInfos, ttlMs = OBJECTS_FULL_TTL_MS)
-            cache?.put(objectsKey(MqObjectType.COMM_INFO), result.commInfos, ttlMs = OBJECTS_FULL_TTL_MS)
+            // 只写**本轮真的扫到了**的类型：预算耗尽 / 查询失败的类型一律跳过。
+            // 把空列表写进 `objects.<type>` 等于告诉 UI「这个 QM 上没有对象」，
+            // 导航树会被整片清空 —— 而真相是「这次没读到」。保留上一轮的结果更诚实，
+            // 加上 partial=true 让界面能标「部分刷新」。
+            fun putIfScanned(type: MqObjectType, value: Any?) {
+                if (type in result.failedTypes) return
+                cache?.put(objectsKey(type), value, ttlMs = OBJECTS_FULL_TTL_MS)
+            }
+            putIfScanned(MqObjectType.QUEUE_MANAGER, result.queueManager)
+            putIfScanned(MqObjectType.QUEUE, result.queues)
+            putIfScanned(MqObjectType.CHANNEL, result.channels)
+            putIfScanned(MqObjectType.TOPIC, result.topics)
+            putIfScanned(MqObjectType.SUBSCRIPTION, result.subscriptions)
+            putIfScanned(MqObjectType.LISTENER, result.listeners)
+            putIfScanned(MqObjectType.SERVICE, result.services)
+            putIfScanned(MqObjectType.PROCESS, result.processes)
+            putIfScanned(MqObjectType.NAMELIST, result.namelists)
+            putIfScanned(MqObjectType.AUTH_INFO, result.authInfos)
+            putIfScanned(MqObjectType.COMM_INFO, result.commInfos)
 
             context.emit(
                 name = IbmMQEvents.OBJECTS_SCANNED,
                 payload = mapOf(
                     "connectionId" to connectionId,
+                    // 部分结果：UI 据此显示「部分刷新（超时）」而不是当完整刷新。
+                    "partial" to result.partial,
                     "queueCount" to result.queues.size,
                     "channelCount" to result.channels.size,
                     "topicCount" to result.topics.size,
@@ -539,23 +549,27 @@ class IbmMQService(private val context: ServiceContext) {
                     "commInfoCount" to result.commInfos.size,
                 ),
             )
-            // 导航树二级菜单的数量徽章：与缓存同语义（全量替换该连接的计数）。
-            // 口径 = 列表页**默认视图**（隐藏系统对象；队列页还隐藏 AMQ.* 临时队列），
+            // 导航树二级菜单的数量徽章：按类型覆盖（**跳过失败的类型**）—— 否则一次
+            // 超时会把徽章清零（树里全是 0，点进去却是上一轮的数据）。口径 = 列表页
+            // **默认视图**（隐藏系统对象；队列页还隐藏 AMQ.* 临时队列），
             // 保证「徽章数字 = 点进去看到的行数」。
-            IbmMQModule.updateObjectCounts(
+            IbmMQModule.mergeObjectCounts(
                 connectionId,
-                mapOf(
-                    MqObjectType.QUEUE to result.queues.count { !isSystemOrTempQueue(it.name) },
-                    MqObjectType.TOPIC to result.topics.count { !isSystemObject(it.name) },
-                    MqObjectType.SUBSCRIPTION to result.subscriptions.count { !isSystemObject(it.name) },
-                    MqObjectType.CHANNEL to result.channels.count { !isSystemObject(it.name) },
-                    MqObjectType.LISTENER to result.listeners.count { !isSystemObject(it.name) },
-                    MqObjectType.SERVICE to result.services.count { !isSystemObject(it.name) },
-                    MqObjectType.PROCESS to result.processes.count { !isSystemObject(it.name) },
-                    MqObjectType.NAMELIST to result.namelists.count { !isSystemObject(it.name) },
-                    MqObjectType.AUTH_INFO to result.authInfos.count { !isSystemObject(it.name) },
-                    MqObjectType.COMM_INFO to result.commInfos.count { !isSystemObject(it.name) },
-                ),
+                buildMap {
+                    fun count(type: MqObjectType, n: Int) {
+                        if (type !in result.failedTypes) put(type, n)
+                    }
+                    count(MqObjectType.QUEUE, result.queues.count { !isSystemOrTempQueue(it.name) })
+                    count(MqObjectType.TOPIC, result.topics.count { !isSystemObject(it.name) })
+                    count(MqObjectType.SUBSCRIPTION, result.subscriptions.count { !isSystemObject(it.name) })
+                    count(MqObjectType.CHANNEL, result.channels.count { !isSystemObject(it.name) })
+                    count(MqObjectType.LISTENER, result.listeners.count { !isSystemObject(it.name) })
+                    count(MqObjectType.SERVICE, result.services.count { !isSystemObject(it.name) })
+                    count(MqObjectType.PROCESS, result.processes.count { !isSystemObject(it.name) })
+                    count(MqObjectType.NAMELIST, result.namelists.count { !isSystemObject(it.name) })
+                    count(MqObjectType.AUTH_INFO, result.authInfos.count { !isSystemObject(it.name) })
+                    count(MqObjectType.COMM_INFO, result.commInfos.count { !isSystemObject(it.name) })
+                },
             )
             ibmMqLog.info(
                 "objects scanned: connection=$connectionId queues=${result.queues.size} " +
@@ -563,7 +577,8 @@ class IbmMQService(private val context: ServiceContext) {
                     "subscriptions=${result.subscriptions.size} listeners=${result.listeners.size} " +
                     "services=${result.services.size} processes=${result.processes.size} " +
                     "namelists=${result.namelists.size} authInfos=${result.authInfos.size} " +
-                    "commInfos=${result.commInfos.size}",
+                    "commInfos=${result.commInfos.size} " +
+                    "partial=${result.partial} failed=${result.failedTypes}",
             )
         } catch (cancellation: CancellationException) {
             throw cancellation

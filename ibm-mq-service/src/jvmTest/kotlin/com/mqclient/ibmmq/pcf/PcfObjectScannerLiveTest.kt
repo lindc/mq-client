@@ -51,7 +51,7 @@ class PcfObjectScannerLiveTest {
             // 逐类直查（自己兜异常打印）——比 scanAllWith 多全量诊断信息：
             // 哪类失败、什么 reasonCode，测试环境日志框架不落控制台也能看到。
             val scanner = PcfObjectScanner()
-            val agent = com.ibm.mq.pcf.PCFMessageAgent(manager)
+            val session = ScanSession(com.ibm.mq.pcf.PCFMessageAgent(manager))
             try {
                 suspend fun <T> safely(name: String, block: suspend () -> T): T? = try {
                     block()
@@ -63,17 +63,17 @@ class PcfObjectScannerLiveTest {
                     null
                 }
 
-                val qmgr = safely("qmgr") { scanner.scanQueueManagerWith(agent) }
-                val queues = safely("queues") { scanner.scanQueuesWith(agent) } ?: emptyList()
-                val channels = safely("channels") { scanner.scanChannelsWith(agent) } ?: emptyList()
-                val topics = safely("topics") { scanner.scanTopicsWith(agent) } ?: emptyList()
-                val subscriptions = safely("subscriptions") { scanner.scanSubscriptionsWith(agent) } ?: emptyList()
-                val listeners = safely("listeners") { scanner.scanListenersWith(agent) } ?: emptyList()
-                val services = safely("services") { scanner.scanServicesWith(agent) } ?: emptyList()
-                val processes = safely("processes") { scanner.scanProcessesWith(agent) } ?: emptyList()
-                val namelists = safely("namelists") { scanner.scanNamelistsWith(agent) } ?: emptyList()
-                val authInfos = safely("authInfos") { scanner.scanAuthInfosWith(agent) } ?: emptyList()
-                val commInfos = safely("commInfos") { scanner.scanCommInfosWith(agent) } ?: emptyList()
+                val qmgr = safely("qmgr") { scanner.scanQueueManagerWith(session) }
+                val queues = safely("queues") { scanner.scanQueuesWith(session) } ?: emptyList()
+                val channels = safely("channels") { scanner.scanChannelsWith(session) } ?: emptyList()
+                val topics = safely("topics") { scanner.scanTopicsWith(session) } ?: emptyList()
+                val subscriptions = safely("subscriptions") { scanner.scanSubscriptionsWith(session) } ?: emptyList()
+                val listeners = safely("listeners") { scanner.scanListenersWith(session) } ?: emptyList()
+                val services = safely("services") { scanner.scanServicesWith(session) } ?: emptyList()
+                val processes = safely("processes") { scanner.scanProcessesWith(session) } ?: emptyList()
+                val namelists = safely("namelists") { scanner.scanNamelistsWith(session) } ?: emptyList()
+                val authInfos = safely("authInfos") { scanner.scanAuthInfosWith(session) } ?: emptyList()
+                val commInfos = safely("commInfos") { scanner.scanCommInfosWith(session) } ?: emptyList()
 
                 println(
                     "LIVE result: qmgr=${qmgr?.name} " +
@@ -120,7 +120,7 @@ class PcfObjectScannerLiveTest {
                         )
                     }
             } finally {
-                runCatching { agent.disconnect() }
+                runCatching { session.agent.disconnect() }
             }
         } finally {
             runCatching { manager.disconnect() }
@@ -152,8 +152,9 @@ class PcfObjectScannerLiveTest {
         }
         try {
             val agent = PCFMessageAgent(manager)
+            val session = ScanSession(agent)
             try {
-                val aliases = PcfObjectScanner().scanQueuesWith(agent)
+                val aliases = PcfObjectScanner().scanQueuesWith(session)
                     .filter { it.attributes["MQIA_Q_TYPE"] == MQConstants.MQQT_ALIAS }
                 if (aliases.isEmpty()) {
                     println("LIVE SKIP: 无 alias 队列")
@@ -201,10 +202,11 @@ class PcfObjectScannerLiveTest {
         } catch (t: Throwable) { println("LIVE SKIP: 连接失败（QMGR 不在线？）：${t.message}"); return@runBlocking }
 
         val agent = PCFMessageAgent(manager)
+        val session = ScanSession(agent)
         try {
             val scanner = PcfObjectScanner()
             val name = "LSNR.QM1"
-            if (scanner.scanListenersWith(agent).none { it.name == name }) {
+            if (scanner.scanListenersWith(session).none { it.name == name }) {
                 println("LIVE SKIP: $name 不存在"); return@runBlocking
             }
 
@@ -221,7 +223,7 @@ class PcfObjectScannerLiveTest {
             var running = false
             repeat(10) {
                 delay(500)
-                val s = scanner.queryListenerStatusWith(agent, name)
+                val s = scanner.queryListenerStatusWith(session, name)
                 if (s.isNotEmpty()) { running = true; return@repeat }
             }
             println("LIVE start '$name' running=$running")
@@ -236,7 +238,7 @@ class PcfObjectScannerLiveTest {
             repeat(20) {
                 delay(1_000)
                 val r = try {
-                    Result.success(scanner.queryListenerStatusWith(agent, name))
+                    Result.success(scanner.queryListenerStatusWith(session, name))
                 } catch (e: Throwable) {
                     Result.failure<List<Pair<String, Int>>>(e)
                 }
