@@ -149,7 +149,6 @@ fun RocketMqTopicPropertiesDialog(
         },
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            var tab by remember(topicName) { mutableIntStateOf(0) }
             if (systemTopic) {
                 androidx.compose.material3.Surface(
                     shape = androidx.compose.foundation.shape.RoundedCornerShape(4.dp),
