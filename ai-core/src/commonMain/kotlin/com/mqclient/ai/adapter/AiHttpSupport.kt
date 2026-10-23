@@ -7,6 +7,11 @@ import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.isSuccess
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -76,6 +81,61 @@ internal fun extractErrorMessage(body: String): String? =
             ?: return@runCatching null
         ((error["message"] as? JsonPrimitive)?.contentOrNull)?.take(400)
     }.getOrNull()
+
+/**
+ * 非流式请求的整体超时（毫秒）。
+ *
+ * 为什么需要单独一个：`AiHttp` 为了 SSE 流式回复把 `requestTimeoutMillis` 设成了 `null`
+ * （流式可能持续数分钟，整体超时会中途砍断），但**非流式**的 `chat()` 复用了同一个
+ * 客户端。服务端只要「细水长流」地吐字节或 keep-alive 帧，`socketTimeoutMillis`（120s）
+ * 就永远不触发 —— AI 面板会一直停在「正在回复」，用户只能点「停止」。
+ */
+const val NON_STREAMING_TIMEOUT_MS: Long = 60_000L
+
+/**
+ * 给非流式请求套一个**整体**超时，超时转成带连接名的 [AiException]。
+ *
+ * 分两层：[withNonStreamingDeadline] 管整体截止时间；`AiHttp` 的
+ * `socketTimeoutMillis` 继续管「连接活着但长时间没数据」。两者互补，缺一不可。
+ *
+ * @param timeoutMs 默认取 [NON_STREAMING_TIMEOUT_MS]；适配器把它做成构造参数，
+ *   测试传小值以验证超时路径（否则得等一分钟）。
+ */
+suspend fun <T : Any> withNonStreamingDeadline(
+    connectionName: String,
+    timeoutMs: Long = NON_STREAMING_TIMEOUT_MS,
+    block: suspend () -> T,
+): T = coroutineScope {
+    // 为什么不用 withTimeout + catch(TimeoutCancellationException)：超时与外部取消都是
+    // CancellationException，而 Ktor 内部会把取消换成它自己 job 的异常 —— 靠**异常类型**
+    // 归因不可靠（实测：同一个场景时而报超时、时而报「被取消」）。
+    //
+    // 改成显式竞争：定时器先 complete 截止信号**再**取消任务，于是「取消来自谁」由一个
+    // 自己写入的信号回答，不靠猜异常归属。
+    // 用 CompletableDeferred 而不是普通 Boolean：它跨线程完成/读取有明确内存语义
+    // （普通 var 的可见性只能靠 cancel/await 的原子状态转换侧面保证，是形式上的数据竞争）。
+    val deadlineHit = CompletableDeferred<Unit>()
+    val work = async { block() }
+    val timer = launch {
+        delay(timeoutMs)
+        deadlineHit.complete(Unit) // 先置位再取消：await 那边一定能看到
+        work.cancel()
+    }
+    try {
+        return@coroutineScope work.await()
+    } catch (cancellation: CancellationException) {
+        if (deadlineHit.isCompleted) {
+            throw AiException(
+                "请求超时（${timeoutMs / 1000}s）：连接「$connectionName」长时间没有完整响应",
+                cause = cancellation,
+            )
+        }
+        // 真正的取消（用户点停止 / 退出 / 上游取消）：原样上抛。
+        throw cancellation
+    } finally {
+        timer.cancel()
+    }
+}
 
 /**
  * [testConnection] 的公共骨架：跑最小请求，成功 true；失败记日志返回 false ——

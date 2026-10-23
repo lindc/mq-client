@@ -15,6 +15,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 
@@ -102,5 +103,35 @@ class OpenAiCompatibleAdapterTest {
 
         val brokenEngine = MockEngine { respond("boom", HttpStatusCode.InternalServerError) }
         assertFalse(adapter(brokenEngine).testConnection(connection()))
+    }
+
+    /**
+     * 非流式请求必须有整体超时：AiHttp 为 SSE 把 requestTimeoutMillis 设成了 null，
+     * 服务端只要一直不把响应体写完，socketTimeout 就永远不触发 —— 面板会一直停在
+     * 「正在回复」。这里用一个永不返回的引擎，断言 chat() 在超时后抛带连接名的 AiException。
+     */
+    @Test
+    fun `chat gives up when the server never finishes the response`() = runBlocking {
+        val hangingEngine = MockEngine {
+            delay(30_000) // 远大于下面的超时；delay 可被取消
+            respond("late", HttpStatusCode.OK)
+        }
+        val subject = OpenAiCompatibleAdapter(
+            clientFor = { HttpClient(hangingEngine) },
+            nonStreamingTimeoutMs = 150,
+        )
+
+        val error = assertFailsWith<AiException> {
+            subject.chat(connection(), listOf(AiChatMessage(AiRole.USER, "hi")))
+        }
+
+        assertTrue(
+            error.message.orEmpty().contains("超时"),
+            "应是超时文案，实际：${error.message}",
+        )
+        assertTrue(
+            error.message.orEmpty().contains(connection().name),
+            "超时文案应带连接名，实际：${error.message}",
+        )
     }
 }

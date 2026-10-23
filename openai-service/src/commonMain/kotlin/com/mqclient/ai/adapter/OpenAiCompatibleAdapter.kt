@@ -43,7 +43,14 @@ private const val DONE_SENTINEL = "[DONE]"
  * （见 [AiHttp.clientFor]），默认走严格校验的共享客户端。旧构造（固定 client）保留
  * —— 适配器契约测试的 MockEngine 注入路径不变。
  */
-class OpenAiCompatibleAdapter(private val clientFor: (AiConnection) -> HttpClient) : AiAdapter {
+class OpenAiCompatibleAdapter(
+    private val clientFor: (AiConnection) -> HttpClient,
+    /**
+     * 非流式请求的整体超时（毫秒）：默认 60s，测试传小值以验证超时路径。
+     * 流式（[chatStream]）不走它 —— 流式可能正当持续数分钟。
+     */
+    private val nonStreamingTimeoutMs: Long = NON_STREAMING_TIMEOUT_MS,
+) : AiAdapter {
 
     /** 固定客户端的旧构造：测试注入 MockEngine 等场景（不区分连接）。 */
     constructor(client: HttpClient) : this({ _ -> client })
@@ -60,21 +67,32 @@ class OpenAiCompatibleAdapter(private val clientFor: (AiConnection) -> HttpClien
                 "messages=${messages.size} stream=false",
         )
         try {
-            val response = clientFor(connection).post(connection.endpoint("/chat/completions")) {
-                connection.applyAuth(this)
-                contentType(ContentType.Application.Json)
-                setBody(aiJson.encodeToString(ChatRequest.serializer(), ChatRequest(connection.model, messages.toDto())))
-            }
-            response.throwIfNotSuccess(PROVIDER_LABEL)
+            // 非流式请求必须有整体超时：AiHttp 为 SSE 把 requestTimeoutMillis 设成了 null
+            // （流式可能持续数分钟），但 chat() 复用了同一个客户端 —— 服务端只要
+            // 「细水长流」地吐字节，socketTimeout 的 120s 永远不触发，面板就一直是
+            // 「正在回复」，用户只能点停止。
+            val result = withNonStreamingDeadline(connection.name, nonStreamingTimeoutMs) {
+                val response = clientFor(connection).post(connection.endpoint("/chat/completions")) {
+                    connection.applyAuth(this)
+                    contentType(ContentType.Application.Json)
+                    setBody(
+                        aiJson.encodeToString(
+                            ChatRequest.serializer(),
+                            ChatRequest(connection.model, messages.toDto()),
+                        ),
+                    )
+                }
+                response.throwIfNotSuccess(PROVIDER_LABEL)
 
-            val dto = aiJson.decodeFromString(ChatResponse.serializer(), response.bodyAsText())
-            val choice = dto.choices.firstOrNull()
-            val result = AiResponse(
-                content = choice?.message?.content.orEmpty(),
-                model = dto.model ?: connection.model,
-                tokensUsed = dto.usage?.totalTokens,
-                finishReason = choice?.finishReason,
-            )
+                val dto = aiJson.decodeFromString(ChatResponse.serializer(), response.bodyAsText())
+                val choice = dto.choices.firstOrNull()
+                AiResponse(
+                    content = choice?.message?.content.orEmpty(),
+                    model = dto.model ?: connection.model,
+                    tokensUsed = dto.usage?.totalTokens,
+                    finishReason = choice?.finishReason,
+                )
+            }
             Log.debug(
                 AI_ADAPTER_LOG_TAG,
                 "chat completed: model=${result.model} tokens=${result.tokensUsed ?: "-"} " +

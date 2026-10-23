@@ -10,7 +10,9 @@ import com.mqclient.ai.adapter.aiJson
 import com.mqclient.ai.adapter.baseUrlOrThrow
 import com.mqclient.ai.adapter.sseData
 import com.mqclient.ai.adapter.testQuietly
+import com.mqclient.ai.adapter.NON_STREAMING_TIMEOUT_MS
 import com.mqclient.ai.adapter.throwIfNotSuccess
+import com.mqclient.ai.adapter.withNonStreamingDeadline
 import com.mqclient.core.AiConnection
 import kotlin.time.TimeSource
 import com.mqclient.core.log.Log
@@ -59,7 +61,14 @@ private const val DEFAULT_MAX_TOKENS = 4096
  * （见 ai-core jvmMain 的 AiHttp.clientFor），默认走严格校验的共享客户端。旧构造
  * （固定 client）保留 —— 适配器契约测试的 MockEngine 注入路径不变。
  */
-class AnthropicAdapter(private val clientFor: (AiConnection) -> HttpClient) : AiAdapter {
+class AnthropicAdapter(
+    private val clientFor: (AiConnection) -> HttpClient,
+    /**
+     * 非流式请求的整体超时（毫秒）：默认 60s，测试传小值以验证超时路径。
+     * 流式（[chatStream]）不走它 —— 流式可能正当持续数分钟。
+     */
+    private val nonStreamingTimeoutMs: Long = NON_STREAMING_TIMEOUT_MS,
+) : AiAdapter {
 
     /** 固定客户端的旧构造：测试注入 MockEngine 等场景（不区分连接）。 */
     constructor(client: HttpClient) : this({ _ -> client })
@@ -76,33 +85,38 @@ class AnthropicAdapter(private val clientFor: (AiConnection) -> HttpClient) : Ai
                 "messages=${messages.size} stream=false",
         )
         try {
-            val response = clientFor(connection).post(connection.endpoint("/v1/messages")) {
-                connection.applyAuth(this)
-                contentType(ContentType.Application.Json)
-                setBody(
-                    aiJson.encodeToString(
-                        ChatRequest.serializer(),
-                        ChatRequest(
-                            model = connection.model,
-                            // max_tokens 刻意无默认值：aiJson 的 encodeDefaults=false 会把
-                            // 等于默认值的字段整个省略，而 Anthropic 缺了它直接 400。
-                            maxTokens = DEFAULT_MAX_TOKENS,
-                            system = messages.systemText(),
-                            messages = messages.toDto(),
+            // 非流式请求必须有整体超时：AiHttp 为 SSE 把 requestTimeoutMillis 设成了 null，
+            // chat() 复用同一个客户端 —— 服务端「细水长流」地吐字节时 socketTimeout 永远
+            // 不触发，面板会一直停在「正在回复」。
+            val result = withNonStreamingDeadline(connection.name, nonStreamingTimeoutMs) {
+                val response = clientFor(connection).post(connection.endpoint("/v1/messages")) {
+                    connection.applyAuth(this)
+                    contentType(ContentType.Application.Json)
+                    setBody(
+                        aiJson.encodeToString(
+                            ChatRequest.serializer(),
+                            ChatRequest(
+                                model = connection.model,
+                                // max_tokens 刻意无默认值：aiJson 的 encodeDefaults=false 会把
+                                // 等于默认值的字段整个省略，而 Anthropic 缺了它直接 400。
+                                maxTokens = DEFAULT_MAX_TOKENS,
+                                system = messages.systemText(),
+                                messages = messages.toDto(),
+                            ),
                         ),
-                    ),
+                    )
+                }
+                response.throwIfNotSuccess(PROVIDER_LABEL)
+
+                val dto = aiJson.decodeFromString(ChatResponse.serializer(), response.bodyAsText())
+                AiResponse(
+                    // content 是块数组，只取 text 块拼接（tool_use / thinking 块第一版不转换）。
+                    content = dto.content.filter { it.type == "text" }.mapNotNull { it.text }.joinToString(""),
+                    model = dto.model ?: connection.model,
+                    tokensUsed = dto.usage?.sum(),
+                    finishReason = dto.stopReason,
                 )
             }
-            response.throwIfNotSuccess(PROVIDER_LABEL)
-
-            val dto = aiJson.decodeFromString(ChatResponse.serializer(), response.bodyAsText())
-            val result = AiResponse(
-                // content 是块数组，只取 text 块拼接（tool_use / thinking 块第一版不转换）。
-                content = dto.content.filter { it.type == "text" }.mapNotNull { it.text }.joinToString(""),
-                model = dto.model ?: connection.model,
-                tokensUsed = dto.usage?.sum(),
-                finishReason = dto.stopReason,
-            )
             Log.debug(
                 LOG_TAG,
                 "chat completed: model=${result.model} tokens=${result.tokensUsed ?: "-"} " +

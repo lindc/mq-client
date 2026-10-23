@@ -19,6 +19,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.jsonArray
@@ -186,5 +187,32 @@ class AnthropicAdapterTest {
 
         val brokenEngine = MockEngine { respond("boom", HttpStatusCode.InternalServerError) }
         assertFalse(adapter(brokenEngine).testConnection(connection()))
+    }
+
+    /**
+     * 非流式请求必须有整体超时（AiHttp 的 requestTimeoutMillis 为 SSE 设成了 null）。
+     * 用永不返回的引擎验证 chat() 在超时后抛带连接名的 AiException。
+     */
+    @Test
+    fun `chat gives up when the server never finishes the response`() = runBlocking {
+        val hangingEngine = MockEngine {
+            delay(30_000) // 远大于下面的超时；delay 可被取消
+            respond("late", HttpStatusCode.OK)
+        }
+        val subject = AnthropicAdapter(
+            clientFor = { HttpClient(hangingEngine) },
+            nonStreamingTimeoutMs = 150,
+        )
+        val target = connection()
+
+        val error = assertFailsWith<AiException> {
+            subject.chat(target, listOf(AiChatMessage(AiRole.USER, "hi")))
+        }
+
+        assertTrue(error.message.orEmpty().contains("超时"), "应是超时文案，实际：${error.message}")
+        assertTrue(
+            error.message.orEmpty().contains(target.name),
+            "超时文案应带连接名，实际：${error.message}",
+        )
     }
 }
