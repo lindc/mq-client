@@ -35,3 +35,13 @@ kotlin {
         }
     }
 }
+
+// 真机诊断测试（RabbitMqScanPartialLiveTest 等）的参数透传：`-Drabbitmqdiag.xxx=...`
+// 从 gradle 命令行传进测试 JVM。与 ibm-mq-service 的 `mqdiag.*` 同一机制。
+tasks.withType<Test>().configureEach {
+    systemProperties(
+        System.getProperties().stringPropertyNames()
+            .filter { it.startsWith("rabbitmqdiag.") }
+            .associateWith { System.getProperty(it) },
+    )
+}

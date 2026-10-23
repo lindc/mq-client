@@ -55,8 +55,11 @@ internal const val KEY_CLUSTER_INFO = "clusterInfo"
  *
  * 彼此的权限要求并不相同（`/api/nodes` 要 `monitor` / `administrator` tag，其余三类
  * 要 `management` tag），所以失败必须**按类记**、按类兑现到缓存与连接状态上。
+ *
+ * 公开（不再是 internal）：UI 的「部分数据未刷新」提示条要按类型拼文案 ——
+ * 枚举本身不含实现，暴露它比在 UI 里用字符串标签匹配更安全。
  */
-internal enum class RabbitMqScanType(val label: String) {
+enum class RabbitMqScanType(val label: String) {
     EXCHANGES("exchanges"),
     QUEUES("queues"),
     BINDINGS("bindings"),
@@ -206,6 +209,10 @@ class RabbitMqScanService(private val context: ServiceContext) {
             cache.putIfScanned(KEY_QUEUES, RabbitMqScanType.QUEUES, failures, queueSnapshots, objectsTtl)
             cache.putIfScanned(KEY_BINDINGS, RabbitMqScanType.BINDINGS, failures, bindingSnapshots, objectsTtl)
             cache.putIfScanned(KEY_NODES, RabbitMqScanType.NODES, failures, nodeSnapshots, objectsTtl)
+
+            // 把「哪几类没取到」交给模块存起来：UI 的提示条要能在页面切来切去后
+            // 仍然知道「这份数据是残的」，而事件是瞬时的。
+            RabbitMqModule.reportScanFailures(connectionId, failures.keys.toSet())
 
             // 四类全失败：管理 API 一条都读不通，连接大概率真的断了（或者凭据失效）。
             // 只有这种情况才动连接状态 —— 单类（尤其是只为 `monitor` tag 才有的 nodes）

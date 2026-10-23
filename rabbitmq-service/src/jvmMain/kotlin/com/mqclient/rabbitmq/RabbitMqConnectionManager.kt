@@ -189,6 +189,8 @@ class RabbitMqConnectionManager(
             unregisterScanJobs(connectionId)
             // 手动刷新（UI 按钮）的协程也要收：它占着该连接的 scanLocks，句柄又要关了。
             service.cancelScan(connectionId)
+            // 「部分数据未刷新」的旧结论不能诈尸到重连后（新连接可能权限不同）。
+            RabbitMqModule.clearScanFailures(connectionId)
             closeQuietly(ctx)
             ctx.cleanup()
             setStatus(ctx, ConnectionStatus.Disconnected)

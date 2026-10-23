@@ -12,6 +12,9 @@ import com.mqclient.core.spi.onEvent
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
@@ -56,6 +59,36 @@ object RabbitMqModule {
     private var moduleContext: ServiceContext? = null
     private var service: RabbitMqScanService? = null
     private var manager: RabbitMqConnectionManager? = null
+
+    /**
+     * 每条连接最近一轮对象慢扫**没取到**的类型（key 不存在 = 上一轮完整）。
+     *
+     * 为什么需要这个状态而不是只靠事件：事件是瞬时的，用户切到别的 Tab 再切回来，
+     * 订阅者已经重建，`OBJECTS_SCANNED` 早就过去了 —— 只靠事件的话提示条会消失，
+     * 而数据仍然是旧的（这正是「界面上看不出东西不对」的那类情况）。存成 StateFlow
+     * 后，提示与缓存事实同寿命，直到下一轮真正扫全或连接断开才消失。
+     *
+     * 对应的事件 payload 仍有 `partial` / `failedKinds`（日志与即时反应用），
+     * 两者是同一事实的两个出口，不是两份逻辑。
+     */
+    private val scanFailures = MutableStateFlow<Map<String, Set<RabbitMqScanType>>>(emptyMap())
+
+    /** 只读视图：UI 的 partial 提示条数据源。 */
+    val scanFailuresFlow: StateFlow<Map<String, Set<RabbitMqScanType>>> = scanFailures
+
+    /**
+     * 记录一轮慢扫的失败类型；空集合表示扫全（顺便摘掉该连接的条目）。
+     */
+    internal fun reportScanFailures(connectionId: String, kinds: Set<RabbitMqScanType>) {
+        scanFailures.update { current ->
+            if (kinds.isEmpty()) current - connectionId else current + (connectionId to kinds)
+        }
+    }
+
+    /** 断开 / 删除连接时摘除（旧连接的结果不能诈尸到重连后）。 */
+    internal fun clearScanFailures(connectionId: String) {
+        scanFailures.update { current -> current - connectionId }
+    }
     private var subscriptions: List<Job> = emptyList()
 
     /**
