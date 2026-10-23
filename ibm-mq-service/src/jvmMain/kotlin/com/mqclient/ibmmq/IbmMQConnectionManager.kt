@@ -5,6 +5,7 @@ import com.mqclient.core.ConnectionInfo
 import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.cache.CacheManager
+import com.mqclient.core.concurrent.BlockingCalls
 import com.mqclient.core.scheduler.ScheduledJob
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.emit
@@ -12,14 +13,10 @@ import com.mqclient.ibmmq.event.IbmMQEvents
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
 
 /**
  * IBM MQ 连接的生命周期管理：**显式连接模型**的中枢。
@@ -131,31 +128,27 @@ class IbmMQConnectionManager(
 
         setStatus(ctx, ConnectionStatus.Connecting)
         ctx.lastError = null
-        // 超时兜底：withTimeout 触发时 IO 线程上的阻塞构造**不会**被中断，它最终
-        // 完成后产生的 MQQueueManager 无人持有（withTimeout 立刻向调用方抛超时）。
-        // 这里记下句柄，超时后延迟 2×连接超时兜底关闭，避免连接挂到 TCP 层超时。
-        var timedOutManager: MQQueueManager? = null
         try {
-            val manager = withContext(Dispatchers.IO) {
-                try {
-                    // 连接阶段超时（connectionTimeout 配置，默认 30s）：MQ 的 TCP
-                    // 握手没有短超时，掉网时能挂十几分钟 —— 必须罩住。超时转成
-                    // 普通异常，不能以「取消」形状逃进下面的 CancellationException
-                    // 分支（否则连接状态永远停在 Connecting）。
-                    withTimeout(ctx.config.connectionTimeout * 1_000L) {
-                        MQQueueManager(ctx.config.queueManager.trim(), mqProperties(ctx.config))
-                            .also { timedOutManager = it }
-                    }
-                } catch (e: TimeoutCancellationException) {
-                    context.coroutineScope.launch(NonCancellable) {
-                        delay(ctx.config.connectionTimeout * 1_000L * 2)
-                        timedOutManager?.let { runCatching { it.disconnect() } }
-                    }
-                    throw IllegalStateException(
-                        "连接超时（${ctx.config.connectionTimeout}s）——检查主机 / 端口 / 网络",
-                        e,
-                    )
-                }
+            // 连接阶段超时（connectionTimeout 配置，默认 30s）：MQ 的 TCP 握手没有短超时，
+            // 掉网时能挂十几分钟。`MQQueueManager` 的构造是**纯阻塞、无挂起点**的 ——
+            // `withTimeout` 在它身上不生效（协程卡在里面检查不到取消），所以这里用
+            // BlockingCalls：把构造丢到独立线程，调用方真正在 connectionTimeout 后拿回控制权。
+            //
+            // 超时后那条构造不会被打断（它仍会跑完）。迟到的句柄交给 onAbandoned 关掉 ——
+            // 比之前的「delay(2×timeout) 后再去读变量」靠谱：不靠猜它什么时候回来。
+            val manager = BlockingCalls.withDeadline(
+                timeoutMs = ctx.config.connectionTimeout * 1_000L,
+                label = "连接 ${ctx.config.queueManager}",
+                onAbandoned = { late ->
+                    runCatching { late.disconnect() }
+                        .onFailure { error ->
+                            ibmMqLog.warn(
+                                "late connect handle close failed: connection=$connectionId error=$error",
+                            )
+                        }
+                },
+            ) {
+                MQQueueManager(ctx.config.queueManager.trim(), mqProperties(ctx.config))
             }
             ctx.mqConnection = manager
             ctx.cache = CacheManager()

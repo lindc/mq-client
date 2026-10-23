@@ -6,15 +6,16 @@ import com.ibm.mq.pcf.PCFException
 import com.ibm.mq.pcf.PCFMessage
 import com.ibm.mq.pcf.PCFMessageAgent
 import com.ibm.mq.pcf.PCFParameter
+import com.mqclient.core.concurrent.BlockingCallTimeoutException
+import com.mqclient.core.concurrent.BlockingCalls
 import com.mqclient.ibmmq.IbmMQModule
 import com.mqclient.ibmmq.ibmMqLog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
 
 /** 单类对象查询的超时（60 秒；慢 QMGR / 大通配符结果也要在它之内给说法）。 */
 private const val SCAN_TIMEOUT_MS = 60_000L
@@ -537,9 +538,15 @@ class PcfObjectScanner {
     }
 
     /**
-     * 取该连接的 MQQueueManager，在其上开 PCFMessageAgent 执行 [block]，
-     * 整体套 60s 超时（超时转成普通异常 —— 心跳链路靠异常上报失败，不能让它
-     * 以「取消」的形状逃出去）。agent 用完即断。
+     * 取该连接的 MQQueueManager，在其上开 PCFMessageAgent 执行 [block]。
+     *
+     * 超时用 [BlockingCalls] 而不是 `withTimeout`：`PCFMessageAgent` 的构造与每次
+     * `send` 都是**纯阻塞、无挂起点**的 MQI 调用，`withTimeout` 只能等到下一个挂起点
+     * 才发现超时 —— 服务器半天不回时，用户就一直停在加载中，而这个连接的扫描锁
+     * 也一直被占着（重连后点刷新只能排在后面等）。
+     *
+     * 整个「开 agent → 扫描 → 断 agent」都跑在同一条 worker 线程上，所以超时后
+     * 那条扫描仍会跑完，而它内的 `finally` 会保证 agent 被断开，不会泄漏。
      */
     private suspend fun <T> withAgent(connectionId: String, block: suspend (PCFMessageAgent) -> T): T {
         val manager: MQQueueManager = IbmMQModule.connectionOrNull(connectionId)?.mqConnection
@@ -547,22 +554,28 @@ class PcfObjectScanner {
         val start = System.currentTimeMillis()
         ibmMqLog.debug("pcf agent open: connection=$connectionId")
         return try {
-            withTimeout(SCAN_TIMEOUT_MS) {
-                withContext(Dispatchers.IO) {
+            BlockingCalls.withDeadline(
+                timeoutMs = SCAN_TIMEOUT_MS,
+                label = "PCF 查询（connection=$connectionId）",
+            ) {
+                // 在 worker 线程上桥接挂起函数：block 内部基本是阻塞的 MQI 调用，
+                // 用 runBlocking 把它包成同步体，与 agent 的创建 / 断开同一线程。
+                runBlocking {
                     val agent = PCFMessageAgent(manager)
                     try {
                         block(agent)
                     } finally {
                         runCatching { agent.disconnect() }
                         ibmMqLog.debug(
-                            "pcf agent closed: connection=$connectionId duration=${System.currentTimeMillis() - start}ms",
+                            "pcf agent closed: connection=$connectionId " +
+                                "duration=${System.currentTimeMillis() - start}ms",
                         )
                     }
                 }
             }
-        } catch (e: TimeoutCancellationException) {
+        } catch (e: BlockingCallTimeoutException) {
             ibmMqLog.error("pcf query timeout: connection=$connectionId timeout=${SCAN_TIMEOUT_MS / 1000}s")
-            throw IllegalStateException("PCF 查询超时（${SCAN_TIMEOUT_MS / 1000}s）", e)
+            throw e
         }
     }
 
