@@ -1,7 +1,9 @@
 package com.mqclient.ibmmq.ui
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -59,6 +61,17 @@ class IbmMqUI : AdapterUI {
      * —— 极端时序下不崩、不破 Tab。
      */
     override fun contentFor(objectType: String, connectionId: String): (@Composable () -> Unit)? {
+        val page = contentForPage(objectType, connectionId) ?: return null
+        // 命令控制台不展示对象数据（它是一次性命令的结果），提示条在那里只是噪音。
+        if (objectType == "command") return page
+        return { IbmMqPanelHost(connectionId) { page() } }
+    }
+
+    /**
+     * 真实的页面路由（提示条包装前）。拆出来是为了把「哪些导航项贡献内容」与
+     * 「怎么包装」分开 —— 提示条只在这里包一层，十三个分支一个不动。
+     */
+    private fun contentForPage(objectType: String, connectionId: String): (@Composable () -> Unit)? {
         return when (objectType) {
             "topology" -> {
                 if (IbmMQModule.serviceOrNull() == null) return null
@@ -186,5 +199,21 @@ class IbmMqUI : AdapterUI {
             }
             else -> null
         }
+    }
+}
+
+/**
+ * 面板外壳：顶部「部分数据未刷新」提示（有的话）+ 剩余空间给面板本体。
+ *
+ * `weight(1f)` 而不是 `fillMaxSize()`：提示条占高后内容必须缩，不能溢出到窗口外。
+ */
+@Composable
+private fun IbmMqPanelHost(
+    connectionId: String,
+    content: @Composable () -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        IbmMqPartialScanBanner(connectionId)
+        Box(modifier = Modifier.weight(1f).fillMaxWidth()) { content() }
     }
 }

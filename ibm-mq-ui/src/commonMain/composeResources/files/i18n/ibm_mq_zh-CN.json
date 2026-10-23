@@ -1148,5 +1148,8 @@
   "ibm_mq_nav_namelists": "名称列表",
   "ibm_mq_nav_auth_info": "认证信息",
   "ibm_mq_nav_comm_info": "通信信息",
-  "ibm_mq_nav_cluster_relations": "集群关系"
+  "ibm_mq_nav_cluster_relations": "集群关系",
+  "ibm_mq_partial_scan_banner": "部分数据未刷新：%1$s 未取到",
+  "ibm_mq_partial_scan_hint": "通常是权限不足（2035）或查询超时，其余数据已正常刷新",
+  "ibm_mq_scan_kind_queue_manager": "队列管理器"
 }

@@ -534,6 +534,10 @@ class IbmMQService(private val context: ServiceContext) {
             putIfScanned(MqObjectType.AUTH_INFO, result.authInfos)
             putIfScanned(MqObjectType.COMM_INFO, result.commInfos)
 
+            // 把「哪几类没取到」交给模块存起来：UI 的提示条要能在页面切来切去后
+            // 仍然知道「这份数据是残的」，而事件是瞬时的。
+            IbmMQModule.reportScanFailures(connectionId, result.failedTypes)
+
             context.emit(
                 name = IbmMQEvents.OBJECTS_SCANNED,
                 payload = mapOf(

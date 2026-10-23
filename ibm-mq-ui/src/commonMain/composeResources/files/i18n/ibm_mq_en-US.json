@@ -1007,6 +1007,9 @@
   "ibm_mq_nav_auth_info": "Authentication Information",
   "ibm_mq_nav_comm_info": "Communication Information",
   "ibm_mq_nav_cluster_relations": "Cluster relations",
+  "ibm_mq_partial_scan_banner": "Some data was not refreshed: %1$s unavailable",
+  "ibm_mq_partial_scan_hint": "Usually a not-authorized (2035) gap or a timeout; the rest was refreshed",
+  "ibm_mq_scan_kind_queue_manager": "queue manager",
 
   "ibm_mq_queue_prop_desc_q_name": "Unique name of the object; cannot be changed after creation.",
   "ibm_mq_queue_prop_desc_q_type": "Local / alias / remote / model / cluster queue; cannot be changed after creation.",
