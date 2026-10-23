@@ -153,18 +153,29 @@ object RabbitMqModule {
     }
 
     /**
+     * 仍开着的消息会话（对话框持有）：模块销毁时统一关闭。
+     *
+     * 光靠对话框的 `onDispose` 不够：应用退出时 `ModuleRegistry.disposeServices()` 先跑
+     * （把 `moduleContext` 置空），对话框的 onDispose 随后才到，那时
+     * [closeMessageSessionAsync] 已经没有 scope 可用 —— 会话就漏在那里了。
+     */
+    private val openSessions: MutableSet<RabbitMqMessageSession> =
+        java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+    /**
      * 队列消息会话入口（队列消息对话框）：AMQP 直连当前队列（autoAck = false）。
      * 连接必须处于 Connected；会话生命周期归对话框 —— 关闭时调 [closeMessageSessionAsync]。
      */
     suspend fun openMessageSession(connectionId: String, queueName: String): RabbitMqMessageSession {
         val ctx = connectionOrNull(connectionId)?.takeIf { it.status == ConnectionStatus.Connected }
             ?: throw IllegalStateException("未连接")
-        return RabbitMqMessageSession.open(ctx.config, queueName)
+        return RabbitMqMessageSession.open(ctx.config, queueName).also { openSessions.add(it) }
     }
 
     /** 会话关闭的异步兜底（对话框 onDispose 是同步回调，挂起 close 另起协程跑）。 */
     fun closeMessageSessionAsync(session: RabbitMqMessageSession?) {
         if (session == null) return
+        openSessions.remove(session)
         moduleContext?.coroutineScope?.launch { runCatching { session.close() } }
     }
 
@@ -192,9 +203,24 @@ object RabbitMqModule {
     fun shutdown() {
         val subscriptionsToCancel = subscriptions
         val managerToStop = manager
+        val sessionsToClose = openSessions.toList()
+        openSessions.clear()
         subscriptions = emptyList()
         manager = null
         try {
+            // 先关消息会话：它们不挂在连接上下文上（归对话框），[shutdownAll] 收不到。
+            sessionsToClose.forEach { session ->
+                runBlocking {
+                    try {
+                        session.close()
+                    } catch (error: Throwable) {
+                        // 一条关不掉的会话不该拦住后面的会话与连接收尾。
+                        rabbitMqLog.warn(
+                            "message session close failed: ${error.message ?: error::class.simpleName}",
+                        )
+                    }
+                }
+            }
             // 模块销毁是同步出口（ModuleRegistry.disposeServices 不挂起）：
             // runBlocking 等全部连接断完再返回 —— 退出路径不能留下没关的句柄。
             managerToStop?.let { connectionManager -> runBlocking { connectionManager.shutdownAll() } }

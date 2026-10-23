@@ -105,7 +105,9 @@ fun MainWindow(
     // 右键菜单的动作与对话框状态：动作实现（ConnectionActionsImpl）是无 UI 的回调集，
     // 对话框集中在文件尾的 ConnectionMenuDialogs 里渲染。
     val menuState = remember { ConnectionMenuState() }
-    val connectionActions = remember(menuState) { ConnectionActionsImpl(menuState) }
+    // 「复制连接」要落盘：用应用级 scope（与 CoreModule 同生命周期），不用菜单自己的
+    // 即时作用域 —— 复制是 fire-and-forget 动作，不该因右键菜单关闭而被取消。
+    val connectionActions = remember(menuState) { ConnectionActionsImpl(menuState, CoreModule.scope) }
     val propertiesServiceIds =
         remember { ModuleRegistry.propertiesUis.mapTo(mutableSetOf()) { it.serviceId } }
 

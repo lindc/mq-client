@@ -12,11 +12,15 @@ import com.mqclient.core.event.getString
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.core.newConnectionId
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 /** 一次「测试连接」的结果（来源：`<serviceId>.connection.test.completed` 事件）。 */
@@ -76,7 +80,16 @@ class ConnectionMenuState {
  *    「正在连接」。等结果用状态流而不是事件：状态是事实来源（连接中的状态跳变、
  *    模块初始化失败等异常路径都能收敛到终态或超时），事件可能没人发。
  */
-class ConnectionActionsImpl(private val state: ConnectionMenuState) : ConnectionActions {
+class ConnectionActionsImpl(
+    private val state: ConnectionMenuState,
+    /**
+     * 「复制连接」落盘用的作用域（宿主传入）。
+     *
+     * 不能用 `rememberCoroutineScope()` 的即时作用域：复制是 fire-and-forget 的落盘动作，
+     * 不该因为右键菜单关闭而被取消；也不该占菜单自己的生命周期。
+     */
+    private val scope: CoroutineScope,
+) : ConnectionActions {
 
     override suspend fun connect(connectionId: String) = request(connectionId, "connect")
 
@@ -96,12 +109,17 @@ class ConnectionActionsImpl(private val state: ConnectionMenuState) : Connection
             name = connection.name + stringResource("connection_copy_suffix"),
             status = ConnectionStatus.Disconnected,
         )
-        ConnectionStore.create(duplicate).onFailure { failure ->
-            CoreModule.reportError(
-                message = failure.message ?: failure::class.simpleName ?: "unknown",
-                source = "app-ui",
-                error = failure,
-            )
+        // 落盘要写整份 config.toml（含敏感字段 AES 加密 + 原子换文件），不能压在
+        // 点击回调所在的 UI 线程上。失败仍然走错误通道，与之前一致。
+        scope.launch {
+            val result = withContext(Dispatchers.IO) { ConnectionStore.create(duplicate) }
+            result.onFailure { failure ->
+                CoreModule.reportError(
+                    message = failure.message ?: failure::class.simpleName ?: "unknown",
+                    source = "app-ui",
+                    error = failure,
+                )
+            }
         }
     }
 

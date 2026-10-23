@@ -16,8 +16,11 @@ import com.mqclient.rabbitmq.toOptions
 import com.mqclient.uicommon.i18n.stringResource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 
 /**
@@ -82,7 +85,7 @@ class RabbitMqConnectionFormState(
 
     /** ---------------- 宿主契约（busy / onSaved）---------------- */
 
-    override val busy: Boolean get() = saveState == SaveState.Testing
+    override val busy: Boolean get() = saveState == SaveState.Testing || saving
 
     /** ---------------- 流程状态 ---------------- */
 
@@ -90,6 +93,12 @@ class RabbitMqConnectionFormState(
     var errors by mutableStateOf(RabbitMqFieldErrors()); private set
     var saveError by mutableStateOf<String?>(null); private set
     var saveState by mutableStateOf<SaveState>(SaveState.Idle); private set
+
+    /**
+     * 落盘进行中（「仍要保存」路径）：落盘已挪到 IO 线程，这段窗口里必须挡住重复提交，
+     * 否则双击会写出两条连接（[ConnectionStore.update] 每次都换发新 id，不会报「已存在」）。
+     */
+    private var saving by mutableStateOf(false)
 
     /** 测试失败待确认的配置快照：用户选「仍要保存」时按它落盘。 */
     var pendingConfig by mutableStateOf<RabbitMqConfig?>(null); private set
@@ -267,7 +276,19 @@ class RabbitMqConnectionFormState(
 
     /** 用户在确认框选「仍要保存」：按测试时的配置快照落盘。 */
     fun confirmSave() {
-        pendingConfig?.let(::doSave)
+        val config = pendingConfig ?: return
+        // 先摘掉待保存配置并关掉确认框（它只在 Failed 时渲染）：落盘已改为异步，
+        // 不清的话这段窗口里还能再点一次「保存」，写出两条连接。
+        pendingConfig = null
+        saveState = SaveState.Idle
+        saving = true
+        scope.launch {
+            try {
+                doSave(config)
+            } finally {
+                saving = false
+            }
+        }
     }
 
     /** 用户在确认框选「取消」：只关确认框，回到 Idle —— 主对话框保留，表单原样可改。 */
@@ -298,7 +319,7 @@ class RabbitMqConnectionFormState(
      * 成功自动发 `core.connection.added/updated`），这里不重复发。敏感键（password）
      * 落盘时由 SensitiveOptionsSerializer 自动加密，这里保持明文。
      */
-    private fun doSave(config: RabbitMqConfig) {
+    private suspend fun doSave(config: RabbitMqConfig) {
         val info = ConnectionInfo(
             id = editingId ?: newConnectionId(),
             name = name.ifBlank { defaultName },
@@ -309,8 +330,11 @@ class RabbitMqConnectionFormState(
             port = config.amqpPort,
             options = config.toOptions(),
         )
-        val result =
+        // 写盘（读整份 config.toml + 敏感字段加密 + 原子换文件）走 IO，不压 UI 线程。
+        // NonCancellable：点了「完成」之后的落盘不该因对话框关闭而半途作废。
+        val result = withContext(Dispatchers.IO + NonCancellable) {
             if (editingId == null) ConnectionStore.create(info) else ConnectionStore.update(info)
+        }
         val failure = result.exceptionOrNull()
         if (failure != null) {
             pendingConfig = null

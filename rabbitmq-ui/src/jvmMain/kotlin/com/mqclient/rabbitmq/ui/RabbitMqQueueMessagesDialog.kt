@@ -143,7 +143,25 @@ fun RabbitMqQueueMessagesDialog(
     }
 
     // 会话三态：打开即建 AMQP 连接（passive 校验队列存在）。
+    //
+    // 重开（换队列 / 重试）前必须先关旧会话：`session` 不按 queueName 取 key，同一对话框
+    // 实例换队列时它仍指向旧连接 —— 直接覆盖会让那条 AMQP Connection + Channel 一直挂着
+    // （旧 channel 上的未 ack 消息也一直不还给队列，要等对话框销毁）。
+    //
+    // 关掉之后消息列表上的 deliveryTag 全部作废：tag 是 channel 级、新 channel 从 1 重新
+    // 计数，旧 tag 拿去 ack 会命中新会话里的**另一条**消息。所以一并清空列表，让用户
+    // 在新会话上重新拉取。
     LaunchedEffect(connectionId, queueName, sessionRetry) {
+        session?.let { previous ->
+            session = null
+            previous.close()
+        }
+        messages = emptyList()
+        held = 0
+        exhausted = false
+        // 详情 / 转发选择都持有旧会话的消息对象，同样作废。
+        detail = null
+        forwarding = emptyList()
         sessionState = LoadState.Loading
         sessionState = runCatching {
             val s = RabbitMqModule.openMessageSession(connectionId, queueName)
