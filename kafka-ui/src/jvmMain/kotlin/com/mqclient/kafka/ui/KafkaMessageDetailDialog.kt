@@ -36,6 +36,7 @@ import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.file.saveFileBytes
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
+import com.mqclient.uicommon.table.formatTimestamp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 

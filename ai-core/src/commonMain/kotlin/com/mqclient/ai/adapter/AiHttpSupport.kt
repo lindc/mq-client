@@ -3,25 +3,35 @@ package com.mqclient.ai.adapter
 import com.mqclient.ai.AiException
 import com.mqclient.core.AiConnection
 import com.mqclient.core.log.Log
-import io.ktor.client.HttpClient
-import io.ktor.client.engine.cio.CIO
-import io.ktor.client.engine.java.Java
-import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.isSuccess
-import java.security.SecureRandom
-import java.security.cert.X509Certificate
-import javax.net.ssl.SSLContext
-import javax.net.ssl.X509TrustManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 
-/** 适配器层统一日志 tag。 */
-internal const val AI_ADAPTER_LOG_TAG = "ai-adapter"
+/**
+ * 适配器层的**平台中立**部分：JSON、URL 规范化、错误翻译、连接测试骨架。
+ *
+ * 与 [AiHttp]（jvmMain，构造 Ktor 客户端）拆开的原因：这几个函数被
+ * `OpenAiCompatibleAdapter` / `AnthropicAdapter` 的 commonMain 代码调用 ——
+ * 它们只依赖 Ktor 的公共 API 与 kotlinx.serialization，可以留在 commonMain。
+ * 客户端构造要 `io.ktor.client.engine.java` / `javax.net.ssl.SSLContext`，
+ * 那部分放在 jvmMain 才是诚实的（见 AiHttp 的 KDoc）。
+ *
+ * 残余依赖说明：[isAiSslFailure] 仍用 `javax.net.ssl` / `java.security.cert` 的
+ * 异常类型做分类，而 [testQuietly] 依赖它 —— 两者因此留在 commonMain。项目当前
+ * 只有 `jvm()` 一个 target，这个残余依赖是已知且被记录的；真要加第二个 target，
+ * 这里应改成 expect/actual。
+ */
+
+/**
+ * 适配器层统一日志 tag（public：provider 模块的适配器也要用它，`internal` 只在
+ * 本模块内可见）。
+ */
+const val AI_ADAPTER_LOG_TAG = "ai-adapter"
 
 /**
  * 适配器层共享的 JSON 解析器：宽松（服务端多加字段、格式小偏差都不致命）。
@@ -32,68 +42,6 @@ internal const val AI_ADAPTER_LOG_TAG = "ai-adapter"
 val aiJson: Json = Json {
     ignoreUnknownKeys = true
     isLenient = true
-}
-
-/**
- * 全进程共享的 Ktor 客户端（惰性创建）。
- *
- * 故意不开 `expectSuccess`：非 2xx 由 [throwIfNotSuccess] 统一转成 [AiException]，
- * 这样错误信息里能带上服务端返回的正文。
- *
- * 超时策略：`requestTimeoutMillis = null` —— SSE 流式回复可能持续数分钟，整体超时
- * 会中途砍断它；改用 `socketTimeoutMillis` 表达「长时间没有新数据才算断」。
- *
- * **SSL**：默认客户端（CIO）走严格校验。`ignoreSsl=true` 的连接经 [clientFor] 拿
- * trust-all 客户端（**Java 引擎**：JDK HttpClient 默认不做主机名校验，配合信任所有
- * 证书的 SSLContext 才能完整绕过链校验 + 主机名校验；CIO 的主机名校验在公开 API
- * 里关不掉 —— 自签名证书 SAN 不含访问主机名/IP 时仅 trustManager 仍会握手失败，
- * 见 Ktor 3.2.3 TLSClientHandshake 的字节码）。两条客户端只差 TLS，超时与错误
- * 口径完全一致。
- *
- * public 化理由同 [aiJson]：所有适配器模块共用同一个客户端（超时策略、日志口径一致）。
- */
-object AiHttp {
-    val client: HttpClient by lazy {
-        HttpClient(CIO) {
-            expectSuccess = false
-            install(HttpTimeout) {
-                connectTimeoutMillis = 15_000
-                socketTimeoutMillis = 120_000
-                requestTimeoutMillis = null
-            }
-        }
-    }
-
-    /** 按连接取客户端：`ignoreSsl=false`（默认）走严格 CIO；true 走 trust-all。 */
-    fun clientFor(connection: AiConnection): HttpClient =
-        if (connection.ignoreSsl) trustingClient else client
-
-    /** trust-all 客户端：惰性创建（绝大多数用户不会开启，零启动成本）。 */
-    private val trustingClient: HttpClient by lazy {
-        // 信任所有证书的 TrustManager：check* 全部空实现 —— 链校验由它接管。
-        val trustAll = object : X509TrustManager {
-            override fun checkClientTrusted(chain: Array<X509Certificate>?, authType: String?) {}
-            override fun checkServerTrusted(chain: Array<X509Certificate>?, authType: String?) {}
-            override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
-        }
-        val sslContext = SSLContext.getInstance("TLS").apply { init(null, arrayOf(trustAll), SecureRandom()) }
-        HttpClient(Java) {
-            expectSuccess = false
-            install(HttpTimeout) {
-                connectTimeoutMillis = 15_000
-                socketTimeoutMillis = 120_000
-                requestTimeoutMillis = null
-            }
-            engine {
-                // JavaHttpConfig.config 暴露原生 JDK HttpClient.Builder（receiver）；
-                // JDK HttpClient 默认不做主机名校验（除非显式设 endpointIdentification
-                // Algorithm），SSLContext 换成 trust-all 即完整绕过。
-                config {
-                    sslContext(sslContext)
-                }
-            }
-        }
-    }
 }
 
 /**

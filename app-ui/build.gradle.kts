@@ -31,8 +31,9 @@ kotlin {
             // AI 落库（ai_connection / chat_history）——bootstrapEvents 里注册订阅。
             implementation(projects.aiService)
 
-            // OpenAI-compatible AI adapter module (:openai-service) — adapter, registry
-            // and provider descriptors live there; the connection model is in app-core.
+            // AI 核心层：适配器契约 + 注册表 + HTTP 基建（设置页直接查注册表）。
+            implementation(projects.aiCore)
+            // OpenAI 兼容 provider（一个 provider 一个模块，与 anthropic 平级）。
             implementation(projects.openaiService)
             // OpenAI branding/resources (logo shown when creating a connection).
             implementation(projects.openaiUi)

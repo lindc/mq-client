@@ -17,6 +17,8 @@ import com.mqclient.uicommon.dialog.MessageDetailSectionTitle
 import com.mqclient.uicommon.dialog.MessageHeaderRow
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
+import com.mqclient.uicommon.table.formatSize
+import com.mqclient.uicommon.table.formatTimestamp
 
 /**
  * RocketMQ 消息详情对话框（浏览表格「详情」按钮打开）：body 全量随浏览一起拿到
@@ -35,7 +37,7 @@ internal fun RocketMqMessageDetailDialog(
         rawBody = message.body,
         onDismiss = onDismiss,
         subtitleText = "${message.topic} [q${message.queueId}:${message.offset}] · " +
-            rmsgFormatTimestamp(message.storeTimestamp),
+            formatTimestamp(message.storeTimestamp),
         headerContent = { RocketMqHeaderContent(message) },
         downloadBaseName = "msg_" + message.topic + "_q" + message.queueId + "_o" + message.offset,
         minWidth = 720.dp,
@@ -53,10 +55,10 @@ private fun RocketMqHeaderContent(message: RocketMqMessage) {
         MessageHeaderRow(stringResource("rocketmq_ui_msg_detail_h_msgid"), message.msgId)
         message.tags?.let { MessageHeaderRow(stringResource("rocketmq_ui_msg_detail_h_tags"), it) }
         message.keys?.let { MessageHeaderRow(stringResource("rocketmq_ui_msg_detail_h_keys"), it) }
-        MessageHeaderRow(stringResource("rocketmq_ui_msg_detail_h_born_time"), rmsgFormatTimestamp(message.bornTimestamp))
-        MessageHeaderRow(stringResource("rocketmq_ui_msg_detail_h_store_time"), rmsgFormatTimestamp(message.storeTimestamp))
+        MessageHeaderRow(stringResource("rocketmq_ui_msg_detail_h_born_time"), formatTimestamp(message.bornTimestamp))
+        MessageHeaderRow(stringResource("rocketmq_ui_msg_detail_h_store_time"), formatTimestamp(message.storeTimestamp))
         MessageHeaderRow(stringResource("rocketmq_ui_msg_detail_h_born_host"), message.bornHost)
-        MessageHeaderRow(stringResource("rocketmq_ui_msg_detail_h_body_size"), rmsgFormatSize(message.valueSize.toLong()))
+        MessageHeaderRow(stringResource("rocketmq_ui_msg_detail_h_body_size"), formatSize(message.valueSize.toLong()))
 
         // ---- 用户属性小节 ----
         Spacer(Modifier.height(12.dp))

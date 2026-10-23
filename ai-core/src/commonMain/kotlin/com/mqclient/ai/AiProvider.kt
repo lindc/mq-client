@@ -7,7 +7,8 @@ package com.mqclient.ai
  * [com.mqclient.core.AiConnection]（Provider + 地址 / token / 模型），
  * 同一个 Provider 可以有多条连接（多个账号、多个 Ollama 实例……）。
  *
- * 规范 id 的字符串只在 [AiProviders] 里出现，适配器和注册表都引用那里的常量。
+ * 具体 provider 的预置常量（如 `AiProviders.OPENAI_COMPATIBLE`）由**各自的服务模块**
+ * 定义，不放在这里 —— ai-core 只提供契约，不认识任何具体协议。
  */
 data class AiProvider(
     /** 稳定 id（如 `openai-compatible`）；连接通过 providerId 找到适配器。 */
@@ -23,17 +24,3 @@ data class AiProvider(
     /** 模型下拉候选；空列表 = 只让用户手填。 */
     val defaultModels: List<String> = emptyList(),
 )
-
-/** 内置 Provider 预置。 */
-object AiProviders {
-
-    /** OpenAI Chat Completions 协议：OpenAI / Ollama / DeepSeek / Moonshot 等。 */
-    val OPENAI_COMPATIBLE = AiProvider(
-        id = "openai-compatible",
-        name = "OpenAI 兼容",
-        description = "OpenAI Chat Completions 协议，覆盖 OpenAI、Ollama、DeepSeek、Moonshot 等服务",
-        defaultBaseUrl = "https://api.openai.com/v1",
-        requiresToken = true,
-        defaultModels = listOf("gpt-4o", "gpt-4o-mini", "deepseek-chat", "moonshot-v1-8k", "llama3.1"),
-    )
-}

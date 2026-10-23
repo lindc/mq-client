@@ -4,6 +4,7 @@ import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.db.CommandAudit
 import com.mqclient.core.cache.CacheManager
+import com.mqclient.core.concurrent.KeyedMutex
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.emit
 import org.apache.rocketmq.client.exception.MQBrokerException
@@ -16,7 +17,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
@@ -111,7 +111,8 @@ class RocketMqScanService(private val context: ServiceContext) {
         }
     }
 
-    private val scanLock = Mutex()
+    /** 按连接分组的扫描锁：同一条连接串行（防重叠扫描互相覆盖结果），不同连接并发。 */
+    private val scanLocks = KeyedMutex()
 
 
 
@@ -136,7 +137,7 @@ class RocketMqScanService(private val context: ServiceContext) {
     // ---------------------------------------------------------------- 对象慢扫
 
     /** 定时任务入口（`rocketmq.<connectionId>.scan.objects`）。 */
-    suspend fun scanObjects(connectionId: String) = scanLock.withLock {
+    suspend fun scanObjects(connectionId: String) = scanLocks.withLock(connectionId) {
         val ctx = connectedContext(connectionId) ?: return@withLock
         val admin = ctx.adminClient ?: return@withLock
         try {
@@ -198,7 +199,7 @@ class RocketMqScanService(private val context: ServiceContext) {
     // ---------------------------------------------------------------- 心跳快扫
 
     /** 定时任务入口（`rocketmq.<connectionId>.scan.lag`）：全部组的 Lag 统计。 */
-    suspend fun scanGroupLags(connectionId: String) = scanLock.withLock {
+    suspend fun scanGroupLags(connectionId: String) = scanLocks.withLock(connectionId) {
         val ctx = connectedContext(connectionId) ?: return@withLock
         val admin = ctx.adminClient ?: return@withLock
         try {

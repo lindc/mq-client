@@ -246,6 +246,7 @@
   "rabbitmq_ui_conn_props_timeout": "Timed out loading data, please retry",
   "rabbitmq_ui_conn_props_no_service": "Service unavailable",
   "rabbitmq_ui_conn_props_no_nodes": "No node data yet",
+  "rabbitmq_ui_exchange_delete_failed": "Failed to delete exchange: %1$s",
   "rabbitmq_ui_binding_add_arguments_hint": "Values are auto-typed (integer → number, true/false → boolean); headers exchanges route on these arguments",
   "rabbitmq_ui_field_truststore_path": "TLS truststore path",
   "rabbitmq_ui_hint_truststore_path": "PKCS12 truststore file (self-signed CA); empty = JVM default trust chain",

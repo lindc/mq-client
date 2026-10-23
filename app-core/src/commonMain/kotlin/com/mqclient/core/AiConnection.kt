@@ -6,12 +6,12 @@ import kotlinx.serialization.Serializable
  * 一条用户创建的 AI 连接（Provider + 具体配置）。
  *
  * 与 MQ 侧的 [ConnectionInfo] 同一思路，但只服务 AI 面板 / AI 适配器：
- *  - [providerId] 指向 openai-service 里 `com.mqclient.ai.AiProvider.id`
+ *  - [providerId] 指向 ai-core 里 `com.mqclient.ai.AiProvider.id`
  *    （内置 `openai-compatible`），适配器据此分发；
  *  - [token] 挂 [EncryptedStringSerializer]（[Sensitive] 标注意图）→ 落盘自动加密；
  *  - 同一个 Provider 可以有多条连接（多个账号、多个 Ollama 实例），互不影响。
  *
- * 为什么放 commonMain：openai-service 的 commonMain（适配器接口）要引用它；
+ * 为什么放 commonMain：ai-core 的 commonMain（适配器接口）要引用它；
  * jvmMain 的 ConfigModel 再引用 commonMain 的类则是合法方向（jvmMain 可见 commonMain）。
  */
 @Serializable
@@ -34,7 +34,7 @@ data class AiConnection(
     val enabled: Boolean = true,
     /**
      * 忽略 SSL 证书校验（信任自签名证书）：仅影响本连接的 HTTP 客户端（Java 引擎
-     * trust-all，见 openai-service 的 AiHttp.clientFor），默认 false 走严格的 CIO
+     * trust-all，见 ai-core 的 AiHttp.clientFor），默认 false 走严格的 CIO
      * 校验，不影响进程里其他 HTTPS 流量。自建 AI 服务器 + HTTPS 自签名证书时开启。
      */
     val ignoreSsl: Boolean = false,

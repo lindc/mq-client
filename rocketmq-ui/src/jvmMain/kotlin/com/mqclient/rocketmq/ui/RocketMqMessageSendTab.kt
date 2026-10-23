@@ -60,6 +60,9 @@ import com.mqclient.uicommon.file.pickFiles
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
+import com.mqclient.uicommon.table.TableHeaderText
+import com.mqclient.uicommon.table.TableRowActionIcon
+import com.mqclient.uicommon.table.formatSize
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -506,10 +509,10 @@ private fun MultiSendPane(state: RocketMqSendMessagesState) {
                 .padding(horizontal = RMSG_ROW_HPADDING, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            RmsgTableHeaderText(stringResource("rocketmq_ui_send_files_col_name"), Modifier.weight(1f))
-            RmsgTableHeaderText(stringResource("rocketmq_ui_send_files_col_size"), Modifier.width(80.dp))
-            RmsgTableHeaderText(stringResource("rocketmq_ui_send_files_col_status"), Modifier.width(110.dp))
-            RmsgTableHeaderText(stringResource("rocketmq_ui_send_files_col_actions"), Modifier.width(80.dp))
+            TableHeaderText(stringResource("rocketmq_ui_send_files_col_name"), Modifier.weight(1f))
+            TableHeaderText(stringResource("rocketmq_ui_send_files_col_size"), Modifier.width(80.dp))
+            TableHeaderText(stringResource("rocketmq_ui_send_files_col_status"), Modifier.width(110.dp))
+            TableHeaderText(stringResource("rocketmq_ui_send_files_col_actions"), Modifier.width(80.dp))
         }
         HorizontalDivider()
         LazyColumn(modifier = Modifier.weight(1f)) {
@@ -546,7 +549,7 @@ private fun SendTaskRow(task: RocketMqSendTask, state: RocketMqSendMessagesState
             )
         }
         Text(
-            text = rmsgFormatSize(task.fileSize),
+            text = formatSize(task.fileSize),
             style = MaterialTheme.typography.bodySmall,
             maxLines = 1,
             modifier = Modifier.width(80.dp),

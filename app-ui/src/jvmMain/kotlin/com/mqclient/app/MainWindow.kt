@@ -63,6 +63,7 @@ import com.mqclient.core.event.getBoolean
 import com.mqclient.core.event.getLong
 import com.mqclient.core.event.getString
 import com.mqclient.uicommon.i18n.stringResource
+import com.mqclient.uicommon.i18n.withArg
 
 /**
  * Window widths at or above this get the full tree sidebar; narrower windows
@@ -323,7 +324,7 @@ fun MainWindow(
                         when {
                             current == null -> {
                                 Text(
-                                    "Select a connection from the sidebar",
+                                    stringResource("common_select_connection"),
                                     modifier = Modifier.align(Alignment.Center),
                                 )
                             }
@@ -335,7 +336,8 @@ fun MainWindow(
                                     ui.content()
                                 } else {
                                     Text(
-                                        "Module UI missing for ${connection?.serviceId}",
+                                        stringResource("module_ui_missing")
+                                            .withArg(connection?.serviceId ?: "-"),
                                         modifier = Modifier.align(Alignment.Center),
                                     )
                                 }

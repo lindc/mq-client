@@ -188,25 +188,15 @@ data class RabbitMqNodeDto(
  * 带原因的 [IllegalStateException]（文案直出 UI，见 [friendlyError]）；CancellationException
  * 原样上抛（协程取消不能吞）。
  */
-class RabbitMqAdminClient(private val config: RabbitMqConfig) : AutoCloseable {
+class RabbitMqAdminClient internal constructor(
+    private val config: RabbitMqConfig,
+    private val http: HttpClient,
+) : AutoCloseable {
+
+    /** 生产构造：自建 Java 引擎客户端（TLS 信任库随配置）。 */
+    constructor(config: RabbitMqConfig) : this(config, defaultHttpClient(config))
 
     private val json = Json { ignoreUnknownKeys = true }
-
-    private val http: HttpClient = HttpClient(Java) {
-        // 状态码自己检查转文案（expectSuccess=true 会先抛不带上下文的异常）。
-        expectSuccess = false
-        // 自签 CA：信任库配置了就挂定制 SSLContext（AMQP 会话与管理 API 同源）。
-        engine {
-            rabbitMqSslContext(config.tlsTruststorePath, config.tlsTruststorePassword)?.let { ctx ->
-                config { sslContext(ctx) }
-            }
-        }
-        install(HttpTimeout) {
-            requestTimeoutMillis = config.connectionTimeout * 1_000L
-            connectTimeoutMillis = config.connectionTimeout * 1_000L
-            socketTimeoutMillis = config.connectionTimeout * 1_000L
-        }
-    }
 
     private val authHeader: String =
         "Basic " + Base64.getEncoder()
@@ -518,5 +508,28 @@ class RabbitMqAdminClient(private val config: RabbitMqConfig) : AutoCloseable {
 
     override fun close() {
         http.close()
+    }
+}
+
+/**
+ * 生产用的 HTTP 客户端：Java 引擎（CIO 不支持定制 SSLContext）、关掉 expectSuccess
+ * （状态码自己转文案）、超时按连接配置。
+ *
+ * 单独抽成顶层函数（而不是写在类里的属性初始化）是为了给测试留缝：
+ * [RabbitMqAdminClient] 的 internal 主构造能直接拿到 MockEngine 客户端。
+ */
+private fun defaultHttpClient(config: RabbitMqConfig): HttpClient = HttpClient(Java) {
+    // 状态码自己检查转文案（expectSuccess=true 会先抛不带上下文的异常）。
+    expectSuccess = false
+    // 自签 CA：信任库配置了就挂定制 SSLContext（AMQP 会话与管理 API 同源）。
+    engine {
+        rabbitMqSslContext(config.tlsTruststorePath, config.tlsTruststorePassword)?.let { ctx ->
+            config { sslContext(ctx) }
+        }
+    }
+    install(HttpTimeout) {
+        requestTimeoutMillis = config.connectionTimeout * 1_000L
+        connectTimeoutMillis = config.connectionTimeout * 1_000L
+        socketTimeoutMillis = config.connectionTimeout * 1_000L
     }
 }

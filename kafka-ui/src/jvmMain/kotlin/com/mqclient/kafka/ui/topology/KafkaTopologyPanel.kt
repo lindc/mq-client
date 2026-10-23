@@ -41,6 +41,7 @@ import com.mqclient.kafka.ui.rememberKafkaConnectionStatus
 import com.mqclient.mqui.state.LoadState
 import com.mqclient.uicommon.command.ToolbarButton
 import com.mqclient.topology.TopologyCanvas
+import com.mqclient.topology.topicBrokerLayout
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
@@ -193,7 +194,7 @@ fun KafkaTopologyPanel(
 
                 TopologyCanvas(
                     data = current,
-                    layoutProvider = kafkaColumnLayoutProvider,
+                    layoutProvider = topicBrokerLayout,
                     // 节点可拖拽：位置仅会话内有效（kuiver manualPositions，内存态），
                     // 切走 / 关闭 Tab 随组合销毁恢复默认布局。
                     nodeDragEnabled = true,
@@ -213,9 +214,6 @@ fun KafkaTopologyPanel(
                         .weight(1f)
                         .fillMaxSize(),
                     fallbackType = TopologyNodeType.BROKER,
-                    // 布局 provider 在布局阶段读模块级类型查找表：写入与 relayout 由
-                    // TopologyCanvas 保证主线程相邻（时序不变量见 TopologyCanvas 文档）。
-                    onBeforeLayout = { kafkaTopologyNodeTypes = it.nodeTypes },
                     snackbarHostState = snackbarHostState,
                 )
             }

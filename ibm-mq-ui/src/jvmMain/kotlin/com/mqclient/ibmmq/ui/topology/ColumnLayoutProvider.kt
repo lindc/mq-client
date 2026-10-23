@@ -7,23 +7,9 @@ import com.dk.kuiver.model.Kuiver
 import com.dk.kuiver.model.KuiverNode
 import com.dk.kuiver.model.buildKuiverWithClassifiedEdges
 import com.dk.kuiver.model.layout.LayoutConfig
-import com.dk.kuiver.model.layout.LayoutProvider
 import com.mqclient.graph.TopologyNodeType
 import com.mqclient.topology.CARD_HEIGHT
-
-/**
- * 当前图的 `nodeId → 类型` 查找表，供 [columnLayoutProvider] 在布局阶段读取。
- *
- * kuiver 的 LayoutProvider 只看得到通用节点（无 type 字段），而固定列序 / alias 链深度
- * 都需要类型语义。与 topology-ui 通用面板的 clusteredTypeLookup 同一思路：桌面单面板
- * 场景下用模块级暂存足够。
- *
- * **线程/时序不变量**：写入（[TopologyPanel] 的 LaunchedEffect 里 `topologyNodeTypes = …`）
- * 与消费（紧随的 `relayout()` → provider 同步执行）必须保持**主线程相邻语句、中间无挂起点**
- * ——Main dispatcher 单线程下其他面板的布局不可能插进这个窗口，故不会串图。若未来把
- * 布局挪到后台或拆散这两句，必须先把本表改为随图传递（如包进 LayoutConfig）。
- */
-internal var topologyNodeTypes: Map<String, TopologyNodeType> = emptyMap()
+import com.mqclient.topology.TopologyLayoutProvider
 
 /**
  * 「按角色分列 + 数据流泳道」的自定义布局（[LayoutConfig.Custom] 用）。
@@ -48,11 +34,14 @@ internal var topologyNodeTypes: Map<String, TopologyNodeType> = emptyMap()
  *
  * 节点坐标由本 provider 直接写入并经 [buildKuiverWithClassifiedEdges] 重建，边类型
  * （FORWARD / BACK / CROSS / SELF_LOOP）随之定档，BACK 边由面板标橙。
+ *
+ * `nodeTypes` 由 [com.mqclient.topology.TopologyCanvas] 按图传入（见
+ * [TopologyLayoutProvider]）—— 本模块不再持有任何模块级查找表，布局在后台线程执行也
+ * 不会读到别的面板写进去的类型。
  */
-val columnLayoutProvider: LayoutProvider = labeled@{ kuiver, config ->
+val columnLayoutProvider: TopologyLayoutProvider = labeled@{ kuiver, config, types ->
     val nodes = kuiver.nodes.values.toList()
     if (nodes.isEmpty()) return@labeled kuiver
-    val types = topologyNodeTypes
 
     // ---- 邻接表（有向 + 无向各一份）----
     val outgoing = mutableMapOf<String, MutableList<String>>()

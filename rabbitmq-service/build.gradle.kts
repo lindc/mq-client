@@ -30,6 +30,8 @@ kotlin {
         }
         jvmTest.dependencies {
             implementation(kotlin("test"))
+            // 管理 API 写操作契约测试：MockEngine 替换真实网络（不碰集群）。
+            implementation(libs.ktor.client.mock)
         }
     }
 }

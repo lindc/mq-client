@@ -4,6 +4,7 @@ import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.db.CommandAudit
 import com.mqclient.core.cache.CacheManager
+import com.mqclient.core.concurrent.KeyedMutex
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.emit
 import java.util.concurrent.TimeUnit
@@ -11,7 +12,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.apache.kafka.clients.admin.AdminClient
@@ -73,8 +73,8 @@ class KafkaScanService(private val context: ServiceContext) {
         const val LAG_TTL_FACTOR = 2f
     }
 
-    /** 同一模块内多次扫描串行执行，避免重叠扫描互相覆盖结果（与 MQ 的 scanLock 同职责）。 */
-    private val scanLock = Mutex()
+    /** 按连接分组的扫描锁：同一条连接串行（防重叠扫描互相覆盖结果），不同连接并发。 */
+    private val scanLocks = KeyedMutex()
 
     // ---------------------------------------------------------------- 对象慢扫
 
@@ -84,7 +84,7 @@ class KafkaScanService(private val context: ServiceContext) {
      *
      * topic 的 configs 不取（describeConfigs 每主题一调用太重），第一版只要布局快照。
      */
-    suspend fun scanObjects(connectionId: String) = scanLock.withLock {
+    suspend fun scanObjects(connectionId: String) = scanLocks.withLock(connectionId) {
         val ctx = connectedContext(connectionId) ?: return@withLock
         val admin = ctx.adminClient ?: return@withLock
         try {
@@ -150,7 +150,7 @@ class KafkaScanService(private val context: ServiceContext) {
      * 单组失败（无权 / 组消失 / 超时）只跳过该组（受限账号的预期现象）；list
      * consumer groups 与 listOffsets 这两步失败才是整轮失败。
      */
-    suspend fun scanGroupLags(connectionId: String) = scanLock.withLock {
+    suspend fun scanGroupLags(connectionId: String) = scanLocks.withLock(connectionId) {
         val ctx = connectedContext(connectionId) ?: return@withLock
         val admin = ctx.adminClient ?: return@withLock
         try {

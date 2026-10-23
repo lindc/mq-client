@@ -15,6 +15,7 @@ import com.mqclient.ibmmq.messaging.SendResult
 import com.mqclient.ibmmq.messaging.deleteMessageById
 import com.mqclient.ibmmq.messaging.downloadMessageBody
 import com.mqclient.ibmmq.messaging.getMessageDetail
+import com.mqclient.core.concurrent.KeyedMutex
 import com.mqclient.ibmmq.messaging.sendMessageToQueue
 import com.mqclient.ibmmq.pcf.ChannelStatusDetail
 import com.mqclient.ibmmq.pcf.ClusterRelations
@@ -114,8 +115,11 @@ class IbmMQService(private val context: ServiceContext) {
         }
     }
 
-    /** 同一模块内多次扫描串行执行，避免重叠扫描互相覆盖结果。 */
-    private val scanLock = Mutex()
+    /**
+     * 按连接分组的扫描锁：**同一条连接**上的扫描串行（防重叠扫描互相覆盖结果），
+     * 不同连接可以并发 —— 一把全局锁会让 A 的慢扫挡住 B 的刷新。
+     */
+    private val scanLocks = KeyedMutex()
 
     /** PCF 全对象扫描器（每次查询自建 agent，可并发）。 */
     private val objectScanner = PcfObjectScanner()
@@ -141,11 +145,13 @@ class IbmMQService(private val context: ServiceContext) {
     fun startScan(connectionId: String) {
         ibmMqLog.debug("manual scan requested: connection=$connectionId")
         val started = context.coroutineScope.launch {
-            scanLock.withLock {
+            scanLocks.withLock(connectionId) {
                 // 显式连接模型：没连上就没有 cache 可写，也没有 MQ 句柄可查。
                 if (connectedContext(connectionId) == null) {
                     ibmMqLog.debug("manual scan skipped (not connected): connection=$connectionId")
-                    return@launch
+                    // KeyedMutex.withLock 不是 inline（要维护 key 的引用计数），
+                    // 所以这里只能用 lambda 自己的标签退出，不能用 return@launch。
+                    return@withLock
                 }
                 // 事件名来自 IbmMQEvents，payload 里的 moduleId / source 由
                 // ServiceContext.emit 自动补上。
@@ -416,11 +422,11 @@ class IbmMQService(private val context: ServiceContext) {
      * 消息数量 + 通道运行状态。**状态守卫**：非 CONNECTED（未连 / 连接中 / 已失败）
      * 直接跳过 —— 连接失败后任务不注销、靠状态守卫空转，用户重连后自动恢复。
      *
-     * 与 [startScan] 共用一把 [scanLock]：定时扫描和用户手动扫描不会同时压到同一条连接上。
+     * 与 [startScan] 共用同一把按连接的 [scanLocks]：定时扫描和用户手动扫描不会同时压到同一条连接上。
      * 业务错误在这里就转成 `*.failed` 事件了 —— 能落到调度器 `JOB_FAILED` 的是「意料之外」
      * 的异常（代码 bug 之类），两者别混为一谈。
      */
-    suspend fun scanMessageCounts(connectionId: String) = scanLock.withLock {
+    suspend fun scanMessageCounts(connectionId: String) = scanLocks.withLock(connectionId) {
         val ctx = connectedContext(connectionId) ?: return@withLock
         try {
             // 真 PCF：INQUIRE_Q_STATUS / INQUIRE_CHANNEL_STATUS 各一条，拿全部
@@ -475,7 +481,7 @@ class IbmMQService(private val context: ServiceContext) {
      * QMGR 上已删除的对象）。完成后发 OBJECTS_SCANNED，订阅方（UI）读缓存刷新
      * —— 全程不碰 UI 线程。
      */
-    suspend fun scanObjects(connectionId: String) = scanLock.withLock {
+    suspend fun scanObjects(connectionId: String) = scanLocks.withLock(connectionId) {
         connectedContext(connectionId) ?: return@withLock
         try {
             val result = objectScanner.scanAll(connectionId)

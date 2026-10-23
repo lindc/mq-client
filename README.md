@@ -49,6 +49,8 @@ KMP 桌面端的中间件管理工具（当前主打 IBM MQ），Compose Multipl
 
 `DELETE / CLEAR / ALTER / STOP / RESET` 开头的命令会先弹确认框，确认后才真正执行；执行中可随时点「取消」（当前这条跑完后停止后续命令）。
 
+判定用的是**展开缩写之后**的动词，所以 `del q(Q1)` / `clr q(Q1)` / `alt` / `sto` / `res` 与全称同样会弹确认框 —— 缩写不会绕过这一步。
+
 ## RabbitMQ 连接与 TLS
 
 RabbitMQ 连接涉及**两套端口**：AMQP 0.9.1（默认 5672，消息收发）与管理 API（默认 15672，扫描 / 属性面板 / 拓扑）。勾选「启用 TLS」后两者分别走 5671 / https。

@@ -6,6 +6,7 @@ import com.mqclient.aiservice.db.AiConnectionSnapshotRepository
 import com.mqclient.core.CoreModule
 import com.mqclient.core.event.AppEvent
 import com.mqclient.core.event.getString
+import kotlinx.coroutines.CancellationException
 
 /**
  * 处理 [AiEvents.AI_CONNECTION_SNAPSHOT_CREATED]：把连接快照写进 ai_connection 表。
@@ -23,13 +24,17 @@ class AiConnectionSnapshotHandler(private val repository: AiConnectionSnapshotRe
         val prevId = event.getString(AiPayloadKeys.PREV_ID) // url 变化 = 旧连接的 UUID；全新建为 null
         val serviceUrl = event.getString(AiPayloadKeys.SERVICE_URL) ?: return
 
-        runCatching { repository.saveSnapshot(connectionId, prevId, serviceUrl) }
-            .onFailure { error ->
-                CoreModule.reportError(
-                    message = "AI 连接快照写入失败（connectionId=$connectionId）",
-                    source = "ai-panel",
-                    error = error,
-                )
-            }
+        // 不用 runCatching：它连 CancellationException 一起吞，协程取消失效。
+        try {
+            repository.saveSnapshot(connectionId, prevId, serviceUrl)
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (error: Throwable) {
+            CoreModule.reportError(
+                message = "AI 连接快照写入失败（connectionId=$connectionId）",
+                source = "ai-panel",
+                error = error,
+            )
+        }
     }
 }

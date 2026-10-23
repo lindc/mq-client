@@ -84,15 +84,16 @@ import com.mqclient.uicommon.i18n.LanguageResources
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
+import com.mqclient.uicommon.table.TableHeaderText
+import com.mqclient.uicommon.table.TableRowActionIcon
+import com.mqclient.uicommon.table.formatSize
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import java.time.Instant
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
-import java.util.Locale
 
 /** 「加载更多」每批条数（串行翻页）。 */
 private const val PAGE_SIZE = 100
@@ -554,17 +555,6 @@ private fun MessageTable(
 }
 
 @Composable
-internal fun TableHeaderText(text: String, modifier: Modifier = Modifier) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.labelLarge,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        maxLines = 1,
-        modifier = modifier,
-    )
-}
-
-@Composable
 private fun MessageRow(
     message: MessageSummary,
     onCopy: (String) -> Unit,
@@ -614,14 +604,14 @@ private fun MessageRow(
         )
         Row(modifier = Modifier.width(COL_DETAIL)) {
             // 详细：弹出详情对话框（内容待实装，先空壳）。
-            RowActionIcon(
+            TableRowActionIcon(
                 icon = Icons.Default.Info,
                 tooltip = stringResource("ibm_mq_msg_col_detail"),
                 enabled = !anyActionInProgress,
                 onClick = { onDetail(message) },
             )
             // 下载：取完整消息体弹「另存为」，队列消息不动。
-            RowActionIcon(
+            TableRowActionIcon(
                 icon = Icons.Default.Download,
                 tooltip = stringResource("ibm_mq_msg_browse_download"),
                 enabled = !anyActionInProgress,
@@ -629,47 +619,13 @@ private fun MessageRow(
                 onClick = { onDownload(message) },
             )
             // 删除：按 MessageId 消费掉该条（只动这一条），成功后刷新列表。
-            RowActionIcon(
+            TableRowActionIcon(
                 icon = Icons.Default.Delete,
                 tooltip = stringResource("ibm_mq_msg_browse_delete"),
                 enabled = !anyActionInProgress,
                 executing = actionInProgress,
                 onClick = { onDelete(message) },
             )
-        }
-    }
-}
-
-/** 表格行内的 24dp 图标操作钮（ObjectCard 的 ActionIconButton 同款尺寸与禁用降透明）。 */
-@Composable
-private fun RowActionIcon(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    tooltip: String,
-    enabled: Boolean = true,
-    executing: Boolean = false,
-    onClick: () -> Unit = {},
-) {
-    AppTooltip(tooltip) {
-        IconButton(
-            onClick = onClick,
-            enabled = enabled && !executing,
-            modifier = Modifier.size(24.dp),
-        ) {
-            if (executing) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(16.dp),
-                    strokeWidth = 2.dp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = tooltip,
-                    modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        .copy(alpha = if (enabled) 1f else 0.38f),
-                )
-            }
         }
     }
 }
@@ -929,8 +885,3 @@ private fun filterMessages(
     }
 }
 
-/** 大小列：< 1KB 显示字节，否则 KB（1 位小数）；浏览 / 发送两页共用。 */
-internal fun formatSize(bytes: Long): String = when {
-    bytes < 1024 -> "$bytes B"
-    else -> String.format(Locale.ROOT, "%.1f KB", bytes / 1024.0)
-}

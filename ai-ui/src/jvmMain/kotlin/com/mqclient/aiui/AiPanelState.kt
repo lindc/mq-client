@@ -341,10 +341,14 @@ class AiPanelState internal constructor(
         val connectionId = activeConnection?.id ?: return
         listFor(connectionId).clear()
         scope.launch {
-            runCatching { ChatHistoryRepository.deleteByConnectionId(connectionId) }
-                .onFailure { error ->
-                    CoreModule.reportError(message = "清空 AI 对话失败", source = SOURCE_TAG, error = error)
-                }
+            // 不用 runCatching：它连 CancellationException 一起吞，协程取消失效。
+            try {
+                ChatHistoryRepository.deleteByConnectionId(connectionId)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Throwable) {
+                CoreModule.reportError(message = "清空 AI 对话失败", source = SOURCE_TAG, error = error)
+            }
         }
     }
 
@@ -360,12 +364,15 @@ class AiPanelState internal constructor(
      */
     private suspend fun ensureHistoryLoaded(connectionId: String, list: SnapshotStateList<AiMessage>) {
         if (!historyLoaded.add(connectionId)) return
-        val rows = runCatching {
+        val rows = try {
             ChatHistoryRepository.getRecent(connectionId, limit = config.historyLimit.toLong())
-        }.onFailure { error ->
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (error: Throwable) {
             // 读取失败不弹全局错误框（非关键后台数据，缺了不影响发消息），降级为日志。
             Log.warn(SOURCE_TAG, "failed to load chat history: $error")
-        }.getOrDefault(emptyList())
+            emptyList()
+        }
         list.addAll(rows.toAiMessages())
     }
 

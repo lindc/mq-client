@@ -133,7 +133,7 @@ object RocketMqModule {
     fun messageServiceOrNull(): RocketMqMessageService? = messageService
 
     /**
-     * 手动扫描入口（UI 刷新按钮）：在模块 scope 里跑一轮**对象慢扫**（scanLock
+     * 手动扫描入口（UI 刷新按钮）：在模块 scope 里跑一轮**对象慢扫**（按连接的 scanLocks
      * 串行）；扫完经 OBJECTS_SCANNED 事件驱动 UI 刷新。
      */
     fun scanNow(connectionId: String) {
