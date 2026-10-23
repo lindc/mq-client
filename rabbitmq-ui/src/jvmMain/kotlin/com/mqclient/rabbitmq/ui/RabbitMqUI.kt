@@ -1,7 +1,9 @@
 package com.mqclient.rabbitmq.ui
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -48,52 +50,40 @@ class RabbitMqUI : AdapterUI {
      */
     override fun contentFor(objectType: String, connectionId: String): (@Composable () -> Unit)? {
         val connected = RabbitMqModule.connectionOrNull(connectionId) != null
+        if (!connected) return null
+        // 四个页都是「读同一份慢扫缓存」的视图，所以「部分数据未刷新」提示在**同一处**
+        // 统一包上（contentFor 是四个面板的唯一入口）—— 各个面板里各写一份是同类
+        // 提示四处漏三处的温床。
         return when (objectType) {
-            "queues" ->
-                if (connected) {
-                    {
-                        RabbitMqQueuesPanel(
-                            connectionId = connectionId,
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                    }
-                } else {
-                    null
-                }
-            "exchanges" ->
-                if (connected) {
-                    {
-                        RabbitMqExchangesPanel(
-                            connectionId = connectionId,
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                    }
-                } else {
-                    null
-                }
-            "overview" ->
-                if (connected) {
-                    {
-                        RabbitMqOverviewPanel(
-                            connectionId = connectionId,
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                    }
-                } else {
-                    null
-                }
-            "topology" ->
-                if (connected) {
-                    {
-                        RabbitMqTopologyPanel(
-                            connectionId = connectionId,
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                    }
-                } else {
-                    null
-                }
+            "queues" -> {
+                { RabbitMqPanelHost(connectionId) { RabbitMqQueuesPanel(connectionId, Modifier.fillMaxSize()) } }
+            }
+            "exchanges" -> {
+                { RabbitMqPanelHost(connectionId) { RabbitMqExchangesPanel(connectionId, Modifier.fillMaxSize()) } }
+            }
+            "overview" -> {
+                { RabbitMqPanelHost(connectionId) { RabbitMqOverviewPanel(connectionId, Modifier.fillMaxSize()) } }
+            }
+            "topology" -> {
+                { RabbitMqPanelHost(connectionId) { RabbitMqTopologyPanel(connectionId, Modifier.fillMaxSize()) } }
+            }
             else -> null
         }
+    }
+}
+
+/**
+ * 面板外壳：顶部「部分数据未刷新」提示（有的话）+ 剩余空间给面板本体。
+ *
+ * `weight(1f)` 而不是 `fillMaxSize()`：提示条占高后内容必须缩，不能溢出到窗口外。
+ */
+@Composable
+private fun RabbitMqPanelHost(
+    connectionId: String,
+    content: @Composable () -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        RabbitMqPartialScanBanner(connectionId)
+        Box(modifier = Modifier.weight(1f).fillMaxWidth()) { content() }
     }
 }
