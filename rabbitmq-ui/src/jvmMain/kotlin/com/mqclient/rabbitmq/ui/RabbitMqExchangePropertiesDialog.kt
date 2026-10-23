@@ -36,6 +36,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.mqclient.core.concurrent.runCatchingCancellable
 import com.mqclient.uicommon.command.ToolbarButton
 import com.mqclient.mqui.state.LoadState
 import com.mqclient.rabbitmq.RabbitMqBindingSnapshot
@@ -143,7 +144,7 @@ fun RabbitMqExchangePropertiesDialog(
 
     LaunchedEffect(connectionId, exchangeName, bindingsReload) {
         bindingsState = LoadState.Loading
-        bindingsState = runCatching {
+        bindingsState = runCatchingCancellable {
             val service = RabbitMqModule.serviceOrNull() ?: error("服务未初始化")
             LoadState.Success(service.exchangeBindings(connectionId, exchangeName))
         }.getOrElse { LoadState.Error(failureText(it)) }

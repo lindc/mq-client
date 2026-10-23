@@ -26,6 +26,7 @@ import com.mqclient.graph.TopologyNodeType
 import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.CoreModule
+import com.mqclient.core.concurrent.runCatchingCancellable
 import com.mqclient.core.topology.TopologyFocusHolder
 import com.mqclient.ibmmq.IbmMQConfig
 import com.mqclient.ibmmq.IbmMQModule
@@ -93,7 +94,7 @@ fun TopologyPanel(
     fun rescan() {
         Log.debug(TOPOLOGY_LOG_TAG, "topology rescan requested: connection=$connectionId")
         scope.launch {
-            runCatching { IbmMQModule.serviceOrNull()?.scanObjects(connectionId) }
+            runCatchingCancellable { IbmMQModule.serviceOrNull()?.scanObjects(connectionId) }
                 .onFailure {
                     Log.warn(
                         TOPOLOGY_LOG_TAG,
@@ -117,7 +118,7 @@ fun TopologyPanel(
         // 隐式连接建立 → 仅当还没有图（缓存为空）时补一拍慢扫；热缓存不打扰。
         bus?.on(IbmMQEvents.CONNECTED, scope = this) { event ->
             if (event.payload["connectionId"] as? String == connectionId && data == null) {
-                runCatching { IbmMQModule.serviceOrNull()?.scanObjects(connectionId) }
+                runCatchingCancellable { IbmMQModule.serviceOrNull()?.scanObjects(connectionId) }
                     .onFailure {
                         Log.warn(
                             TOPOLOGY_LOG_TAG,
@@ -132,7 +133,7 @@ fun TopologyPanel(
         rebuild()
         if (data == null) {
             if (IbmMQModule.connectionOrNull(connectionId)?.status == ConnectionStatus.Connected) {
-                runCatching { IbmMQModule.serviceOrNull()?.scanObjects(connectionId) }
+                runCatchingCancellable { IbmMQModule.serviceOrNull()?.scanObjects(connectionId) }
                     .onFailure {
                         Log.warn(
                             TOPOLOGY_LOG_TAG,

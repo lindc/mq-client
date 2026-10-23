@@ -38,6 +38,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.mqclient.core.concurrent.runCatchingCancellable
 import com.mqclient.kafka.KafkaModule
 import com.mqclient.kafka.KafkaTopicConfigSnapshot
 import com.mqclient.kafka.KafkaTopicOffsetRange
@@ -88,12 +89,12 @@ fun KafkaTopicPropertiesDialog(
         scope.launch {
             val service = KafkaModule.serviceOrNull() ?: error("服务未初始化")
             configs = LoadState.Loading
-            configs = runCatching {
+            configs = runCatchingCancellable {
                 LoadState.Success(service.getTopicConfigs(connectionId, topicName))
             }.getOrElse { LoadState.Error(failureText(it)) }
             offsets = LoadState.Loading
             val partitions = snapshot?.partitions?.map { it.id } ?: emptyList()
-            offsets = runCatching {
+            offsets = runCatchingCancellable {
                 LoadState.Success(service.getTopicOffsets(connectionId, topicName, partitions))
             }.getOrElse { LoadState.Error(failureText(it)) }
         }

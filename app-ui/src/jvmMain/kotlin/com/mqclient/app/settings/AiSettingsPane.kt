@@ -41,6 +41,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.mqclient.ai.AiAdapterRegistry
 import com.mqclient.ai.AiProvider
+import com.mqclient.core.concurrent.runCatchingCancellable
 import com.mqclient.core.AiConfig
 import com.mqclient.core.AiConnection
 import com.mqclient.core.ModuleRegistry
@@ -409,7 +410,7 @@ private fun ConnectionCard(
                     scope.launch {
                         // 异常经 AiSslHint 翻译（自签名证书 → 开启忽略 SSL 的指引；
                         // testQuietly 对 SSL 类失败会重抛，其余失败仍返回 false）。
-                        val outcome = runCatching {
+                        val outcome = runCatchingCancellable {
                             val adapter = AiAdapterRegistry.adapter(snapshot().providerId)
                             adapter != null && adapter.testConnection(snapshot())
                         }

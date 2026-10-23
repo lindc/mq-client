@@ -1,6 +1,7 @@
 package com.mqclient.core.db
 
 import com.mqclient.core.CoreModule
+import com.mqclient.core.concurrent.runCatchingCancellable
 import com.mqclient.core.event.AppEvent
 import com.mqclient.core.event.EventNames
 import com.mqclient.core.event.getLong
@@ -13,6 +14,10 @@ import com.mqclient.core.event.getString
  * 经 MqCommandHistoryEmitter，DISPLAY 等只读命令不会发出本事件），payload 自包含，
  * 本类只做一件事 —— 忠实落库。任何失败都走错误通道上报，绝不上抛（EventBus 会就地
  * 吃掉 handler 异常，但显式 report 能让用户看见）；写入失败不影响命令本身的执行结果。
+ *
+ * 唯一的例外是**取消**：模块关闭 / 应用退出时 handler 被取消，那是正常控制流，必须
+ * 原样上抛。否则 `Repository.save` 的取消会被当成「写入失败」报一条假错误，关闭路径
+ * 也要等它跑完。
  */
 class MqCommandHistoryHandler(private val repository: MqCommandHistoryRepository) {
 
@@ -38,7 +43,7 @@ class MqCommandHistoryHandler(private val repository: MqCommandHistoryRepository
             durationMs = event.getLong("durationMs"),
         )
 
-        runCatching { repository.save(record) }
+        runCatchingCancellable { repository.save(record) }
             .onFailure { error ->
                 CoreModule.reportError(
                     message = "命令历史写入失败（connectionId=$connectionId，command=${command.take(40)}）",

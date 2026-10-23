@@ -7,6 +7,7 @@ import com.mqclient.core.ConnectionStore
 import com.mqclient.core.cache.CacheManager
 import com.mqclient.core.concurrent.KeyedJobRegistry
 import com.mqclient.core.concurrent.KeyedMutex
+import com.mqclient.core.concurrent.runCatchingCancellable
 import com.mqclient.core.event.EventNames
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.emit
@@ -341,7 +342,9 @@ class IbmMQService(private val context: ServiceContext) {
      */
     suspend fun getClusterRelations(connectionId: String): ClusterRelations {
         val relations = objectScanner.queryClusterRelations(connectionId)
-        val statusByName = runCatching { objectScanner.scanChannelStatuses(connectionId) }
+        // 可取消版：scanChannelStatuses 是挂起调用。切走集群 Tab 时的取消不能被当成
+        // 「状态查不到」吞掉 —— 那样函数会继续跑完并返回「状态全是 -」的结果。
+        val statusByName = runCatchingCancellable { objectScanner.scanChannelStatuses(connectionId) }
             .onFailure { ibmMqLog.warn("cluster channel status query failed: ${it.message}") }
             .getOrDefault(emptyList())
             .toMap()

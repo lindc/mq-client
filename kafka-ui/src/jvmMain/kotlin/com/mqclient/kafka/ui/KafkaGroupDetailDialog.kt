@@ -46,6 +46,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mqclient.kafka.KafkaGroupDetailSnapshot
 import com.mqclient.kafka.KafkaGroupResetTo
+import com.mqclient.core.concurrent.runCatchingCancellable
 import com.mqclient.kafka.KafkaModule
 import com.mqclient.mqui.state.LoadState
 import com.mqclient.uicommon.DangerButton
@@ -88,7 +89,7 @@ fun KafkaGroupDetailDialog(
     fun load() {
         scope.launch {
             detail = LoadState.Loading
-            detail = runCatching {
+            detail = runCatchingCancellable {
                 val service = KafkaModule.serviceOrNull() ?: error("服务未初始化")
                 LoadState.Success(service.getGroupDetail(connectionId, groupId))
             }.getOrElse { LoadState.Error(failureText(it)) }
@@ -99,7 +100,7 @@ fun KafkaGroupDetailDialog(
     fun reset(to: KafkaGroupResetTo) {
         scope.launch {
             val service = KafkaModule.serviceOrNull() ?: error("服务未初始化")
-            runCatching { service.resetGroupOffsets(connectionId, groupId, to) }
+            runCatchingCancellable { service.resetGroupOffsets(connectionId, groupId, to) }
                 .onSuccess { count ->
                     val doneKey = if (to is KafkaGroupResetTo.AtTimestamp) {
                         "kafka_ui_group_detail_reset_done_timestamp"
@@ -116,7 +117,7 @@ fun KafkaGroupDetailDialog(
     fun delete() {
         scope.launch {
             val service = KafkaModule.serviceOrNull() ?: error("服务未初始化")
-            runCatching { service.deleteGroup(connectionId, groupId) }
+            runCatchingCancellable { service.deleteGroup(connectionId, groupId) }
                 .onSuccess {
                     snackbar.showSnackbar(stringResource("kafka_ui_group_detail_delete_done"))
                     // 组已删除：关详情并触发一轮慢扫，让列表尽快反映变化。

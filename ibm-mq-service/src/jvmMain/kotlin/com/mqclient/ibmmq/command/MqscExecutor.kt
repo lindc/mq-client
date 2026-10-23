@@ -1,6 +1,7 @@
 package com.mqclient.ibmmq.command
 
 import com.ibm.mq.pcf.PCFException
+import com.mqclient.core.concurrent.runCatchingCancellable
 import com.mqclient.ibmmq.command.model.MqscCommand
 import com.mqclient.ibmmq.command.model.MqscHistoryItem
 import com.mqclient.ibmmq.command.model.MqscResult
@@ -76,7 +77,9 @@ class MqscExecutor(
         ibmMqLog.debug(
             "mqsc executed: line=$lineNumber success=${result.success} duration=${result.duration}ms",
         )
-        runCatching {
+        // 历史写入是挂起调用（数据库），所以用可取消版：停止 / 关闭时的取消必须原样上抛，
+        // 不能被 runCatching 当成「这条历史没写成功」吞掉后继续往下跑。
+        runCatchingCancellable {
             historyRepository.add(
                 MqscHistoryItem(
                     id = 0,
@@ -87,6 +90,7 @@ class MqscExecutor(
                 ),
             )
         }
+        // 这个是**普通函数**（内部自己处理了异常），不涉及挂起点，普通 runCatching 就够。
         runCatching {
             MqCommandHistoryEmitter.onExecuted(connectionId, command, result, requestTime)
         }

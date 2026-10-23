@@ -2,6 +2,7 @@ package com.mqclient.ai.adapter
 
 import com.mqclient.ai.AiException
 import com.mqclient.core.AiConnection
+import com.mqclient.core.concurrent.runCatchingCancellable
 import com.mqclient.core.log.Log
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
@@ -66,7 +67,9 @@ fun AiConnection.baseUrlOrThrow(): String {
  */
 suspend fun HttpResponse.throwIfNotSuccess(provider: String) {
     if (status.isSuccess()) return
-    val body = runCatching { bodyAsText() }.getOrNull().orEmpty().trim()
+    // 可取消版：bodyAsText() 是挂起点。用户点「停止」时如果正卡在读错误正文，
+    // 用普通 runCatching 会把取消变成「请求失败：HTTP 5xx」弹给用户 —— 每次停止都弹一次假错误。
+    val body = runCatchingCancellable { bodyAsText() }.getOrNull().orEmpty().trim()
     val detail = extractErrorMessage(body) ?: body.take(400)
     throw AiException(
         message = "$provider 请求失败：HTTP ${status.value}" + if (detail.isNotEmpty()) " — $detail" else "",

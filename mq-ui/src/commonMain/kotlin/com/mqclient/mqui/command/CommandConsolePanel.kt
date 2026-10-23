@@ -13,6 +13,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.ui.Modifier
+import com.mqclient.core.concurrent.runCatchingCancellable
 import com.mqclient.mqui.command.file.readCommandText
 import com.mqclient.mqui.command.file.writeResultText
 import com.mqclient.mqui.command.model.CommandResult
@@ -134,7 +135,7 @@ private fun onOpenFileResult(
 ) {
     if (file == null) return
     scope.launch {
-        runCatching {
+        runCatchingCancellable {
             file.readCommandText()
         }.onSuccess { content ->
             state.appendText(content)
@@ -161,7 +162,7 @@ private fun onExportResult(
 ) {
     if (file == null) return
     scope.launch {
-        runCatching {
+        runCatchingCancellable {
             file.writeResultText(formatOutput(state.results))
         }.onSuccess {
             snackbarHostState.showSnackbar(stringResource("console_exported").withArg(file.name))

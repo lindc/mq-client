@@ -30,6 +30,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.mqclient.core.concurrent.runCatchingCancellable
 import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.CoreModule
 import com.mqclient.kafka.KafkaEvents
@@ -245,7 +246,7 @@ fun TopicListPanel(
                     onClick = {
                         clearTopic = null
                         scope.launch {
-                            runCatching {
+                            runCatchingCancellable {
                                 KafkaModule.serviceOrNull()?.clearTopicRecords(connectionId, topicName)
                                     ?: error("服务未初始化")
                             }.onSuccess { count ->
