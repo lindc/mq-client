@@ -1,7 +1,9 @@
 package com.mqclient.kafka.ui
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -46,52 +48,40 @@ class KafkaUI : AdapterUI {
      * soon」占位页，极端时序下不崩、不破 Tab。
      */
     override fun contentFor(objectType: String, connectionId: String): (@Composable () -> Unit)? {
+        if (KafkaModule.connectionOrNull(connectionId) == null) return null
+        // 四个页都是「读同一份慢扫缓存」的视图，所以「部分数据未刷新」提示在**同一处**
+        // 统一包上（contentFor 是四个面板的唯一入口）—— 各面板各写一份是同类提示
+        // 四处漏三处的温床。
         return when (objectType) {
-            "topics" ->
-                if (KafkaModule.connectionOrNull(connectionId) == null) {
-                    null
-                } else {
-                    {
-                        TopicListPanel(
-                            connectionId = connectionId,
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                    }
-                }
-            "groups" ->
-                if (KafkaModule.connectionOrNull(connectionId) == null) {
-                    null
-                } else {
-                    {
-                        ConsumerGroupListPanel(
-                            connectionId = connectionId,
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                    }
-                }
-            "topology" ->
-                if (KafkaModule.connectionOrNull(connectionId) == null) {
-                    null
-                } else {
-                    {
-                        KafkaTopologyPanel(
-                            connectionId = connectionId,
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                    }
-                }
-            "clusterOverview" ->
-                if (KafkaModule.connectionOrNull(connectionId) == null) {
-                    null
-                } else {
-                    {
-                        KafkaClusterOverviewPanel(
-                            connectionId = connectionId,
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                    }
-                }
+            "topics" -> {
+                { KafkaPanelHost(connectionId) { TopicListPanel(connectionId, Modifier.fillMaxSize()) } }
+            }
+            "groups" -> {
+                { KafkaPanelHost(connectionId) { ConsumerGroupListPanel(connectionId, Modifier.fillMaxSize()) } }
+            }
+            "topology" -> {
+                { KafkaPanelHost(connectionId) { KafkaTopologyPanel(connectionId, Modifier.fillMaxSize()) } }
+            }
+            "clusterOverview" -> {
+                { KafkaPanelHost(connectionId) { KafkaClusterOverviewPanel(connectionId, Modifier.fillMaxSize()) } }
+            }
             else -> null
         }
+    }
+}
+
+/**
+ * 面板外壳：顶部「部分数据未刷新」提示（有的话）+ 剩余空间给面板本体。
+ *
+ * `weight(1f)` 而不是 `fillMaxSize()`：提示条占高后内容必须缩，不能溢出到窗口外。
+ */
+@Composable
+private fun KafkaPanelHost(
+    connectionId: String,
+    content: @Composable () -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        KafkaPartialScanBanner(connectionId)
+        Box(modifier = Modifier.weight(1f).fillMaxWidth()) { content() }
     }
 }

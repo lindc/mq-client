@@ -51,18 +51,6 @@ import org.apache.kafka.common.TopicPartition
  */
 class KafkaScanService(private val context: ServiceContext) {
 
-    /**
-     * 对象慢扫的三类查询。
-     *
-     * 失败必须**按类记**：不能因为 topics 失败了就拿空表覆盖 `topics` 缓存 ——
-     * 那等于告诉 UI「这个集群没有 topic」。
-     */
-    internal enum class KafkaScanKind(val label: String) {
-        BROKERS("brokers"),
-        TOPICS("topics"),
-        GROUPS("groups"),
-    }
-
     private companion object {
         /** 缓存 key：broker 列表。 */
         const val KEY_BROKERS = "brokers"
@@ -173,6 +161,8 @@ class KafkaScanService(private val context: ServiceContext) {
                     "objects scan failed (all kinds): connection=$connectionId " +
                         "errors=" + failures.entries.joinToString(", ") { "${it.key.label}=${it.value}" },
                 )
+                // 整体不可用时「部分」已无意义：界面走连接错误态，旧的残数据提示要让位。
+                KafkaModule.clearScanFailures(connectionId)
                 context.emit(
                     name = KafkaEvents.OBJECTS_SCAN_FAILED,
                     payload = mapOf("connectionId" to connectionId, "message" to message),
@@ -180,6 +170,10 @@ class KafkaScanService(private val context: ServiceContext) {
                 markFailed(connectionId, message)
                 return@withLock
             }
+
+            // 把「哪几类没取到」交给模块存起来：UI 的提示条要能在页面切来切去后
+            // 仍然知道「这份数据是残的」，而事件是瞬时的。
+            KafkaModule.reportScanFailures(connectionId, failures.keys.toSet())
 
             context.emit(
                 name = KafkaEvents.OBJECTS_SCANNED,
@@ -1017,4 +1011,18 @@ sealed interface KafkaGroupResetTo {
     data object Earliest : KafkaGroupResetTo
     data object Latest : KafkaGroupResetTo
     data class AtTimestamp(val epochMillis: Long) : KafkaGroupResetTo
+}
+/**
+ * 对象慢扫的三类查询。
+ *
+ * 失败必须**按类记**：不能因为 topics 失败了就拿空表覆盖 `topics` 缓存 —— 那等于
+ * 告诉 UI「这个集群没有 topic」。
+ *
+ * 顶层公开（不再是 `KafkaScanService` 的 internal 嵌套）：UI 的「部分数据未刷新」
+ * 提示条要按类型拼文案。枚举不含实现，暴露它比在 UI 里用字符串标签匹配安全。
+ */
+enum class KafkaScanKind(val label: String) {
+    BROKERS("brokers"),
+    TOPICS("topics"),
+    GROUPS("groups"),
 }
