@@ -23,7 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mqclient.rabbitmq.RabbitMqFetchedMessage
-import com.mqclient.rabbitmq.RabbitMqMessageSession
+import com.mqclient.rabbitmq.RabbitMqQueueSession
 import com.mqclient.rabbitmq.RabbitMqModule
 import com.mqclient.uicommon.LabeledField
 import com.mqclient.uicommon.PrimaryButton
@@ -43,9 +43,9 @@ import kotlinx.coroutines.launch
  * 交换机）+ 目标下拉 + Routing Key（仅交换机目标显示）+「转发后删除原消息」开关
  * （默认勾选 = 搬移语义 publish + ack；不勾 = 复制语义只发不删）。
  *
- * 转发经当前 AMQP 会话的 [RabbitMqMessageSession.publish]（原始字节直发），属性
- * 用 [RabbitMqMessageSession.buildProps] 重建 —— 原消息的 messageId / headers /
- * contentType 等元数据全保留；勾选删除时 [RabbitMqMessageSession.ack] 原消息。
+ * 转发经当前 AMQP 会话的 `RabbitMqMessageSession.publish`（原始字节直发），属性
+ * 用 `buildProps` 重建 —— 原消息的 messageId / headers /
+ * contentType 等元数据全保留；勾选删除时调会话的 `ack` 去掉原消息。
  * [onForwarded](deleteSource) 回调父级刷新列表。
  */
 @Composable
@@ -53,7 +53,7 @@ fun RabbitMqForwardMessageDialog(
     connectionId: String,
     sourceQueue: String,
     targets: List<RabbitMqFetchedMessage>,
-    session: RabbitMqMessageSession,
+    session: RabbitMqQueueSession,
     onDismiss: () -> Unit,
     onForwarded: (forwarded: List<RabbitMqFetchedMessage>, deleteSource: Boolean) -> Unit,
 ) {

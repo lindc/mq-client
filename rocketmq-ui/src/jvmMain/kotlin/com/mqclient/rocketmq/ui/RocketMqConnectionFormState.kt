@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.mqclient.core.ConnectionFormState
 import com.mqclient.core.ConnectionInfo
+import com.mqclient.core.ConnectionPersistence
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.newConnectionId
 import com.mqclient.mqui.state.SaveState
@@ -39,6 +40,8 @@ import kotlinx.coroutines.withTimeout
 class RocketMqConnectionFormState(
     defaultName: String,
     private val scope: CoroutineScope,
+    /** 落盘端口：默认直连 ConnectionStore，测试注入记录线程的替身。 */
+    private val persistence: ConnectionPersistence = ConnectionPersistence.Default,
 ) : ConnectionFormState {
 
     companion object {
@@ -347,7 +350,7 @@ class RocketMqConnectionFormState(
         // 写盘（读整份 config.toml + 敏感字段加密 + 原子换文件）走 IO，不压 UI 线程。
         // NonCancellable：点了「完成」之后的落盘不该因对话框关闭而半途作废。
         val result = withContext(Dispatchers.IO + NonCancellable) {
-            if (editingId == null) ConnectionStore.create(info) else ConnectionStore.update(info)
+            if (editingId == null) persistence.create(info) else persistence.update(info)
         }
         val failure = result.exceptionOrNull()
         if (failure != null) {

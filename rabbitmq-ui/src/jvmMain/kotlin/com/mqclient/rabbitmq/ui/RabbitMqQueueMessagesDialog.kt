@@ -54,7 +54,8 @@ import com.mqclient.mqui.objectlist.ObjectListEmptyState
 import com.mqclient.mqui.state.LoadState
 import com.mqclient.rabbitmq.RabbitMqFetchedMessage
 import com.mqclient.rabbitmq.RabbitMqModule
-import com.mqclient.rabbitmq.RabbitMqMessageSession
+import com.mqclient.rabbitmq.RabbitMqQueueSession
+import com.mqclient.rabbitmq.RabbitMqSessionOpener
 import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
@@ -114,10 +115,16 @@ fun RabbitMqQueueMessagesDialog(
     connectionId: String,
     queueName: String,
     onDismiss: () -> Unit,
+    /**
+     * 打开会话的工厂（可注入）：默认真连 AMQP；测试传替身以观察「重开前先关旧会话」。
+     */
+    openSession: RabbitMqSessionOpener = RabbitMqSessionOpener.Default,
 ) {
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
-    var session by remember { mutableStateOf<RabbitMqMessageSession?>(null) }
+    // 会话的**所有者**：开会话只能经它（内部先关旧的），UI 侧的 `session` 只是镜像。
+    val sessionSlot = remember(openSession) { QueueSessionSlot(openSession) }
+    var session by remember { mutableStateOf<RabbitMqQueueSession?>(null) }
     var sessionState by remember(queueName) { mutableStateOf<LoadState<Unit>>(LoadState.Idle) }
     var sessionRetry by remember(queueName) { mutableIntStateOf(0) }
     var selectedTab by remember { mutableIntStateOf(0) }
@@ -138,24 +145,21 @@ fun RabbitMqQueueMessagesDialog(
     var sendError by remember { mutableStateOf<String?>(null) }
 
     // 对话框销毁 → 收会话（onDispose 同步，挂起 close 另起协程；未 ack 自动重入队）。
+    // 走槽的 detach：取走「当前」会话（而不是读某个可能过时的 state 变量）。
     DisposableEffect(Unit) {
-        onDispose { RabbitMqModule.closeMessageSessionAsync(session) }
+        onDispose { RabbitMqModule.closeMessageSessionAsync(sessionSlot.detach()) }
     }
 
     // 会话三态：打开即建 AMQP 连接（passive 校验队列存在）。
     //
-    // 重开（换队列 / 重试）前必须先关旧会话：`session` 不按 queueName 取 key，同一对话框
-    // 实例换队列时它仍指向旧连接 —— 直接覆盖会让那条 AMQP Connection + Channel 一直挂着
-    // （旧 channel 上的未 ack 消息也一直不还给队列，要等对话框销毁）。
+    // 重开（换队列 / 重试）一律经 [QueueSessionSlot.open]：它保证**先关旧会话再开新的**。
+    // `session` 只是给 UI 读的镜像，不是句柄的所有者 —— 开新会话只有槽这一条路。
     //
     // 关掉之后消息列表上的 deliveryTag 全部作废：tag 是 channel 级、新 channel 从 1 重新
     // 计数，旧 tag 拿去 ack 会命中新会话里的**另一条**消息。所以一并清空列表，让用户
     // 在新会话上重新拉取。
     LaunchedEffect(connectionId, queueName, sessionRetry) {
-        session?.let { previous ->
-            session = null
-            previous.close()
-        }
+        session = null
         messages = emptyList()
         held = 0
         exhausted = false
@@ -164,7 +168,7 @@ fun RabbitMqQueueMessagesDialog(
         forwarding = emptyList()
         sessionState = LoadState.Loading
         sessionState = runCatching {
-            val s = RabbitMqModule.openMessageSession(connectionId, queueName)
+            val s = sessionSlot.open(connectionId, queueName)
             session = s
             LoadState.Success(Unit)
         }.getOrElse { e ->
@@ -246,7 +250,7 @@ fun RabbitMqQueueMessagesDialog(
         batchTasks = batchTasks.map { if (it.id == id) transform(it) else it }
     }
 
-    suspend fun sendOneDirect(routingBytes: ByteArray, headers: Map<String, String>, s: RabbitMqMessageSession): Pair<Boolean, String?> {
+    suspend fun sendOneDirect(routingBytes: ByteArray, headers: Map<String, String>, s: RabbitMqQueueSession): Pair<Boolean, String?> {
         return try {
             s.publishDirect(routingBytes, headers)
             true to null
@@ -689,4 +693,35 @@ private fun failureText(error: Throwable): String =
         ?: error.message
         ?: error::class.simpleName
         ?: "unknown"
+
+/**
+ * 会话槽：**唯一**持有当前队列消息会话的容器，开新的必然先关旧的。
+ *
+ * 把「先关旧、再开新」做成容器语义，而不是调用方的约定：对话框里任何一处想开会话
+ * 都得经 [open]，没有第二条路 —— 漏关旧会话从「靠代码审阅发现」变成「结构上做不到」。
+ *
+ * 之前这里只是 `mutableStateOf<Session?>`：`session` 不按 queueName 取 key，同一对话框
+ * 实例换队列时它仍指向旧连接，直接覆盖就会漏掉那条 AMQP `Connection` + `Channel`
+ * （旧 channel 上的未 ack 消息也一直不还给队列，要等对话框销毁）。
+ */
+internal class QueueSessionSlot(private val opener: RabbitMqSessionOpener) {
+
+    private var current: RabbitMqQueueSession? = null
+
+    /** 关掉旧会话（如果有）再开新的。返回新会话。 */
+    suspend fun open(connectionId: String, queueName: String): RabbitMqQueueSession {
+        // 关闭失败不拦重开：旧连接已不可用时，能开新的比卡在旧的上更有用。
+        //（close 自身已对未 ack 做了 requeue；失败时 broker 也会在连接断开后重入队。）
+        current?.let { runCatching { it.close() } }
+        current = null
+        return opener.open(connectionId, queueName).also { current = it }
+    }
+
+    /**
+     * 取走当前会话（对话框销毁时把它交给模块异步关闭）。
+     *
+     * 取走而不是读取：槽不再持有它，避免关闭与重开同时对同一个句柄动手。
+     */
+    fun detach(): RabbitMqQueueSession? = current.also { current = null }
+}
 

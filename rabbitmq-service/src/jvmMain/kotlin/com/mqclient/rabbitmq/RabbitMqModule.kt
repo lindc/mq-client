@@ -159,21 +159,21 @@ object RabbitMqModule {
      * （把 `moduleContext` 置空），对话框的 onDispose 随后才到，那时
      * [closeMessageSessionAsync] 已经没有 scope 可用 —— 会话就漏在那里了。
      */
-    private val openSessions: MutableSet<RabbitMqMessageSession> =
+    private val openSessions: MutableSet<RabbitMqQueueSession> =
         java.util.concurrent.ConcurrentHashMap.newKeySet()
 
     /**
      * 队列消息会话入口（队列消息对话框）：AMQP 直连当前队列（autoAck = false）。
      * 连接必须处于 Connected；会话生命周期归对话框 —— 关闭时调 [closeMessageSessionAsync]。
      */
-    suspend fun openMessageSession(connectionId: String, queueName: String): RabbitMqMessageSession {
+    suspend fun openMessageSession(connectionId: String, queueName: String): RabbitMqQueueSession {
         val ctx = connectionOrNull(connectionId)?.takeIf { it.status == ConnectionStatus.Connected }
             ?: throw IllegalStateException("未连接")
         return RabbitMqMessageSession.open(ctx.config, queueName).also { openSessions.add(it) }
     }
 
     /** 会话关闭的异步兜底（对话框 onDispose 是同步回调，挂起 close 另起协程跑）。 */
-    fun closeMessageSessionAsync(session: RabbitMqMessageSession?) {
+    fun closeMessageSessionAsync(session: RabbitMqQueueSession?) {
         if (session == null) return
         openSessions.remove(session)
         moduleContext?.coroutineScope?.launch { runCatching { session.close() } }

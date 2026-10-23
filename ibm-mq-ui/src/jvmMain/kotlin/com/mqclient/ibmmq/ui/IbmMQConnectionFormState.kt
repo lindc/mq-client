@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.mqclient.core.ConnectionFormState
 import com.mqclient.core.ConnectionInfo
+import com.mqclient.core.ConnectionPersistence
 import com.mqclient.core.ConnectionStore
 import com.mqclient.ibmmq.ConnectionMode
 import com.mqclient.ibmmq.IbmMQConfig
@@ -64,6 +65,10 @@ data class IbmMQFieldErrors(
 class IbmMqConnectionFormState(
     defaultName: String,
     private val scope: CoroutineScope,
+    /**
+     * 落盘端口：默认直连 [ConnectionStore]，测试注入记录线程的替身以断言 IO 不在 UI 线程。
+     */
+    private val persistence: ConnectionPersistence = ConnectionPersistence.Default,
 ) : ConnectionFormState {
 
     companion object {
@@ -450,7 +455,7 @@ class IbmMqConnectionFormState(
         // NonCancellable：用户点了「完成」之后的这次落盘不该因为对话框被关掉而半途作废
         // —— 旧实现是同步调用，天然不会被取消；异步化后必须显式保留这个保证。
         val result = withContext(Dispatchers.IO + NonCancellable) {
-            if (editingId == null) ConnectionStore.create(info) else ConnectionStore.update(info)
+            if (editingId == null) persistence.create(info) else persistence.update(info)
         }
         val failure = result.exceptionOrNull()
         if (failure != null) {

@@ -15,6 +15,62 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /**
+ * 队列消息会话的**能力契约**（UI 只依赖这一层）。
+ *
+ * 抽接口而不是让 UI 直接持有 [RabbitMqMessageSession]：真实实现需要 AMQP 的
+ * `Connection` / `Channel`，测试里造不出来；而对话框要验证的「重开前先关旧会话」
+ * 只有在能注入替身、观察 `close()` 何时被调用时才成立。
+ *
+ * 刻意只含 UI 用得到的成员 —— `publish` / `buildProps`（签名带 AMQP 类型）留在实现类上，
+ * 不把 amqp-client 的类型泄到 UI 模块。
+ */
+interface RabbitMqQueueSession {
+
+    /** 拉取下一批（同一 channel 上继续往后取，不 requeue 已拉取的）。 */
+    suspend fun fetchNext(limit: Int): List<RabbitMqFetchedMessage>
+
+    /** 当前手上未 ack 的条数。 */
+    suspend fun heldCount(): Int
+
+    /** 彻底消费一条（basicAck）。 */
+    suspend fun ack(deliveryTag: Long)
+
+    /** 全部重新入队（basicNack requeue），供「重新拉取」用。 */
+    suspend fun requeueAll()
+
+    /** 经默认交换机直发当前队列。 */
+    suspend fun publishDirect(body: ByteArray, headers: Map<String, String>)
+
+    /** 转发一条已拉取的消息到任意 exchange + routing key（元数据保留）。 */
+    suspend fun forward(message: RabbitMqFetchedMessage, exchange: String, routingKey: String)
+
+    /** 关闭会话：先显式 requeue 未 ack，再关 channel / connection。重复调用安全。 */
+    suspend fun close()
+}
+
+/**
+ * 打开队列消息会话的工厂端口（可注入）。
+ *
+ * 生产实现 [Default] 走模块的真实 AMQP 链路；测试注入替身即可观察「先关旧的、再开新的」
+ * 的调用次序，不需要真的连 broker。
+ */
+fun interface RabbitMqSessionOpener {
+
+    /**
+     * 为 [connectionId] 上的 [queueName] 开一个只读会话（autoAck = false）。
+     * 连接未建立时抛 [IllegalStateException]，由调用方转「加载失败」。
+     */
+    suspend fun open(connectionId: String, queueName: String): RabbitMqQueueSession
+
+    companion object {
+        /** 默认实现：交给模块（用该连接已建立的真实 AMQP 配置）。 */
+        val Default: RabbitMqSessionOpener = RabbitMqSessionOpener { connectionId, queueName ->
+            RabbitMqModule.openMessageSession(connectionId, queueName)
+        }
+    }
+}
+
+/**
  * 一条拉取到的消息（basicGet 结果投影）：[deliveryTag] 是 ack（彻底消费）与
  * nack（重新入队）的唯一凭据，[body] 是原始字节（交解释器 SPI 渲染）。
  */
@@ -56,7 +112,7 @@ class RabbitMqMessageSession private constructor(
     private val queueName: String,
     private val connection: Connection,
     private val channel: Channel,
-) {
+) : RabbitMqQueueSession {
     private val lock = Mutex()
 
     /** 本会话手上未 ack 的 deliveryTag（按拉取顺序）。 */
@@ -66,7 +122,7 @@ class RabbitMqMessageSession private constructor(
 
     /** 拉取下一批（**不 requeue 已拉取的** —— 同一 channel 的 basicGet 天然继续
      *  往后发；已拉取的仍挂在手上未 ack）。返回空表 = 队列当前没有更多可见消息。 */
-    suspend fun fetchNext(limit: Int): List<RabbitMqFetchedMessage> = lock.withLock {
+    override suspend fun fetchNext(limit: Int): List<RabbitMqFetchedMessage> = lock.withLock {
         withContext(Dispatchers.IO) {
             checkOpen()
             val out = mutableListOf<RabbitMqFetchedMessage>()
@@ -98,19 +154,21 @@ class RabbitMqMessageSession private constructor(
     }
 
     /** 当前手上未 ack 的条数（对话框底部「M 条待处理」用）。 */
-    suspend fun heldCount(): Int = lock.withLock { heldTags.size }
+    override suspend fun heldCount(): Int = lock.withLock { heldTags.size }
 
     /** 彻底消费一条（用户点删除）：basicAck 从队列移除。 */
-    suspend fun ack(deliveryTag: Long) = lock.withLock {
+    override suspend fun ack(deliveryTag: Long) = lock.withLock {
         withContext(Dispatchers.IO) {
             checkOpen()
             channel.basicAck(deliveryTag, false)
             heldTags.remove(deliveryTag)
+            // 显式 Unit：heldTags.remove 返回 Boolean，不写的话整个函数会推出 Boolean。
+            Unit
         }
     }
 
     /** 全部重新入队（「重新拉取」用）：basicNack(requeue = true) 放回队列。 */
-    suspend fun requeueAll() = lock.withLock {
+    override suspend fun requeueAll() = lock.withLock {
         withContext(Dispatchers.IO) {
             checkOpen()
             requeueHeldLocked()
@@ -134,7 +192,7 @@ class RabbitMqMessageSession private constructor(
         }
 
     /** 直发当前队列：经默认交换机（""，routing key = 队列名），自拼 headers 的重载。 */
-    suspend fun publishDirect(body: ByteArray, headers: Map<String, String>) {
+    override suspend fun publishDirect(body: ByteArray, headers: Map<String, String>) {
         val props = AMQP.BasicProperties.Builder().headers(headers).build()
         publish("", queueName, body, props)
     }
@@ -143,7 +201,7 @@ class RabbitMqMessageSession private constructor(
      * 转发（重发）消息：把已拉取的消息经任意 exchange + routing key 重新发布，
      * 属性经 [buildProps] 保留原元数据。搬移语义 = 本方法 + [ack]（由调用方组合）。
      */
-    suspend fun forward(message: RabbitMqFetchedMessage, exchange: String, routingKey: String) =
+    override suspend fun forward(message: RabbitMqFetchedMessage, exchange: String, routingKey: String) =
         publish(exchange, routingKey, message.body, buildProps(message))
 
     /** 从已拉取消息重建 AMQP 属性：转发 / 重发时保留原消息的元数据（body 除外）。 */
@@ -162,7 +220,7 @@ class RabbitMqMessageSession private constructor(
             .build()
 
     /** 优雅关闭：显式 requeue 全部未 ack（broker 本也会自动重入队，双保险）→ 关 channel → 关 connection。 */
-    suspend fun close() = lock.withLock {
+    override suspend fun close() = lock.withLock {
         if (closed) return@withLock
         withContext(Dispatchers.IO) {
             runCatching { requeueHeldLocked() }

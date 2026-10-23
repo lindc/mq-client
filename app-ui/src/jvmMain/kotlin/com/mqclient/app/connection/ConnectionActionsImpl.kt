@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.mqclient.core.ConnectionActions
 import com.mqclient.core.ConnectionInfo
+import com.mqclient.core.ConnectionPersistence
 import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.CoreModule
@@ -89,6 +90,8 @@ class ConnectionActionsImpl(
      * 不该因为右键菜单关闭而被取消；也不该占菜单自己的生命周期。
      */
     private val scope: CoroutineScope,
+    /** 落盘端口：默认直连 ConnectionStore，测试注入记录线程的替身。 */
+    private val persistence: ConnectionPersistence = ConnectionPersistence.Default,
 ) : ConnectionActions {
 
     override suspend fun connect(connectionId: String) = request(connectionId, "connect")
@@ -112,7 +115,7 @@ class ConnectionActionsImpl(
         // 落盘要写整份 config.toml（含敏感字段 AES 加密 + 原子换文件），不能压在
         // 点击回调所在的 UI 线程上。失败仍然走错误通道，与之前一致。
         scope.launch {
-            val result = withContext(Dispatchers.IO) { ConnectionStore.create(duplicate) }
+            val result = withContext(Dispatchers.IO) { persistence.create(duplicate) }
             result.onFailure { failure ->
                 CoreModule.reportError(
                     message = failure.message ?: failure::class.simpleName ?: "unknown",

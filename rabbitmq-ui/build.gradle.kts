@@ -38,6 +38,8 @@ kotlin {
         }
         jvmTest.dependencies {
             implementation(kotlin("test"))
+            // 「落盘不在 UI 线程」的测试替身（RecordingConnectionPersistence / UiThreadHarness）。
+            implementation(projects.uiTestKit)
         }
     }
 }
