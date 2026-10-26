@@ -36,12 +36,15 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.concurrent.runCatchingCancellable
 import com.mqclient.uicommon.command.ToolbarButton
 import com.mqclient.mqui.state.LoadState
 import com.mqclient.rabbitmq.RabbitMqBindingSnapshot
 import com.mqclient.rabbitmq.RabbitMqModule
 import com.mqclient.uicommon.DangerButton
+import com.mqclient.uicommon.PropertyItem
+import com.mqclient.uicommon.PropertyTable
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
@@ -89,8 +92,20 @@ fun RabbitMqExchangePropertiesDialog(
     // 绑定增删成功后的本地重载触发器（实时列表不等慢扫缓存）。
     var bindingsReload by remember(exchangeName) { mutableStateOf(0) }
 
+    // 打开瞬间可能恰好处于 Connecting / 刚从抖动恢复：错误不能粘住。
+    val connectionStatus = rememberRabbitMqConnectionStatus(connectionId)
+
+    /**
+     * 重新拉一次绑定。
+     *
+     * **必须动 [bindingsReload]**，不能只把状态改成 Loading：真正发请求的是下面那个
+     * `LaunchedEffect(connectionId, exchangeName, bindingsReload)`，只改状态不会重跑
+     * 它 —— 旧写法（`fun load() { bindingsState = Loading }`）让错误态的「刷新」按钮
+     * 把界面打进永久转圈。
+     */
     fun load() {
         bindingsState = LoadState.Loading
+        bindingsReload++
     }
 
     fun reload() {
@@ -150,6 +165,13 @@ fun RabbitMqExchangePropertiesDialog(
         }.getOrElse { LoadState.Error(failureText(it)) }
     }
 
+    // 时序兜底：连接落定成 Connected 而绑定仍在错误态时自动重拉（与队列属性对话框同口径）。
+    LaunchedEffect(connectionStatus) {
+        if (connectionStatus == ConnectionStatus.Connected && bindingsState is LoadState.Error) {
+            reload()
+        }
+    }
+
     ObjectDetailDialog(
         title = stringResource("rabbitmq_ui_exchange_props_title").withArg(displayName),
         onDismiss = onDismiss,
@@ -169,19 +191,23 @@ fun RabbitMqExchangePropertiesDialog(
         },
     ) {
         Column(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp)) {
-            // ---- 概览行 ----
-            PropertyLine(stringResource("rabbitmq_ui_exchange_props_field_type"), type)
-            PropertyLine(
-                stringResource("rabbitmq_ui_exchange_field_durable"),
-                stringResource(if (durable) "rabbitmq_ui_exchange_props_yes" else "rabbitmq_ui_exchange_props_no"),
-            )
-            PropertyLine(
-                stringResource("rabbitmq_ui_exchange_field_auto_delete"),
-                stringResource(if (autoDelete) "rabbitmq_ui_exchange_props_yes" else "rabbitmq_ui_exchange_props_no"),
-            )
-            PropertyLine(
-                stringResource("rabbitmq_ui_exchange_field_internal"),
-                stringResource(if (internal) "rabbitmq_ui_exchange_props_yes" else "rabbitmq_ui_exchange_props_no"),
+            // ---- 概览区（统一 PropertyTable：斑马纹 / 左对齐 / 可复制）----
+            PropertyTable(
+                items = listOf(
+                    PropertyItem(stringResource("rabbitmq_ui_exchange_props_field_type"), type),
+                    PropertyItem(
+                        stringResource("rabbitmq_ui_exchange_field_durable"),
+                        stringResource(if (durable) "rabbitmq_ui_exchange_props_yes" else "rabbitmq_ui_exchange_props_no"),
+                    ),
+                    PropertyItem(
+                        stringResource("rabbitmq_ui_exchange_field_auto_delete"),
+                        stringResource(if (autoDelete) "rabbitmq_ui_exchange_props_yes" else "rabbitmq_ui_exchange_props_no"),
+                    ),
+                    PropertyItem(
+                        stringResource("rabbitmq_ui_exchange_field_internal"),
+                        stringResource(if (internal) "rabbitmq_ui_exchange_props_yes" else "rabbitmq_ui_exchange_props_no"),
+                    ),
+                ),
             )
             Spacer(Modifier.height(16.dp))
             HorizontalDivider()
@@ -328,24 +354,6 @@ fun RabbitMqExchangePropertiesDialog(
                 },
             )
         }
-    }
-}
-
-/** 单行概览属性：左标签右值。 */
-@Composable
-private fun PropertyLine(label: String, value: String) {
-    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.width(120.dp),
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodyMedium,
-            fontFamily = FontFamily.Monospace,
-        )
     }
 }
 

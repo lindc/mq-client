@@ -29,6 +29,10 @@ import kotlin.test.assertTrue
  *
  * 同时守住错误分类（401 / 403 / 404 / 5xx → 带原因的中文文案）和
  * CancellationException 原样上抛（协程取消不能被包装成业务异常）。
+ *
+ * 读端点里只挑 **queueDetail**（包括其 `consumer_details` 字段）做解析契约：它曾经
+ * 因为指向一个不存在的端点（`/api/queues/{vhost}/{name}/consumers`，管理 API 只有
+ * `/consumers`）而让「消费者」Tab 永远转圈，这里把响应形状钉在测试里。
  */
 class RabbitMqAdminClientContractTest {
 
@@ -241,6 +245,87 @@ class RabbitMqAdminClientContractTest {
         assertEquals("base64", body["payload_encoding"]?.jsonPrimitive?.content)
         // 无 headers 时不写 properties.headers（空对象会让服务端误判）。
         assertEquals(null, body["properties"]?.jsonObject?.get("headers"))
+    }
+
+    @Test
+    fun `queueDetail - 解析 consumer_details 明细与计数`() = runBlocking {
+        val (admin, seen) = client {
+            HttpStatusCode.OK to """
+                {
+                  "name": "orders.q",
+                  "vhost": "/",
+                  "state": "running",
+                  "queue_type": "quorum",
+                  "durable": true,
+                  "auto_delete": false,
+                  "exclusive": false,
+                  "arguments": {"x-queue-type": "quorum", "x-max-length": 1000},
+                  "messages": 12,
+                  "messages_ready": 10,
+                  "messages_unacknowledged": 2,
+                  "consumers": 1,
+                  "consumer_details": [
+                    {
+                      "consumer_tag": "amq.ctag-abc",
+                      "ack_required": true,
+                      "channel_details": {"peer_host": "10.0.0.7", "peer_port": 51324}
+                    }
+                  ]
+                }
+            """
+        }
+
+        val detail = admin.queueDetail("orders.q")
+
+        // 详情端点本身（不是 /consumers —— 那个路径在管理 API 里不存在）。
+        assertEquals("/api/queues/%2F/orders.q", seen.single().path)
+        assertEquals("quorum", detail.queueType)
+        assertEquals(1, detail.consumers)
+        val consumer = detail.consumerDetails?.single()
+        assertEquals("amq.ctag-abc", consumer?.consumerTag)
+        assertEquals("10.0.0.7", consumer?.channelDetails?.peerHost)
+        assertEquals(51324, consumer?.channelDetails?.peerPort)
+        assertTrue(consumer?.ackRequired == true)
+    }
+
+    @Test
+    fun `queueDetail - consumer_details 缺失或 null 都解析成 null 而不是抛错`() = runBlocking {
+        // 老版本 / 关闭 metrics collector：字段可能整个缺席，也可能是显式 null。
+        for (body in listOf(
+            """{"name":"q","consumers":0}""",
+            """{"name":"q","consumers":0,"consumer_details":null}""",
+        )) {
+            val (admin, _) = client { HttpStatusCode.OK to body }
+            val detail = admin.queueDetail("q")
+            assertEquals(null, detail.consumerDetails, "body=$body 应解析成 null（UI 据此区分「无明细」与「无消费者」）")
+        }
+    }
+
+    @Test
+    fun `queueDetail - 超过 5s 硬超时抛中文文案而不是英文原文`() = runBlocking {
+        // 真实的 5s 等待：这例的价值就在「真的会超时触发」——MockEngine 拖 6s，
+        // 断言 queueDetail 在 5s（DETAIL_TIMEOUT_MS）时抛错且文案已被翻译。
+        val engine = MockEngine {
+            kotlinx.coroutines.delay(6_000)
+            respond("{\"name\":\"q\"}", HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+        }
+        // HttpTimeout 插件必须装（timeout {} 靠它生效；不装就是静默忽略）。
+        val admin = RabbitMqAdminClient(
+            RabbitMqConfig(host = "h", username = "u", password = "p"),
+            HttpClient(engine) { install(io.ktor.client.plugins.HttpTimeout) },
+        )
+
+        val error = assertFailsWith<IllegalStateException> { admin.queueDetail("q") }
+        assertTrue(
+            error.message?.contains("请求超时") == true,
+            "超时应转成中文文案，实际 '${error.message}'",
+        )
+        // 回归守卫：HttpRequestTimeoutException 不是 SocketTimeoutException，
+        // 落到 else 分支的话用户看到的就是这句英文。
+        assertTrue(
+            error.message?.contains("Request timeout has expired") != true,
+            "英文原文泄露到 UI，实际 '${error.message}'",
+        )
     }
 
     @Test

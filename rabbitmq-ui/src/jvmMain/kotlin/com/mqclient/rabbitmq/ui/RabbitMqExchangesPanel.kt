@@ -38,7 +38,6 @@ import com.mqclient.mqui.objectlist.CardAction
 import com.mqclient.mqui.objectlist.ObjectCardData
 import com.mqclient.mqui.objectlist.ObjectListEmptyState
 import com.mqclient.mqui.objectlist.ObjectListPanel
-import com.mqclient.mqui.state.LoadState
 import com.mqclient.mqui.state.LoadStateContent
 import com.mqclient.rabbitmq.RabbitMqEvents
 import com.mqclient.rabbitmq.RabbitMqModule
@@ -78,17 +77,6 @@ fun RabbitMqExchangesPanel(
     var sendExchange by remember(connectionId) { mutableStateOf<RabbitMqExchangeCardInfo?>(null) }
     // 「询问 AI」宿主回调：宿主没 Provide（独立预览等）时为 null —— AI 按钮不显示。
     val aiAsk = LocalAiAsk.current
-
-    // DLX 链接跳转留下的「打开交换机属性」焦点：列表就绪后消费一次 —— 缓存里
-    // 找得到才开（不存在的目标静默丢弃，与「找不到不跳转」的链接判定同一口径）。
-    LaunchedEffect(state.loadState) {
-        val s = state.loadState
-        if (s is LoadState.Success) {
-            RabbitMqUiHints.consumeObjectFocus(connectionId, "exchange")?.let { name ->
-                s.data.firstOrNull { it.name == name }?.let { propsExchange = it }
-            }
-        }
-    }
 
     Box(modifier.fillMaxSize()) {
         Column(modifier.fillMaxSize()) {

@@ -41,6 +41,10 @@ data class RabbitMqQueueSnapshot(
  * 队列详情快照（GET /api/queues/{vhost}/{name} 详情端点的 UI 投影）：慢扫快照没有
  * arguments 与 queue_type，属性对话框实时拉取。arguments 已在 service 层渲染成
  * 纯文本（标量取原值，数组/对象 toString）—— UI 模块不依赖 kotlinx.serialization。
+ *
+ * [consumers] 是计数（指标行用），[consumerDetails] 是明细（「消费者」Tab 用）：
+ * 两者同源同一个响应 —— 不过 [consumerDetails] 可能为空而 [consumers] > 0（broker
+ * 关了 metrics collector），UI 必须区分这两种「空」。
  */
 data class RabbitMqQueueDetailSnapshot(
     val name: String,
@@ -54,10 +58,11 @@ data class RabbitMqQueueDetailSnapshot(
     val messagesReady: Long,
     val messagesUnacknowledged: Long,
     val consumers: Int,
+    val consumerDetails: List<RabbitMqConsumerSnapshot> = emptyList(),
 )
 
 /**
- * 一条队列消费者的实时快照（GET /api/queues/{vhost}/{name}/consumers 的 UI 投影）：
+ * 一条队列消费者的实时快照（队列详情响应 `consumer_details` 的 UI 投影）：
  * 队列属性对话框「消费者」Tab 用。peerHost / peerPort 是消费者客户端的对端地址
  * （channel_details.peer_*），管理端没给就为 null（UI 显示 -）。
  */

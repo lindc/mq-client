@@ -287,6 +287,57 @@ class RabbitMqConnectionManager(
         ConnectionStore.reportStatus(ctx.connectionId, status, MODULE_ID)
     }
 
+    /**
+     * 定时扫描的一次失败：**连续** [SCAN_FAILURE_THRESHOLD] 次才把连接判为 Failed。
+     *
+     * 单次失败不再判死（旧行为）：管理 API 经代理时常会撞上被回收的空闲 socket，
+     * 那是一次可恢复的请求失败，不是连接死亡。只有连续多轮都读不通才当作真断。
+     *
+     * 返回 true 表示这次失败**触发了**状态翻转（用于日志区分「记了一笔」与「判死了」）。
+     */
+    fun onScanFailed(connectionId: String, message: String): Boolean {
+        val ctx = contexts[connectionId] ?: return false
+        // 没有客户端就是真的没连接（或已断开），交给 connect 路径，不走阈值。
+        if (ctx.admin == null) return false
+        val failures = ctx.recordScanFailure()
+        if (failures < SCAN_FAILURE_THRESHOLD) {
+            rabbitMqLog.info(
+                "scan failure tolerated: connection=$connectionId " +
+                    "consecutive=$failures/$SCAN_FAILURE_THRESHOLD reason=$message",
+            )
+            return false
+        }
+        if (ctx.status == ConnectionStatus.Failed) return false
+        ctx.lastError = message
+        setStatus(ctx, ConnectionStatus.Failed)
+        rabbitMqLog.warn(
+            "connection marked FAILED after $failures consecutive scan failures: " +
+                "connection=$connectionId reason=$message",
+        )
+        return true
+    }
+
+    /**
+     * 定时扫描成功：计数归零；如果之前被判为 Failed（但客户端还在），**自动恢复**
+     * 成 Connected。
+     *
+     * 这是整套修复的自愈环节：判死之后扫描仍会继续跑（扫描入口只看客户端在不在，
+     * 不看 status），所以第一次成功就是恢复时机 —— 不需要用户手点重连，也不需要
+     * 额外的定时器。
+     */
+    fun onScanSucceeded(connectionId: String) {
+        val ctx = contexts[connectionId] ?: return
+        val previous = ctx.scanFailureCount()
+        ctx.resetScanFailures()
+        if (ctx.status == ConnectionStatus.Failed && ctx.admin != null) {
+            ctx.lastError = null
+            setStatus(ctx, ConnectionStatus.Connected)
+            rabbitMqLog.info(
+                "connection recovered after $previous consecutive scan failures: connection=$connectionId",
+            )
+        }
+    }
+
     private fun lockFor(connectionId: String): Mutex =
         locks.computeIfAbsent(connectionId) { Mutex() }
 

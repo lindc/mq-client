@@ -5,7 +5,9 @@ import io.ktor.client.engine.cio.CIO
 import io.ktor.client.engine.java.Java
 import io.ktor.client.network.sockets.ConnectTimeoutException
 import io.ktor.client.network.sockets.SocketTimeoutException
+import io.ktor.client.plugins.HttpRequestTimeoutException
 import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.plugins.timeout
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.request
@@ -94,6 +96,16 @@ data class RabbitMqQueueDetailDto(
     @SerialName("messages_ready") val messagesReady: Long = 0,
     @SerialName("messages_unacknowledged") val messagesUnacknowledged: Long = 0,
     val consumers: Int = 0,
+    /**
+     * 消费者明细：详情端点自带（管理端 `clean_consumer_details/1` 生成），队列属性
+     * 对话框「消费者」Tab 的唯一数据源。
+     *
+     * **必须按可空处理**：老版本或关闭 metrics collector（`?disable_stats` /
+     * `management_agent.disable_metrics_collector`）时该字段整个缺失或为 null。
+     * 注意管理 API **没有** `/api/queues/{vhost}/{name}/consumers` 这个端点（路由表
+     * 里只有 `/consumers` 与 `/consumers/{vhost}`），别再去发那次注定 404 的请求。
+     */
+    @SerialName("consumer_details") val consumerDetails: List<RabbitMqConsumerDto>? = null,
 ) {
     /** state 的字符串投影：字符串原样；数组（多节点各报各的状态）取首个元素。 */
     val stateText: String?
@@ -105,7 +117,7 @@ data class RabbitMqQueueDetailDto(
 }
 
 /**
- * 消费者条目（`GET /api/queues/{vhost}/{name}/consumers`）：队列属性对话框
+ * 消费者条目（队列详情响应的 `consumer_details` 数组元素）：队列属性对话框
  * 「消费者」Tab 的实时数据源。管理端点返回字段更多（active / prefetch / 通道
  * 详情几十项），ignoreUnknownKeys 只取投影所需。
  */
@@ -230,6 +242,13 @@ class RabbitMqAdminClient internal constructor(
             "请求超时（${config.connectionTimeout}s）：管理 API 响应过慢",
             e,
         )
+        // HttpTimeout 插件的请求级超时。**注意它不是 SocketTimeoutException**（Ktor 3.2.3
+        // 里继承 java.io.IOException），不进这一支的话用户看到的会是英文原文
+        // `Request timeout has expired [url=..., request_timeout=30000 ms]`。
+        is HttpRequestTimeoutException -> IllegalStateException(
+            "请求超时（${config.connectionTimeout}s）：管理 API 响应过慢",
+            e,
+        )
         else -> IllegalStateException(e.message ?: e::class.simpleName ?: "unknown", e)
     }
 
@@ -271,6 +290,13 @@ class RabbitMqAdminClient internal constructor(
     }
 
     companion object {
+        /**
+         * 队列详情 GET 的硬超时（5s）：属性对话框打开时的交互请求，详见 [queueDetail]。
+         * 5s 对毫秒级的单对象查询有三个数量级余量；它不是「多一点耐心」，而是「保证
+         * 有尽头」。
+         */
+        const val DETAIL_TIMEOUT_MS = 5_000L
+
         /** RabbitMQ 错误响应（JSON）里 reason 字段的提取；plain text 响应整体兜底。 */
         private val REASON_REGEX = Regex("\"reason\"\\s*:\\s*\"([^\"]+)\"")
 
@@ -284,11 +310,29 @@ class RabbitMqAdminClient internal constructor(
         }
     }
 
-    private suspend fun getJson(vararg segments: String): String {
+    /**
+     * GET 请求（JSON 文本）。[timeoutMillis] 非 null 时**只给这一次请求**上硬超时
+     * （`HttpTimeout` 的 requestTimeoutMillis），其余请求继续用连接配置里的全局超时。
+     *
+     * 为什么要能单独收紧：属性对话框的详情 GET 是「点开就要反应」的交互，等全局
+     * 30s（用户还能改成更大）与「卡死」无区别；后台慢扫则应该容忍慢响应。一个全局
+     * 超时值无法同时满足两者。
+     */
+    private suspend fun getJson(
+        vararg segments: String,
+        timeoutMillis: Long? = null,
+    ): String {
         val response: HttpResponse = try {
-            http.get(apiUrl(*segments)) { header(HttpHeaders.Authorization, authHeader) }
+            http.get(apiUrl(*segments)) {
+                header(HttpHeaders.Authorization, authHeader)
+                if (timeoutMillis != null) timeout { requestTimeoutMillis = timeoutMillis }
+            }
         } catch (e: CancellationException) {
             throw e
+        } catch (e: HttpRequestTimeoutException) {
+            // 这次请求的超时值可能小于全局值（如 5s vs 30s），文案得说真实的那一个。
+            val seconds = (timeoutMillis ?: (config.connectionTimeout * 1_000L)) / 1_000L
+            throw IllegalStateException("请求超时（${seconds}s）：管理 API 响应过慢", e)
         } catch (e: Exception) {
             throw mapConnectionError(e)
         }
@@ -459,22 +503,18 @@ class RabbitMqAdminClient internal constructor(
         )
     }
 
-    /** 指定队列详情（实时查询，不走缓存）：属性对话框数据源（arguments / queue_type / 计数）。 */
+    /**
+     * 指定队列详情（实时查询，不走缓存）：属性对话框数据源（arguments / queue_type /
+     * 计数 / consumer_details）。
+     *
+     * 走 [DETAIL_TIMEOUT_MS]（5s）而不是全局连接超时：这是用户点开对话框时的一发
+     * 交互请求，三个 Tab 都靠它的结果，不能让 UI 陪着全局 30s 一起等。超时抛
+     * 带中文文案的 [IllegalStateException]，由 UI 转成错误态 + 重试。
+     */
     suspend fun queueDetail(name: String): RabbitMqQueueDetailDto =
         json.decodeFromString(
             RabbitMqQueueDetailDto.serializer(),
-            getJson("queues", vhostSegment(), pathSegment(name)),
-        )
-
-    /**
-     * 指定队列的消费者列表（实时查询，不走缓存）：`GET
-     * /api/queues/{vhost}/{name}/consumers`。队列不存在时服务端 404 /
-     * 无权限 403，由 checkStatus 统一转文案。
-     */
-    suspend fun queueConsumers(name: String): List<RabbitMqConsumerDto> =
-        json.decodeFromString(
-            ListSerializer(RabbitMqConsumerDto.serializer()),
-            getJson("queues", vhostSegment(), pathSegment(name), "consumers"),
+            getJson("queues", vhostSegment(), pathSegment(name), timeoutMillis = DETAIL_TIMEOUT_MS),
         )
 
     /**

@@ -1,7 +1,6 @@
 package com.mqclient.rabbitmq.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,10 +12,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -27,7 +27,6 @@ import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -38,38 +37,54 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.PointerIcon
-import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.mqclient.core.ConnectionStatus
 import com.mqclient.mqui.state.LoadState
-import androidx.compose.material.icons.filled.Circle
-import com.mqclient.core.CoreModule
-import com.mqclient.core.event.EventNames
-import com.mqclient.rabbitmq.RabbitMqConsumerSnapshot
-import com.mqclient.rabbitmq.RabbitMqQueueDetailSnapshot
 import com.mqclient.rabbitmq.RabbitMqModule
+import com.mqclient.rabbitmq.RabbitMqQueueDetailSnapshot
 import com.mqclient.uicommon.DangerButton
+import com.mqclient.uicommon.PropertyItem
+import com.mqclient.uicommon.PropertyTable
+import com.mqclient.uicommon.PropertyTableSection
+import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
-import com.mqclient.uicommon.SecondaryButton
+import com.mqclient.uicommon.failureText
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
-import com.mqclient.uicommon.failureText
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 
-/** 死信类 argument：行首红色 Error 图标 + error 文字 —— 排查死信时最关心的键。 */
-private val DEAD_LETTER_KEYS = setOf("x-dead-letter-exchange", "x-dead-letter-routing-key")
+/** 死信类 argument 的判定前缀（description 行标「死信相关」）。 */
+private const val DEAD_LETTER_PREFIX = "x-dead-letter"
 
-/** 限制类 argument：行首警告橙图标（TTL / 长度 / 过期 / 优先级）。 */
+/** 限制类 argument：TTL / 长度 / 过期 / 优先级（description 行标「资源限制」）。 */
 private val LIMIT_KEYS = setOf("x-message-ttl", "x-max-length", "x-expires", "x-max-priority")
 
-private val ArgsKeyError = Color(0xFFD32F2F)
+/**
+ * 详情加载的 UI 层兜底超时，覆盖整条详情（概览 / 参数 / 消费者三个 Tab 同源一次 GET）。
+ *
+ * **为什么比 HttpClient 的 5s（[com.mqclient.rabbitmq.RabbitMqAdminClient.DETAIL_TIMEOUT_MS]）
+ * 更长**：两道超时管不同的事。客户端那道是请求本身的截止时间，到点抛带「请求超时」
+ * 文案的异常，用户看到的是具体原因；这道只是「协程层绝不无限等下去」的最后一道保险
+ * （防 service 层在请求之外卡住，例如取 context / 切线程）。所以刻意让它晚 1s 触
+ * 发，让更具体的那个文案先说话 —— 两道都设 5s 的话，谁先到不确定，提示会在
+ * 「请求超时」和笼统的「数据加载超时」之间摇摆。
+ */
+private const val DETAIL_TIMEOUT_MS = 6_000L
+
+/**
+ * 消费者表格单次渲染行数上限。
+ *
+ * 大数据消费者队列（数千个 consumer）的 `consumer_details` 既大又没必要整表呈现：
+ * 排查问题看前几十行就够，超出的用一行提示告知总数。配上 LazyColumn，开表的
+ * 组合与布局成本与这个上限有关，与真实消费者数无关。
+ */
+private const val MAX_RENDERED_CONSUMERS = 200
 
 /**
  * 队列属性对话框（队列卡片 ⓘ / 拓扑双击 queue 入口）：ObjectDetailDialog 外壳 +
@@ -77,12 +92,14 @@ private val ArgsKeyError = Color(0xFFD32F2F)
  * 同款 Tab。
  *
  * 数据：打开即实时拉详情（[RabbitMqModule] service queueDetail —— 慢扫快照没有
- * arguments 与 queue_type），LoadState 三态。消费者 Tab 选中时才懒加载（避免打开
- * 对话框就多打一次 HTTP，同新鲜数据哲学）。只读展示（RabbitMQ 不支持改队列参数）。
+ * arguments 与 queue_type），LoadState 三态。**三个 Tab 共用这一次请求**：消费者明细
+ * 就在详情的 `consumer_details` 字段里（管理 API 没有「某队列的消费者」端点），
+ * 所以消费者 Tab 没有自己的加载态、也不会再卡在转圈上。
  *
- * 参数 Tab：死信类参数值渲染为链接 —— x-dead-letter-exchange 命中慢扫缓存里的
- * 交换机时点击跳交换机页开属性；x-dead-letter-routing-key 命中缓存队列名时跳
- * 队列页开属性（找不到则纯文本不可点）。
+ * 版式：概览与参数统一走 ui-common 的 [PropertyTableSection] / [PropertyTable]
+ * （斑马纹、Key 左对齐、值可拖选、行尾一键复制），与 Kafka / RocketMQ 的属性面板
+ * 同一套视觉，模块内不再维护手写 Row/Column 属性行。参数里的死信 / 限制类键用
+ * [PropertyItem.description] 小字标注，不再靠行首图标。
  *
  * 底部：清空队列（普通按钮 + 警示图标）与删除队列（danger 红），均二次确认
  * （AlertDialog 声明在本外壳 content lambda 内 —— 窗口归属随组合走）；执行中
@@ -99,42 +116,35 @@ fun RabbitMqQueuePropertiesDialog(
     val snackbar = remember { SnackbarHostState() }
     var selectedTab by remember(queueName) { mutableIntStateOf(0) }
     var detailState by remember(queueName) { mutableStateOf<LoadState<RabbitMqQueueDetailSnapshot>>(LoadState.Idle) }
-    var consumersState by remember(queueName) { mutableStateOf<LoadState<List<RabbitMqConsumerSnapshot>>>(LoadState.Idle) }
     var purgeConfirm by remember(queueName) { mutableStateOf(false) }
     var deleteConfirm by remember(queueName) { mutableStateOf(false) }
     var operating by remember(queueName) { mutableStateOf(false) }
 
+    // 文案在组合里取好再进协程：suspend 块里不能调 @Composable。
+    val timeoutMessage = stringResource("rabbitmq_ui_conn_props_timeout")
+    val noServiceMessage = stringResource("rabbitmq_ui_conn_props_no_service")
+
+    // 连接状态：打开瞬间可能恰好处于 Connecting / 刚恢复，错误不能粘住。
+    val connectionStatus = rememberRabbitMqConnectionStatus(connectionId)
+
     fun load() {
         scope.launch {
             detailState = LoadState.Loading
-            detailState = runCatching {
-                val service = RabbitMqModule.serviceOrNull() ?: error("服务未初始化")
-                LoadState.Success(service.queueDetail(connectionId, queueName))
-            }.getOrElse { e ->
-                if (e is CancellationException) throw e
-                LoadState.Error(failureText(e))
+            detailState = loadDetail(timeoutMessage) {
+                val service = RabbitMqModule.serviceOrNull() ?: error(noServiceMessage)
+                service.queueDetail(connectionId, queueName)
             }
         }
     }
 
     LaunchedEffect(connectionId, queueName) { load() }
 
-    // 消费者 Tab 懒加载：每次选中都重拉（新鲜数据哲学，一次 GET 很轻）。
-    fun loadConsumers() {
-        scope.launch {
-            consumersState = LoadState.Loading
-            consumersState = runCatching {
-                val service = RabbitMqModule.serviceOrNull() ?: error("服务未初始化")
-                LoadState.Success(service.queueConsumers(connectionId, queueName))
-            }.getOrElse { e ->
-                if (e is CancellationException) throw e
-                LoadState.Error(failureText(e))
-            }
+    // 时序兜底：对话框打开时若连接正在建立（或在抖动后自动恢复），等状态落定再重拉。
+    // 只在当前是错误态时触发 —— 已经拿到数据的对话框不该因为一次背景状态变化就闪。
+    LaunchedEffect(connectionStatus) {
+        if (connectionStatus == ConnectionStatus.Connected && detailState is LoadState.Error) {
+            load()
         }
-    }
-
-    LaunchedEffect(connectionId, queueName, selectedTab) {
-        if (selectedTab == 2) loadConsumers()
     }
 
     fun purge() {
@@ -240,8 +250,8 @@ fun RabbitMqQueuePropertiesDialog(
                         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                             when (selectedTab) {
                                 0 -> OverviewPane(detail)
-                                1 -> ArgumentsPane(connectionId, detail.arguments, onDismiss)
-                                else -> ConsumersPane(consumersState, ::loadConsumers)
+                                1 -> ArgumentsPane(detail.arguments)
+                                else -> ConsumersPane(detail, ::load)
                             }
                         }
                     }
@@ -328,124 +338,61 @@ private fun FlowBanner() {
 
 @Composable
 private fun OverviewPane(detail: RabbitMqQueueDetailSnapshot) {
-    // 指标行：unacked 大于积压阈值（与概览同口径 1000）→ 警告橙。
-    val unackedHot = detail.messagesUnacknowledged >= BACKLOG_THRESHOLD
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(vertical = 8.dp),
     ) {
-        Text(
-            text = stringResource("rabbitmq_ui_queue_props_section_basic"),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.primary,
-        )
-        Spacer(Modifier.height(8.dp))
-        // 状态：色点 + 文字（色板复用 rabbitMqQueueStateColor）。
-        Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = stringResource("rabbitmq_ui_queue_field_state_label"),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.width(120.dp),
-            )
-            Row(
-                modifier = Modifier.weight(1f),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Circle,
-                    contentDescription = null,
-                    tint = rabbitMqQueueStateColor(detail.state) ?: MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(10.dp),
-                )
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    text = detail.state ?: "-",
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontFamily = FontFamily.Monospace,
-                )
-            }
-        }
-        PropertyLine(
-            stringResource("rabbitmq_ui_queue_field_type"),
-            when (detail.queueType) {
-                "classic" -> stringResource("rabbitmq_ui_queue_type_classic")
-                "quorum" -> stringResource("rabbitmq_ui_queue_type_quorum")
-                else -> detail.queueType
-            },
-        )
-        PropertyLine(
-            stringResource("rabbitmq_ui_exchange_field_durable"),
-            stringResource(if (detail.durable) "rabbitmq_ui_exchange_props_yes" else "rabbitmq_ui_exchange_props_no"),
-        )
-        PropertyLine(
-            stringResource("rabbitmq_ui_exchange_field_auto_delete"),
-            stringResource(if (detail.autoDelete) "rabbitmq_ui_exchange_props_yes" else "rabbitmq_ui_exchange_props_no"),
-        )
-        PropertyLine(
-            stringResource("rabbitmq_ui_queue_field_exclusive"),
-            stringResource(if (detail.exclusive) "rabbitmq_ui_exchange_props_yes" else "rabbitmq_ui_exchange_props_no"),
+        PropertyTableSection(
+            title = stringResource("rabbitmq_ui_queue_props_section_basic"),
+            items = listOf(
+                PropertyItem(stringResource("rabbitmq_ui_queue_field_state_label"), detail.state),
+                PropertyItem(stringResource("rabbitmq_ui_queue_field_type"), queueTypeText(detail.queueType)),
+                PropertyItem(stringResource("rabbitmq_ui_exchange_field_durable"), yesNo(detail.durable)),
+                PropertyItem(stringResource("rabbitmq_ui_exchange_field_auto_delete"), yesNo(detail.autoDelete)),
+                PropertyItem(stringResource("rabbitmq_ui_queue_field_exclusive"), yesNo(detail.exclusive)),
+            ),
         )
         Spacer(Modifier.height(16.dp))
-        Text(
-            text = stringResource("rabbitmq_ui_queue_props_section_metrics"),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.primary,
+        PropertyTableSection(
+            title = stringResource("rabbitmq_ui_queue_props_section_metrics"),
+            items = listOf(
+                PropertyItem(stringResource("rabbitmq_ui_overview_total_messages"), detail.messages.toString()),
+                PropertyItem(stringResource("rabbitmq_ui_queue_field_ready"), detail.messagesReady.toString()),
+                PropertyItem(
+                    stringResource("rabbitmq_ui_queue_field_unacked"),
+                    detail.messagesUnacknowledged.toString(),
+                ),
+                PropertyItem(stringResource("rabbitmq_ui_queue_metric_consumers"), detail.consumers.toString()),
+            ),
         )
-        Spacer(Modifier.height(8.dp))
-        PropertyLine(stringResource("rabbitmq_ui_overview_total_messages"), detail.messages.toString())
-        PropertyLine(stringResource("rabbitmq_ui_queue_field_ready"), detail.messagesReady.toString())
-        PropertyLine(
-            stringResource("rabbitmq_ui_queue_field_unacked"),
-            detail.messagesUnacknowledged.toString(),
-            valueColor = if (unackedHot) RabbitMqWarningOrange else null,
-        )
-        PropertyLine(stringResource("rabbitmq_ui_queue_metric_consumers"), detail.consumers.toString())
     }
 }
+
+/** 队列类型本地化：classic / quorum 有译名，其余（stream 等）原样显示。 */
+@Composable
+private fun queueTypeText(queueType: String): String = when (queueType) {
+    "classic" -> stringResource("rabbitmq_ui_queue_type_classic")
+    "quorum" -> stringResource("rabbitmq_ui_queue_type_quorum")
+    else -> queueType
+}
+
+@Composable
+private fun yesNo(value: Boolean): String =
+    stringResource(if (value) "rabbitmq_ui_exchange_props_yes" else "rabbitmq_ui_exchange_props_no")
 
 /* ------------------------------ Tab 2：参数 ------------------------------ */
 
 /**
- * 死信参数的跳转目标（链接化判定）：value 命中慢扫缓存才可点 ——
- * x-dead-letter-exchange → 交换机（默认交换机 name="" 不跳，列表里没有实体）；
- * x-dead-letter-routing-key → 仅当它恰好是某个队列的名字。
- * 判定走缓存零网络开销；找不到就纯文本，不给「点了没反应」的死链。
+ * 参数 Tab：arguments 直接映射成 [PropertyItem]（按 key 排序，扫一遍有固定顺序）。
+ *
+ * 死信类 / 限制类的标注走 [PropertyItem.description] —— 之前是行首红橙图标 + 值可
+ * 点击跳转；为了复用统一表格，跳转换成了纯文本（组件不支持值点击），换来斑马纹、
+ * 左对齐与一键复制，也和 Kafka / RocketMQ 的属性面板对齐。
  */
-private fun dlxLinkTarget(connectionId: String, key: String, value: String): String? {
-    val service = RabbitMqModule.serviceOrNull() ?: return null
-    return when {
-        key == "x-dead-letter-exchange" && value.isNotEmpty() &&
-            service.cachedExchanges(connectionId).any { it.name == value } -> "exchange"
-        key == "x-dead-letter-routing-key" && value.isNotEmpty() &&
-            service.cachedQueues(connectionId).any { it.name == value } -> "queue"
-        else -> null
-    }
-}
-
-/**
- * 死信链接点击的跳转：先关当前队列属性弹窗（防 UI 叠层），再发 OBJECT_TAB_OPEN_REQUESTED
- * 切主 Tab（宿主 MainWindow onSelect + openTab），最后留 focus hint 给目标面板 ——
- * 列表就绪后自动打开对象属性对话框（RabbitMqExchangesPanel / RabbitMqQueuesPanel 消费）。
- */
-private fun jumpToDlxTarget(connectionId: String, kind: String, name: String, dismissCurrent: () -> Unit) {
-    dismissCurrent()
-    CoreModule.eventBusOrNull?.emit(
-        name = EventNames.OBJECT_TAB_OPEN_REQUESTED,
-        payload = mapOf(
-            "connectionId" to connectionId,
-            "objectType" to if (kind == "exchange") "exchanges" else "queues",
-        ),
-        source = "rabbitmq",
-    )
-    RabbitMqUiHints.requestObjectFocus(connectionId, kind, name)
-}
-
 @Composable
-private fun ArgumentsPane(connectionId: String, arguments: Map<String, String>, dismissCurrent: () -> Unit) {
+private fun ArgumentsPane(arguments: Map<String, String>) {
     if (arguments.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(
@@ -456,227 +403,174 @@ private fun ArgumentsPane(connectionId: String, arguments: Map<String, String>, 
         }
         return
     }
-    Column(modifier = Modifier.fillMaxSize().padding(vertical = 8.dp)) {
-        Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-            Text(
-                text = "Key",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1.2f),
-            )
-            Text(
-                text = "Value",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f),
-            )
-        }
-        HorizontalDivider()
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState()),
-        ) {
-            arguments.forEach { (key, value) ->
-                val isDeadLetter = key in DEAD_LETTER_KEYS || key.startsWith("x-dead-letter")
-                val isLimit = key in LIMIT_KEYS
-                // 死信参数的值命中缓存对象 → 链接（primary 色 + 下划线 + 小手）。
-                val linkTarget = if (isDeadLetter) dlxLinkTarget(connectionId, key, value) else null
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    // 固定图标位：有图标放图标，无图标空占位 —— 所有 key 同一垂直线。
-                    Box(modifier = Modifier.width(24.dp)) {
-                        if (isDeadLetter || isLimit) {
-                            Icon(
-                                imageVector = if (isDeadLetter) Icons.Default.Error else Icons.Default.Warning,
-                                contentDescription = stringResource(
-                                    if (isDeadLetter) "rabbitmq_ui_queue_args_dead_letter" else "rabbitmq_ui_queue_args_limit",
-                                ),
-                                tint = if (isDeadLetter) ArgsKeyError else RabbitMqWarningOrange,
-                                modifier = Modifier.size(14.dp).align(Alignment.CenterStart),
-                            )
-                        }
-                    }
-                    Text(
-                        text = key,
-                        style = MaterialTheme.typography.bodySmall,
-                        fontFamily = FontFamily.Monospace,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        color = if (isDeadLetter) ArgsKeyError else MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.weight(1.2f),
-                    )
-                    if (linkTarget != null) {
-                        Text(
-                            text = value,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontFamily = FontFamily.Monospace,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            color = MaterialTheme.colorScheme.primary,
-                            textDecoration = TextDecoration.Underline,
-                            modifier = Modifier
-                                .weight(1f)
-                                .pointerHoverIcon(PointerIcon.Hand)
-                                .clickable { jumpToDlxTarget(connectionId, linkTarget, value, dismissCurrent) },
-                        )
-                    } else {
-                        Text(
-                            text = value,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontFamily = FontFamily.Monospace,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                }
-                HorizontalDivider(thickness = 0.5.dp)
-            }
-        }
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(vertical = 8.dp),
+    ) {
+        PropertyTable(
+            items = arguments.entries.sortedBy { it.key }.map { (key, value) ->
+                PropertyItem(
+                    key = key,
+                    value = value,
+                    description = argumentDescription(key),
+                )
+            },
+        )
     }
+}
+
+/** 参数说明行：死信类 / 资源限制类各一行小字，其余无说明。 */
+@Composable
+private fun argumentDescription(key: String): String? = when {
+    key.startsWith(DEAD_LETTER_PREFIX) -> stringResource("rabbitmq_ui_queue_args_dead_letter")
+    key in LIMIT_KEYS -> stringResource("rabbitmq_ui_queue_args_limit")
+    else -> null
 }
 
 /* ------------------------------ Tab 3：消费者 ------------------------------ */
 
 /**
  * 消费者 Tab：四列表格（Consumer Tag / 连接 IP / 端口 / Ack Required），数据来自
- * `GET /api/queues/{vhost}/{name}/consumers` 的实时投影。三态 —— Loading 转圈 /
- * Error（404 / 403 等由 AdminClient 统一转文案，给重试）/ 空（当前无消费者连接）。
+ * 本次详情响应里的 `consumer_details` —— **没有独立请求、没有独立加载态**，
+ * 打开对话框那次 GET 成功还是失败，这里就一定是终态。
+ *
+ * 两种「空」必须分开：
+ *  - [RabbitMqQueueDetailSnapshot.consumerDetails] 空且 `consumers == 0` → 真的没有消费者；
+ *  - 空但 `consumers > 0` → broker 没给明细（老版本 / 关了 metrics collector），
+ *    这时说「暂无消费者」就是在骗人，改为提示「明细不可用」并给一个刷新。
  */
 @Composable
 private fun ConsumersPane(
-    state: LoadState<List<RabbitMqConsumerSnapshot>>,
-    onRetry: () -> Unit,
+    detail: RabbitMqQueueDetailSnapshot,
+    onRefresh: () -> Unit,
 ) {
-    when (state) {
-        is LoadState.Idle, is LoadState.Loading -> {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
+    val consumers = detail.consumerDetails
+    if (consumers.isEmpty()) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(vertical = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text(
+                text = if (detail.consumers > 0) {
+                    stringResource("rabbitmq_ui_consumers_unavailable").withArg(detail.consumers)
+                } else {
+                    stringResource("rabbitmq_ui_consumers_empty")
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (detail.consumers > 0) {
+                Spacer(Modifier.height(12.dp))
+                SecondaryButton(onClick = onRefresh) { Text(stringResource("rabbitmq_ui_refresh")) }
             }
         }
-        is LoadState.Error -> {
-            Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center) {
-                Text(
-                    text = stringResource("rabbitmq_ui_consumers_load_failed").withArg(state.message),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.error,
-                )
-                SecondaryButton(onClick = onRetry) { Text(stringResource("rabbitmq_ui_refresh")) }
-            }
+        return
+    }
+    Column(modifier = Modifier.fillMaxSize().padding(vertical = 8.dp)) {
+        Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+            Text(
+                text = stringResource("rabbitmq_ui_consumers_col_tag"),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1.4f),
+            )
+            Text(
+                text = stringResource("rabbitmq_ui_consumers_col_host"),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = stringResource("rabbitmq_ui_consumers_col_port"),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(0.5f),
+            )
+            Text(
+                text = stringResource("rabbitmq_ui_consumers_col_ack"),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(0.5f),
+            )
         }
-        is LoadState.Success -> {
-            val consumers = state.data
-            if (consumers.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        HorizontalDivider()
+        // 上限 + LazyColumn：组合与布局成本与真实消费者数解耦（详见 [MAX_RENDERED_CONSUMERS]）。
+        val shown = consumers.take(MAX_RENDERED_CONSUMERS)
+        LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f)) {
+            items(shown) { consumer ->
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Text(
-                        text = stringResource("rabbitmq_ui_consumers_empty"),
+                        text = consumer.consumerTag,
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                return
-            }
-            Column(modifier = Modifier.fillMaxSize().padding(vertical = 8.dp)) {
-                Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-                    Text(
-                        text = stringResource("rabbitmq_ui_consumers_col_tag"),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1.4f),
                     )
                     Text(
-                        text = stringResource("rabbitmq_ui_consumers_col_host"),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        text = consumer.peerHost ?: "-",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
                     )
                     Text(
-                        text = stringResource("rabbitmq_ui_consumers_col_port"),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        text = consumer.peerPort?.toString() ?: "-",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
                         modifier = Modifier.weight(0.5f),
                     )
                     Text(
-                        text = stringResource("rabbitmq_ui_consumers_col_ack"),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        text = stringResource(
+                            if (consumer.ackRequired) "rabbitmq_ui_exchange_props_yes" else "rabbitmq_ui_exchange_props_no",
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.weight(0.5f),
                     )
                 }
-                HorizontalDivider()
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .verticalScroll(rememberScrollState()),
-                ) {
-                    consumers.forEach { consumer ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                text = consumer.consumerTag,
-                                style = MaterialTheme.typography.bodySmall,
-                                fontFamily = FontFamily.Monospace,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1.4f),
-                            )
-                            Text(
-                                text = consumer.peerHost ?: "-",
-                                style = MaterialTheme.typography.bodySmall,
-                                fontFamily = FontFamily.Monospace,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f),
-                            )
-                            Text(
-                                text = consumer.peerPort?.toString() ?: "-",
-                                style = MaterialTheme.typography.bodySmall,
-                                fontFamily = FontFamily.Monospace,
-                                modifier = Modifier.weight(0.5f),
-                            )
-                            Text(
-                                text = stringResource(
-                                    if (consumer.ackRequired) "rabbitmq_ui_exchange_props_yes" else "rabbitmq_ui_exchange_props_no",
-                                ),
-                                style = MaterialTheme.typography.bodySmall,
-                                modifier = Modifier.weight(0.5f),
-                            )
-                        }
-                        HorizontalDivider(thickness = 0.5.dp)
-                    }
+                HorizontalDivider(thickness = 0.5.dp)
+            }
+            if (consumers.size > shown.size) {
+                item {
+                    Text(
+                        text = stringResource("rabbitmq_ui_consumers_truncated")
+                            .withArg(consumers.size, shown.size),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
+                    )
                 }
             }
         }
     }
 }
 
-/* ------------------------------- 小件 ------------------------------- */
+/* ------------------------------- 加载 ------------------------------- */
 
-/** 单行概览属性：左标签右值（与交换机属性对话框同一排版）。 */
-@Composable
-private fun PropertyLine(label: String, value: String, valueColor: Color? = null) {
-    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.width(120.dp),
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodyMedium,
-            fontFamily = FontFamily.Monospace,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.End,
-            color = valueColor ?: MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.weight(1f),
-        )
-    }
+/**
+ * 详情加载的**唯一出口**：成功 / 失败 / 超时一律返回终态，绝不返回 Loading。
+ *
+ * 分支顺序是这里最要紧的部分：[TimeoutCancellationException] 是
+ * [CancellationException] 的子类，必须先接住 —— 否则超时会被当成「组合已销毁」
+ * 原样抛走，界面就永远停在转圈上。真正的外层取消（对话框关闭 / 宿主退出）仍然原样
+ * 上抛，那时没人再看这个状态。
+ */
+private suspend fun loadDetail(
+    timeoutMessage: String,
+    block: suspend () -> RabbitMqQueueDetailSnapshot,
+): LoadState<RabbitMqQueueDetailSnapshot> = try {
+    LoadState.Success(withTimeout(DETAIL_TIMEOUT_MS) { block() })
+} catch (e: TimeoutCancellationException) {
+    LoadState.Error(timeoutMessage)
+} catch (e: CancellationException) {
+    throw e
+} catch (e: Exception) {
+    LoadState.Error(failureText(e))
 }
-

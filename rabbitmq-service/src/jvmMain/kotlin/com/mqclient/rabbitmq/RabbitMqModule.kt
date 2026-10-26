@@ -1,6 +1,5 @@
 package com.mqclient.rabbitmq
 
-import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.event.EventNames
 import com.mqclient.core.event.getString
@@ -40,6 +39,16 @@ internal const val JOB_SCAN_STATUS = "scan.status"
 
 /** 对象慢扫的起步延迟：先把首拍让给状态快扫（见 RabbitMqConnectionManager.registerScanJobs）。 */
 internal const val OBJECTS_FIRST_DELAY_MS = 5_000L
+
+/**
+ * 连续多少轮扫描失败才把连接判为 `Failed`（默认 3 轮 ≈ 30s）。
+ *
+ * 为什么不是 1：管理 API 走长连接池，代理 / 端口转发回收空闲 socket 时单次请求
+ * 会失败（`HTTP/1.1 header parser received no bytes`），下一次就好 —— 判死一条健康
+ * 连接比多等 30s 代价大得多。为什么不是更大：真正断网 / 凭据失效也应该在半分钟内
+ * 在侧边栏变红。
+ */
+internal const val SCAN_FAILURE_THRESHOLD = 3
 
 /**
  * RabbitMQ 模块的初始化入口 —— **显式连接模型**（与 kafka / ibm-mq 同构）。
@@ -197,11 +206,18 @@ object RabbitMqModule {
 
     /**
      * 队列消息会话入口（队列消息对话框）：AMQP 直连当前队列（autoAck = false）。
-     * 连接必须处于 Connected；会话生命周期归对话框 —— 关闭时调 [closeMessageSessionAsync]。
+     * 只要管理 API 客户端还在（即这条连接真的连上过）就允许开；会话生命周期归
+     * 对话框 —— 关闭时调 [closeMessageSessionAsync]。
      */
     suspend fun openMessageSession(connectionId: String, queueName: String): RabbitMqQueueSession {
-        val ctx = connectionOrNull(connectionId)?.takeIf { it.status == ConnectionStatus.Connected }
-            ?: throw IllegalStateException("未连接")
+        // 与扫描 / 查询同一口径：有客户端就继续，不拿 status 当否决票（见
+        // RabbitMqScanService.targetOrThrow 的说明）。
+        val ctx = connectionOrNull(connectionId)
+            ?.takeIf { it.admin != null }
+            ?: throw IllegalStateException(
+                connectionOrNull(connectionId)?.let { connectionRefusalText(it) }
+                    ?: "连接未登记：该连接已被删除或模块未初始化",
+            )
         return RabbitMqMessageSession.open(ctx.config, queueName).also { openSessions.add(it) }
     }
 
@@ -227,6 +243,15 @@ object RabbitMqModule {
     /** 一条连接的运行时上下文；未登记时为 null。 */
     fun connectionOrNull(connectionId: String): RabbitMqConnectionContext? =
         manager?.contextOrNull(connectionId)
+
+    /** 扫描失败上报（按阈值判定是否置 Failed）；模块未初始化时静默忽略。 */
+    internal fun reportScanFailure(connectionId: String, message: String): Boolean =
+        manager?.onScanFailed(connectionId, message) ?: false
+
+    /** 扫描成功上报（计数归零 + Failed 自愈）；模块未初始化时静默忽略。 */
+    internal fun reportScanSuccess(connectionId: String) {
+        manager?.onScanSucceeded(connectionId)
+    }
 
     /**
      * 模块销毁：先断开全部连接（关句柄），再取消订阅，最后摘掉引用。顺序反了的话

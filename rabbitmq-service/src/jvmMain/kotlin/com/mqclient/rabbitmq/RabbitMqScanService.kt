@@ -1,7 +1,5 @@
 package com.mqclient.rabbitmq
 
-import com.mqclient.core.ConnectionStatus
-import com.mqclient.core.ConnectionStore
 import com.mqclient.core.concurrent.KeyedJobRegistry
 import com.mqclient.core.concurrent.KeyedMutex
 import com.mqclient.core.cache.allKindsFailed
@@ -31,8 +29,14 @@ import kotlinx.serialization.json.buildJsonObject
  *    `GET /api/nodes` 要 `monitor` / `administrator` tag，而只带 `management` tag 的
  *    账号（标准的只读账号）能读 exchanges / queues / bindings，读 nodes 会 403。
  *    曾经的写法是任一类失败就整轮失败 → 一个完全可用的只读账号被标成
- *    `ConnectionStatus.Failed`，界面全红、点重连也没用。现在只有四类**全**失败
- *    才判定为连接真的断了（那时才标 Failed），单类失败只跳过该类并保留上一轮缓存。
+ *    `ConnectionStatus.Failed`，界面全红、点重连也没用。现在单类失败只跳过该类并
+ *    保留上一轮缓存；真正判连接已死的是**连续失败阈值**（见下）。
+ *  - **连接状态的判定不再由单次结果决定**：扫描失败只记一笔，连续
+ *    [SCAN_FAILURE_THRESHOLD] 轮都失败才把连接置 `Failed`；任一成功即计数归零并把
+ *    误判的 `Failed` 恢复成 `Connected`。长连接池经代理时偶发的
+ *    `header parser received no bytes` 因此不会再造成「明明连着却报未连接」。
+ *  - 请求入口（[RabbitMqScanService.queueDetail] 等）不再拿 `status` 当否决票：
+ *    只要管理 API 客户端还在就直接发请求，真断了由客户端招供真实原因。
  *  - **状态快扫** [scanStatus]（默认 10s）：`GET /api/queues` 的计数字段全量替换
  *    进 `queueStatus`，发事件通知 UI 刷新队列卡片。跑通 → reportStatus(Connected)
  *    保活（与 Kafka 的 lag 心跳同款）。
@@ -69,9 +73,12 @@ enum class RabbitMqScanType(val label: String) {
 /**
  * 四类全失败才算连接断了（见 [allKindsFailed] 的说明）。
  *
+ * 四类全失败是一个强信号（四类都读不通），但它仍然走**连续失败阈值**：
+ * 慢扫 5 分钟一轮，三次才判死太慢，而真正的断线 10 秒一次的状态快扫会在
+ * 30 秒内先报上来 —— 所以慢扫全失败只是佐证，不需要更激进的规则。
+ *
  * 单类失败不改连接状态：四类端点的权限要求不同（`/api/nodes` 要 `monitor` tag），
- * 只读账号读不到节点是**正常现象**，不是连接故障。真正的「连接已断」还会被 10s
- * 一条的队列心跳（[RabbitMqScanService.scanStatus]）捕获——那条跑不通才是真断。
+ * 只读账号读不到节点是**正常现象**，不是连接故障。
  */
 internal fun isConnectionBroken(failedTypes: Collection<RabbitMqScanType>): Boolean =
     allKindsFailed(failedTypes, RabbitMqScanType.entries)
@@ -146,8 +153,7 @@ class RabbitMqScanService(private val context: ServiceContext) {
      *    `OBJECTS_SCAN_FAILED` 并 `markFailed`，让界面给「重连」。
      */
     suspend fun scanObjects(connectionId: String) = scanLocks.withLock(connectionId) {
-        val ctx = connectedContext(connectionId) ?: return@withLock
-        val admin = ctx.admin ?: return@withLock
+        val (ctx, admin) = scanTargetOrNull(connectionId) ?: return@withLock
         val objectsTtl = objectsTtlMs(ctx)
         // 四路 async 并发写，用线程安全容器（每类只写自己的 key）。
         val failures = ConcurrentHashMap<RabbitMqScanType, String>()
@@ -279,8 +285,7 @@ class RabbitMqScanService(private val context: ServiceContext) {
      * 状态没变时直接忽略）。
      */
     suspend fun scanStatus(connectionId: String) = scanLocks.withLock(connectionId) {
-        val ctx = connectedContext(connectionId) ?: return@withLock
-        val admin = ctx.admin ?: return@withLock
+        val (ctx, admin) = scanTargetOrNull(connectionId) ?: return@withLock
         try {
             val queueDtos = withContext(Dispatchers.IO) { admin.queues() }
             val status = queueDtos.associate { dto ->
@@ -304,9 +309,8 @@ class RabbitMqScanService(private val context: ServiceContext) {
                     "totalMessages" to status.values.sumOf { it.messages },
                 ),
             )
-            // 心跳跑通了即这条连接是活的，按「连接状态上报」约定报给核心（唯一入口，
-            // 见 ConnectionStore.reportStatus）。状态没变时核心直接忽略。
-            ConnectionStore.reportStatus(connectionId, ConnectionStatus.Connected, context.moduleId)
+            // 心跳跑通了即这条连接是活的：计数归零，若之前被误判 Failed 则自动恢复。
+            RabbitMqModule.reportScanSuccess(connectionId)
             rabbitMqLog.debug(
                 "status scanned: connection=$connectionId queues=${status.size} " +
                     "totalMessages=${status.values.sumOf { it.messages }}",
@@ -364,8 +368,7 @@ class RabbitMqScanService(private val context: ServiceContext) {
         autoDelete: Boolean,
         arguments: Map<String, String> = emptyMap(),
     ) {
-        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
-        val admin = ctx.admin ?: throw IllegalStateException("未连接")
+        val (ctx, admin) = targetOrThrow(connectionId)
         val flags = listOfNotNull(
             "type=$type",
             "durable".takeIf { durable },
@@ -415,8 +418,7 @@ class RabbitMqScanService(private val context: ServiceContext) {
         require(name.isNotEmpty() && !name.startsWith("amq.")) {
             "默认交换机与系统交换机（amq.*）不可删除"
         }
-        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
-        val admin = ctx.admin ?: throw IllegalStateException("未连接")
+        val (ctx, admin) = targetOrThrow(connectionId)
         audited(connectionId, "DELETE EXCHANGE $name") {
             withContext(Dispatchers.IO) { admin.deleteExchange(name) }
         }
@@ -442,8 +444,7 @@ class RabbitMqScanService(private val context: ServiceContext) {
      * getGroupDetail 同一哲学）。
      */
     suspend fun exchangeBindings(connectionId: String, name: String): List<RabbitMqBindingSnapshot> {
-        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
-        val admin = ctx.admin ?: throw IllegalStateException("未连接")
+        val (ctx, admin) = targetOrThrow(connectionId)
         return withContext(Dispatchers.IO) {
             admin.exchangeBindings(name).map {
                 RabbitMqBindingSnapshot(
@@ -470,8 +471,7 @@ class RabbitMqScanService(private val context: ServiceContext) {
         routingKey: String,
         arguments: Map<String, String> = emptyMap(),
     ) {
-        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
-        val admin = ctx.admin ?: throw IllegalStateException("未连接")
+        val (ctx, admin) = targetOrThrow(connectionId)
         audited(connectionId, "CREATE BINDING $exchange -> $destination" + routingKey.takeIf { it.isNotBlank() }?.let { " [rk=$it]" }) {
             withContext(Dispatchers.IO) { admin.createBinding(exchange, destination, destinationType, routingKey, arguments) }
         }
@@ -492,8 +492,7 @@ class RabbitMqScanService(private val context: ServiceContext) {
         destinationType: String,
         propertiesKey: String,
     ) {
-        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
-        val admin = ctx.admin ?: throw IllegalStateException("未连接")
+        val (ctx, admin) = targetOrThrow(connectionId)
         audited(connectionId, "DELETE BINDING $exchange -> $destination" + propertiesKey.takeIf { it.isNotBlank() }?.let { " [rk=$it]" }) {
             withContext(Dispatchers.IO) { admin.deleteBinding(exchange, destination, destinationType, propertiesKey) }
         }
@@ -518,8 +517,7 @@ class RabbitMqScanService(private val context: ServiceContext) {
         headers: Map<String, String>,
         payloadEncoding: String = "string",
     ): Boolean {
-        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
-        val admin = ctx.admin ?: throw IllegalStateException("未连接")
+        val (ctx, admin) = targetOrThrow(connectionId)
         val routed = withContext(Dispatchers.IO) {
             admin.publish(exchange, routingKey, payload, headers, payloadEncoding)
         }
@@ -532,11 +530,15 @@ class RabbitMqScanService(private val context: ServiceContext) {
 
     /**
      * 队列详情（实时查询，不走缓存 —— 属性对话框要新鲜的 arguments / queue_type /
-     * 计数，与 exchangeBindings 同一哲学）。
+     * 计数 / 消费者明细，与 exchangeBindings 同一哲学）。
+     *
+     * 消费者明细走详情端点自带的 `consumer_details` 字段，**不另发请求**：管理 API
+     * 没有「某队列的消费者」这个端点（只有 `/api/consumers/{vhost}`，还得全量拉回
+     * 再按队列名过滤）。一次 GET 就把三个 Tab 的数据全拿到，消费者 Tab 也就没有
+     * 自己的加载态可卡。
      */
     suspend fun queueDetail(connectionId: String, name: String): RabbitMqQueueDetailSnapshot {
-        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
-        val admin = ctx.admin ?: throw IllegalStateException("未连接")
+        val (ctx, admin) = targetOrThrow(connectionId)
         return withContext(Dispatchers.IO) { admin.queueDetail(name) }.let { d ->
             RabbitMqQueueDetailSnapshot(
                 name = d.name,
@@ -550,6 +552,14 @@ class RabbitMqScanService(private val context: ServiceContext) {
                 messagesReady = d.messagesReady,
                 messagesUnacknowledged = d.messagesUnacknowledged,
                 consumers = d.consumers,
+                consumerDetails = d.consumerDetails.orEmpty().map {
+                    RabbitMqConsumerSnapshot(
+                        consumerTag = it.consumerTag,
+                        peerHost = it.channelDetails?.peerHost,
+                        peerPort = it.channelDetails?.peerPort,
+                        ackRequired = it.ackRequired,
+                    )
+                },
             )
         }
     }
@@ -562,30 +572,11 @@ class RabbitMqScanService(private val context: ServiceContext) {
         }
 
     /**
-     * 队列消费者列表（实时查询，不走缓存 —— 属性对话框「消费者」Tab 要新鲜数据，
-     * 与 queueDetail 同一哲学）。队列不存在 / 无权限由 AdminClient 的 checkStatus
-     * 转文案，原样上抛给 UI。
-     */
-    suspend fun queueConsumers(connectionId: String, name: String): List<RabbitMqConsumerSnapshot> {
-        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
-        val admin = ctx.admin ?: throw IllegalStateException("未连接")
-        return withContext(Dispatchers.IO) { admin.queueConsumers(name) }.map {
-            RabbitMqConsumerSnapshot(
-                consumerTag = it.consumerTag,
-                peerHost = it.channelDetails?.peerHost,
-                peerPort = it.channelDetails?.peerPort,
-                ackRequired = it.ackRequired,
-            )
-        }
-    }
-
-    /**
      * 清空队列（实时操作）：DELETE contents 端点（只删 Ready，Unacked 不受影响）。
      * 成功后触发一轮 scanNow，快扫计数缓存几秒内归零（对话框自身也会重载实时详情）。
      */
     suspend fun purgeQueue(connectionId: String, name: String) {
-        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
-        val admin = ctx.admin ?: throw IllegalStateException("未连接")
+        val (ctx, admin) = targetOrThrow(connectionId)
         audited(connectionId, "PURGE QUEUE $name") {
             withContext(Dispatchers.IO) { admin.purgeQueue(name) }
         }
@@ -608,8 +599,7 @@ class RabbitMqScanService(private val context: ServiceContext) {
         exclusive: Boolean,
         arguments: Map<String, String>,
     ) {
-        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
-        val admin = ctx.admin ?: throw IllegalStateException("未连接")
+        val (ctx, admin) = targetOrThrow(connectionId)
         val args = buildJsonObject {
             arguments
                 .filter { it.key.isNotBlank() }
@@ -654,8 +644,7 @@ class RabbitMqScanService(private val context: ServiceContext) {
      * reason 原样抛给调用方。
      */
     suspend fun deleteQueue(connectionId: String, name: String) {
-        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
-        val admin = ctx.admin ?: throw IllegalStateException("未连接")
+        val (ctx, admin) = targetOrThrow(connectionId)
         audited(connectionId, "DELETE QUEUE $name") {
             withContext(Dispatchers.IO) { admin.deleteQueue(name) }
         }
@@ -677,11 +666,6 @@ class RabbitMqScanService(private val context: ServiceContext) {
     }
 
     // ---------------------------------------------------------------- 内部
-
-    /** 连接处于 Connected 的上下文；否则 null（定时任务下一轮由状态守卫跳过）。 */
-    private fun connectedContext(connectionId: String): RabbitMqConnectionContext? =
-        RabbitMqModule.connectionOrNull(connectionId)
-            ?.takeIf { it.status == ConnectionStatus.Connected }
 
     /**
      * 写操作审计包裹：操作前计时，成功 / 失败各发一条 core.mq.command.executed
@@ -732,16 +716,51 @@ class RabbitMqScanService(private val context: ServiceContext) {
     private fun cacheOf(connectionId: String): com.mqclient.core.cache.CacheManager? =
         RabbitMqModule.connectionOrNull(connectionId)?.cache
 
-    /** 整轮扫描失败即这条连接大概率已断：上下文与核心状态一起转 FAILED（UI 显示「连接失败」）。 */
+    /**
+     * 整轮扫描失败 → 交给连接管理器按「连续失败阈值」判定是否置 Failed。
+     *
+     * 旧写法是这里直接写 `ctx.status = Failed`：单次失败就判死，而扫描入口本身
+     * 又要求 `Connected` —— 判死之后心跳再也不跑，于是一条健康连接被永久误判为
+     * 「未连接」（真实现场见 mqclient.log：四类对象扫描刚全部成功，5 秒后一次
+     * `header parser received no bytes` 就把连接标成 FAILED）。现在状态翻转集中在
+     * [RabbitMqConnectionManager.onScanFailed]，单次抖动只计数、不翻状态。
+     */
     private fun markFailed(connectionId: String, message: String) {
-        RabbitMqModule.connectionOrNull(connectionId)?.let { ctx ->
-            if (ctx.status == ConnectionStatus.Connected) {
-                ctx.lastError = message
-                ctx.status = ConnectionStatus.Failed
-                ConnectionStore.reportStatus(connectionId, ConnectionStatus.Failed, context.moduleId)
-                rabbitMqLog.warn("connection marked FAILED after scan error: connection=$connectionId")
-            }
-        }
+        RabbitMqModule.reportScanFailure(connectionId, message)
+    }
+
+    /**
+     * 请求入口的**统一守卫**：只看「有没有管理 API 客户端」，不拿 status 当否决票。
+     *
+     * 这是本次误判的关键修正。`status` 是**扫描结论**（可能因一次抖动被误标），
+     * `admin` 才是**能力事实**（客户端在 = 可以发请求）。用结论去否决能力，就会
+     * 出现「明明连着却报未连接」；反过来让请求自己去试，真断了它会抛连接异常，
+     * 那时展示的才是真实原因。
+     */
+    private data class ScanTarget(
+        val ctx: RabbitMqConnectionContext,
+        val admin: RabbitMqAdminClient,
+    )
+
+    /** 有客户端就返回；真的没有则抛带具体原因的异常（未登记 / 连接中 / 失败原因 / 未连）。 */
+    private fun targetOrThrow(connectionId: String): ScanTarget {
+        val ctx = RabbitMqModule.connectionOrNull(connectionId)
+            ?: throw IllegalStateException("连接未登记：该连接已被删除或模块未初始化")
+        val admin = ctx.admin ?: throw IllegalStateException(connectionRefusalText(ctx))
+        return ScanTarget(ctx, admin)
+    }
+
+    /**
+     * 定时扫描专用的宽松版：只要客户端还在就返回，`status` 不参与判定。
+     *
+     * 为什么定时扫描必须忽略 status：只有这样才能**自愈** —— 被判 Failed 之后
+     * 心跳继续跑，第一次成功即可恢复成 Connected（见
+     * [RabbitMqConnectionManager.onScanSucceeded]）。
+     */
+    private fun scanTargetOrNull(connectionId: String): ScanTarget? {
+        val ctx = RabbitMqModule.connectionOrNull(connectionId) ?: return null
+        val admin = ctx.admin ?: return null
+        return ScanTarget(ctx, admin)
     }
 
     /** 给日志 / 事件的失败原因：RabbitMqAdminClient 已产出人类可读文案，直接取 message。 */

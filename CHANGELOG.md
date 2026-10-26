@@ -2,6 +2,83 @@
 
 本文件记录 MQClient 的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [Unreleased] — 2026-10-26 (2)
+
+### Fixed
+
+- **RabbitMQ 属性对话框假报「未连接」（根因：心跳单次失败就被判死，且判死永不复查）**：
+  运行时日志里的现场是 —— 11:08:15 四类对象端点（exchanges / queues / bindings /
+  nodes）**全部读成功**，11:08:20 一次状态快扫失败
+  （`HTTP/1.1 header parser received no bytes`，长连接池取到被代理回收的空闲
+  socket）就 `markFailed`；而扫描入口当时要求 `status == Connected`，判死之后
+  10s 心跳再也不跑，于是**一条完全健康的连接永久显示「未连接」**，点重连也没用。
+  三处修正：
+  1. **连续失败阈值**：扫描失败只记一笔，连续 3 轮（≈30s）都失败才置 `Failed`；
+     任一成功即计数归零，并把误判的 `Failed` **自动恢复**成 `Connected`。
+  2. **能力优先的守卫**：请求入口不再拿 `status` 当否决票，只要管理 API 客户端
+     还在就直接发请求（`status` 是扫描结论，`admin` 才是能力事实）；真断了由
+     客户端招供 `ConnectException` / 超时的真实原因。12 处调用点统一收敛到
+     `targetOrThrow`，扫除了「守卫先拒 → 真实错误根本没机会出现」这一类问题。
+  3. **拒绝文案分层**：`connectionRefusalText` 按状态分开说 —— 未登记 / 正在连接
+     （提示等待）/ 上次请求失败（**带出 `lastError` 真实原因**）/ 未连接（指去侧栏）。
+     旧写法四种情况全叫「未连接」。
+- **属性对话框不再钉住假错误**：队列与交换机属性对话框都跟连接状态走 —— 当前是
+  错误态且连接落定成 `Connected` 时自动重拉。解决「打开瞬间恰好在
+  `Connecting` / 抖动恢复中」造成的粘性报错（「重试」按钮保留）。
+- **交换机绑定表的「刷新」按钮是永久转圈**（顺带发现）：`load()` 只把状态改成
+  `Loading`，真正发请求的是 `LaunchedEffect(connectionId, exchangeName, bindingsReload)`
+  —— 不动 `bindingsReload` 就不会重跑，界面卡死在转圈。现改为同时递增触发器。
+
+### Tests
+
+- 新增 `RabbitMqConnectionGuardTest`（8 例）：连续失败计数与重置、断开清理归零、
+  阈值常量为 3、四种连接状态拒绝文案互不相同、`Failed` 必须带出真实原因、
+  原因为空时仍可读。
+
+## [Unreleased] — 2026-10-26
+
+### Fixed
+
+- **RabbitMQ 队列属性对话框「消费者」Tab 永远转圈**：根因是它去请求
+  `GET /api/queues/{vhost}/{name}/consumers` —— 管理 API 根本没有这个端点
+  （`rabbit_mgmt_dispatcher.erl` 里只有 `/consumers` 与 `/consumers/{vhost}`），
+  每次点 Tab 都是一次注定失败的请求；UI 侧又让 `Idle` 与 `Loading` 共用转圈、
+  全链路没有任何超时，所以失败被呈现成「加载不出来了」。改为直接渲染详情响应
+  自带的 `consumer_details`（同一个 GET，零额外请求，消费者 Tab 不再有自己的
+  加载态）：`RabbitMqAdminClient.queueConsumers` 这个伪端点请求、`RabbitMqScanService`
+  的对应封装与 UI 调用点一并移除。字段按**可空**解析（老版本 / 关闭 metrics
+  collector 时缺失），空明细但计数 > 0 时提示「明细不可用」而不是谎称无消费者。
+  详情加载加 5s 硬超时，`TimeoutCancellationException` 先于
+  `CancellationException` 接住 —— 成功 / 失败 / 超时一律落到终态。
+- **属性对话框会「极其缓慢」的真正原因：消费者表格没有虚拟化**：
+  `Column(verticalScroll) { consumers.forEach { ... } }` 会把全部消费者一次性
+  组合（数千 consumer 的队列即上万节点，每次都重新布局）。换成 `LazyColumn`，
+  并将单次渲染上限设为 200 行（超出的一行小字告知总数），组合与布局成本不再随
+  消费者数增长。
+- **详情请求的硬超时下沉到 HttpClient 层**（`getJson` 新增 `timeoutMillis`，
+  `queueDetail` 传 `DETAIL_TIMEOUT_MS = 5s`），不再只靠全局连接超时（默认 30s、
+  用户可改大）；UI 层 `withTimeout` 改为 6s 作最后一道保险 —— 刻意让客户端先触发，
+  用户看到的是具体的「请求超时（5s）」，而不是笼统的「数据加载超时」。
+  顺带修一个真实缺陷：`HttpRequestTimeoutException` 在 Ktor 3.2.3 里继承
+  `java.io.IOException`（不是 `SocketTimeoutException`），`mapConnectionError` 漏发
+  这一支时超时会直接透出英文原文
+  `Request timeout has expired [url=...]`，现补上中文映射（GET 与写请求共用）。
+- **RabbitMQ 属性对话框版式不统一**：概览 / 参数两个 Tab 手写的 Key-Value 行
+  （值右对齐、无斑马纹、无复制按钮）全部换成 ui-common 的
+  `PropertyTableSection` / `PropertyTable`，与 Kafka / RocketMQ 属性面板同一套
+  视觉（斑马纹、Key 左对齐、值可拖选、行尾一键复制）。参数里的死信 / 资源限制
+  类键改走 `PropertyItem.description` 小字标注，原先「值可点击跳转交换机 /
+  队列」的链接按决策移除（连同失去生产方的 `RabbitMqUiHints` 对象焦点通道与
+  两个面板里的消费点）。交换机属性对话框里的同一份手写 `PropertyLine` 一并收掉。
+  「状态」色点与「Unacked」橙色随之取消 —— 与公共组件不支持值着色保持一致。
+
+### Tests
+
+- `RabbitMqAdminClientContractTest` +3 例：详情响应 `consumer_details` 明细解析、
+  字段缺失 / 显式 null 都解析成 null 而不抛错；以及 MockEngine 拖 6s 时
+  `queueDetail` 在 5s 抛带中文「请求超时」的 `IllegalStateException`（实测
+  5.09s 完成，证明是客户端那道超时先说话，且英文原文没泄露）。
+
 ## [Unreleased] — 2026-10-22
 
 ### Added
