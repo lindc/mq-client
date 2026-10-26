@@ -36,6 +36,7 @@ import com.mqclient.rocketmq.RocketMqEvents
 import com.mqclient.rocketmq.RocketMqModule
 import com.mqclient.uicommon.PropertyItem
 import com.mqclient.uicommon.PropertyTableSection
+import com.mqclient.uicommon.WidthCappedColumn
 import com.mqclient.uicommon.i18n.stringResource
 
 /**
@@ -79,10 +80,10 @@ fun RocketMqOverviewPanel(
             loadingMessage = stringResource("rocketmq_ui_overview_loading"),
             modifier = Modifier.fillMaxWidth().weight(1f),
         ) { cluster ->
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            // 整页内容（属性表 + Broker 表格卡片 + 计数）夹到同一个宽度并居中：
+            // 只夹属性表会让它比下面的全宽卡片窄一截、左右缩进又不齐，反而更散。
+            WidthCappedColumn(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
             ) {
                 // ---- 集群信息：属性表（斑马纹 + 行尾复制）----
                 PropertyTableSection(

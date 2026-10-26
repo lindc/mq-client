@@ -205,7 +205,7 @@ graph TB
 
 ### 统一视觉规范
 
-全模块采用无边框斑马纹 `PropertyTable`，Key 定宽 120dp、Value 左对齐可拖选，超长两行截断，空值显示 `-` 且不渲染复制按钮。**13 个对话框的 `failureText` 已合并为一份实现**，顺带解包 `CompletionException`（`CompletableFuture` 异步链抛的就是它）。
+全模块采用无边框斑马纹 `PropertyTable`，Key `weight(0.35f)` / Value `weight(0.65f)` 分栏、都左对齐，Value 可拖选，超长两行截断，空值显示 `-` 且不渲染复制按钮；整表限宽 900dp 并居中，宽屏下不会被拉散。**13 个对话框的 `failureText` 已合并为一份实现**，顺带解包 `CompletionException`（`CompletableFuture` 异步链抛的就是它）。
 
 ### 类 DBeaver 的 MQSC 控制台
 

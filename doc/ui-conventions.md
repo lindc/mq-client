@@ -14,21 +14,28 @@
 （连接属性、队列管理器、主题/消费组属性、集群概览等）：
 
 ```kotlin
-data class PropertyItem(val key: String, val value: String?, val copyable: Boolean = true)
+data class PropertyItem(val key: String, val value: String?, val copyable: Boolean = true, val description: String? = null)
+
+val PropertyTableMaxWidth: Dp = 900.dp
 
 @Composable
-fun PropertyTable(items: List<PropertyItem>, modifier: Modifier = Modifier)
+fun PropertyTable(items: List<PropertyItem>, modifier: Modifier = Modifier, maxWidth: Dp = PropertyTableMaxWidth)
 @Composable
-fun PropertyTableSection(title: String, items: List<PropertyItem>, modifier: Modifier = Modifier)
+fun PropertyTableSection(title: String, items: List<PropertyItem>, modifier: Modifier = Modifier, maxWidth: Dp = PropertyTableMaxWidth)
+@Composable
+fun WidthCappedColumn(modifier: Modifier = Modifier, maxWidth: Dp = PropertyTableMaxWidth, ...)
 ```
 
 视觉与交互约定：
 
 - **斑马纹**：奇数行 `surfaceVariant.copy(alpha = 0.3f)` + 4dp 圆角，偶数行透明；行高最小 40dp，行距 8dp
-- **对齐**：Key 定宽 120dp 左对齐（次要色）；Value `weight(1f)` **左对齐**（不右对齐），超长两行后省略，包在 `SelectionContainer` 里可拖选
+- **宽度**：整表 `widthIn(max = PropertyTableMaxWidth)` 并**水平居中**（与 `ObjectCardGrid` 同一惯用法：先夹约束再 `fillMaxWidth`）。超宽屏 / 全屏下不再把两列拉散；窗口窄于上限时不触发
+- **分栏**：Key `weight(0.35f)` / Value `weight(0.65f)`，都左对齐（Key 次要色 / Value 主色）。900dp 上限下 Key ≈ 300dp，容得下 `x-dead-letter-routing-key` 一类长参数名
+- **行数上限**：Key 与 Value 都 `maxLines = 2` + `TextOverflow.Ellipsis`；Value 额外包在 `SelectionContainer` 里可拖选
 - **空值**：`null` / 空串显示 `-`，且不渲染复制按钮
-- **复制**：行尾 24dp IconButton（ContentCopy 图标），点击写剪贴板并弹「已复制」Snackbar（host 内置在组件里，调用方无需接入）
-- **分组**：小标题 + `PropertyTable`（用 `PropertyTableSection`），不再套卡片背景（避免与斑马纹叠色）
+- **复制**：行尾 24dp IconButton（ContentCopy 图标），点击写剪贴板并弹「已复制」Snackbar（host 内置在组件里，调用方无需接入）；**无复制按钮的行用同宽 Spacer 占位**，否则分栏线会逐行错开
+- **分组**：小标题 + `PropertyTable`（用 `PropertyTableSection`），不再套卡片背景（避免与斑马纹叠色）。标题与表格在**同一个限宽列**内，内层表格传 `maxWidth = Dp.Infinity` 避免二次居中
+- **混合页面**：属性表旁边还有别的全宽块（RocketMQ 概览的 Broker 卡片、RabbitMQ 概览的节点行）时，用 `WidthCappedColumn` 把**整页内容**夹到同一个宽度 —— 只夹表格会让它比相邻块窄一截、左右缩进不齐
 
 范围边界：`MessageHeaderRow`（消息详情 Header 的元数据表）与 IBM MQ 的
 `PropertyGroupsPane`（队列管理器分组管线）不在该组件范围内；UI 层禁止直接展示

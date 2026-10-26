@@ -2,6 +2,32 @@
 
 本文件记录 MQClient 的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [Unreleased] — 2026-10-26 (4)
+
+### Changed
+
+- **`PropertyTable` 宽度策略与分栏比例**（全应用属性面板的观感一次性变了）：
+  1. **Key 不再定宽 120dp** —— 那个宽度装不下 `x-dead-letter-exchange`（约 158dp）
+     之类的长参数名，旧写法只能折行，而且行数无上限。改为 Key `weight(0.35f)` /
+     Value `weight(0.65f)`（保持左右两列），两列都 `maxLines = 2` + 省略号。
+     900dp 上限下 Key ≈ 300dp，长参数名一行就能站下。
+  2. **整表 `widthIn(max = 900.dp)` 并水平居中**（`PropertyTableMaxWidth`，修饰符顺序与
+     `ObjectCardGrid` 一致：先夹约束再 `fillMaxWidth`）。旧写法 `fillMaxWidth` +
+     Value `weight(1f)` 会让短值（如 `classic`）在高分屏窗口里被推到极左、后面
+     几千像素空白 —— 窗口越宽比例越失衡。
+  3. **无复制按钮的行补 24dp 占位**：`weight` 分配的是扣除固定子项后的剩余宽度，
+     缺按钮时那 24dp 会退还给两列，分栏线逐行错开约 8dp。
+  4. **`PropertyTableSection` 的标题与表格进同一个限宽列**（内层传
+     `maxWidth = Dp.Infinity`）：只夹表格会让标题贴最左、表格居中缩进几百 dp。
+  5. 新增公开的 `WidthCappedColumn`（限宽 + 居中），供**混合页面**把整页内容夹到
+     同一宽度：RocketMQ 概览（属性表 + Broker 表格卡片 + 计数）、RabbitMQ 概览
+     （属性表 + 节点行）。只夹表格会让它比相邻的全宽块窄一截、左右缩进不齐。
+  6. `PropertyTable` / `PropertyTableSection` 新增 `maxWidth` 参数（默认
+     `PropertyTableMaxWidth`）—— 带默认值，11 个调用点一行未改。
+
+  斑马纹与行尾复制行为不变。文档 `doc/ui-conventions.md` 与 `README.md` 里那句
+  「Key 定宽 120dp」一并改掉（已失效的规范比没有规范更坑）。
+
 ## [Unreleased] — 2026-10-26 (3)
 
 ### Fixed

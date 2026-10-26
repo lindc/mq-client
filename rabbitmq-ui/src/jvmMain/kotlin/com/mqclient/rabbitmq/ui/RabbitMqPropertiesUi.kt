@@ -44,6 +44,7 @@ import com.mqclient.rabbitmq.RabbitMqEvents
 import com.mqclient.uicommon.dialog.MessageDetailSectionTitle
 import com.mqclient.uicommon.PropertyItem
 import com.mqclient.uicommon.PropertyTableSection
+import com.mqclient.uicommon.WidthCappedColumn
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 import kotlinx.coroutines.CancellationException
@@ -153,37 +154,41 @@ internal fun RabbitMqConnectionPropertiesPanel(connectionId: String) {
 
 @Composable
 private fun ReadyPane(clusterInfo: RabbitMqClusterInfoSnapshot?, nodes: List<RabbitMqNodeSnapshot>) {
-    Column(
+    // 滚动容器保持满宽（滚动条 / 命中区域），内容夹到 PropertyTable 同一个宽度并居中 ——
+    // 节点行是自绘的满宽块，不一起夹就会比上面的属性表宽出一截。
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(vertical = 8.dp),
     ) {
-        PropertyTableSection(
-            title = stringResource("rabbitmq_ui_conn_props_broker"),
-            items = listOf(
-                PropertyItem(stringResource("rabbitmq_ui_conn_props_version"), clusterInfo?.rabbitmqVersion),
-                PropertyItem(stringResource("rabbitmq_ui_conn_props_mgmt_version"), null, copyable = false),
-                PropertyItem(stringResource("rabbitmq_ui_conn_props_cluster_name"), clusterInfo?.clusterName),
-                PropertyItem(stringResource("rabbitmq_ui_conn_props_initial_node"), clusterInfo?.node),
-            ),
-        )
-        Spacer(Modifier.height(12.dp))
-        MessageDetailSectionTitle(
-            text = stringResource("rabbitmq_ui_conn_props_nodes").withArg(nodes.size),
-        )
-        Spacer(Modifier.height(4.dp))
-        nodes.forEach { node ->
-            NodeRow(node)
-        }
-        if (nodes.isEmpty()) {
-            Text(
-                text = stringResource("rabbitmq_ui_conn_props_no_nodes"),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+        WidthCappedColumn {
+            PropertyTableSection(
+                title = stringResource("rabbitmq_ui_conn_props_broker"),
+                items = listOf(
+                    PropertyItem(stringResource("rabbitmq_ui_conn_props_version"), clusterInfo?.rabbitmqVersion),
+                    PropertyItem(stringResource("rabbitmq_ui_conn_props_mgmt_version"), null, copyable = false),
+                    PropertyItem(stringResource("rabbitmq_ui_conn_props_cluster_name"), clusterInfo?.clusterName),
+                    PropertyItem(stringResource("rabbitmq_ui_conn_props_initial_node"), clusterInfo?.node),
+                ),
             )
+            Spacer(Modifier.height(12.dp))
+            MessageDetailSectionTitle(
+                text = stringResource("rabbitmq_ui_conn_props_nodes").withArg(nodes.size),
+            )
+            Spacer(Modifier.height(4.dp))
+            nodes.forEach { node ->
+                NodeRow(node)
+            }
+            if (nodes.isEmpty()) {
+                Text(
+                    text = stringResource("rabbitmq_ui_conn_props_no_nodes"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Spacer(Modifier.height(12.dp))
         }
-        Spacer(Modifier.height(12.dp))
     }
 }
 
