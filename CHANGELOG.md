@@ -2,6 +2,35 @@
 
 本文件记录 MQClient 的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [Unreleased] — 2026-10-26 (3)
+
+### Fixed
+
+- **Kafka / RocketMQ 同步收口「单次失败即判死 → 假未连接」**（与上一轮 RabbitMQ 同一份
+  写法的副本）。两个模块的 `markFailed` 都是一次扫描失败就写 `status = Failed`，而扫描
+  入口又要求 `status == Connected`，于是判死之后心跳再也不跑，健康连接永久显示
+  「未连接」—— 与 RabbitMQ 日志里那条完全同构。四处修正，逐模块落地：
+  1. **连续失败阈值**（`SCAN_FAILURE_THRESHOLD = 3`）：失败只记一笔，连续 3 轮才置
+     `Failed`；任一成功即计数归零，并把误判的 `Failed` **自动恢复**成 `Connected`。
+     状态翻转收敛到 `KafkaConnectionManager` / `RocketMqConnectionManager` 的
+     `onScanFailed` / `onScanSucceeded`，不再由 ScanService 直接改 `ctx.status`。
+  2. **能力优先的守卫**：请求入口不再拿 `status` 当否决票，只要 AdminClient /
+     管理客户端还在就直接发请求。Kafka 8 处、RocketMQ 6 处调用点统一收敛到
+     `targetOrThrow`，两个模块各自的 `connectedContext`（只认 Connected）删除。
+  3. **扫描入口忽略 status**（`scanTargetOrNull`）：判死之后心跳仍然继续跑 —— 这是
+     自愈的前提；否则“第一次成功就恢复”永远等不到。
+  4. **拒绝文案分层**（`connectionRefusalText`）：未登记 / 正在连接（提示等待）/
+     上次请求失败（带出 `lastError` 真实原因）/ 未连接（指去侧栏）。
+- **消息会话也不再被误判堵死**：`KafkaMessageService` / `RocketMqMessageService` 的会话
+  守卫同样是「只认 Connected」，改为「有客户端就允许」，否则一次抖动会让消息浏览 /
+  发送也一并报「未连接」，而底层连接其实还能用。
+
+### Tests
+
+- 新增 `KafkaConnectionGuardTest` / `RocketMqConnectionGuardTest`（各 8 例）：连续失败
+  计数与重置、断开清理归零、阈值常量、四种状态拒绝文案互不相同、`Failed` 必须带出
+  真实原因。三个模块现在是同一套断言。
+
 ## [Unreleased] — 2026-10-26 (2)
 
 ### Fixed

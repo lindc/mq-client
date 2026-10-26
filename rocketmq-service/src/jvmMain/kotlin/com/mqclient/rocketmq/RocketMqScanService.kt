@@ -1,7 +1,5 @@
 package com.mqclient.rocketmq
 
-import com.mqclient.core.ConnectionStatus
-import com.mqclient.core.ConnectionStore
 import com.mqclient.core.db.CommandAudit
 import com.mqclient.core.cache.CacheManager
 import com.mqclient.core.cache.putIfScanned
@@ -195,8 +193,7 @@ class RocketMqScanService(private val context: ServiceContext) {
 
     /** 定时任务入口（`rocketmq.<connectionId>.scan.objects`）。 */
     suspend fun scanObjects(connectionId: String) = scanLocks.withLock(connectionId) {
-        val ctx = connectedContext(connectionId) ?: return@withLock
-        val admin = ctx.adminClient ?: return@withLock
+        val (ctx, admin) = scanTargetOrNull(connectionId) ?: return@withLock
         val objectsTtl = objectsTtlMs(ctx)
         // 两路 async 并发写，用线程安全容器（每类只写自己的 key）。
         val failures = ConcurrentHashMap<RocketMqScanKind, String>()
@@ -279,8 +276,7 @@ class RocketMqScanService(private val context: ServiceContext) {
 
     /** 定时任务入口（`rocketmq.<connectionId>.scan.lag`）：全部组的 Lag 统计。 */
     suspend fun scanGroupLags(connectionId: String) = scanLocks.withLock(connectionId) {
-        val ctx = connectedContext(connectionId) ?: return@withLock
-        val admin = ctx.adminClient ?: return@withLock
+        val (ctx, admin) = scanTargetOrNull(connectionId) ?: return@withLock
         try {
             val groups = withContext(Dispatchers.IO) { admin.fetchConsumerGroupList() }
             val lags = withContext(Dispatchers.IO) {
@@ -340,8 +336,8 @@ class RocketMqScanService(private val context: ServiceContext) {
                     "totalLag" to lags.sumOf { it.totalLag },
                 ),
             )
-            // 心跳跑通了即这条连接是活的，按「连接状态上报」约定报给核心（唯一入口）。
-            ConnectionStore.reportStatus(connectionId, ConnectionStatus.Connected, context.moduleId)
+            // 心跳跑通了即这条连接是活的：计数归零，若之前被误判 Failed 则自动恢复。
+            RocketMqModule.reportScanSuccess(connectionId)
             rocketMqLog.debug(
                 "lag scanned: connection=$connectionId groups=" + lags.size +
                     " totalLag=" + lags.sumOf { it.totalLag },
@@ -392,8 +388,7 @@ class RocketMqScanService(private val context: ServiceContext) {
      * 整体只有「未连接 / clusterInfo 失败 / 无可用 Broker」才抛（对话框整页 Error）。
      */
     suspend fun fetchGroupDetail(connectionId: String, group: String): RocketMqGroupDetailSnapshot {
-        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
-        val admin = ctx.adminClient ?: throw IllegalStateException("未连接")
+        val (ctx, admin) = targetOrThrow(connectionId)
         return withContext(Dispatchers.IO) {
             val config = runCatching { admin.fetchGroupConfig(group) }
                 .onFailure {
@@ -463,8 +458,7 @@ class RocketMqScanService(private val context: ServiceContext) {
         writeQueues: Int,
         perm: Int,
     ) {
-        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
-        val admin = ctx.adminClient ?: throw IllegalStateException("未连接")
+        val (ctx, admin) = targetOrThrow(connectionId)
         audited(connectionId, "CREATE TOPIC $topicName (read: $readQueues, write: $writeQueues, perm: $perm)") {
             withContext(Dispatchers.IO) { admin.createTopic(topicName, readQueues, writeQueues, perm) }
         }
@@ -481,8 +475,7 @@ class RocketMqScanService(private val context: ServiceContext) {
      * 成功后由 UI 触发一轮慢扫刷新列表（组列表数据源就是订阅组配置）。
      */
     suspend fun createConsumerGroup(connectionId: String, groupName: String, orderly: Boolean) {
-        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
-        val admin = ctx.adminClient ?: throw IllegalStateException("未连接")
+        val (ctx, admin) = targetOrThrow(connectionId)
         audited(connectionId, "CREATE GROUP " + groupName.trim() + orderly.takeIf { it }?.let { " [orderly]" }.orEmpty()) {
             withContext(Dispatchers.IO) { admin.createSubscriptionGroup(groupName.trim(), orderly) }
         }
@@ -497,8 +490,7 @@ class RocketMqScanService(private val context: ServiceContext) {
      * 清理（属 topic 生命周期，broker 会自行回收）。
      */
     suspend fun deleteConsumerGroup(connectionId: String, group: String) {
-        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
-        val admin = ctx.adminClient ?: throw IllegalStateException("未连接")
+        val (ctx, admin) = targetOrThrow(connectionId)
         audited(connectionId, "DELETE GROUP $group") {
             withContext(Dispatchers.IO) { admin.deleteSubscriptionGroup(group) }
         }
@@ -527,8 +519,7 @@ class RocketMqScanService(private val context: ServiceContext) {
      */
     suspend fun fetchTopicMessageType(connectionId: String, topic: String): String? =
         withContext(Dispatchers.IO) {
-            val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
-            val admin = ctx.adminClient ?: throw IllegalStateException("未连接")
+            val (ctx, admin) = targetOrThrow(connectionId)
             admin.fetchTopicConfig(topic)?.attributes
                 ?.entries
                 ?.firstOrNull { it.key.trimStart('+') == "message.type" }
@@ -546,8 +537,7 @@ class RocketMqScanService(private val context: ServiceContext) {
         if (isSystemTopic(topic)) {
             throw IllegalStateException("系统内置主题不允许删除：$topic")
         }
-        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
-        val admin = ctx.adminClient ?: throw IllegalStateException("未连接")
+        val (ctx, admin) = targetOrThrow(connectionId)
         audited(connectionId, "DELETE TOPIC $topic") {
             withContext(Dispatchers.IO) { admin.deleteTopic(topic) }
         }
@@ -631,28 +621,51 @@ class RocketMqScanService(private val context: ServiceContext) {
     private fun lagTtlMs(ctx: RocketMqConnectionContext): Long =
         ctx.config.statusScanIntervalSeconds * 1_000L * LAG_TTL_FACTOR.toLong()
 
-    /** 连接处于 CONNECTED 时的上下文；否则 null —— 显式连接模型的扫描守卫。 */
-    private fun connectedContext(connectionId: String): RocketMqConnectionContext? =
-        RocketMqModule.connectionOrNull(connectionId)
-            ?.takeIf { it.status == ConnectionStatus.Connected }
+    /**
+     * 请求入口的**统一守卫**：只看「有没有管理客户端」，不拿 status 当否决票。
+     *
+     * 这是与 RabbitMQ / Kafka 同口径的修正。`status` 是**扫描结论**（可能因一次抖动被
+     * 误标），`adminClient` 才是**能力事实**。用结论否决能力，就会出现「明明连着却报
+     * 未连接」；反过来让请求自己去试，真断了它会抛连接异常，展示的才是真实原因。
+     */
+    private data class ScanTarget(
+        val ctx: RocketMqConnectionContext,
+        val admin: RocketMqAdminClient,
+    )
+
+    /** 有客户端就返回；真的没有则抛带具体原因的异常。 */
+    private fun targetOrThrow(connectionId: String): ScanTarget {
+        val ctx = RocketMqModule.connectionOrNull(connectionId)
+            ?: throw IllegalStateException("连接未登记：该连接已被删除或模块未初始化")
+        val admin = ctx.adminClient ?: throw IllegalStateException(connectionRefusalText(ctx))
+        return ScanTarget(ctx, admin)
+    }
+
+    /**
+     * 定时扫描专用的宽松版：只要管理客户端还在就返回，`status` 不参与判定。
+     *
+     * 为什么定时扫描必须忽略 status：只有这样才能**自愈** —— 被判 Failed 之后心跳
+     * 继续跑，第一次成功即可恢复成 Connected（见
+     * [RocketMqConnectionManager.onScanSucceeded]）。
+     */
+    private fun scanTargetOrNull(connectionId: String): ScanTarget? {
+        val ctx = RocketMqModule.connectionOrNull(connectionId) ?: return null
+        val admin = ctx.adminClient ?: return null
+        return ScanTarget(ctx, admin)
+    }
 
     private fun cacheOf(connectionId: String): CacheManager? =
         RocketMqModule.connectionOrNull(connectionId)?.cache
 
     /**
-     * 整轮扫描失败即这条连接大概率已断：上下文与核心状态一起转 FAILED（UI 显示
-     * 「连接失败」），定时任务下个轮次由状态守卫跳过，等用户重连。守卫 Connected：
-     * 与 connect() 并发时不能把刚建好的连接踩成 Failed —— 与 kafka 的处理一致。
+     * 整轮扫描失败 → 交给连接管理器按「连续失败阈值」判定是否置 Failed。
+     *
+     * 旧写法是这里直接写 `ctx.status = Failed`：单次失败就判死，而扫描入口本身又
+     * 要求 `Connected` —— 判死之后心跳再也不跑，健康连接被永久误判为「未连接」。
+     * 现在状态翻转集中在 [RocketMqConnectionManager.onScanFailed]。
      */
     private fun markFailed(connectionId: String, message: String) {
-        RocketMqModule.connectionOrNull(connectionId)?.let { ctx ->
-            if (ctx.status == ConnectionStatus.Connected) {
-                ctx.lastError = message
-                ctx.status = ConnectionStatus.Failed
-                ConnectionStore.reportStatus(connectionId, ConnectionStatus.Failed, context.moduleId)
-                rocketMqLog.warn("connection marked FAILED after scan error: connection=$connectionId")
-            }
-        }
+        RocketMqModule.reportScanFailure(connectionId, message)
     }
 
     /** ClusterInfo（5.x 在 remoting.protocol.body）→ 模块快照（角色按 brokerId 推导）。 */

@@ -39,6 +39,14 @@ internal const val JOB_SCAN_LAG = "scan.lag"
 internal const val OBJECTS_FIRST_DELAY_MS = 5_000L
 
 /**
+ * 连续多少轮扫描失败才把连接判为 `Failed`（默认 3 轮，与 Kafka / RabbitMQ 同口径）。
+ *
+ * 单次失败不判死：Remoting 请求经代理 / NameServer 路由时，单次超时或某个 broker
+ * 短暂不答都是可恢复的请求失败；真正断线也该在半分钟内于侧边栏变红。
+ */
+internal const val SCAN_FAILURE_THRESHOLD = 3
+
+/**
  * RocketMQ 模块入口：SPI 生命周期与显式动作事件的中枢，与 KafkaModule 同构。
  */
 object RocketMqModule {
@@ -184,6 +192,15 @@ object RocketMqModule {
     /** 一条连接的运行时上下文；未登记时为 null。 */
     fun connectionOrNull(connectionId: String): RocketMqConnectionContext? =
         manager?.contextOrNull(connectionId)
+
+    /** 扫描失败上报（按阈值判定是否置 Failed）；模块未初始化时静默忽略。 */
+    internal fun reportScanFailure(connectionId: String, message: String): Boolean =
+        manager?.onScanFailed(connectionId, message) ?: false
+
+    /** 扫描成功上报（计数归零 + Failed 自愈）；模块未初始化时静默忽略。 */
+    internal fun reportScanSuccess(connectionId: String) {
+        manager?.onScanSucceeded(connectionId)
+    }
 
     /** 模块销毁：先断开全部连接（关句柄），再取消订阅，最后摘掉引用。 */
     @Synchronized

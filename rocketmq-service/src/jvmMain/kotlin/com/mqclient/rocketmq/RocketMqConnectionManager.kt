@@ -234,6 +234,51 @@ class RocketMqConnectionManager(
         ConnectionStore.reportStatus(ctx.connectionId, status, MODULE_ID)
     }
 
+    /**
+     * 定时扫描的一次失败：**连续** [SCAN_FAILURE_THRESHOLD] 次才把连接判为 Failed。
+     *
+     * 单次失败不再判死：Remoting 超时或单个 broker 短暂不答都是可恢复的请求失败。
+     * 返回 true 表示这次失败**触发了**状态翻转。
+     */
+    fun onScanFailed(connectionId: String, message: String): Boolean {
+        val ctx = contexts[connectionId] ?: return false
+        // 没有客户端就是真的没连接（或已断开），交给 connect 路径，不走阈值。
+        if (ctx.adminClient == null) return false
+        val failures = ctx.recordScanFailure()
+        if (failures < SCAN_FAILURE_THRESHOLD) {
+            rocketMqLog.info(
+                "scan failure tolerated: connection=$connectionId " +
+                    "consecutive=$failures/$SCAN_FAILURE_THRESHOLD reason=$message",
+            )
+            return false
+        }
+        if (ctx.status == ConnectionStatus.Failed) return false
+        ctx.lastError = message
+        setStatus(ctx, ConnectionStatus.Failed)
+        rocketMqLog.warn(
+            "connection marked FAILED after $failures consecutive scan failures: " +
+                "connection=$connectionId reason=$message",
+        )
+        return true
+    }
+
+    /**
+     * 定时扫描成功：计数归零；如果之前被判为 Failed（但客户端还在），**自动恢复**
+     * 成 Connected。自愈的前提是扫描入口不再看 status（只看 AdminClient 在不在）。
+     */
+    fun onScanSucceeded(connectionId: String) {
+        val ctx = contexts[connectionId] ?: return
+        val previous = ctx.scanFailureCount()
+        ctx.resetScanFailures()
+        if (ctx.status == ConnectionStatus.Failed && ctx.adminClient != null) {
+            ctx.lastError = null
+            setStatus(ctx, ConnectionStatus.Connected)
+            rocketMqLog.info(
+                "connection recovered after $previous consecutive scan failures: connection=$connectionId",
+            )
+        }
+    }
+
     private fun lockFor(connectionId: String): Mutex =
         locks.computeIfAbsent(connectionId) { Mutex() }
 

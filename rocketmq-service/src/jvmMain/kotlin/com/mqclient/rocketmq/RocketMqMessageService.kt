@@ -1,6 +1,5 @@
 package com.mqclient.rocketmq
 
-import com.mqclient.core.ConnectionStatus
 import com.mqclient.message.interpreter.isProbablyBinary
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
@@ -225,11 +224,18 @@ class RocketMqMessageService {
 
     // ---------------------------------------------------------------- 内部零件
 
-    /** 连接处于 Connected 的上下文；否则抛状态异常（消息是即时查询，不守卫会拿 stale config 建 TLS 连接）。 */
+    /**
+     * 消息会话的上下文：只要管理客户端还在（即这条连接真的连上过）就允许，不拿
+     * `status` 当否决票 —— 与扫描 / 请求入口同一口径。否则一次抖动误标的 `Failed`
+     * 会把消息浏览 / 发送也一并堵死，而底层连接其实还能用。
+     */
     private fun connectedContext(connectionId: String): RocketMqConnectionContext =
         RocketMqModule.connectionOrNull(connectionId)
-            ?.takeIf { it.status == ConnectionStatus.Connected }
-            ?: throw IllegalStateException("连接未建立或已断开，无法读写消息")
+            ?.takeIf { it.adminClient != null }
+            ?: throw IllegalStateException(
+                RocketMqModule.connectionOrNull(connectionId)?.let { connectionRefusalText(it) }
+                    ?: "连接未登记：该连接已被删除或模块未初始化",
+            )
 
     /** `MessageExt` → 浏览/详情一体模型（body 全量随行，见 [RocketMqMessage] KDoc）。 */
     private fun MessageExt.toMessage(): RocketMqMessage {

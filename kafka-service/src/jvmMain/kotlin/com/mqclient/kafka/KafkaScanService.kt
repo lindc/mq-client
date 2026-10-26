@@ -1,7 +1,5 @@
 package com.mqclient.kafka
 
-import com.mqclient.core.ConnectionStatus
-import com.mqclient.core.ConnectionStore
 import com.mqclient.core.db.CommandAudit
 import com.mqclient.core.cache.CacheManager
 import com.mqclient.core.cache.allKindsFailed
@@ -118,8 +116,7 @@ class KafkaScanService(private val context: ServiceContext) {
      * topic 的 configs 不取（describeConfigs 每主题一调用太重），第一版只要布局快照。
      */
     suspend fun scanObjects(connectionId: String) = scanLocks.withLock(connectionId) {
-        val ctx = connectedContext(connectionId) ?: return@withLock
-        val admin = ctx.adminClient ?: return@withLock
+        val (ctx, admin) = scanTargetOrNull(connectionId) ?: return@withLock
         val timeoutMs = ctx.config.connectionTimeout * 1_000L
         val objectsTtl = objectsTtlMs(ctx)
         // 三路 async 并发写，用线程安全容器（每类只写自己的 key）。
@@ -222,8 +219,7 @@ class KafkaScanService(private val context: ServiceContext) {
      * consumer groups 与 listOffsets 这两步失败才是整轮失败。
      */
     suspend fun scanGroupLags(connectionId: String) = scanLocks.withLock(connectionId) {
-        val ctx = connectedContext(connectionId) ?: return@withLock
-        val admin = ctx.adminClient ?: return@withLock
+        val (ctx, admin) = scanTargetOrNull(connectionId) ?: return@withLock
         try {
             val timeoutMs = ctx.config.connectionTimeout * 1_000L
             val lags = withContext(Dispatchers.IO) { scanAllGroupLags(admin, timeoutMs) }
@@ -243,9 +239,8 @@ class KafkaScanService(private val context: ServiceContext) {
                     "topicChanges" to topicsTouched,
                 ),
             )
-            // 心跳跑通了即这条连接是活的，按「连接状态上报」约定报给核心（唯一入口，
-            // 见 ConnectionStore.reportStatus）。状态没变时核心直接忽略。
-            ConnectionStore.reportStatus(connectionId, ConnectionStatus.Connected, context.moduleId)
+            // 心跳跑通了即这条连接是活的：计数归零，若之前被误判 Failed 则自动恢复。
+            KafkaModule.reportScanSuccess(connectionId)
             kafkaLog.debug(
                 "lag scanned: connection=$connectionId groups=${lags.size} " +
                     "totalLag=${lags.values.sumOf { it.totalLag }} topicChanges=$topicsTouched",
@@ -298,8 +293,7 @@ class KafkaScanService(private val context: ServiceContext) {
         partitions: Int,
         replicationFactor: Int,
     ) {
-        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
-        val admin = ctx.adminClient ?: throw IllegalStateException("未连接")
+        val (ctx, admin) = targetOrThrow(connectionId)
         val timeoutMs = ctx.config.connectionTimeout * 1_000L
         audited(connectionId, "CREATE TOPIC $name (partitions=$partitions, replicationFactor=$replicationFactor)") {
             withContext(Dispatchers.IO) {
@@ -364,8 +358,7 @@ class KafkaScanService(private val context: ServiceContext) {
 
     /** Topic 配置项（describeConfigs 投影，按 key 排序）。 */
     suspend fun getTopicConfigs(connectionId: String, name: String): List<KafkaTopicConfigSnapshot> {
-        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
-        val admin = ctx.adminClient ?: throw IllegalStateException("未连接")
+        val (ctx, admin) = targetOrThrow(connectionId)
         val timeoutMs = ctx.config.connectionTimeout * 1_000L
         return withContext(Dispatchers.IO) {
             val config = admin.describeConfigs(listOf(ConfigResource(ConfigResource.Type.TOPIC, name)))
@@ -384,8 +377,7 @@ class KafkaScanService(private val context: ServiceContext) {
         name: String,
         partitions: List<Int>,
     ): Map<Int, KafkaTopicOffsetRange> {
-        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
-        val admin = ctx.adminClient ?: throw IllegalStateException("未连接")
+        val (ctx, admin) = targetOrThrow(connectionId)
         val timeoutMs = ctx.config.connectionTimeout * 1_000L
         return withContext(Dispatchers.IO) {
             val tps = partitions.map { TopicPartition(name, it) }
@@ -405,8 +397,7 @@ class KafkaScanService(private val context: ServiceContext) {
 
     /** 删除主题（admin.deleteTopics）：权限不足 / 不存在等错误原样上抛由 UI 提示。 */
     suspend fun deleteTopic(connectionId: String, name: String) {
-        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
-        val admin = ctx.adminClient ?: throw IllegalStateException("未连接")
+        val (ctx, admin) = targetOrThrow(connectionId)
         val timeoutMs = ctx.config.connectionTimeout * 1_000L
         audited(connectionId, "DELETE TOPIC $name") {
             withContext(Dispatchers.IO) {
@@ -427,8 +418,7 @@ class KafkaScanService(private val context: ServiceContext) {
      * @return 清掉的分区数（空分区不计）。
      */
     suspend fun clearTopicRecords(connectionId: String, name: String): Int {
-        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
-        val admin = ctx.adminClient ?: throw IllegalStateException("未连接")
+        val (ctx, admin) = targetOrThrow(connectionId)
         val timeoutMs = ctx.config.connectionTimeout * 1_000L
         val cleared = audited(connectionId, "PURGE TOPIC $name", resultNote = { "(partitions=$it)" }) {
             withContext(Dispatchers.IO) {
@@ -468,8 +458,7 @@ class KafkaScanService(private val context: ServiceContext) {
      * listOffsets(LATEST) 取位点行。组不存在时抛原异常（UI 显示原因）。
      */
     suspend fun getGroupDetail(connectionId: String, groupId: String): KafkaGroupDetailSnapshot {
-        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
-        val admin = ctx.adminClient ?: throw IllegalStateException("未连接")
+        val (ctx, admin) = targetOrThrow(connectionId)
         val timeoutMs = ctx.config.connectionTimeout * 1_000L
         return withContext(Dispatchers.IO) {
             val described = admin.describeConsumerGroups(
@@ -559,8 +548,7 @@ class KafkaScanService(private val context: ServiceContext) {
         groupId: String,
         to: KafkaGroupResetTo,
     ): Int {
-        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
-        val admin = ctx.adminClient ?: throw IllegalStateException("未连接")
+        val (ctx, admin) = targetOrThrow(connectionId)
         val strategy = when (to) {
             is KafkaGroupResetTo.Earliest -> "EARLIEST"
             is KafkaGroupResetTo.Latest -> "LATEST"
@@ -651,8 +639,7 @@ class KafkaScanService(private val context: ServiceContext) {
      * 拒绝（GroupNotEmpty 等），异常原样上抛由 UI 提示。
      */
     suspend fun deleteGroup(connectionId: String, groupId: String) {
-        val ctx = connectedContext(connectionId) ?: throw IllegalStateException("未连接")
-        val admin = ctx.adminClient ?: throw IllegalStateException("未连接")
+        val (ctx, admin) = targetOrThrow(connectionId)
         val timeoutMs = ctx.config.connectionTimeout * 1_000L
         audited(connectionId, "DELETE GROUP $groupId") {
             withContext(Dispatchers.IO) {
@@ -919,10 +906,39 @@ class KafkaScanService(private val context: ServiceContext) {
     private fun lagTtlMs(ctx: KafkaConnectionContext): Long =
         ctx.config.lagScanIntervalSeconds * 1_000L * LAG_TTL_FACTOR.toLong()
 
-    /** 连接处于 CONNECTED 时的上下文；否则 null —— 显式连接模型的扫描守卫。 */
-    private fun connectedContext(connectionId: String): KafkaConnectionContext? =
-        KafkaModule.connectionOrNull(connectionId)
-            ?.takeIf { it.status == ConnectionStatus.Connected }
+    /**
+     * 请求入口的**统一守卫**：只看「有没有 AdminClient」，不拿 status 当否决票。
+     *
+     * 这是与 RabbitMQ 同口径的修正。`status` 是**扫描结论**（可能因一次抖动被误标），
+     * `adminClient` 才是**能力事实**（客户端在 = 可以发请求）。用结论否决能力，就会
+     * 出现「明明连着却报未连接」；反过来让请求自己去试，真断了它会抛连接异常，
+     * 那时展示的才是真实原因。
+     */
+    private data class ScanTarget(
+        val ctx: KafkaConnectionContext,
+        val admin: AdminClient,
+    )
+
+    /** 有客户端就返回；真的没有则抛带具体原因的异常。 */
+    private fun targetOrThrow(connectionId: String): ScanTarget {
+        val ctx = KafkaModule.connectionOrNull(connectionId)
+            ?: throw IllegalStateException("连接未登记：该连接已被删除或模块未初始化")
+        val admin = ctx.adminClient ?: throw IllegalStateException(connectionRefusalText(ctx))
+        return ScanTarget(ctx, admin)
+    }
+
+    /**
+     * 定时扫描专用的宽松版：只要 AdminClient 还在就返回，`status` 不参与判定。
+     *
+     * 为什么定时扫描必须忽略 status：只有这样才能**自愈** —— 被判 Failed 之后心跳
+     * 继续跑，第一次成功即可恢复成 Connected（见
+     * [KafkaConnectionManager.onScanSucceeded]）。
+     */
+    private fun scanTargetOrNull(connectionId: String): ScanTarget? {
+        val ctx = KafkaModule.connectionOrNull(connectionId) ?: return null
+        val admin = ctx.adminClient ?: return null
+        return ScanTarget(ctx, admin)
+    }
 
     /**
      * 写操作审计包裹：操作前计时，成功 / 失败各发一条 core.mq.command.executed
@@ -968,19 +984,14 @@ class KafkaScanService(private val context: ServiceContext) {
         KafkaModule.connectionOrNull(connectionId)?.cache
 
     /**
-     * 整轮扫描失败即这条连接大概率已断：上下文与核心状态一起转 FAILED（UI 显示
-     * 「连接失败」），定时任务下个轮次由状态守卫跳过，等用户重连。守卫 Connected：
-     * 与 connect() 并发时不能把刚建好的连接踩成 Failed —— 与 MQ 的处理一致。
+     * 整轮扫描失败 → 交给连接管理器按「连续失败阈值」判定是否置 Failed。
+     *
+     * 旧写法是这里直接写 `ctx.status = Failed`：单次失败就判死，而扫描入口本身又
+     * 要求 `Connected` —— 判死之后心跳再也不跑，健康连接被永久误判为「未连接」。
+     * 现在状态翻转集中在 [KafkaConnectionManager.onScanFailed]。
      */
     private fun markFailed(connectionId: String, message: String) {
-        KafkaModule.connectionOrNull(connectionId)?.let { ctx ->
-            if (ctx.status == ConnectionStatus.Connected) {
-                ctx.lastError = message
-                ctx.status = ConnectionStatus.Failed
-                ConnectionStore.reportStatus(connectionId, ConnectionStatus.Failed, context.moduleId)
-                kafkaLog.warn("connection marked FAILED after scan error: connection=$connectionId")
-            }
-        }
+        KafkaModule.reportScanFailure(connectionId, message)
     }
 
     /**

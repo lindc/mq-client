@@ -41,6 +41,15 @@ internal const val JOB_SCAN_LAG = "scan.lag"
 internal const val OBJECTS_FIRST_DELAY_MS = 5_000L
 
 /**
+ * 连续多少轮扫描失败才把连接判为 `Failed`（默认 3 轮）。
+ *
+ * 为什么不是 1：AdminClient 经代理 / 负载均衡时，单次请求撞上被回收的连接或某个
+ * broker 短暂不答是常事，下一次就好 —— 判死一条健康连接比多等几轮代价大得多。
+ * 为什么不是更大：真正断网 / 凭据失效也该在半分钟内于侧边栏变红。
+ */
+internal const val SCAN_FAILURE_THRESHOLD = 3
+
+/**
  * Kafka 模块的初始化入口 —— **显式连接模型**（与 ibm-mq 的 IbmMQModule 同构）。
  *
  * 启动时（以及 `connection.added` 时）**只登记 DISCONNECTED 上下文**，不主动连接；
@@ -201,6 +210,15 @@ object KafkaModule {
     /** 一条连接的运行时上下文；未登记时为 null。 */
     fun connectionOrNull(connectionId: String): KafkaConnectionContext? =
         manager?.contextOrNull(connectionId)
+
+    /** 扫描失败上报（按阈值判定是否置 Failed）；模块未初始化时静默忽略。 */
+    internal fun reportScanFailure(connectionId: String, message: String): Boolean =
+        manager?.onScanFailed(connectionId, message) ?: false
+
+    /** 扫描成功上报（计数归零 + Failed 自愈）；模块未初始化时静默忽略。 */
+    internal fun reportScanSuccess(connectionId: String) {
+        manager?.onScanSucceeded(connectionId)
+    }
 
     /**
      * 模块销毁：先断开全部连接（关句柄），再取消订阅，最后摘掉引用。顺序反了的话

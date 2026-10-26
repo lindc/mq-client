@@ -1,6 +1,5 @@
 package com.mqclient.kafka
 
-import com.mqclient.core.ConnectionStatus
 import com.mqclient.message.interpreter.isProbablyBinary
 import java.time.Duration
 import java.util.UUID
@@ -292,11 +291,21 @@ class KafkaMessageService {
 
     // ---------------------------------------------------------------- 内部零件
 
-    /** 连接处于 Connected 的上下文；否则抛状态异常（消息是即时查询，不守卫会拿 stale config 建 SSL 连接）。 */
+    /**
+     * 消息会话的上下文：只要 AdminClient 还在（即这条连接真的连上过）就允许，不拿
+     * `status` 当否决票 —— 与扫描 / 请求入口同一口径。否则一次抖动误标的 `Failed`
+     * 会把消息浏览 / 发送也一并堵死，而底层连接其实还能用。
+     *
+     * 真的没连（或已断开）时 `adminClient` 已由 `cleanup()` 置空，这里仍然会拒，
+     * 并给出分层原因。
+     */
     private fun connectedContext(connectionId: String): KafkaConnectionContext =
         KafkaModule.connectionOrNull(connectionId)
-            ?.takeIf { it.status == ConnectionStatus.Connected }
-            ?: throw IllegalStateException("连接未建立或已断开，无法读写消息")
+            ?.takeIf { it.adminClient != null }
+            ?: throw IllegalStateException(
+                KafkaModule.connectionOrNull(connectionId)?.let { connectionRefusalText(it) }
+                    ?: "连接未登记：该连接已被删除或模块未初始化",
+            )
 
     /** 分区解析：指定分区直接用；否则 partitionsFor 现查（不用扫描缓存 —— 分区数可能刚变）。 */
     private fun resolvePartitions(
