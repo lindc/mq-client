@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DeleteSweep
@@ -190,91 +192,106 @@ fun RabbitMqExchangePropertiesDialog(
             ) { Text(stringResource("common_close")) }
         },
     ) {
-        Column(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp)) {
-            // ---- 概览区（统一 PropertyTable：斑马纹 / 左对齐 / 可复制）----
-            PropertyTable(
-                items = listOf(
-                    PropertyItem(stringResource("rabbitmq_ui_exchange_props_field_type"), type),
-                    PropertyItem(
-                        stringResource("rabbitmq_ui_exchange_field_durable"),
-                        stringResource(if (durable) "rabbitmq_ui_exchange_props_yes" else "rabbitmq_ui_exchange_props_no"),
+        // 内容区最外层 Box：Snackbar 当浮层贴底，**不参与 Column 的高度分配**。
+        // 旧写法把它排在 Column 末尾，状态区又是无权重子项 —— 短对话框里整条
+        // 固定高度栈会溢出内容区，把 Loading 画到外壳的底部分割线 / 按钮栏上。
+        Box(modifier = Modifier.fillMaxSize()) {
+            Column(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp)) {
+                // ---- 概览区（统一 PropertyTable：斑马纹 / 左对齐 / 可复制）----
+                PropertyTable(
+                    items = listOf(
+                        PropertyItem(stringResource("rabbitmq_ui_exchange_props_field_type"), type),
+                        PropertyItem(
+                            stringResource("rabbitmq_ui_exchange_field_durable"),
+                            stringResource(if (durable) "rabbitmq_ui_exchange_props_yes" else "rabbitmq_ui_exchange_props_no"),
+                        ),
+                        PropertyItem(
+                            stringResource("rabbitmq_ui_exchange_field_auto_delete"),
+                            stringResource(if (autoDelete) "rabbitmq_ui_exchange_props_yes" else "rabbitmq_ui_exchange_props_no"),
+                        ),
+                        PropertyItem(
+                            stringResource("rabbitmq_ui_exchange_field_internal"),
+                            stringResource(if (internal) "rabbitmq_ui_exchange_props_yes" else "rabbitmq_ui_exchange_props_no"),
+                        ),
                     ),
-                    PropertyItem(
-                        stringResource("rabbitmq_ui_exchange_field_auto_delete"),
-                        stringResource(if (autoDelete) "rabbitmq_ui_exchange_props_yes" else "rabbitmq_ui_exchange_props_no"),
-                    ),
-                    PropertyItem(
-                        stringResource("rabbitmq_ui_exchange_field_internal"),
-                        stringResource(if (internal) "rabbitmq_ui_exchange_props_yes" else "rabbitmq_ui_exchange_props_no"),
-                    ),
-                ),
-            )
-            Spacer(Modifier.height(16.dp))
-            HorizontalDivider()
-            Spacer(Modifier.height(12.dp))
-            Text(
-                text = stringResource("rabbitmq_ui_exchange_props_bindings_title"),
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.primary,
-            )
-            Spacer(Modifier.height(8.dp))
-
-            // ---- Bindings 区：头部行（计数 + 添加）+ 表格（实时，系统交换机禁写）----
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+                )
+                Spacer(Modifier.height(16.dp))
+                HorizontalDivider()
+                Spacer(Modifier.height(12.dp))
                 Text(
-                    text = stringResource("rabbitmq_ui_exchange_props_bindings_count")
-                        .withArg((bindingsState as? LoadState.Success)?.data?.size ?: 0),
+                    text = stringResource("rabbitmq_ui_exchange_props_bindings_title"),
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.weight(1f),
                 )
-                if (!systemExchange) {
-                    ToolbarButton(
-                        icon = Icons.Default.Add,
-                        text = stringResource("rabbitmq_ui_exchange_bindings_add"),
-                        onClick = { showAddBinding = true },
-                    )
-                }
-            }
-            Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(8.dp))
 
-            // ---- Bindings 表（实时）----
-            when (val s = bindingsState) {
-                is LoadState.Idle, is LoadState.Loading -> {
-                    Box(modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
+                // ---- Bindings 区：头部行（计数 + 添加）+ 表格（实时，系统交换机禁写）----
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = stringResource("rabbitmq_ui_exchange_props_bindings_count")
+                            .withArg((bindingsState as? LoadState.Success)?.data?.size ?: 0),
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (!systemExchange) {
+                        ToolbarButton(
+                            icon = Icons.Default.Add,
+                            text = stringResource("rabbitmq_ui_exchange_bindings_add"),
+                            onClick = { showAddBinding = true },
+                        )
                     }
                 }
-                is LoadState.Error -> {
-                    Column {
-                        Text(
-                            text = stringResource("rabbitmq_ui_exchange_props_bindings_failed").withArg(s.message),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                        SecondaryButton(onClick = { load() }) { Text(stringResource("rabbitmq_ui_refresh")) }
-                    }
-                }
-                is LoadState.Success<List<RabbitMqBindingSnapshot>> -> {
-                    val bindings = s.data
-                    if (bindings.isEmpty()) {
-                        Text(
-                            text = stringResource("rabbitmq_ui_exchange_props_bindings_empty"),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    } else {
-                        BindingsTable(
-                            bindings = bindings,
-                            onDelete = if (systemExchange) null else { binding -> deleteConfirm = binding },
-                        )
+                Spacer(Modifier.height(8.dp))
+
+                // ---- Bindings 表（实时）----
+                // 状态区 `weight(1f)` 吃掉剩余高度并在内部居中（与 Kafka 属性对话框的
+                // ConfigsTab 同一范式）；不能靠固定 padding 定位 —— 那样 Loading 只是
+                // 跟在头部行后面的普通子项，既不居中，也压不住溢出。
+                Box(
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    when (val s = bindingsState) {
+                        is LoadState.Idle, is LoadState.Loading -> {
+                            CircularProgressIndicator()
+                        }
+                        is LoadState.Error -> {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    text = stringResource("rabbitmq_ui_exchange_props_bindings_failed").withArg(s.message),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                SecondaryButton(onClick = { load() }) { Text(stringResource("rabbitmq_ui_refresh")) }
+                            }
+                        }
+                        is LoadState.Success<List<RabbitMqBindingSnapshot>> -> {
+                            val bindings = s.data
+                            if (bindings.isEmpty()) {
+                                Text(
+                                    text = stringResource("rabbitmq_ui_exchange_props_bindings_empty"),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            } else {
+                                BindingsTable(
+                                    bindings = bindings,
+                                    onDelete = if (systemExchange) null else { binding -> deleteConfirm = binding },
+                                )
+                            }
+                        }
                     }
                 }
             }
-            SnackbarHost(hostState = snackbar)
+            SnackbarHost(
+                hostState = snackbar,
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
         }
 
         // ---- 删除交换机二次确认：**必须声明在本外壳 content lambda 内** —— compose
@@ -373,7 +390,9 @@ private fun BindingsTable(
             }
         }
         HorizontalDivider()
-        Column(modifier = Modifier.weight(1f)) {
+        // 行区自己滚：绑定数量没有上限（实测集群里 59 条），固定高度的 Column 会
+        // 溢出内容区 —— 外壳现在已经 clipToBounds，不滚就等于把后面的行直接藏了。
+        Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             bindings.forEach { binding ->
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),

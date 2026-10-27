@@ -209,12 +209,20 @@ fun RabbitMqQueuePropertiesDialog(
             Column(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp)) {
                 when (val s = detailState) {
                     is LoadState.Idle, is LoadState.Loading -> {
-                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        // weight(1f) 而不是 fillMaxSize()：显式吃掉剩余高度并在内部居中，
+                        // 不依赖「刚好是唯一子项」这个巧合（与交换机属性对话框同口径）。
+                        Box(
+                            modifier = Modifier.weight(1f).fillMaxWidth(),
+                            contentAlignment = Alignment.Center,
+                        ) {
                             CircularProgressIndicator()
                         }
                     }
                     is LoadState.Error -> {
-                        Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center) {
+                        Column(
+                            modifier = Modifier.weight(1f).fillMaxWidth(),
+                            verticalArrangement = Arrangement.Center,
+                        ) {
                             Text(
                                 text = stringResource("rabbitmq_ui_queue_props_load_failed").withArg(s.message),
                                 style = MaterialTheme.typography.bodyMedium,

@@ -23,6 +23,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -131,7 +132,11 @@ fun ObjectDetailDialog(
                 HorizontalDivider()
 
                 // 2. 内容区（业务模块填充）
-                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                // clipToBounds：内容溢出时只能被裁到本区域，**不得**画到上下两条
+                // 分割线 / 底部按钮栏上。模块内部的布局错误应该表现为「底部被切」，
+                // 而不是「分割线从 Loading 中间穿过」—— 后者会让人以为分割线归错了
+                // 容器（实测就踩过：RabbitMQ 交换机属性对话框的固定高度栈溢出）。
+                Box(modifier = Modifier.weight(1f).fillMaxWidth().clipToBounds()) {
                     content()
                 }
 
