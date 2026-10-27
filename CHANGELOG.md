@@ -2,6 +2,53 @@
 
 本文件记录 MQClient 的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [Unreleased] — 2026-10-27 (8)
+
+### Tests（先补测试，再动手拆）
+
+- **对象慢扫的编排语义有了端到端测试**（`KafkaObjectScanOrchestrationTest`，8 例）：
+  编排本体此前只能靠真集群验证 —— 单点测试只覆盖了 `scanKindOr` 与 `putIfScanned`
+  各自的行为，**没有一条把真实编排跑一遍**。现在注入假 scanner 覆盖三件事：
+  1. **单类失败不影响其他类**：topics 抛错时 brokers / groups 照常入缓存，
+     失败的那类不写（不是写空列表）；
+  2. **三类真的并发**：用 gate（三类都到齐才放行）+ `withTimeout` 断言，
+     串行化实现会在这里超时；
+  3. **全失败才判死**：部分失败发 `SCANNED(partial=true, failedKinds=[...])`
+     且**不发** `SCAN_FAILED`；三类全灭才发 `SCAN_FAILED`。
+  外加两条缓存策略：失败的类型**保留上一轮结果**（写成空列表等于告诉 UI
+  「集群上没有 topic」）、broker 类失败时兜底空快照**不能**覆盖上一轮的 clusterId。
+  事件断言用「屏障事件」做确定性等待（`emitSync` 只是往 SharedFlow 投递，
+  送达仍是异步的 —— 第一版就是栽在这里）。
+- **消费组位点行的纯聚合抽出来并测试**（`buildGroupOffsetDetails` +
+  `KafkaGroupOffsetDetailsTest`，7 例）：`lag = end - current` 这三个算式是用户
+  判断消费滞后的唯一依据，此前埋在 200 行的实时查询里。边界：从未提交 →
+  `currentOffset` 为 **null**（不是 0，两者含义不同）、无末端位点 → 按 0 算、
+  空组 → `ownerId` 为 null。
+- 变异验证（4 项，全部确认能红）：失败的类型也写缓存 → 2 例红；
+  单类失败即判死 → 1 例红；去掉并发改串行 → 1 例红；「判死」改成「一半失败」→ 红。
+
+### Changed
+
+- **`KafkaScanService` 按职责切分**（1007 → 926 行，另起 `KafkaObjectQueries.kt` 137 行）：
+  把**协议查询层**（`scanKafkaBrokers` / `scanKafkaTopics` / `scanKafkaGroups` +
+  `ClusterScan`）切到独立文件 —— 这一层只做「AdminClient → 领域快照」，不含并发
+  编排、缓存策略、失败判定与事件。切分前后做了一次归一化逐字比对，三个函数体
+  **完全一致**。
+- 编排入口 `runObjectScan` 改为 `internal` 并接受三个 scanner lambda：真实路径
+  注入 AdminClient 调用，测试注入假实现。这是本轮唯一为「可测」而做的结构调整，
+  行为不变。
+- 错误文案统一走 `kafkaErrorOf`（协议查询层与 `KafkaScanService.errorMessage`
+  共用一份实现，不再各写一遍 `ExecutionException` 解包）。
+
+### 未做（如实记录）
+
+- `KafkaScanService` 仍剩约 926 行：组详情 / 重置位点 / Topic 管理这些**写操作与
+  实时查询**没有行为测试，按「有测试的拆分才敢做」的原则没有动。要继续拆，需要先
+  给这些路径补上同类 seam 测试（下一个自然切口是 `KafkaGroupService` 与
+  `KafkaTopicAdmin`）。
+- `IbmMQService`（1012 行）没有动：它的扫描走 PCF agent + 协作式预算，与 Kafka 的
+  `coroutineScope { async }` 结构不同，不能套同一个 seam。
+
 ## [Unreleased] — 2026-10-27 (7)
 
 ### Fixed
