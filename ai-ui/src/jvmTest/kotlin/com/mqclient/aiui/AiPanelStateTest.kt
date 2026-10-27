@@ -125,6 +125,35 @@ class AiPanelStateTest {
      * 记录后端：把真正传给模型的 messages / 系统提示词留下来。
      * 「不可信边界」是发送时点拼的，只能在这里断言。
      */
+    /**
+     * 流式节流后**内容仍完整**：服务端高速吐字（分片间隔远小于 100ms）时，UI 只
+     * 刷新了少数几次，但收尾必须把每一个字都写回去 —— 节流不能吞内容。
+     */
+    @Test
+    fun `throttled streaming keeps every chunk`() = runBlocking {
+        val chunks = (1..200).map { "chunk-$it " }
+        val state = newState(
+            config = AiConfig(connections = listOf(aiConnection())),
+            chat = object : ChatService {
+                override suspend fun streamReply(
+                    history: List<AiMessage>,
+                    connection: AiConnection,
+                    context: AiContext?,
+                    systemPromptOverride: String?,
+                    onChunk: (String) -> Unit,
+                ): AiStreamResult {
+                    chunks.forEach(onChunk) // 无延迟：全部落在同一个 100ms 窗口内
+                    return AiStreamResult(finishReason = "stop")
+                }
+            },
+        )
+
+        state.sendUserMessage("你好", null)
+        withTimeout(5_000) { while (state.isStreaming) delay(5) }
+
+        assertEquals(chunks.joinToString(""), state.messages.last().content, "节流不能丢任何分片")
+    }
+
     private class RecordingChatService : ChatService {
         var lastHistory: List<AiMessage> = emptyList()
         var lastSystemPrompt: String? = null

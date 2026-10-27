@@ -2,6 +2,80 @@
 
 本文件记录 MQClient 的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [Unreleased] — 2026-10-27 (2)
+
+### Fixed
+
+- **XML 解释器把合法报文切碎**（消息解码器，`message-interpreter-xml`）：旧实现用
+  `split(Regex("(?=<)|(?<=>)"))` 按字符切分，三类合法输入全部被切坏 —— CDATA 里的
+  `<`（`<![CDATA[if (a < b)]]>`）、DOCTYPE 内部子集（`<!DOCTYPE msg [<!ENTITY …>]>`）、
+  属性值里的 `>`（`<a title="x>y">`）。改为**真 DOM 解析 + 重新序列化**：
+  1. `DocumentBuilderFactory` 按 XXE 加固（禁止外部通用/参数实体、禁止加载外部 DTD、
+     `FEATURE_SECURE_PROCESSING`、外部 DTD/Schema 访问置空）；
+  2. 整篇解析失败后**再按多根片段重试**（套内部根后只输出其子节点）—— MQ 正文里
+     多根并列是常态，而严格 XML 解析器只接受单根；两条路径都失败才报 Failure；
+  3. 自写递归序列化器（不走 Transformer）：CDATA 逐字保留、注释/PI 保留、
+     空元素自闭合、单文本子节点内联（`<a>1</a>`）、多空格与换行按缩进归一。
+  代价（已记录在 KDoc 里）：实体按解析结果展开、属性引号归一、混合内容的标签间空白
+  被 trim、`<?xml?>` 声明与 DOCTYPE 不重新输出。
+- **JSON 解释器把畸形 JSON 当成功**：旧 `prettyPrintJson` 是纯 token 重排，`{"a":}`、
+  `{"a":1,}`、`{`、`{"a":1}{"b":2}` 全部返回 `Success` —— 用户会误以为消息体是
+  合法 JSON。现在**先严格校验再重排**：`kotlinx-serialization-json` 做合法性校验
+  （拒绝尾逗号 / 未加引号的 key / 多根），通过后仍走原来的字符级重排（只动空白，
+  字符串字面量、数字形态、键序、`\u` 转义全部原样）。空容器 `{}` / `[]` 保持紧凑。
+  `canInterpret` 同步收紧为「首字符像 JSON **且** 真能解析」—— Base64 解码层的链式
+  选择不再把 `{oops` 这类文本错认成 JSON 再把整条链路拖成 Failure。
+- **Base64 误判 + 静默吞字符**（`message-interpreter-base64`）：旧 `canInterpret` 只看
+  `%4 == 0` + 字母数字白名单，而 Base64 字母表是 ASCII 子集的真子集 —— `ORDERS05`、
+  `ABCD1234` 这类普通编号在数学上也是合法 Base64；更糟的是 `interpret` 用
+  `Base64.getMimeDecoder()`，它会**静默跳过**非法字符，于是 `hello, world!` 被“成功”
+  解码成一段垃圾字节。现在：严格字符集 + 长度 4 的倍数 + 填充只能出现在末尾且最多
+  两个（`getDecoder()` 严格模式，不合规一律 `Failure`）；自动认领另加启发式 —— 需
+  出现 `=`/`+`/`/` 或长度 ≥ 16，短纯字母数字串不再自动认领（仍可手动选）。
+- **AI 连接迁移到不存在的 provider**：`AiConnectionRepository.migrateIfNeeded` 把旧
+  `claude` 槽位映射成 `providerId = "claude"`，而 Anthropic 适配器的真实 id 是
+  `anthropic` —— 迁移出来的连接在注册表里查不到适配器，面板只会报「没有对应的
+  适配器」。改为映射到 `anthropic`（`defaultBaseUrl` / `defaultModel` 不变）。
+- **AI 流式回复 O(n²)**：`AiPanelState` 每收到一个 SSE 分片就 `content + chunk` 再
+  写回消息，气泡因此对整个累积文本**重跑一遍 Markdown 解析** —— 长回复就是几千次
+  全量重解析，越写越卡。新增 `StreamingReplyBuffer`（StringBuilder 缓冲 + 100ms
+  节流）：首片立即上屏（不让用户觉得“没反应”），之后距上次刷新 ≥100ms 才刷，稳态
+  约 10 fps；流结束 / 取消 / 异常一律 `force` 刷出尾巴，一个字不丢（审计记录与界面
+  内容一致）。
+- **忽略 SSL 用了进程级共享的 trust-all 客户端**（`AiHttp`）：所有 `ignoreSsl=true`
+  的连接共用一个“信任所有证书”的客户端，等于把这条宽松策略的适用范围扩散到全部
+  使用方。改为**按目标 host 派生**（键 = `host[:port]`，同 host 不同端口也算两个
+  目标）：每个 trust-all 客户端只可能与用户显式点开开关的那一个 host 握手。
+  baseUrl 解析不出 host 时**抛 AiException**，不回退到共享客户端。
+- **两处 `outcome.lastError!!`**（`ChannelListPanel` / `ListenerListPanel`）：改成
+  在 `PollOutcome.Timeout` 分支里先绑定到局部 `val`，既不需要 `!!` 也不依赖跨协程
+  smart-cast。
+- **kafka-ui 直接展示 Kafka 原始异常**：8 处把
+  `org.apache.kafka.common.errors.TimeoutException: Topic xxx not present in metadata
+  after 60000 ms.` 这类英文原文（或 `cause` 链用 `"  ←  "` 拼成的长串）直接甩给用户。
+  新增 `kafkaErrorText()`（kafka-ui 唯一出口，职责对齐 IBM MQ 的 `MqrcTranslator`）：
+  解包 `ExecutionException` / `CompletionException` → 按异常类型映射到 i18n 文案
+  （超时 / 认证 / 授权 / Topic 不存在 / 消息过大 / 位点越界 / Topic 已存在 / Topic 参数
+  非法 / 协议版本不支持 / SSL）→ 附上截断后的原文片段（保留「哪个 topic」这类可操作
+  细节）。未分类的异常原样走 `failureText`，不重复包装 service 已写好的中文文案。
+
+### Security
+
+- `ignoreSsl=true` 的信任范围从「进程级共享」收窄到「单个目标 host」，并在 **AI 面板
+  顶部（常驻横幅）** 与 **设置页连接卡** 两处给出显著警告（`ai_ignore_ssl_warning`，
+  中英 i18n）：证书校验已关闭 → 可被中间人劫持，API key 与对话内容可能泄漏。
+
+### Tests
+
+- 新增 `XmlInterpreterTest`（12 例：CDATA / DOCTYPE 内部子集 / 属性含 `>` / 注释与 PI /
+  空元素 / 多根片段 / 标签错配 / 未闭合 / 外部实体不解析）、`JsonInterpreterTest`（7 例：
+  5 种畸形必失败 + 字符串与数字不被改写 + 空容器紧凑）、`Base64InterpreterTest`（9 例：
+  普通文本拒绝 / 短串不认领 / 折行容忍 / 非法字符与错位填充拒绝）、`StreamingReplyBufferTest`
+  （7 例，含「渲染次数与时间成正比而非与分片数」）、`AiHttpTest`（7 例：同 host 共享 /
+  异 host 与异端口隔离 / 坏 URL 抛错）、`KafkaErrorTextTest`（8 例）。
+- `AiConnectionRepositoryTest` 补 `providerId == "anthropic"` 断言；`AiPanelStateTest`
+  补「节流后 200 个分片仍逐字完整」。
+
 ## [Unreleased] — 2026-10-27
 
 ### Fixed

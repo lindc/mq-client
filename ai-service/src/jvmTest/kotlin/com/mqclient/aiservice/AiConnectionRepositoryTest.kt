@@ -126,6 +126,8 @@ class AiConnectionRepositoryTest {
         assertEquals("qwen2.5", ollama.model)
 
         val claude = ai.connections.first { it.name == "Claude" }
+        assertEquals("anthropic", claude.providerId, "旧 claude 槽位要映到真实 provider id（anthropic-service）")
+        assertEquals("https://api.anthropic.com", claude.baseUrl)
         assertEquals("你好", claude.systemPrompt, "旧 base64 提示词要解码成明文")
         assertEquals(claude.id, ai.activeConnectionId, "旧 activeProviderId 对应的连接接任激活项")
 

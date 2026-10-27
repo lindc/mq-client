@@ -92,6 +92,7 @@
   "ai_field_enabled": "启用",
   "ai_field_ignore_ssl": "忽略 SSL 证书校验（信任自签名证书）",
   "ai_field_ignore_ssl_desc": "仅建议在连接本地 / 自建 AI 服务器时开启",
+  "ai_ignore_ssl_warning": "已关闭 SSL 证书校验：该连接可被中间人劫持，API key 与对话内容可能被窃取。仅在你完全信任该主机时使用。",
   "ai_ssl_handshake_hint": "SSL 握手失败：服务器证书校验未通过。如果您的服务器使用自签名证书，请在 AI 连接设置中开启【忽略 SSL 证书校验】。",
   "ai_testing": "测试中…",
   "ai_test_ok": "连接成功",

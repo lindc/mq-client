@@ -26,6 +26,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Single source of truth for the AI panel.
@@ -227,6 +228,11 @@ class AiPanelState internal constructor(
             // 状态只能在面板自己的调度器上写。用一条无界 channel 把分片转进本协程里串行
             // 追加：顺序天然保真，写状态的一定是面板的调度器。
             val chunks = Channel<String>(Channel.UNLIMITED)
+            // 渲染节流缓冲：分片先进这里，按 100ms 上限落到 Compose 状态。
+            val buffer = StreamingReplyBuffer()
+            fun flushNow() {
+                buffer.takeIfDue(force = true)?.let { setMessageContent(list, assistantMsg.id, it) }
+            }
             // 落库用的时间戳：createdTime = 提问时刻；startedTime = 首片到达；
             // finishedTime = 流结束。三者构成一条审计记录的耗时画像。
             val createdAt = userMsg.timestamp
@@ -242,12 +248,31 @@ class AiPanelState internal constructor(
                         chunks.close()
                     }
                 }
-                for (chunk in chunks) {
-                    if (startedAt == null) startedAt = System.currentTimeMillis()
-                    appendToMessage(list, assistantMsg.id, chunk)
+                // 分片只进缓冲，UI 最多每 100ms 更新一次（见 StreamingReplyBuffer 的
+                // KDoc：旧写法每个分片都重拼字符串 + 重跑一遍 Markdown）。
+                // withTimeoutOrNull 用来给「距上次刷新满 100ms」定拍：
+                //  - 拿到 ChannelResult 且 value 为 null = 生产端已关 channel，收工；
+                //  - 返回 null = 只是这一拍没等到新分片，顺手把缓冲刷出去（空闲也刷）。
+                var channelClosed = false
+                while (!channelClosed) {
+                    val received = withTimeoutOrNull(StreamingReplyBuffer.DEFAULT_INTERVAL_MS) {
+                        chunks.receiveCatching()
+                    }
+                    if (received != null) {
+                        val chunk = received.getOrNull()
+                        if (chunk == null) {
+                            channelClosed = true
+                        } else {
+                            if (startedAt == null) startedAt = System.currentTimeMillis()
+                            buffer.append(chunk)
+                        }
+                    }
+                    buffer.takeIfDue()?.let { setMessageContent(list, assistantMsg.id, it) }
                 }
                 // 生产端的异常在这里浮上来（join 不会重抛，await 会）。
                 val result = producer.await()
+                // 尾巴不到 100ms 也要落地（chunk 静止时的那一刷可能刚好在关 channel 之前）。
+                buffer.takeIfDue(force = true)?.let { setMessageContent(list, assistantMsg.id, it) }
                 finishedAt = System.currentTimeMillis()
                 val reply = list.lastOrNull { it.id == assistantMsg.id }?.content.orEmpty()
                 emitChatSaved(
@@ -265,6 +290,8 @@ class AiPanelState internal constructor(
                 )
             } catch (cancellation: CancellationException) {
                 // 取消不是失败，必须原样抛出（吞掉会让 scope 的取消失效）。
+                // 但缓冲里剩下的字要先落地：审计里的半截回复与界面必须一致。
+                flushNow()
                 // 普通对话的半截回复不落库（审计以「完成」为单位）；链路分析则落一条
                 // CANCELLED（reply = 已流出的部分）。
                 if (chain != null) {
@@ -284,6 +311,7 @@ class AiPanelState internal constructor(
                 }
                 throw cancellation
             } catch (error: Throwable) {
+                flushNow()
                 // 失败必须看得见：否则界面上只剩一个永远“…”的空气泡。未捕获异常逃出
                 // 这里会直接把 scope 的 Job 弄失败，整个面板之后 launch 全部被取消。
                 // 刻意不写进 messages —— 那会被下一轮当成 history 发给模型；失败只进
@@ -304,6 +332,8 @@ class AiPanelState internal constructor(
                     result = null,
                 )
             } finally {
+                // 最后一道保险：任何路径离开前都把缓冲里剩下的内容写回气泡。
+                flushNow()
                 streamingMessageId = null
                 // 一个字都没流出来就撤掉空气泡：出错时提示条已经说明了原因；被取消时
                 // 更不该留一条空回复 —— 下一轮会被当成 history 又发给模型。流了一半的
@@ -456,11 +486,18 @@ class AiPanelState internal constructor(
         )
     }
 
-    private fun appendToMessage(list: SnapshotStateList<AiMessage>, messageId: String, chunk: String) {
+    /**
+     * 把缓冲的**完整快照**写回消息（不是追加片段）。
+     *
+     * 由 [StreamingReplyBuffer] 节流后调用，所以这里一次赋值就覆盖了上一次的显示
+     * 内容；不再需要 `content + chunk` 的字符串拼接（那是旧实现的 O(n²) 来源）。
+     */
+    private fun setMessageContent(list: SnapshotStateList<AiMessage>, messageId: String, content: String) {
         val idx = list.indexOfLast { it.id == messageId }
         if (idx < 0) return
+        if (list[idx].content == content) return
         // 只改这一条：列表身份不变，只有读它的气泡重组。
-        list[idx] = list[idx].copy(content = list[idx].content + chunk)
+        list[idx] = list[idx].copy(content = content)
     }
 
     /** Builds a `[CONTEXT] k=v =` prefix from the current selection, or null if nothing to attach. */

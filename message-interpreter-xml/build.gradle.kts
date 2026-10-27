@@ -10,5 +10,8 @@ kotlin {
         commonMain.dependencies {
             implementation(projects.messageInterpreterApi)
         }
+        jvmTest.dependencies {
+            implementation(kotlin("test"))
+        }
     }
 }

@@ -132,16 +132,21 @@ fun ListenerListPanel(
                     scope.launch { snackbarHostState.showSnackbar(stringResource("ibm_mq_operation_failed").withArg(outcome.errorMessage ?: "")) }
                 is PollOutcome.Reached ->
                     scope.launch { snackbarHostState.showSnackbar(stringResource(successKey).withArg(name)) }
-                is PollOutcome.Timeout ->
+                is PollOutcome.Timeout -> {
+                    // lastError 可空：先绑定到 when 分支里的局部 val —— 既不需要 `!!`，
+                    // 也不依赖跨协程的 smart-cast（outcome 本身是不可变的，但把非空
+                    // 判定挪进 launch 之后编译器就不再保证）。
+                    val lastError = outcome.lastError
                     scope.launch {
                         snackbarHostState.showSnackbar(
-                            if (outcome.lastError != null) {
-                                stringResource("ibm_mq_listener_operation_timeout_error").withArg(outcome.lastError!!)
+                            if (lastError != null) {
+                                stringResource("ibm_mq_listener_operation_timeout_error").withArg(lastError)
                             } else {
                                 stringResource("ibm_mq_listener_operation_timeout")
                             },
                         )
                     }
+                }
             }
         } finally {
             executingActions = executingActions - name

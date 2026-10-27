@@ -330,16 +330,14 @@ class KafkaConnectionFormState(
     }
 
     /**
-     * 失败原因转提示文案：沿 cause 链取前几条去重拼接（KafkaFuture 的
-     * ExecutionException 包装会把真正的错误藏在里面），确认框里才能看出根因。
+     * 失败原因转提示文案：统一走 [kafkaErrorText]（解包 KafkaFuture 的
+     * ExecutionException / CompletionException + 按异常类型给本地化说明）。
+     *
+     * 旧实现在这里把 cause 链用 `"  ←  "` 拼成一行，用户看到的是一串英文类名
+     * （`TimeoutException: Topic xxx not present in metadata after 60000 ms`），
+     * 既读不懂也不知道该改什么 —— 与其它四个面板的错误展示口径也不一致。
      */
-    private fun failureMessage(error: Throwable): String =
-        generateSequence(error) { it.cause }
-            .take(4)
-            .mapNotNull { it.message?.takeIf(String::isNotBlank) }
-            .distinct()
-            .joinToString("  ←  ")
-            .ifBlank { error::class.simpleName ?: "unknown" }
+    private fun failureMessage(error: Throwable): String = kafkaErrorText(error)
 
     /**
      * 落盘：新建走 [ConnectionStore.create]、编辑走 [ConnectionStore.update]（core
@@ -372,7 +370,8 @@ class KafkaConnectionFormState(
         if (failure != null) {
             pendingConfig = null
             saveState = SaveState.Idle
-            saveError = failure.message ?: failure::class.simpleName
+            // 落盘失败（读不到 config.toml / 加密失败…）：同一套友好文案出口。
+            saveError = kafkaErrorText(failure)
             return
         }
         pendingConfig = null

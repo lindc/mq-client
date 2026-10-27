@@ -254,8 +254,8 @@ fun TopicListPanel(
                                     stringResource("kafka_ui_topic_clear_done").withArg(count),
                                 )
                             }.onFailure { error ->
-                                val cause = (error as? java.util.concurrent.ExecutionException)?.cause ?: error
-                                snackbarHostState.showSnackbar(cause.message ?: error::class.simpleName ?: "unknown")
+                                // 统一出口：解包异常链 + 本地化分类（不再手写 ExecutionException 拆包）。
+                                snackbarHostState.showSnackbar(kafkaErrorText(error))
                             }
                         }
                     },

@@ -223,8 +223,9 @@ object AiConnectionRepository {
      * 旧的 SPI id 到新 providerId 的映射：
      *  - `openai` → `openai-compatible`（沿用用户填的 URL）；
      *  - `ollama` → `openai-compatible`，URL 补 `/v1`（那是它的 Chat Completions 端点）；
-     *  - `claude` → `claude`（该适配器已不在内置列表；槽位迁移成连接保留数据，
-     *    以「未知 provider」出现在设置里，由用户删除或重填）；
+     *  - `claude` → `anthropic`（`anthropic-service` 的内置 provider id 就是
+     *    `anthropic`；映射成 `claude` 会指向一个注册表里不存在的 provider，连接
+     *    永远选不到适配器，面板只会报「没有对应的适配器」）；
      *  - 其他（第三方 SPI provider）→ `openai-compatible` 尽力而为，用户可在设置里改。
      */
     fun migrateIfNeeded(ai: AiConfig): AiConfig {
@@ -287,6 +288,6 @@ object AiConnectionRepository {
             "llama3.1",
             appendV1 = true,
         ),
-        "claude" to LegacyMapping("claude", "Claude", "https://api.anthropic.com", "claude-3-5-sonnet-latest"),
+        "claude" to LegacyMapping("anthropic", "Claude", "https://api.anthropic.com", "claude-3-5-sonnet-latest"),
     )
 }

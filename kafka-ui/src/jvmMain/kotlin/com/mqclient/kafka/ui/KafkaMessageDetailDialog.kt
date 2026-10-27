@@ -82,7 +82,7 @@ internal fun KafkaMessageDetailDialog(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            DetailUiState.Failed(e.message ?: e::class.simpleName ?: "unknown")
+            DetailUiState.Failed(kafkaErrorText(e))
         }
     }
 

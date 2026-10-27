@@ -72,6 +72,11 @@ fun AiPanel(
                     onConnectionSelected = { picked -> state.updateConfig { it.copy(activeConnectionId = picked.id) } },
                     onDismiss = onDismiss,
                 )
+                // 忽略 SSL = 该连接的证书校验被关掉（可能被中间人劫持）。开关在设置页，
+                // 但风险发生在**对话时**，所以这里常驻一条提示 —— 不做事后提醒。
+                if (state.activeConnection?.ignoreSsl == true) {
+                    IgnoreSslBanner()
+                }
                 currentContext?.chain?.let { chain ->
                     ChainAnalysisBar(
                         chain = chain,
@@ -128,6 +133,37 @@ fun AiPanel(
                 )
             }
         }
+    }
+}
+
+/**
+ * 忽略 SSL 的常驻警告条：该连接的证书校验已被用户关掉。
+ *
+ * 用 `errorContainer`（而不是 secondaryContainer 那种信息色）——这是**安全降级**，
+ * 不是配置提示；颜色与面板错误条同一档，用户扫一眼就知道有风险。
+ */
+@Composable
+private fun IgnoreSslBanner() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.errorContainer)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = Icons.Default.Warning,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onErrorContainer,
+            modifier = Modifier.size(14.dp),
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text = stringResource("ai_ignore_ssl_warning"),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onErrorContainer,
+            modifier = Modifier.weight(1f),
+        )
     }
 }
 

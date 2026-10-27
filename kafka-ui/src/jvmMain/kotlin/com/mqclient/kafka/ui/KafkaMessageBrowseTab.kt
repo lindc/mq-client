@@ -212,7 +212,7 @@ internal fun KafkaMessageBrowseTab(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            uiState = BrowseUiState.Failed(e.message ?: e::class.simpleName ?: "unknown")
+            uiState = BrowseUiState.Failed(kafkaErrorText(e))
         }
     }
 
@@ -237,7 +237,7 @@ internal fun KafkaMessageBrowseTab(
             } catch (e: Exception) {
                 (uiState as? BrowseUiState.Ready)?.let { uiState = it.copy(loadingMore = false) }
                 scope.launch {
-                    snackbarHostState.showSnackbar(e.message ?: e::class.simpleName ?: "unknown")
+                    snackbarHostState.showSnackbar(kafkaErrorText(e))
                 }
             }
         }
@@ -264,7 +264,7 @@ internal fun KafkaMessageBrowseTab(
                 throw e
             } catch (e: Exception) {
                 snackbarHostState.showSnackbar(
-                    stringResource("kafka_ui_msg_save_failed").withArg(e.message ?: ""),
+                    stringResource("kafka_ui_msg_save_failed").withArg(kafkaErrorText(e)),
                 )
             }
             rowActionKey = null

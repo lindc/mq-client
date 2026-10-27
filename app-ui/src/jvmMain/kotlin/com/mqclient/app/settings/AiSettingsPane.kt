@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Icon
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
@@ -390,7 +391,7 @@ private fun ConnectionCard(
         Spacer(Modifier.height(12.dp))
 
         // 忽略 SSL 证书校验（信任自签名证书）：per-connection 开关，只影响本连接
-        // 走的 HTTP 客户端（trust-all），默认关 —— 严格校验。
+        // 走的 HTTP 客户端（trust-all，按目标 host 隔离），默认关 —— 严格校验。
         ToggleRow(
             label = stringResource("ai_field_ignore_ssl"),
             description = stringResource("ai_field_ignore_ssl_desc"),
@@ -400,6 +401,26 @@ private fun ConnectionCard(
                 flush()
             },
         )
+        // 打开后把后果写在卡片里：开关本身是中性控件，风险必须显式说出来
+        // （AI 面板顶部还有一条常驻横幅，两处用同一句文案）。
+        if (ignoreSsl) {
+            Spacer(Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.Top) {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(14.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = stringResource("ai_ignore_ssl_warning"),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
         Spacer(Modifier.height(12.dp))
 
         Row(verticalAlignment = Alignment.CenterVertically) {

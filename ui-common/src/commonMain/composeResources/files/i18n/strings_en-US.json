@@ -92,6 +92,7 @@
   "ai_field_enabled": "Enabled",
   "ai_field_ignore_ssl": "Ignore SSL certificate validation (trust self-signed certificates)",
   "ai_field_ignore_ssl_desc": "Only recommended when connecting to a local / self-hosted AI server",
+  "ai_ignore_ssl_warning": "SSL certificate validation is DISABLED for this connection: it can be intercepted (MITM) and your API key or chat content may leak. Use it only if you fully trust this host.",
   "ai_ssl_handshake_hint": "SSL handshake failed: server certificate validation did not pass. If your server uses a self-signed certificate, enable \"Ignore SSL certificate validation\" in the AI connection settings.",
   "ai_testing": "Testing…",
   "ai_test_ok": "Connected",
