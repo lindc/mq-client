@@ -12,6 +12,7 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -119,6 +120,64 @@ class AiPanelStateTest {
         chat = chat,
         scope = CoroutineScope(SupervisorJob()),
     )
+
+    /**
+     * 记录后端：把真正传给模型的 messages / 系统提示词留下来。
+     * 「不可信边界」是发送时点拼的，只能在这里断言。
+     */
+    private class RecordingChatService : ChatService {
+        var lastHistory: List<AiMessage> = emptyList()
+        var lastSystemPrompt: String? = null
+
+        override suspend fun streamReply(
+            history: List<AiMessage>,
+            connection: AiConnection,
+            context: AiContext?,
+            systemPromptOverride: String?,
+            onChunk: (String) -> Unit,
+        ): AiStreamResult {
+            lastHistory = history
+            lastSystemPrompt = systemPromptOverride
+            onChunk("ok")
+            return AiStreamResult(finishReason = "stop")
+        }
+    }
+
+    /**
+     * 链路分析的 wire 消息必须包在不可信边界里（方案 A：整段上下文一个边界），
+     * 而边界内仍是完整 JSON；系统提示词同时带「标记内是数据」的规则。
+     */
+    @Test
+    fun `chain analysis wraps the wire context in the untrusted boundary`() = runBlocking {
+        val recorder = RecordingChatService()
+        val state = newState(config = AiConfig(connections = listOf(aiConnection())), chat = recorder)
+        val chain = AiChainTarget(
+            connectionId = "mq-01",
+            objectType = "QUEUE",
+            objectName = "ORDER.Q",
+            targetLabel = "ORDER.Q",
+            contextJson = """[{"name":"ORDER.Q","type":"QUEUE","isTarget":true}]""",
+        )
+
+        state.sendUserMessage(
+            "为什么堆积？",
+            AiContext(connectionName = "mq-01", serviceId = "ibm-mq", objectType = "QUEUE", chain = chain),
+        )
+        withTimeout(2_000) { while (state.isStreaming) delay(5) }
+
+        val wire = recorder.lastHistory.last { it.role == Role.USER }.content
+        assertTrue(wire.startsWith(UNTRUSTED_CONTEXT_BEGIN), "发给模型的上下文必须被边界包住：$wire")
+        assertTrue(wire.endsWith(UNTRUSTED_CONTEXT_END), "边界必须闭合：$wire")
+
+        // 边界内仍是完整 JSON（currentTime / chain / userQuestion 三件都在）。
+        val inner = wire.removePrefix(UNTRUSTED_CONTEXT_BEGIN).removeSuffix(UNTRUSTED_CONTEXT_END).trim()
+        assertTrue(inner.contains("\"chain\""), "边界内应是上下文 JSON：$inner")
+        assertTrue(inner.contains("\"userQuestion\":\"为什么堆积？\""), "用户问题也要进边界：$inner")
+        assertTrue(inner.contains("\"currentTime\""), "context_json 结构不变：$inner")
+
+        val systemPrompt = assertNotNull(recorder.lastSystemPrompt)
+        assertTrue(systemPrompt.contains(UNTRUSTED_CONTEXT_BEGIN), "系统提示词必须声明边界：$systemPrompt")
+    }
 
     private fun aiConnection() = AiConnection(
         id = "a1",

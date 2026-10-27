@@ -2,6 +2,7 @@ package com.mqclient.ai.adapter
 
 import com.mqclient.ai.AiAdapter
 import com.mqclient.ai.AiChatMessage
+import com.mqclient.ai.AiException
 import com.mqclient.ai.AiResponse
 import com.mqclient.ai.AiRole
 import com.mqclient.ai.AiStreamChunk
@@ -24,6 +25,9 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 
 private const val PROVIDER_LABEL = "OpenAI 兼容"
 
@@ -84,7 +88,17 @@ class OpenAiCompatibleAdapter(
                 }
                 response.throwIfNotSuccess(PROVIDER_LABEL)
 
-                val dto = aiJson.decodeFromString(ChatResponse.serializer(), response.bodyAsText())
+                // HTTP 200 + 错误体：不少兼容服务（网关 / 限流 / 未开通的模型）会用一个
+                // 200 响应回 {"error":…}。不拦的话 ChatResponse 会把缺失的 choices 解成
+                // 空列表，面板上就是「AI 回了一条空消息」，真实原因（欠费 / 限流 / 模型
+                // 不存在）全丢失。
+                val body = response.bodyAsText()
+                errorDetail(body)?.let { detail ->
+                    Log.warn(AI_ADAPTER_LOG_TAG, "chat error payload: model=${connection.model} detail=$detail")
+                    throw AiException("$PROVIDER_LABEL 响应失败：$detail")
+                }
+
+                val dto = aiJson.decodeFromString(ChatResponse.serializer(), body)
                 val choice = dto.choices.firstOrNull()
                 AiResponse(
                     content = choice?.message?.content.orEmpty(),
@@ -143,6 +157,13 @@ class OpenAiCompatibleAdapter(
             var deltaChars = 0
             response.bodyAsChannel().sseData().collect { payload ->
                 if (payload == DONE_SENTINEL) return@collect
+                // 错误帧拦截必须跑在「解析失败就跳过」之前：有的服务不回 SSE，而是就在
+                // 200 响应体里给一个 {"error":…}；旧写法一律 return@collect，于是整条
+                // 回复静默变成空字符串（用户只看到一个空的气泡，日志里什么都没有）。
+                errorDetail(payload)?.let { detail ->
+                    Log.warn(AI_ADAPTER_LOG_TAG, "chat stream error frame: model=${connection.model} detail=$detail")
+                    throw AiException("$PROVIDER_LABEL 流式响应失败：$detail")
+                }
                 // 解析不了的帧直接跳过：部分兼容服务会插非标准的心跳 / 注释帧。
                 val chunk = runCatching { aiJson.decodeFromString(StreamChunk.serializer(), payload) }.getOrNull()
                     ?: return@collect
@@ -191,6 +212,24 @@ class OpenAiCompatibleAdapter(
         }
 
     private fun AiConnection.endpoint(path: String): String = baseUrlOrThrow() + path
+
+    /**
+     * 从响应体 / SSE 帧里抽出错误载荷：`{"error":{"message":"…"}}` 与 `{"error":"…"}`
+     * 两种形状都认（OpenAI 兼容生态大体一致）。返回 null = 这不是错误帧。
+     *
+     * 快速路径先看字符串：流式每帧都要过这里，正常 delta 帧不付 JSON 解析成本。
+     */
+    private fun errorDetail(payload: String): String? {
+        if (!payload.contains("\"error\"")) return null
+        return runCatching {
+            val root = aiJson.parseToJsonElement(payload) as? JsonObject ?: return@runCatching null
+            when (val error = root["error"]) {
+                is JsonObject -> (error["message"] as? JsonPrimitive)?.contentOrNull
+                is JsonPrimitive -> error.contentOrNull
+                else -> null
+            }?.trim()?.take(400)
+        }.getOrNull()
+    }
 
     private fun AiConnection.applyAuth(builder: HttpRequestBuilder) {
         // 不带 token 的本地服务（如 Ollama）不该收到一个空的 Authorization 头。

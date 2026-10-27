@@ -8,7 +8,12 @@ import com.ibm.mq.MQQueueManager
 import com.ibm.mq.constants.MQConstants
 import com.mqclient.ibmmq.command.MqrcTranslator
 import com.mqclient.ibmmq.ibmMqLog
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /**
@@ -28,11 +33,18 @@ fun browseErrorText(e: Throwable): String = when (e) {
  *
  * 生命周期跟 UI 对话框走：打开对话框建会话，关闭时 [close]（释放队列句柄）。
  * MQI 调用是阻塞 IO，所有公开方法都挂起并切到 [Dispatchers.IO]。
+ *
+ * 并发：会话的每次 `get` 都要持所属连接的 [mqiLock]（`IbmMQConnectionContext.mqiLock`）
+ * —— 它与 PCF 扫描 / 消息发送共用同一把锁。浏览句柄本身是独立队列句柄，不会踩
+ * 会话光标；但共用的 `MQQueueManager` 上的 MQI 请求/应答是串行的，与扫描并发会在
+ * 同一条通道上交错（实测表现为随机 MQRC / 扫到的对象数抖动）。
  */
 class MessageBrowseSession private constructor(
     private val queue: MQQueue,
     /** 仅用于日志追踪的队列名（open 时从调用方取，MQQueue.name 需要额外属性访问）。 */
     private val queueName: String,
+    /** 所属连接的 MQI 互斥锁（与 PCF 扫描 / 发送共用，见类 KDoc）。 */
+    private val mqiLock: Mutex,
 ) {
 
     /** 下一次 get 是否用 BROWSE_FIRST（首调或 [reset] 后为 true，其余 BROWSE_NEXT）。 */
@@ -41,14 +53,22 @@ class MessageBrowseSession private constructor(
     /**
      * 浏览下一条（内部按 [count] 循环逐条 get，串行）。队列读空（MQRC 2033）时
      * 正常返回已拿到的部分——调用方以「返回条数 < [count]」判定浏览耗尽。
+     *
+     * 锁在**最外层**：整页浏览对扫描而言是一个原子操作，否则半页浏览与一轮 PCF
+     * 查询会交替压在同一条 MQ 通道上。
      */
-    suspend fun browseNext(count: Int): List<MessageSummary> = withContext(Dispatchers.IO) {
+    suspend fun browseNext(count: Int): List<MessageSummary> = mqiLock.withLock { browsePage(count) }
+
+    private suspend fun browsePage(count: Int): List<MessageSummary> = withContext(Dispatchers.IO) {
         val start = System.currentTimeMillis()
         ibmMqLog.debug("browse next: queue=$queueName count=$count")
         try {
             val result = ArrayList<MessageSummary>(count)
             val options = MQGetMessageOptions()
             repeat(count) {
+                // 对话框关掉 / 切队列时，重复的阻塞 get 必须停在这一圈：
+                // queue.get 不看协程状态，循环开头是唯一能察觉取消的位置。
+                currentCoroutineContext().ensureActive()
                 val useFirst = firstBrowse
                 options.options =
                     (if (useFirst) MQConstants.MQGMO_BROWSE_FIRST else MQConstants.MQGMO_BROWSE_NEXT) or
@@ -74,6 +94,10 @@ class MessageBrowseSession private constructor(
                     "duration=${System.currentTimeMillis() - start}ms",
             )
             result
+        } catch (cancellation: CancellationException) {
+            // 取消不是「浏览失败」：吞成 error 日志并转成异常只会让 UI 弹假错误，
+            // 而且会把调用方的取消语义抹掉。
+            throw cancellation
         } catch (e: MQException) {
             ibmMqLog.error(
                 "browse failed: queue=$queueName reason=MQRC ${e.reasonCode}: ${MqrcTranslator.translate(e.reasonCode)}",
@@ -105,18 +129,34 @@ class MessageBrowseSession private constructor(
     companion object {
 
         /**
-         * 在既有的 [MQQueueManager] 上打开浏览会话（复用连接的 TCP 通道，不另建连接）。
+         * 在既有的 [MQQueueManager] 上打开浏览会话（复用连接的 TCP 通道，不另建连接）
+         * 并与该连接共用 [mqiLock]（后续 [browseNext] 每页都持它）。
+         *
+         * **调用方必须已持有 [mqiLock]**（`IbmMQService.openBrowseSession` 在锁内调用，
+         * 顺便把 `mqConnection` 的读取也罩住）——本函数自己不再取锁，否则直接死锁。
          * 连接已断 / QMGR 不可用时报 MQException 原样上抛，由 UI 转「加载失败」。
          */
-        suspend fun open(manager: MQQueueManager, queueName: String): MessageBrowseSession =
-            withContext(Dispatchers.IO) {
-                val openOptions =
-                    MQConstants.MQOO_BROWSE or MQConstants.MQOO_FAIL_IF_QUIESCING
-                val start = System.currentTimeMillis()
-                val session = MessageBrowseSession(manager.accessQueue(queueName.trim(), openOptions), queueName.trim())
-                ibmMqLog.debug("browse session opened: queue=$queueName duration=${System.currentTimeMillis() - start}ms")
-                session
+        suspend fun open(
+            manager: MQQueueManager,
+            queueName: String,
+            mqiLock: Mutex,
+        ): MessageBrowseSession = withContext(Dispatchers.IO) {
+            val openOptions =
+                MQConstants.MQOO_BROWSE or MQConstants.MQOO_FAIL_IF_QUIESCING
+            val start = System.currentTimeMillis()
+            val resolvedName = queueName.trim()
+            val queue = manager.accessQueue(resolvedName, openOptions)
+            // 句柄已到手但还没交给会话时被取消：自己关掉，不然这个队列句柄没人管。
+            try {
+                currentCoroutineContext().ensureActive()
+            } catch (cancellation: CancellationException) {
+                runCatching { queue.close() }
+                throw cancellation
             }
+            val session = MessageBrowseSession(queue, resolvedName, mqiLock)
+            ibmMqLog.debug("browse session opened: queue=$queueName duration=${System.currentTimeMillis() - start}ms")
+            session
+        }
     }
 }
 

@@ -3,6 +3,7 @@ package com.mqclient.ibmmq
 import com.ibm.mq.MQQueueManager
 import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.cache.CacheManager
+import kotlinx.coroutines.sync.Mutex
 
 /**
  * 一条 IBM MQ 连接的运行时上下文：**显式连接模型**下，它就是这个连接的全部可变状态。
@@ -48,6 +49,26 @@ class IbmMQConnectionContext(
      */
     @Volatile
     var cache: CacheManager? = null
+
+    /**
+     * 该连接 **MQI 调用的唯一互斥锁**：PCF 扫描（慢扫 / 心跳 / 单对象查询 / MQSC 控制台）
+     * 与消息发送 / 浏览在这一把锁上串行。
+     *
+     * 为什么必须是每连接一把、而不是全局一把：`MQQueueManager` 的一条 TCP 通道内部的
+     * MQI 请求/应答是有状态串行的，两个协程同时在其上 `accessQueue` / `put` / PCF agent
+     * `send` 会互相踩对方的应答（表现是随机 MQRC、对象凭空消失、慢扫结果被覆盖）。
+     * 锁的粒度是连接，所以 A 连接的慢扫不会挡住 B 连接的消息浏览。
+     *
+     * 为什么不用 [com.mqclient.core.concurrent.KeyedMutex]：锁必须与上下文同生共死 ——
+     * `disconnect` 把 `mqConnection` 置 null 之后，新连接不能拿到上一轮残留的锁状态。
+     *
+     * 不参与锁的两条路径（有意为之）：
+     *  - [IbmMQConnectionManager.disconnectNow] / 模块关闭：一条卡死的 MQI 调用会把断开
+     *    路径一起拖死，断开必须立刻生效（见其 KDoc）；
+     *  - `PcfObjectScanner.scanAll` 内部 11 类并发查询：锁在 service 入口持有一整轮，
+     *    内部每类一个独立 agent 仍可并发（在 `withAgent` 取锁会退化成串行慢扫）。
+     */
+    val mqiLock: Mutex = Mutex()
 
     /**
      * 断开 / 删除时的清理：清空 cache、丢弃 MQ 句柄引用。

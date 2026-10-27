@@ -6,7 +6,6 @@ import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.cache.CacheManager
 import com.mqclient.core.concurrent.KeyedJobRegistry
-import com.mqclient.core.concurrent.KeyedMutex
 import com.mqclient.core.concurrent.runCatchingCancellable
 import com.mqclient.core.event.EventNames
 import com.mqclient.core.spi.ServiceContext
@@ -115,12 +114,16 @@ class IbmMQService(private val context: ServiceContext) {
     }
 
     /**
-     * 按连接分组的扫描锁：**同一条连接**上的扫描串行（防重叠扫描互相覆盖结果），
-     * 不同连接可以并发 —— 一把全局锁会让 A 的慢扫挡住 B 的刷新。
+     * PCF 全对象扫描器（每次查询自建 agent，可并发）。
+     *
+     * 并发约定：本类的**所有** MQI 入口（扫描 / 单对象查询 / 消息收发 / MQSC 由
+     * [com.mqclient.ibmmq.command.MqscPcfSender] 负责）都持连接自己的
+     * [IbmMQConnectionContext.mqiLock] —— 共享的 `MQQueueManager` 上一条通道内的
+     * MQI 请求/应答是有状态串行的，两路并发会互相踩应答。
+     *
+     * 锁在 service 入口持有一整轮，而**不**是在 [PcfObjectScanner] 的 `withAgent` 里逐次取：
+     * `scanAll` 内部 11 类查询仍要并发（每类一个独立 agent），逐次取锁会把慢扫退化成串行。
      */
-    private val scanLocks = KeyedMutex()
-
-    /** PCF 全对象扫描器（每次查询自建 agent，可并发）。 */
     private val objectScanner = PcfObjectScanner()
 
     /**
@@ -130,7 +133,7 @@ class IbmMQService(private val context: ServiceContext) {
      * 之间没有任何关系 —— 单槽位时，在 A 上点刷新会把 B 正在跑的刷新取消掉（B 的列表停在
      * 上一次结果，且窗口期内不再收到完成事件）。
      *
-     * 断开连接时必须经 [cancelScan] 收掉：[scanLocks] 的 key 还握在扫描协程手里，不取消
+     * 断开连接时必须经 [cancelScan] 收掉：扫描协程可能正握着该连接的 `mqiLock`，不取消
      * 的话重连后的第一次刷新要排在它后面等（表现是「点刷新没反应」），而且它手里的 MQ
      * 句柄已经由 [IbmMQConnectionManager] 断掉了。
      */
@@ -148,12 +151,16 @@ class IbmMQService(private val context: ServiceContext) {
     fun startScan(connectionId: String) {
         ibmMqLog.debug("manual scan requested: connection=$connectionId")
         scanJobs.launch(context.coroutineScope, connectionId) {
-            scanLocks.withLock(connectionId) {
-                // 显式连接模型：没连上就没有 cache 可写，也没有 MQ 句柄可查。
-                if (connectedContext(connectionId) == null) {
-                    ibmMqLog.debug("manual scan skipped (not connected): connection=$connectionId")
-                    // KeyedMutex.withLock 不是 inline（要维护 key 的引用计数），
-                    // 所以这里只能用 lambda 自己的标签退出，不能用 return@launch。
+            // 显式连接模型：没连上就没有 cache 可写，也没有 MQ 句柄可查。
+            val ctx = connectedContext(connectionId)
+            if (ctx == null) {
+                ibmMqLog.debug("manual scan skipped (not connected): connection=$connectionId")
+                return@launch
+            }
+            ctx.mqiLock.withLock {
+                // 等锁期间连接可能已被断开：不要拿废句柄去扫。
+                if (ctx.mqConnection == null) {
+                    ibmMqLog.debug("manual scan skipped (handle released): connection=$connectionId")
                     return@withLock
                 }
                 // 事件名来自 IbmMQEvents，payload 里的 moduleId / source 由
@@ -218,6 +225,16 @@ class IbmMQService(private val context: ServiceContext) {
      * 该方法只动单条通道缓存，不会删除其它通道，也不触发整轮全量扫描。
      */
     suspend fun pollChannelStatus(connectionId: String, name: String): String? {
+        // 保持旧语义：连接未登记 = 查询失败（抛），而不是「状态未知」（null）——
+        // null 在轮询里意味着「缓存还没扫到该通道，继续等」，会让一次真实失败
+        // 一直轮询到超时、且丢掉原因。
+        val ctx = IbmMQModule.connectionOrNull(connectionId)
+            ?: throw IllegalStateException("连接 $connectionId 未建立，无法查询通道状态")
+        return ctx.mqiLock.withLock { pollChannelStatusLocked(connectionId, name) }
+    }
+
+    /** [pollChannelStatus] 的锁内实现：调用方必须已持有该连接的 `mqiLock`。 */
+    private suspend fun pollChannelStatusLocked(connectionId: String, name: String): String? {
         val statuses = objectScanner.queryChannelStatus(connectionId, name)
         val cache = cacheOf(connectionId) ?: return null
         val key = objectsKey(MqObjectType.CHANNEL)
@@ -265,6 +282,14 @@ class IbmMQService(private val context: ServiceContext) {
      * 该方法只动单条监听器缓存，不会删除其它监听器，也不触发整轮全量扫描。
      */
     suspend fun pollListenerStatus(connectionId: String, name: String): String? {
+        // 同 pollChannelStatus：连接未登记要抛出，不能退化成「状态未知」。
+        val ctx = IbmMQModule.connectionOrNull(connectionId)
+            ?: throw IllegalStateException("连接 $connectionId 未建立，无法查询监听器状态")
+        return ctx.mqiLock.withLock { pollListenerStatusLocked(connectionId, name) }
+    }
+
+    /** [pollListenerStatus] 的锁内实现：调用方必须已持有该连接的 `mqiLock`。 */
+    private suspend fun pollListenerStatusLocked(connectionId: String, name: String): String? {
         val statuses = objectScanner.queryListenerStatus(connectionId, name)
         val cache = cacheOf(connectionId) ?: return null
         val key = objectsKey(MqObjectType.LISTENER)
@@ -309,26 +334,42 @@ class IbmMQService(private val context: ServiceContext) {
      * 通道已完全停止返回 null（UI 显示「通道未运行」）；连接未建立 / 查询失败
      * 抛异常，由 UI 转「加载失败」。
      */
-    suspend fun getChannelStatus(connectionId: String, name: String): ChannelStatusDetail? =
-        objectScanner.queryChannelStatusDetail(connectionId, name)
+    suspend fun getChannelStatus(connectionId: String, name: String): ChannelStatusDetail? {
+        val ctx = IbmMQModule.connectionOrNull(connectionId)
+            ?: throw IllegalStateException("连接 $connectionId 未建立，无法查询通道状态")
+        return ctx.mqiLock.withLock { objectScanner.queryChannelStatusDetail(connectionId, name) }
+    }
 
     /**
      * 打开队列消息浏览会话（消息处理对话框用）：在该连接的 [MQQueueManager] 上以
      * `MQOO_BROWSE` 打开队列，光标跨调用保持，浏览不消费消息。连接未建立直接抛
      * [IllegalStateException]，由 UI 转「加载失败」。
+     *
+     * 打开动作本身就持 `mqiLock`（与 PCF 扫描 / 发送串行），并把同一把锁交给会话，
+     * 后续每页 [MessageBrowseSession.browseNext] 继续用它。
      */
     suspend fun openBrowseSession(connectionId: String, queueName: String): MessageBrowseSession {
-        val manager = connectedContext(connectionId)?.mqConnection
+        val ctx = IbmMQModule.connectionOrNull(connectionId)
             ?: run {
                 ibmMqLog.warn("browse session aborted (not connected): connection=$connectionId queue=$queueName")
                 throw IllegalStateException("连接 $connectionId 未建立，无法浏览队列消息")
             }
-        return MessageBrowseSession.open(manager, queueName)
+        return ctx.mqiLock.withLock {
+            val manager = ctx.mqConnection
+                ?: run {
+                    ibmMqLog.warn("browse session aborted (handle released): connection=$connectionId queue=$queueName")
+                    throw IllegalStateException("连接 $connectionId 未建立，无法浏览队列消息")
+                }
+            MessageBrowseSession.open(manager, queueName, ctx.mqiLock)
+        }
     }
 
     /** 单队列实时 CURDEPTH（PCF INQUIRE_Q 只点名 MQIA_CURRENT_Q_DEPTH，不读缓存）。 */
-    suspend fun getQueueDepth(connectionId: String, queueName: String): Int =
-        objectScanner.queryQueueDepth(connectionId, queueName)
+    suspend fun getQueueDepth(connectionId: String, queueName: String): Int {
+        val ctx = IbmMQModule.connectionOrNull(connectionId)
+            ?: throw IllegalStateException("连接 $connectionId 未建立，无法查询队列深度")
+        return ctx.mqiLock.withLock { objectScanner.queryQueueDepth(connectionId, queueName) }
+    }
 
     /**
      * 集群关系（集群关系 Tab）：本地 QMgr 的集群角色（完整仓库 / 部分仓库 /
@@ -341,6 +382,13 @@ class IbmMQService(private val context: ServiceContext) {
      * 主体（状态列显示 -）。
      */
     suspend fun getClusterRelations(connectionId: String): ClusterRelations {
+        val ctx = IbmMQModule.connectionOrNull(connectionId)
+            ?: throw IllegalStateException("连接 $connectionId 未建立，无法查询集群关系")
+        return ctx.mqiLock.withLock { getClusterRelationsLocked(connectionId) }
+    }
+
+    /** [getClusterRelations] 的锁内实现：调用方必须已持有该连接的 `mqiLock`。 */
+    private suspend fun getClusterRelationsLocked(connectionId: String): ClusterRelations {
         val relations = objectScanner.queryClusterRelations(connectionId)
         // 可取消版：scanChannelStatuses 是挂起调用。切走集群 Tab 时的取消不能被当成
         // 「状态查不到」吞掉 —— 那样函数会继续跑完并返回「状态全是 -」的结果。
@@ -369,12 +417,17 @@ class IbmMQService(private val context: ServiceContext) {
      * 完整字节，纯浏览不消费、不影响 UI 会话光标。连接未建立返回 failure。
      */
     suspend fun downloadMessageBody(connectionId: String, queueName: String, messageIdHex: String): MessageOperationResult {
-        val manager = connectedContext(connectionId)?.mqConnection
+        val ctx = IbmMQModule.connectionOrNull(connectionId)
             ?: run {
                 ibmMqLog.warn("msg download aborted (not connected): connection=$connectionId queue=$queueName")
                 return MessageOperationResult.failure(null, "连接 $connectionId 未建立")
             }
-        return downloadMessageBody(manager, queueName, messageIdHex)
+        return ctx.mqiLock.withLock {
+            // 等锁期间连接可能已被断开：锁内再读一次句柄，不拿废句柄去 browse。
+            val manager = ctx.mqConnection
+                ?: return@withLock MessageOperationResult.failure(null, "连接 $connectionId 未建立")
+            downloadMessageBody(manager, queueName, messageIdHex)
+        }
     }
 
     /**
@@ -382,12 +435,16 @@ class IbmMQService(private val context: ServiceContext) {
      * 读完整 MQMD + 消息体组装 [MessageDetail]。纯浏览不消费；连接未建立返回 failure。
      */
     suspend fun getMessageDetail(connectionId: String, queueName: String, messageIdHex: String): MessageOperationResult {
-        val manager = connectedContext(connectionId)?.mqConnection
+        val ctx = IbmMQModule.connectionOrNull(connectionId)
             ?: run {
                 ibmMqLog.warn("msg detail aborted (not connected): connection=$connectionId queue=$queueName")
                 return MessageOperationResult.failure(null, "连接 $connectionId 未建立")
             }
-        return getMessageDetail(manager, queueName, messageIdHex)
+        return ctx.mqiLock.withLock {
+            val manager = ctx.mqConnection
+                ?: return@withLock MessageOperationResult.failure(null, "连接 $connectionId 未建立")
+            getMessageDetail(manager, queueName, messageIdHex)
+        }
     }
 
     /**
@@ -395,12 +452,16 @@ class IbmMQService(private val context: ServiceContext) {
      * MQGMO_MSG_UNDER_CURSOR 破坏性 get，只消费该条；删除后由调用方刷新列表。
      */
     suspend fun deleteMessage(connectionId: String, queueName: String, messageIdHex: String): MessageOperationResult {
-        val manager = connectedContext(connectionId)?.mqConnection
+        val ctx = IbmMQModule.connectionOrNull(connectionId)
             ?: run {
                 ibmMqLog.warn("msg delete aborted (not connected): connection=$connectionId queue=$queueName")
                 return MessageOperationResult.failure(null, "连接 $connectionId 未建立")
             }
-        return deleteMessageById(manager, queueName, messageIdHex)
+        return ctx.mqiLock.withLock {
+            val manager = ctx.mqConnection
+                ?: return@withLock MessageOperationResult.failure(null, "连接 $connectionId 未建立")
+            deleteMessageById(manager, queueName, messageIdHex)
+        }
     }
 
     /**
@@ -423,25 +484,29 @@ class IbmMQService(private val context: ServiceContext) {
         format: String? = null,
         replyToQMgrName: String? = null,
     ): SendResult {
-        val manager = connectedContext(connectionId)?.mqConnection
+        val ctx = IbmMQModule.connectionOrNull(connectionId)
             ?: run {
                 ibmMqLog.warn("send aborted (not connected): connection=$connectionId queue=$queueName")
                 return SendResult.failure(null, "连接 $connectionId 未建立，无法发送消息")
             }
-        return sendMessageToQueue(
-            manager = manager,
-            queueName = queueName,
-            content = content,
-            correlationId = correlationId,
-            replyToQueue = replyToQueue,
-            persistence = persistence,
-            priority = priority,
-            expiryTenths = expiryTenths,
-            correlationIdBytes = correlationIdBytes,
-            characterSet = characterSet,
-            format = format,
-            replyToQMgrName = replyToQMgrName,
-        )
+        return ctx.mqiLock.withLock {
+            val manager = ctx.mqConnection
+                ?: return@withLock SendResult.failure(null, "连接 $connectionId 未建立，无法发送消息")
+            sendMessageToQueue(
+                manager = manager,
+                queueName = queueName,
+                content = content,
+                correlationId = correlationId,
+                replyToQueue = replyToQueue,
+                persistence = persistence,
+                priority = priority,
+                expiryTenths = expiryTenths,
+                correlationIdBytes = correlationIdBytes,
+                characterSet = characterSet,
+                format = format,
+                replyToQMgrName = replyToQMgrName,
+            )
+        }
     }
 
     /**
@@ -449,12 +514,23 @@ class IbmMQService(private val context: ServiceContext) {
      * 消息数量 + 通道运行状态。**状态守卫**：非 CONNECTED（未连 / 连接中 / 已失败）
      * 直接跳过 —— 连接失败后任务不注销、靠状态守卫空转，用户重连后自动恢复。
      *
-     * 与 [startScan] 共用同一把按连接的 [scanLocks]：定时扫描和用户手动扫描不会同时压到同一条连接上。
+     * 与 [startScan] 共用同一条连接的 `mqiLock`：定时扫描和用户手动扫描不会同时压到同一条连接上，
+     * 也不会与消息浏览 / 发送交错。
      * 业务错误在这里就转成 `*.failed` 事件了 —— 能落到调度器 `JOB_FAILED` 的是「意料之外」
      * 的异常（代码 bug 之类），两者别混为一谈。
      */
-    suspend fun scanMessageCounts(connectionId: String) = scanLocks.withLock(connectionId) {
-        val ctx = connectedContext(connectionId) ?: return@withLock
+    suspend fun scanMessageCounts(connectionId: String) {
+        val ctx = connectedContext(connectionId) ?: return
+        ctx.mqiLock.withLock {
+            // 等锁期间连接可能已被断开（mqConnection 置 null）：不要拿废句柄去扫。
+            if (ctx.mqConnection == null) return@withLock
+            scanMessageCountsLocked(connectionId)
+        }
+    }
+
+    /** [scanMessageCounts] 的锁内实现：调用方必须已持有该连接的 `mqiLock`。 */
+    private suspend fun scanMessageCountsLocked(connectionId: String) {
+        val ctx = connectedContext(connectionId) ?: return
         try {
             // 真 PCF：INQUIRE_Q_STATUS / INQUIRE_CHANNEL_STATUS 各一条，拿全部
             // 本地队列的当前深度与通道的运行状态（心跳要轻，不查全量属性）。
@@ -508,8 +584,17 @@ class IbmMQService(private val context: ServiceContext) {
      * QMGR 上已删除的对象）。完成后发 OBJECTS_SCANNED，订阅方（UI）读缓存刷新
      * —— 全程不碰 UI 线程。
      */
-    suspend fun scanObjects(connectionId: String) = scanLocks.withLock(connectionId) {
-        connectedContext(connectionId) ?: return@withLock
+    suspend fun scanObjects(connectionId: String) {
+        val ctx = connectedContext(connectionId) ?: return
+        ctx.mqiLock.withLock {
+            // 等锁期间连接可能已被断开（mqConnection 置 null）：不要拿废句柄去扫。
+            if (ctx.mqConnection == null) return@withLock
+            scanObjectsLocked(connectionId)
+        }
+    }
+
+    /** [scanObjects] 的锁内实现：调用方必须已持有该连接的 `mqiLock`。 */
+    private suspend fun scanObjectsLocked(connectionId: String) {
         try {
             val result = objectScanner.scanAll(connectionId)
 
@@ -917,10 +1002,9 @@ class IbmMQService(private val context: ServiceContext) {
      * 查询走 [PCFMessageAgent]，它复用 [MQQueueManager] 的既有连接，不另建 TCP。
      */
     suspend fun queryQmgrSnapshot(connectionId: String): MqObjectSnapshot? {
-        if (IbmMQModule.connectionOrNull(connectionId) == null) {
-            throw IllegalStateException("连接 $connectionId 未建立，无法查询队列管理器属性")
-        }
-        return objectScanner.scanQueueManager(connectionId)
+        val ctx = IbmMQModule.connectionOrNull(connectionId)
+            ?: throw IllegalStateException("连接 $connectionId 未建立，无法查询队列管理器属性")
+        return ctx.mqiLock.withLock { objectScanner.scanQueueManager(connectionId) }
     }
 }
 

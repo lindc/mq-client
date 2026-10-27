@@ -7,7 +7,10 @@ import com.ibm.mq.MQQueueManager
 import com.ibm.mq.constants.MQConstants
 import com.mqclient.ibmmq.command.MqrcTranslator
 import com.mqclient.ibmmq.ibmMqLog
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
 /** 单条消息的发送结果：成功带 hex MessageId 与时间戳，失败带 MQRC 原因码与可读文案。 */
@@ -35,6 +38,9 @@ data class SendResult(
  * （reason code + [MqrcTranslator] 可读文案），其余异常转普通 failure，不向上抛 ——
  * 调用方（UI）按结果更新任务状态，不需要再包一层 try。
  *
+ * **唯一例外是协程取消**：对话框关掉 / 任务被取消时 `CancellationException` 原样上抛，
+ * 不得被下面的宽 catch 转成一条「发送失败」—— 那既是假错误，也会让调用方的取消语义失效。
+ *
  * @param expiryTenths 过期时间（MQMD 单位：十分之一秒）；[MQConstants.MQEI_UNLIMITED]
  *   表示不过期。秒 → 十分之一秒的换算在 UI 层做。
  */
@@ -61,6 +67,9 @@ suspend fun sendMessageToQueue(
     val start = System.currentTimeMillis()
     var queue: MQQueue? = null
     try {
+        // 用户刚关掉对话框（或点击后被新动作顶掉）时不要再发出这条消息：
+        // accessQueue / put 都是阻塞 MQI，一旦进去就只能在应用层等它跑完。
+        currentCoroutineContext().ensureActive()
         queue = manager.accessQueue(
             queueName.trim(),
             MQConstants.MQOO_OUTPUT or MQConstants.MQOO_FAIL_IF_QUIESCING,
@@ -89,6 +98,8 @@ suspend fun sendMessageToQueue(
                 "size=${content.size}B duration=${System.currentTimeMillis() - start}ms",
         )
         result
+    } catch (cancellation: CancellationException) {
+        throw cancellation
     } catch (e: MQException) {
         ibmMqLog.error(
             "send failed: queue=$queueName reason=MQRC ${e.reasonCode}: ${MqrcTranslator.translate(e.reasonCode)}",

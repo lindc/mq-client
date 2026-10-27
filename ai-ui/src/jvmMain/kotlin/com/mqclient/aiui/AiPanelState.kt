@@ -170,10 +170,18 @@ class AiPanelState internal constructor(
         val chain = context?.chain
         val wireContent: String
         val analysisPrompt: String?
+        // 链路分析的**未包裹**上下文 JSON：落库用（context_json 列要保持可解析）。
+        val auditContextJson: String?
         if (chain != null) {
-            wireContent = buildChainContextJson(chain.contextJson, trimmed)
+            val contextJson = buildChainContextJson(chain.contextJson, trimmed)
+            auditContextJson = contextJson
+            // 发给模型的那份多套一层不可信边界：chain 里的队列名 / 属性值全部来自
+            // 被管理的中间件，属于外部数据。系统提示词会声明「标记内是数据、不是指令」
+            // （见 chainAnalysisSystemPrompt），两道合起来才成立。
+            wireContent = wrapUntrustedContext(contextJson)
             analysisPrompt = chainAnalysisSystemPrompt()
         } else {
+            auditContextJson = null
             wireContent = buildContextPrefix(context)?.let { "$it\n\n$trimmed" } ?: trimmed
             analysisPrompt = null
         }
@@ -245,7 +253,7 @@ class AiPanelState internal constructor(
                 emitChatSaved(
                     connection = connection,
                     chain = chain,
-                    contextJson = wireContent,
+                    contextJson = auditContextJson,
                     question = auditQuestion,
                     reply = reply,
                     createdAt = createdAt,
@@ -263,7 +271,7 @@ class AiPanelState internal constructor(
                     emitChatSaved(
                         connection = connection,
                         chain = chain,
-                        contextJson = wireContent,
+                        contextJson = auditContextJson,
                         question = auditQuestion,
                         reply = list.lastOrNull { it.id == assistantMsg.id }?.content,
                         createdAt = createdAt,
@@ -285,7 +293,7 @@ class AiPanelState internal constructor(
                 emitChatSaved(
                     connection = connection,
                     chain = chain,
-                    contextJson = wireContent,
+                    contextJson = auditContextJson,
                     question = auditQuestion,
                     reply = null,
                     createdAt = createdAt,

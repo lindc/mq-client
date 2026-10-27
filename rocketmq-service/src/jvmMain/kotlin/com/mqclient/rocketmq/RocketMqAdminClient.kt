@@ -226,8 +226,12 @@ class RocketMqAdminClient(private val config: RocketMqConfig) : AutoCloseable {
         tls.close()
     }
 
-    /** 所有管理调用的统一出口：IO 线程 + 错误映射。 */
-    private suspend fun <T> ioCall(block: () -> T): T =
+    /** 所有管理调用的统一出口：IO 线程 + 错误映射。
+     *
+     * `suspend` 是因为 TLS start 窗口要挂在 [Mutex] 上等锁（可取消）—— `tls.start`
+     * 本身是挂起调用，非挂起的 lambdas 依然可以传进来。
+     */
+    private suspend fun <T> ioCall(block: suspend () -> T): T =
         withContext(Dispatchers.IO) {
             try {
                 block()

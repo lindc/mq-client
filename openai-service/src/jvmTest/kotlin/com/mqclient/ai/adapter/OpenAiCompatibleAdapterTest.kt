@@ -134,4 +134,47 @@ class OpenAiCompatibleAdapterTest {
             "超时文案应带连接名，实际：${error.message}",
         )
     }
+
+    /**
+     * HTTP 200 + 错误体（流式）：有的兼容服务不回 4xx，而是在 200 的 SSE 流里给一帧
+     * `{"error":…}`，甚至整个 body 就是这一帧。旧实现把它当「解析不了的帧」跳过，
+     * 最终返回空回复——界面只看到一个空气泡。
+     */
+    @Test
+    fun `chatStream surfaces an error payload delivered with HTTP 200`() = runBlocking {
+        val sse = "data: {\"error\":{\"message\":\"insufficient quota\"}}\n\n"
+        val engine = MockEngine {
+            respond(sse, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "text/event-stream"))
+        }
+
+        val error = assertFailsWith<AiException> {
+            adapter(engine).chatStream(connection(), listOf(AiChatMessage(AiRole.USER, "hi"))).toList()
+        }
+
+        assertTrue(
+            error.message.orEmpty().contains("insufficient quota"),
+            "错误文案应带出服务端 detail，实际：${error.message}",
+        )
+    }
+
+    /** HTTP 200 + 错误体（非流式）：同一类服务的非流式分支（choices 缺失会解成空回复）。 */
+    @Test
+    fun `chat surfaces an error payload delivered with HTTP 200`() = runBlocking {
+        val engine = MockEngine {
+            respond(
+                content = """{"error":{"message":"model not found"}}""",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, "application/json"),
+            )
+        }
+
+        val error = assertFailsWith<AiException> {
+            adapter(engine).chat(connection(), listOf(AiChatMessage(AiRole.USER, "hi")))
+        }
+
+        assertTrue(
+            error.message.orEmpty().contains("model not found"),
+            "错误文案应带出服务端 detail，实际：${error.message}",
+        )
+    }
 }

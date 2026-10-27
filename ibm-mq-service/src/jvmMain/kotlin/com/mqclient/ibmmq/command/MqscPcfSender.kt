@@ -7,6 +7,7 @@ import com.ibm.mq.pcf.PCFMessageAgent
 import com.mqclient.ibmmq.IbmMQModule
 import com.mqclient.ibmmq.ibmMqLog
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /**
@@ -24,10 +25,21 @@ import kotlinx.coroutines.withContext
  *
  * 失败语义：`PCFMessageAgent.send` 在响应完成码非 OK 时抛 [PCFException]
  * （`reasonCode` 即命令服务器返回的原因码），由调用方翻译并展示。
+ *
+ * 并发：整条命令（含 agent 的创建 / 断开）持该连接的 `mqiLock` —— PCF agent 与扫描
+ * 复用同一条 MQ 通道，不串行时 MQSC 请求会与扫描的 INQUIRE 应答在同一条通道上交错
+ * （实测表现为随机的 MQRC 2009 / 3010）。代价是慢扫期间 MQSC 命令会排队等锁。
  */
 class MqscPcfSender : PcfExecutor {
 
-    override suspend fun executeMqsc(connectionId: String, command: String): List<String> =
+    override suspend fun executeMqsc(connectionId: String, command: String): List<String> {
+        val ctx = IbmMQModule.connectionOrNull(connectionId)
+            ?: throw IllegalStateException("连接 $connectionId 未建立，无法执行 MQSC 命令")
+        return ctx.mqiLock.withLock { executeMqscLocked(connectionId, command) }
+    }
+
+    /** [executeMqsc] 的锁内实现：调用方必须已持有该连接的 `mqiLock`。 */
+    private suspend fun executeMqscLocked(connectionId: String, command: String): List<String> =
         withContext(Dispatchers.IO) {
             val manager = IbmMQModule.connectionOrNull(connectionId)?.mqConnection
                 ?: throw IllegalStateException("连接 $connectionId 未建立，无法执行 MQSC 命令")
@@ -75,7 +87,14 @@ class MqscPcfSender : PcfExecutor {
      * 它也失败 → 命令服务器 / 权限 / 通道层面的问题（看返回的 reason 与
      * QMGR 的 AMQERR01.LOG，常见 AMQ8079 命令服务器未运行）。
      */
-    suspend fun diagnose(connectionId: String, queueName: String = "DEV.QUEUE.1"): String =
+    suspend fun diagnose(connectionId: String, queueName: String = "DEV.QUEUE.1"): String {
+        val ctx = IbmMQModule.connectionOrNull(connectionId)
+            ?: return "诊断失败：连接 $connectionId 未建立"
+        return ctx.mqiLock.withLock { diagnoseLocked(connectionId, queueName) }
+    }
+
+    /** [diagnose] 的锁内实现：调用方必须已持有该连接的 `mqiLock`。 */
+    private suspend fun diagnoseLocked(connectionId: String, queueName: String): String =
         withContext(Dispatchers.IO) {
             val manager = IbmMQModule.connectionOrNull(connectionId)?.mqConnection
                 ?: return@withContext "诊断失败：连接 $connectionId 未建立"

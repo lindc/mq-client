@@ -27,8 +27,9 @@ KMP 桌面端中间件管理工具（IBM MQ / Kafka / RabbitMQ / RocketMQ），C
 
 - **IBM MQ**：连接管理、MQSC 控制台、对象扫描、消息浏览 / 发送 / 下载、AI 链路分析（最完整）。
 - **Kafka**：连接 / 扫描、Topic 管理、消费组重置位移（earliest / latest / 按时间戳，含状态守卫）、消息读写、拓扑图、AI 链路（含消费组 lag 上下文）、diag 实连测试。
-- **RabbitMQ**（阶段一 + 交换机管理已落地）：管理 API（Ktor + Basic Auth，vhost 按 `%2F` 编码）、显式连接、对象慢扫（5min）+ 队列计数快扫（10s）、概览 Dashboard（指标卡 + 健康度 Banner + Loading 骨架）、队列 / 交换机列表、交换机创建 / 删除 / 属性（**Bindings 增删查**：添加绑定弹窗 + 行内删除，`propertiesKey` 随列表下发用于 DELETE 路径；系统交换机默认 / amq.* 禁写）、拓扑图（Exchange → Binding → Queue 两列布局，双击 exchange 开属性）、AI 链路（CLUSTER → TOPIC → CONSUMER_GROUP lag 上下文）。
-- **RabbitMQ 待做**：消息发布 / 消费（amqp-client 5.22.0 已引入未使用）、队列管理操作、拓扑 E2E 绑定边、Routing Key 边标签（待 kuiver 支持）。
+- **RabbitMQ**（管理面 + 消息面均已落地）：管理 API（Ktor + Basic Auth，vhost 按 `%2F` 编码）、显式连接、对象慢扫（5min）+ 队列计数快扫（10s）、概览 Dashboard（指标卡 + 健康度 Banner + Loading 骨架）、队列 / 交换机列表、交换机创建 / 删除 / 属性（**Bindings 增删查**：添加绑定弹窗 + 行内删除，`propertiesKey` 随列表下发用于 DELETE 路径；系统交换机默认 / amq.* 禁写）、队列创建 / 清空 / 删除、拓扑图（Exchange → Binding → Queue 两列布局，双击 exchange 开属性）、AI 链路（VHOST → EXCHANGE → QUEUE，含绑定 routingKey 与队列积压）。
+- **RabbitMQ 消息面**（AMQP 0.9.1，`RabbitMqMessageSession`）：`basicGet(autoAck = false)` 只读浏览（未 ack 的消息仍留在队列）→ 行内 `basicAck` 彻底消费、`basicNack(requeue)` 全部放回（「重新拉取」）、`basicPublish` 直发当前队列、`forward` 经任意 exchange + routingKey 转发并保留原消息属性。对话框：`RabbitMqQueueMessagesDialog`（拉取 / 详情 / 删除 / 重发）、`RabbitMqSendMessageDialog`、`RabbitMqForwardMessageDialog`。channel 一次性、失败即报废，`channelOps` 单飞守卫。
+- **RabbitMQ 待做**：拓扑 E2E 绑定边、Routing Key 边标签（待 kuiver 支持）。
 - **RocketMQ**：连接表单（ACL + TLS：Truststore 收 JKS/P12 自动转 PEM、PEM CA 证书直接透传；Keystore 双向认证；密码框随文件联动禁用）、显式连接、对象双扫（慢扫 clusterInfo/topics/groups + 快扫消费组 Lag）、Topic 删除、拓扑图、diag 实连测试。TLS 坑位：`ClientConfig.useTLS` 构造时固化（必须 `setUseTLS` 显式传，start 时写 `tls.enable` 全局无效），`TlsSystemConfig` 证书字段在 start() 内 `buildSslContext` 才读取（窗口罩 start()）； PEM 证书若 `IOException` 客户端会静默降级明文，构造前必须预校验。
 
 ## 测试环境

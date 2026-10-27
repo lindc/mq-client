@@ -3,9 +3,11 @@
 -- FAILED 记录只进审计，面板加载对话历史时按 status 过滤。
 -- 生成物说明：物理表名与列名均蛇形，SQLDelight 生成的数据类是 `Chat_history`、
 -- 属性名与列名一致（snake_case，无驼峰转换）。
--- 链路分析（MQ 对象「询问 AI」）的记录 object_type 非空，且 context_json 存发给模型
--- 的完整上下文 JSON；普通聊天这三列为 NULL。原先对象维度的 mq_ai_conversation 表
--- 已并入本表。
+-- 链路分析（MQ 对象「询问 AI」）的记录 object_type 非空，且 context_json 存上下文 JSON
+-- （currentTime/chain/userQuestion，**未包不可信边界**）；普通聊天这三列为 NULL。
+-- 包裹（[BEGIN UNTRUSTED CONTEXT] … [END UNTRUSTED CONTEXT]）只在发给模型的那份上
+-- 做，见 ai-ui 的 AiSystemPrompts.wrapUntrustedContext —— 审计列保持纯 JSON 可解析。
+-- 原先对象维度的 mq_ai_conversation 表已并入本表。
 -- snapshot_id 存的是 ai_connection.connection_id（UUID 字符串，LEFT JOIN 用），
 -- 不是自增 id——ai_connection 的主键就是 connection_id。
 CREATE TABLE IF NOT EXISTS chat_history (
@@ -26,7 +28,7 @@ CREATE TABLE IF NOT EXISTS chat_history (
     reply            TEXT,                  -- AI 回复
     object_type      TEXT,                  -- 链路分析目标类型（QUEUE / CHANNEL / LISTENER）；普通聊天为 NULL
     object_name      TEXT,                  -- 链路分析目标名，如 ORDER.LOCAL.Q；普通聊天为 NULL
-    context_json     TEXT                   -- 链路分析发给模型的上下文 JSON（currentTime/chain/userQuestion）；普通聊天为 NULL
+    context_json     TEXT                   -- 链路分析的上下文 JSON（currentTime/chain/userQuestion，未包裹不可信边界）；普通聊天为 NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_chat_history_connection_id ON chat_history(connection_id);

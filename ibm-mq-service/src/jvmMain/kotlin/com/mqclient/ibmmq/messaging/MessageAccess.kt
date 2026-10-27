@@ -8,7 +8,10 @@ import com.ibm.mq.MQQueueManager
 import com.ibm.mq.constants.MQConstants
 import com.mqclient.ibmmq.command.MqrcTranslator
 import com.mqclient.ibmmq.ibmMqLog
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
 /** 消息下载 / 删除的结果：成功（下载带 content / 详情带 detail）或失败（MQRC + 可读文案）。 */
@@ -72,6 +75,10 @@ suspend fun downloadMessageBody(
         val gmo = MQGetMessageOptions()
         var first = true
         while (true) {
+            // MQI 的 queue.get 是**纯阻塞**调用（不检查取消、也不响应 interrupt），
+            // 所以「用户关掉对话框」只能靠循环开头这一处察觉：不检查的话，取消之后
+            // 这个 while 会继续把剩余队列一路扫完（深队列上就是几十秒的空转 + 占着连接）。
+            currentCoroutineContext().ensureActive()
             gmo.options =
                 (if (first) MQConstants.MQGMO_BROWSE_FIRST else MQConstants.MQGMO_BROWSE_NEXT) or
                     MQConstants.MQGMO_FAIL_IF_QUIESCING
@@ -98,6 +105,10 @@ suspend fun downloadMessageBody(
         }
         @Suppress("UNREACHABLE_CODE")
         MessageOperationResult.failure(null, MSG_NOT_FOUND)
+    } catch (cancellation: CancellationException) {
+        // 必须排在下面两个宽 catch 之前：取消不是「下载失败」，吞掉会变成一条指向
+        // 用户的假错误（且让调用方的取消语义失效）。
+        throw cancellation
     } catch (e: MQException) {
         operationFailure("download", queueName, e)
     } catch (e: Exception) {
@@ -129,6 +140,8 @@ suspend fun getMessageDetail(
         val gmo = MQGetMessageOptions()
         var first = true
         while (true) {
+            // 同 download：阻塞的 MQI get 不感知取消，循环开头是唯一的终止点。
+            currentCoroutineContext().ensureActive()
             gmo.options =
                 (if (first) MQConstants.MQGMO_BROWSE_FIRST else MQConstants.MQGMO_BROWSE_NEXT) or
                     MQConstants.MQGMO_FAIL_IF_QUIESCING
@@ -154,6 +167,8 @@ suspend fun getMessageDetail(
         }
         @Suppress("UNREACHABLE_CODE")
         MessageOperationResult.failure(null, MSG_NOT_FOUND)
+    } catch (cancellation: CancellationException) {
+        throw cancellation
     } catch (e: MQException) {
         operationFailure("detail", queueName, e)
     } catch (e: Exception) {
@@ -186,6 +201,10 @@ suspend fun deleteMessageById(
         val gmo = MQGetMessageOptions()
         var first = true
         while (true) {
+            // 删除同样是「browse 定位 → 破坏性 get」的阻塞循环，取消终止点同上。
+            // 这一处若被取消吞没，最坏的后果不是多跑几圈而是**误删**——取消后继续
+            // browse 到匹配条目时，那条破坏性 get 依旧会执行。
+            currentCoroutineContext().ensureActive()
             gmo.options =
                 (if (first) MQConstants.MQGMO_BROWSE_FIRST else MQConstants.MQGMO_BROWSE_NEXT) or
                     MQConstants.MQGMO_FAIL_IF_QUIESCING
@@ -215,6 +234,8 @@ suspend fun deleteMessageById(
         }
         @Suppress("UNREACHABLE_CODE")
         MessageOperationResult.failure(null, MSG_NOT_FOUND)
+    } catch (cancellation: CancellationException) {
+        throw cancellation
     } catch (e: MQException) {
         operationFailure("delete", queueName, e)
     } catch (e: Exception) {

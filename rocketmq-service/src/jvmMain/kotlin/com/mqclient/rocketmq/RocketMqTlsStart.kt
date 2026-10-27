@@ -2,6 +2,8 @@ package com.mqclient.rocketmq
 
 import java.nio.file.Path
 import java.util.UUID
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * RocketMQ Remoting 客户端（AdminExt / Producer / PullConsumer）共用的 **TLS start
@@ -27,6 +29,10 @@ import java.util.UUID
  *
  * 原 [RocketMqAdminClient] 的窗口逻辑原样搬入（行为不变），消息层的临时
  * Producer / PullConsumer 共用同一份实现与 [TLS_BUILD_LOCK] 互斥窗口。
+ *
+ * 互斥用的是 [Mutex] 而不是 `synchronized`：等待全局 TLS 窗口的是**可取消的挂起点**。
+ * 一条连接在等待期间被断开（用户关对话框 / 切集群）时，它必须能直接退出，而不是把
+ * 自己的线程钉在 monitor 的入口队列上（monitor 不可中断，且会串行化 IO 线程）。
  */
 internal class RocketMqTlsStart(private val config: RocketMqConfig) : AutoCloseable {
 
@@ -50,14 +56,21 @@ internal class RocketMqTlsStart(private val config: RocketMqConfig) : AutoClosea
      * 在 [TLS_BUILD_LOCK] 互斥窗口内「写证书字段 → start → 还原」。窗口内是纯阻塞
      * 调用（start 无线程切换），持有时间极短；start 完成后客户端实例已持有自己的
      * 快照与 sslContext，还原全局互不影响。
+     *
+     * 为什么窗口必须互斥：`TlsSystemConfig` 的证书字段是**进程级静态字段**，而
+     * `NettyRemotingClient` 在构造时（客户端 `start()` 内部）才把它们读进 `SslContext`。
+     * 不互斥时，两条不同证书的连接并发 start 会互相覆盖字段 —— 后 apply 的证书会把
+     * 前者的握手一起带走（A 的连接用上了 B 的 CA）。
+     *
+     * TLS 关闭时 [paths] 为 null，根本不碰全局字段，直接执行（不进锁）。
      */
-    fun <T> start(block: () -> T): T {
+    suspend fun <T> start(block: () -> T): T {
         val pending = paths ?: return block()
-        synchronized(TLS_BUILD_LOCK) {
+        return TLS_BUILD_LOCK.withLock {
             val snapshot = TlsSnapshot.capture()
             try {
                 applyTls(pending)
-                return block()
+                block()
             } finally {
                 snapshot.restore()
             }
@@ -171,8 +184,11 @@ internal class RocketMqTlsStart(private val config: RocketMqConfig) : AutoClosea
          * TLS 全局环境窗口锁：`tls.enable` property 与 `TlsSystemConfig` 静态字段是
          * 进程级全局，「写 → start → 还原」窗口必须互斥，否则两条不同证书的连接并发
          * start 会互相踩（后 apply 的覆盖前者的证书字段）。
+         *
+         * 所有 [RocketMqTlsStart] 实例（AdminExt / Producer / PullConsumer 各一份）
+         * 共用这一把 —— 它是 `companion` 的，不是实例字段。
          */
-        private val TLS_BUILD_LOCK = Any()
+        private val TLS_BUILD_LOCK = Mutex()
 
         /** start() 窗口内用于屏蔽机器全局 tls.properties 的路径（随机后缀，保证不存在）。 */
         private val BLOCKED_TLS_CONFIG_FILE: String =
