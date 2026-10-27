@@ -56,6 +56,7 @@ import com.mqclient.mqui.state.LoadState
 import com.mqclient.rabbitmq.RabbitMqFetchedMessage
 import com.mqclient.rabbitmq.RabbitMqModule
 import com.mqclient.rabbitmq.RabbitMqQueueSession
+import com.mqclient.rabbitmq.RabbitMqOperationTimeoutException
 import com.mqclient.rabbitmq.RabbitMqSessionOpener
 import com.mqclient.uicommon.CompactTextField
 import com.mqclient.uicommon.PrimaryButton
@@ -70,26 +71,25 @@ import com.mqclient.uicommon.failureText
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
 
 /** 拉取条数上限：basicGet 逐条循环，防大队列一次拉爆内存。 */
 private const val FETCH_HARD_LIMIT = 100
 
-/**
- * 单次 AMQP 调用的硬超时（建会话 / basicGet / requeue / ack / heldCount）。
+/*
+ * 超时不在 UI 层做，已下沉到 `rabbitmq-service` 的 `ConnectionFactory`：
+ * `channelRpcTimeout = 5s`（basicGet / ack / publish / channel 打开）、
+ * `shutdownTimeout = 3s`（close 握手）、`handshakeTimeout = 10s`。
  *
- * 为什么需要它：AMQP 的调用是**阻塞式**的，默认 RPC 超时以分钟计。broker 不应答时
- * 会话会一直挂在 `basicGet` 里，UI 侧 `fetching` / `sessionState` 永远不会落地。
- * 5s 到了就当成失败把状态置下去。
+ * 为什么废除 UI 侧的 `withTimeout`：协程超时只能让**等待方**放弃，杀不掉已经阻塞在
+ * socket 上的 AMQP 调用。等待方走了，那次调用仍握着 session 内部的 channel 锁 ——
+ * 后续请求全排到它后面，就是「卡一次之后再也拉不动」。让底层自己超时抛异常，锁由
+ * 协程原语在 finally 里正常归还，才不留残留。
  *
- * **局限（必须知道）**：`withTimeout` 只能让**等待方**放弃，不能杀死已经在阻塞
- * socket 上的那个调用——它会在后台线程里继续挂着，直到连接层自身超时。要真正
- * 回收线程，得靠 AMQP 客户端自己的超时配置；这里保证的是「界面绝不无限期转圈」。
+ * 底层超时被 service 统一翻译成 `RabbitMqOperationTimeoutException`（领域异常），
+ * UI 只认这一个类型 —— 不必知道 amqp-client 的异常体系。
  */
-private const val MESSAGE_TIMEOUT_MS = 5_000L
 
 private val SuccessGreen = Color(0xFF2E7D32)
 private val FailedRed = Color(0xFFD32F2F)
@@ -183,7 +183,7 @@ fun RabbitMqQueueMessagesDialog(
     // 计数，旧 tag 拿去 ack 会命中新会话里的**另一条**消息。所以一并清空列表，让用户
     // 在新会话上重新拉取。
     // 超时文案先取好：LaunchedEffect / launch / 异常分支都不是 @Composable 上下文。
-    val timeoutText = stringResource("rabbitmq_ui_msg_timeout").withArg(MESSAGE_TIMEOUT_MS / 1_000)
+    val timeoutText = stringResource("rabbitmq_ui_msg_timeout")
 
     // 只重置状态、**不建连**。
     LaunchedEffect(connectionId, queueName) {
@@ -202,19 +202,19 @@ fun RabbitMqQueueMessagesDialog(
     /**
      * 确保会话已开（幂等）；失败返回 null 并把原因写进 [sessionState]。
      *
-     * 超时分支必须排在取消分支**之前**：`TimeoutCancellationException` 是
-     * `CancellationException` 的子类，顺序反了会把超时当成外部取消原样上抛，
-     * 协程直接死掉、状态永远停在 Loading。
+     * 建会话（共享连接的懒建 + createChannel + passive 声明）的超时由底层
+     * `channelRpcTimeout` / `handshakeTimeout` 负责，到点抛
+     * [RabbitMqOperationTimeoutException]。取消仍单独放行，不写状态。
      */
     suspend fun ensureSession(): RabbitMqQueueSession? {
         session?.let { return it }
         sessionState = LoadState.Loading
         return try {
-            val opened = withTimeout(MESSAGE_TIMEOUT_MS) { sessionSlot.open(connectionId, queueName) }
+            val opened = sessionSlot.open(connectionId, queueName)
             session = opened
             sessionState = LoadState.Success(Unit)
             opened
-        } catch (e: TimeoutCancellationException) {
+        } catch (e: RabbitMqOperationTimeoutException) {
             sessionState = LoadState.Error(timeoutText)
             null
         } catch (e: CancellationException) {
@@ -230,11 +230,11 @@ fun RabbitMqQueueMessagesDialog(
             fetching = true
             try {
                 val s = ensureSession() ?: return@launch
-                val batch = withTimeout(MESSAGE_TIMEOUT_MS) { s.fetchNext(effectiveLimit(limit)) }
+                val batch = s.fetchNext(effectiveLimit(limit))
                 messages = messages + batch
                 exhausted = batch.isEmpty()
-                held = withTimeout(MESSAGE_TIMEOUT_MS) { s.heldCount() }
-            } catch (e: TimeoutCancellationException) {
+                held = s.heldCount()
+            } catch (e: RabbitMqOperationTimeoutException) {
                 snackbar.showSnackbar(timeoutText)
             } catch (e: CancellationException) {
                 throw e
@@ -251,14 +251,14 @@ fun RabbitMqQueueMessagesDialog(
             fetching = true
             try {
                 val s = ensureSession() ?: return@launch
-                withTimeout(MESSAGE_TIMEOUT_MS) { s.requeueAll() }
+                s.requeueAll()
                 messages = emptyList()
                 exhausted = false
-                val batch = withTimeout(MESSAGE_TIMEOUT_MS) { s.fetchNext(effectiveLimit(limit)) }
+                val batch = s.fetchNext(effectiveLimit(limit))
                 messages = batch
                 exhausted = batch.isEmpty()
-                held = withTimeout(MESSAGE_TIMEOUT_MS) { s.heldCount() }
-            } catch (e: TimeoutCancellationException) {
+                held = s.heldCount()
+            } catch (e: RabbitMqOperationTimeoutException) {
                 snackbar.showSnackbar(timeoutText)
             } catch (e: CancellationException) {
                 throw e
@@ -279,8 +279,8 @@ fun RabbitMqQueueMessagesDialog(
             scope.launch {
                 held =
                     try {
-                        withTimeout(MESSAGE_TIMEOUT_MS) { session?.heldCount() } ?: held
-                    } catch (e: TimeoutCancellationException) {
+                        session?.heldCount() ?: held
+                    } catch (e: RabbitMqOperationTimeoutException) {
                         held
                     } catch (e: CancellationException) {
                         // runCatching 在这里是错的：它会把取消一并吞掉。手写分支保住语义。
@@ -299,11 +299,11 @@ fun RabbitMqQueueMessagesDialog(
         val s = session ?: return
         scope.launch {
             try {
-                withTimeout(MESSAGE_TIMEOUT_MS) { s.ack(msg.deliveryTag) }
+                s.ack(msg.deliveryTag)
                 messages = messages.filterNot { it.deliveryTag == msg.deliveryTag }
-                held = withTimeout(MESSAGE_TIMEOUT_MS) { s.heldCount() }
+                held = s.heldCount()
                 snackbar.showSnackbar(stringResource("rabbitmq_ui_msg_deleted"))
-            } catch (e: TimeoutCancellationException) {
+            } catch (e: RabbitMqOperationTimeoutException) {
                 snackbar.showSnackbar(timeoutText)
             } catch (e: CancellationException) {
                 throw e
@@ -319,11 +319,10 @@ fun RabbitMqQueueMessagesDialog(
 
     suspend fun sendOneDirect(routingBytes: ByteArray, headers: Map<String, String>, s: RabbitMqQueueSession): Pair<Boolean, String?> {
         return try {
-            withTimeout(MESSAGE_TIMEOUT_MS) { s.publishDirect(routingBytes, headers) }
+            s.publishDirect(routingBytes, headers)
             true to null
-        } catch (e: TimeoutCancellationException) {
-            // 超时不能当取消抛出：publishDirect 的 TimeoutCancellationException 也是
-            // CancellationException，若漏给下面那个分支会把整批发送协程连带杀掉。
+        } catch (e: RabbitMqOperationTimeoutException) {
+            // 单条超时不该终止整批：标记该条失败，继续发下一条。
             false to timeoutText
         } catch (e: CancellationException) {
             throw e
@@ -351,16 +350,16 @@ fun RabbitMqQueueMessagesDialog(
                 }
                 if (sent > 0) {
                     // 有成功投递 → 自动重新拉取刷新列表（新消息在队列头部）。
-                    withTimeout(MESSAGE_TIMEOUT_MS) { s.requeueAll() }
+                    s.requeueAll()
                     messages = emptyList()
                     exhausted = false
-                    messages = withTimeout(MESSAGE_TIMEOUT_MS) { s.fetchNext(effectiveLimit(limit)) }
+                    messages = s.fetchNext(effectiveLimit(limit))
                     exhausted = messages.isEmpty()
-                    held = withTimeout(MESSAGE_TIMEOUT_MS) { s.heldCount() }
+                    held = s.heldCount()
                 }
                 val failed = batchTasks.count { it.status == BatchStatus.FAILED }
                 if (failed == 0) snackbar.showSnackbar(stringResource("rabbitmq_ui_msg_batch_done"))
-            } catch (e: TimeoutCancellationException) {
+            } catch (e: RabbitMqOperationTimeoutException) {
                 sendError = timeoutText
             } catch (e: CancellationException) {
                 throw e

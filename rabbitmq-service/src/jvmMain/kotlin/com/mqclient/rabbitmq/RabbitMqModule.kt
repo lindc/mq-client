@@ -8,7 +8,10 @@ import com.mqclient.core.spi.MODULE_ID_KEY
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.emit
 import com.mqclient.core.spi.onEvent
+import com.rabbitmq.client.AMQP
+import com.rabbitmq.client.Channel
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -17,6 +20,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlin.jvm.Synchronized
 
@@ -207,11 +211,18 @@ object RabbitMqModule {
 
     /**
      * 队列消息会话入口（队列消息对话框）：AMQP 直连当前队列（autoAck = false）。
-     * 只要管理 API 客户端还在（即这条连接真的连上过）就允许开；会话生命周期归
-     * 对话框 —— 关闭时调 [closeMessageSessionAsync]。
+     *
+     * **复用共享 AMQP 连接**（[RabbitMqConnectionManager.amqpConnection]）：物理连接
+     * 按连接懒建一次，每个对话框只 `createChannel()`。上一版每次打开对话框都
+     * `factory.newConnection()`（TCP + 握手 + passive 声明），是「越开越慢」的直接原因。
+     *
+     * 会话只拥有 channel，不拥有连接 —— `close()` 不会把共享连接关掉。
+     *
+     * AMQP 建不起来时由 manager 把整条连接置 `Failed`（产品决定），这里只把异常
+     * （已是人类可读文案）向上抛，由对话框转「加载失败」。
      */
     suspend fun openMessageSession(connectionId: String, queueName: String): RabbitMqQueueSession {
-        // 与扫描 / 查询同一口径：有客户端就继续，不拿 status 当否决票（见
+        // 与扫描 / 查询同一口径：有管理客户端就继续，不拿 status 当否决票（见
         // RabbitMqScanService.targetOrThrow 的说明）。
         val ctx = connectionOrNull(connectionId)
             ?.takeIf { it.admin != null }
@@ -219,7 +230,25 @@ object RabbitMqModule {
                 connectionOrNull(connectionId)?.let { connectionRefusalText(it) }
                     ?: "连接未登记：该连接已被删除或模块未初始化",
             )
-        return RabbitMqMessageSession.open(ctx.config, queueName).also { openSessions.add(it) }
+        val connectionManager = manager
+            ?: throw IllegalStateException("RabbitMQ 模块未初始化，无法打开消息会话")
+
+        var channel: Channel? = null
+        try {
+            val connection = connectionManager.amqpConnection(ctx)
+            channel = withContext(Dispatchers.IO) { connection.createChannel() }
+            // passive 声明：队列不存在立刻 404，而不是等第一次 basicGet。
+            // 与 createChannel 一样受 channelRpcTimeout（5s）约束。
+            withContext(Dispatchers.IO) { channel.queueDeclarePassive(queueName) }
+            return RabbitMqMessageSession.onSharedConnection(queueName, connection, channel)
+                .also { openSessions.add(it) }
+        } catch (error: Throwable) {
+            if (error is CancellationException) throw error
+            // 半成品 channel 不能留在共享连接上（会白占一个 channel 号）。
+            // abort 不等 close-ok，失败路径不会再卡一次。
+            channel?.let { leaked -> runCatching { leaked.abort(AMQP.REPLY_SUCCESS, "open failed") } }
+            throw error
+        }
     }
 
     /**

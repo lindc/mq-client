@@ -2,6 +2,7 @@ package com.mqclient.rabbitmq
 
 import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.cache.CacheManager
+import com.rabbitmq.client.Connection
 
 /**
  * 「为什么拒绝」的唯一判定点：请求入口只在**真的没有客户端**时才拒绝，并且按
@@ -54,6 +55,24 @@ class RabbitMqConnectionContext(
     var admin: RabbitMqAdminClient? = null
 
     /**
+     * 管理 API 之外的第二类句柄：**共享的 AMQP 物理连接**（消息浏览 / 发送用）。
+     *
+     * 为什么放在连接上下文里而不是对话框里：物理连接的建立要一次 TCP + AMQP 握手，
+     * 每次打开消息对话框都 `factory.newConnection()` 是「越开越慢」的直接原因。
+     * 挂在这里之后，同一个连接下的所有消息对话框共用一条物理连接，各自只
+     * `createChannel()`——channel 是轻量级的（一个 channel 号 + 一帧控制消息）。
+     *
+     * **懒建**：连接成功（`connect()`）时**不**建它，首次需要读 / 发消息时才建
+     * （见 `RabbitMqConnectionManager.amqpConnection`）。理由：只想看队列列表、
+     * 从不读消息的用户不应该为一次 AMQP 握手买单，也不应该承担 AMQP 失败的风险。
+     *
+     * 生命周期：断开 / 失败 / 模块关闭时由 ConnectionManager 用
+     * `close(AMQP_SHUTDOWN_TIMEOUT_MS)` 关闭（不等 close-ok 太久）。
+     */
+    @Volatile
+    var amqp: Connection? = null
+
+    /**
      * 本连接专属的扫描缓存（[CacheManager]，扫描链路 write-through、读口只读）。
      * 连接成功时创建、断开 / 失败时置空 —— 与 kafka / ibm-mq 同一生命周期。
      */
@@ -93,6 +112,8 @@ class RabbitMqConnectionContext(
      */
     fun cleanup() {
         admin = null
+        // amqp 的关闭是 suspend + 带超时的，必须在 IO 上做，不能进这个同步清理；
+        // 它由 RabbitMqConnectionManager.closeQuietly 负责关掉并置空。
         cache?.clear()
         cache = null
         resetScanFailures()

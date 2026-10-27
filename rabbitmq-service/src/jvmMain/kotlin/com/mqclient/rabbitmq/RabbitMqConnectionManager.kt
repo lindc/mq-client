@@ -7,6 +7,7 @@ import com.mqclient.core.cache.CacheManager
 import com.mqclient.core.scheduler.ScheduledJob
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.emit
+import com.rabbitmq.client.Connection
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -178,6 +179,54 @@ class RabbitMqConnectionManager(
     }
 
     /**
+     * 取（必要时懒建）本连接的**共享 AMQP 连接** —— 消息浏览 / 发送共用它。
+     *
+     * 设计要点：
+     *
+     *  1. **懒建**：`connect()` 不建它。只想看队列列表的用户不必为一次 AMQP 握手买单，
+     *     也不承担 AMQP 失败风险。首次读 / 发消息才建。
+     *  2. **判死整条连接**（产品决定）：AMQP 建不起来时把连接置 `Failed` 并发
+     *     `CONNECT_FAILED`。理由：管理 API 能连但 AMQP 连不上，通常意味着端口 / 证书 /
+     *     权限配置里有一项是错的 —— 把它当「只是消息读不了」会让用户以为连接健康，
+     *     反而更难定位。
+     *  3. **双检锁**：两个对话框同时首开只建一条物理连接。
+     *  4. 超时全部由 [rabbitMqConnectionFactory] 提供（握手 10s、shutdown 3s、
+     *     channel RPC 5s），这里不再叠协程层 `withTimeout`。
+     *
+     * 抛出的异常已转成人类可读文案（[mapAmqpOpenError]），由调用方转「加载失败」。
+     */
+    suspend fun amqpConnection(ctx: RabbitMqConnectionContext): Connection {
+        ctx.amqp?.takeIf { it.isOpen }?.let { return it }
+        return lockFor(ctx.connectionId).withLock {
+            // 双检：排队期间可能已被另一个调用方建好。
+            ctx.amqp?.takeIf { it.isOpen }?.let { return@withLock it }
+            try {
+                val created = withContext(Dispatchers.IO) {
+                    rabbitMqConnectionFactory(ctx.config).newConnection()
+                }
+                ctx.amqp = created
+                rabbitMqLog.debug(
+                    "amqp connection opened (lazy): connection=${ctx.connectionId} " +
+                        "host=${ctx.config.host}:${ctx.config.amqpPort}",
+                )
+                created
+            } catch (error: Throwable) {
+                if (error is CancellationException) throw error
+                // 产品决定：AMQP 不可用 = 这条连接不可用。
+                val reason = errorMessage(mapAmqpOpenError(error, ctx.config))
+                ctx.lastError = reason
+                setStatus(ctx, ConnectionStatus.Failed)
+                context.emit(
+                    name = RabbitMqEvents.CONNECT_FAILED,
+                    payload = mapOf("connectionId" to ctx.connectionId, "message" to reason),
+                )
+                rabbitMqLog.warn("amqp connection failed: connection=${ctx.connectionId} reason=$reason")
+                throw mapAmqpOpenError(error, ctx.config)
+            }
+        }
+    }
+
+    /**
      * 断开：取消该连接全部定时任务 → 关 HTTP 客户端 → 清缓存 → 状态回 DISCONNECTED。
      * 已经是 DISCONNECTED 时是空操作（重复点「断开」无副作用）。
      */
@@ -341,15 +390,36 @@ class RabbitMqConnectionManager(
     private fun lockFor(connectionId: String): Mutex =
         locks.computeIfAbsent(connectionId) { Mutex() }
 
-    /** 关 HTTP 客户端（切到 IO 线程）；失败只记日志 —— 断开路径不能被一个关不掉的句柄中断。 */
+    /**
+     * 关掉本连接的两类句柄：管理 API 客户端与共享 AMQP 连接。切到 IO 线程；失败只记
+     * 日志 —— 断开路径不能被一个关不掉的句柄中断。
+     *
+     * AMQP 用 `close(AMQP_SHUTDOWN_TIMEOUT_MS)`（≤3s）而不是无参 `close()`：后者等
+     * close-ok 的默认上限是 **10 秒**，broker 不应答时断开路径会卡住整整 10s ——
+     * 这正是「点关闭没反应」的形态之一。
+     */
     private suspend fun closeQuietly(ctx: RabbitMqConnectionContext) {
-        val admin = ctx.admin ?: return
+        val admin = ctx.admin
+        val amqp = ctx.amqp
         ctx.admin = null
-        try {
-            withContext(Dispatchers.IO) { admin.close() }
-            rabbitMqLog.debug("management api client closed: connection=${ctx.connectionId}")
-        } catch (error: Throwable) {
-            rabbitMqLog.warn("management api client close failed: connection=${ctx.connectionId} error=$error")
+        ctx.amqp = null
+        if (admin != null) {
+            try {
+                withContext(Dispatchers.IO) { admin.close() }
+                rabbitMqLog.debug("management api client closed: connection=${ctx.connectionId}")
+            } catch (error: Throwable) {
+                rabbitMqLog.warn("management api client close failed: connection=${ctx.connectionId} error=$error")
+            }
+        }
+        if (amqp != null) {
+            try {
+                withContext(Dispatchers.IO) { amqp.close(AMQP_SHUTDOWN_TIMEOUT_MS) }
+                rabbitMqLog.debug("amqp connection closed: connection=${ctx.connectionId}")
+            } catch (error: Throwable) {
+                // close 失败要 abort 兜底：否则底层 socket 会留在 TIME_WAIT / 半开状态。
+                runCatching { amqp.abort() }
+                rabbitMqLog.warn("amqp connection close failed (aborted): connection=${ctx.connectionId} error=$error")
+            }
         }
     }
 
