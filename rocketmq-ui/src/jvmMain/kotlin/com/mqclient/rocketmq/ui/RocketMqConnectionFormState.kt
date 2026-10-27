@@ -4,12 +4,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import com.mqclient.core.ConnectionFormState
 import com.mqclient.core.ConnectionInfo
+import com.mqclient.mqui.state.AbstractConnectionFormState
 import com.mqclient.core.ConnectionPersistence
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.newConnectionId
-import com.mqclient.mqui.state.SaveState
 import com.mqclient.rocketmq.RocketMqConfig
 import com.mqclient.rocketmq.RocketMqModule
 import com.mqclient.rocketmq.rocketMqConfigFromOptions
@@ -42,7 +41,7 @@ class RocketMqConnectionFormState(
     private val scope: CoroutineScope,
     /** 落盘端口：默认直连 ConnectionStore，测试注入记录线程的替身。 */
     private val persistence: ConnectionPersistence = ConnectionPersistence.Default,
-) : ConnectionFormState {
+) : AbstractConnectionFormState<RocketMqConfig>(scope) {
 
     companion object {
         const val TEST_TIMEOUT_MS = 15_000L
@@ -59,21 +58,8 @@ class RocketMqConnectionFormState(
      */
     private val PEM_EXTENSIONS = setOf("pem", "crt", "cer")
 
-    override val busy: Boolean get() = saveState == SaveState.Testing || saving
-
     var defaultName by mutableStateOf(defaultName); private set
     var errors by mutableStateOf(RocketMqFieldErrors()); private set
-    var saveError by mutableStateOf<String?>(null); private set
-    var saveState by mutableStateOf<SaveState>(SaveState.Idle); private set
-
-    /**
-     * 落盘进行中（「仍要保存」路径）：落盘已挪到 IO 线程，这段窗口里必须挡住重复提交，
-     * 否则双击会写出两条连接（[ConnectionStore.update] 每次都换发新 id，不会报「已存在」）。
-     */
-    private var saving by mutableStateOf(false)
-
-    var pendingConfig by mutableStateOf<RocketMqConfig?>(null); private set
-    var editingId by mutableStateOf<String?>(null); private set
 
     var name by mutableStateOf(defaultName)
     var namesrvAddr by mutableStateOf("")
@@ -96,7 +82,7 @@ class RocketMqConnectionFormState(
     var originalKeyStorePassword by mutableStateOf(""); private set
     var keyStorePasswordChanged by mutableStateOf(false)
 
-    fun validate(): Boolean {
+    override fun validate(): Boolean {
         var e = RocketMqFieldErrors()
         if (namesrvAddr.isBlank()) {
             e = e.copy(namesrvAddr = stringResource("rocketmq_ui_error_namesrv_required"))
@@ -118,7 +104,7 @@ class RocketMqConnectionFormState(
         return !e.hasAny
     }
 
-    fun buildConfig(): RocketMqConfig = RocketMqConfig(
+    override fun buildConfig(): RocketMqConfig = RocketMqConfig(
         namesrvAddr = namesrvAddr.trim(),
         accessKey = accessKey.trim(),
         secretKey = if (secretKeyChanged || originalSecretKey.isEmpty()) secretKey else originalSecretKey,
@@ -158,9 +144,7 @@ class RocketMqConnectionFormState(
         originalKeyStorePassword = ""
         keyStorePasswordChanged = false
         errors = RocketMqFieldErrors()
-        saveError = null
-        pendingConfig = null
-        saveState = SaveState.Idle
+        resetSaveFlow()
     }
 
     override fun loadFrom(connection: ConnectionInfo) {
@@ -189,9 +173,7 @@ class RocketMqConnectionFormState(
         keyStorePasswordChanged = false
 
         errors = RocketMqFieldErrors()
-        saveError = null
-        pendingConfig = null
-        saveState = SaveState.Idle
+        resetSaveFlow()
     }
 
     fun clearErrors() {
@@ -280,63 +262,22 @@ class RocketMqConnectionFormState(
         return err
     }
 
-    override fun submit(): Boolean {
-        if (saveState != SaveState.Idle) return false
-        saveError = null
-        if (!validate()) return false
+    /* ------------------------- 基类钩子（保存链路） ------------------------- */
 
-        val config = buildConfig()
-        saveState = SaveState.Testing
-        scope.launch {
-            try {
-                withTimeout(TEST_TIMEOUT_MS) { RocketMqModule.testConnection(config) }
-                doSave(config)
-            } catch (e: TimeoutCancellationException) {
-                fail(config, stringResource("rocketmq_ui_test_timeout"))
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                fail(config, stringResource("rocketmq_ui_test_fail_prefix") + failureMessage(e))
-            }
-        }
-        return false
+    override suspend fun testConnection(config: RocketMqConfig) {
+        RocketMqModule.testConnection(config)
     }
 
-    fun confirmSave() {
-        val config = pendingConfig ?: return
-        // 先摘掉待保存配置并关掉确认框（它只在 Failed 时渲染）：落盘已改为异步，
-        // 不清的话这段窗口里还能再点一次「保存」，写出两条连接。
-        pendingConfig = null
-        saveState = SaveState.Idle
-        saving = true
-        scope.launch {
-            try {
-                doSave(config)
-            } finally {
-                saving = false
-            }
-        }
-    }
+    override fun testTimeoutMessage(): String = stringResource("rocketmq_ui_test_timeout")
 
-    fun dismissFailed() {
-        pendingConfig = null
-        saveState = SaveState.Idle
-    }
+    override fun testFailurePrefix(): String = stringResource("rocketmq_ui_test_fail_prefix")
 
-    private fun fail(config: RocketMqConfig, message: String) {
-        pendingConfig = config
-        saveState = SaveState.Failed(message)
-    }
-
-    private fun failureMessage(error: Throwable): String =
-        generateSequence(error) { it.cause }
-            .take(4)
-            .mapNotNull { it.message?.takeIf(String::isNotBlank) }
-            .distinct()
-            .joinToString("  ←  ")
-            .ifBlank { error::class.simpleName ?: "unknown" }
-
-    private suspend fun doSave(config: RocketMqConfig) {
+    /**
+     * 落盘：新建走 [ConnectionStore.create]、编辑走 [ConnectionStore.update]（core 换发
+     * 新 UUID）。写盘要读整份 config.toml + 敏感字段加密 + 原子换文件，走 IO 不压 UI；
+     * `NonCancellable` 保证点了「完成」之后的落盘不会因对话框关闭而半途作废。
+     */
+    override suspend fun persist(config: RocketMqConfig): Result<Unit> {
         val info = ConnectionInfo(
             id = editingId ?: newConnectionId(),
             name = name.ifBlank { defaultName },
@@ -347,28 +288,10 @@ class RocketMqConnectionFormState(
             port = 9876,
             options = config.toOptions(),
         )
-        // 写盘（读整份 config.toml + 敏感字段加密 + 原子换文件）走 IO，不压 UI 线程。
-        // NonCancellable：点了「完成」之后的落盘不该因对话框关闭而半途作废。
-        val result = withContext(Dispatchers.IO + NonCancellable) {
+        return withContext(Dispatchers.IO + NonCancellable) {
             if (editingId == null) persistence.create(info) else persistence.update(info)
         }
-        val failure = result.exceptionOrNull()
-        if (failure != null) {
-            pendingConfig = null
-            saveState = SaveState.Idle
-            saveError = failure.message ?: failure::class.simpleName
-            return
-        }
-        pendingConfig = null
-        saveState = SaveState.Idle
-        savedCallback?.invoke()
     }
-
-    private var savedCallback: (() -> Unit)? = null
-
-    override var onSaved: (() -> Unit)?
-        get() = savedCallback
-        set(value) { savedCallback = value }
 
     @Composable
     override fun Content() = RocketMqConnectionFormContent(this)

@@ -23,6 +23,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
+import com.mqclient.testing.assumeNotNull
+import com.mqclient.testing.assumeLive
 
 /**
  * 真机验证：部分扫描失败的隔离（需要 `~/.mqclient/config.toml` 里有可用的 RabbitMQ 连接）。
@@ -44,11 +46,11 @@ class RabbitMqScanPartialLiveTest {
 
     @Test
     fun livePartialScanKeepsConnectionHealthy() = runBlocking {
-        val info = ConnectionStore.connections.value.firstOrNull { it.serviceId == "rabbitmq" }
-        if (info == null) {
-            println("LIVE SKIP: config.toml 里没有 RabbitMQ 连接")
-            return@runBlocking
-        }
+        // 无环境 = SKIP（assumption），不是 PASSED —— 旧写法 return 让 CI 永远绿。
+        val info = assumeNotNull(
+            "LIVE SKIP: config.toml 里没有 RabbitMQ 连接",
+            ConnectionStore.connections.value.firstOrNull { it.serviceId == "rabbitmq" },
+        )
         val config = rabbitMqConfigFromOptions(info.options)
         println("=========== RABBITMQ PARTIAL SCAN DIAG ===========")
         println("  connection = ${info.name} (${info.id})")
@@ -86,8 +88,7 @@ class RabbitMqScanPartialLiveTest {
             } ?: false
             if (!connected) {
                 val reason = RabbitMqModule.connectionOrNull(info.id)?.lastError
-                println("LIVE SKIP: 连接未成功（服务器不可达 / 凭据失效）：$reason")
-                return@runBlocking
+                assumeLive("LIVE SKIP: 连接未成功（服务器不可达 / 凭据失效）：$reason", false)
             }
             println("  connect ok: status=${RabbitMqModule.connectionOrNull(info.id)?.status}")
 

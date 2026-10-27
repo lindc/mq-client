@@ -20,6 +20,8 @@ kotlin {
             implementation(libs.ktor.client.core)
         }
         jvmTest.dependencies {
+            // JUnit assumption 包装：LiveTest 无环境时记 SKIP 而不是 PASSED。
+            implementation(projects.testSupport)
             // 适配器契约测试用 MockEngine 替换真实网络。
             implementation(kotlin("test"))
             implementation(libs.ktor.client.mock)

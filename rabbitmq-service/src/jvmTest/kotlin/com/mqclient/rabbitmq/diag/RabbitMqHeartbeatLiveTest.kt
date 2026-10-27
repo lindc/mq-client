@@ -9,6 +9,7 @@ import kotlin.test.assertTrue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import com.mqclient.testing.assumeNotNull
 
 /**
  * 真机验证：心跳与超时配置真的落到了连接上。
@@ -25,11 +26,11 @@ class RabbitMqHeartbeatLiveTest {
 
     @Test
     fun liveHeartbeatIsNegotiated() = runBlocking {
-        val info = ConnectionStore.connections.value.firstOrNull { it.serviceId == "rabbitmq" }
-        if (info == null) {
-            println("LIVE SKIP: config.toml 里没有 RabbitMQ 连接")
-            return@runBlocking
-        }
+        // 无环境 = SKIP（assumption），不是 PASSED —— 旧写法 return 让 CI 永远绿。
+        val info = assumeNotNull(
+            "LIVE SKIP: config.toml 里没有 RabbitMQ 连接",
+            ConnectionStore.connections.value.firstOrNull { it.serviceId == "rabbitmq" },
+        )
         val config = rabbitMqConfigFromOptions(info.options)
         println("=========== RABBITMQ HEARTBEAT DIAG ===========")
         println("  target = ${config.host}:${config.amqpPort}")

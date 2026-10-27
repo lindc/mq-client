@@ -1,27 +1,13 @@
 package com.mqclient.ibmmq.ui
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.WarningAmber
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import com.mqclient.ibmmq.IbmMQModule
 import com.mqclient.ibmmq.pcf.MqObjectType
+import com.mqclient.uicommon.PartialScanBanner
 import com.mqclient.uicommon.i18n.stringResource
-import com.mqclient.uicommon.i18n.withArg
 
 /**
  * 「部分数据未刷新」提示条：这一轮对象慢扫有类型没取到时，在该连接的所有对象页顶部。
@@ -30,9 +16,12 @@ import com.mqclient.uicommon.i18n.withArg
  * 权限边界，不是故障），某一类查询超时也只跳过该类。所以连接不该标红，但代价是
  * 界面会安静地少一块数据 —— 用户无从区分「这里本来就没有」和「这次没读到」。
  *
+ * 外壳（配色 / 图标 / 布局）在 ui-common 的 [PartialScanBanner]（四个 MQ 模块共用），
+ * 这里只保留「本连接失败了哪些类型」与「类型名怎么翻译」这两件 IBM MQ 特有的事。
+ *
  * 数据源是 [IbmMQModule.scanFailuresFlow] 而不是事件：事件是瞬时的，切个 Tab 再回来
  * 订阅者就重建了，提示会消失而数据依旧是旧的。StateFlow 与缓存同寿命，下一轮扫全
- * 或断开连接才清。（与 RabbitMQ / Kafka / RocketMQ 同构。）
+ * 或断开连接才清。
  */
 @Composable
 internal fun IbmMqPartialScanBanner(
@@ -41,36 +30,12 @@ internal fun IbmMqPartialScanBanner(
 ) {
     val failures by IbmMQModule.scanFailuresFlow.collectAsState()
     val types = scanFailureTypes(failures, connectionId)
-    if (types.isEmpty()) return
-
-    // 分隔符用字面量 " · "：与项目里拼多值文案的约定一致（它不需要翻译）。
-    val names = types.joinToString(" · ") { type -> stringResource(type.i18nKey()) }
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.tertiaryContainer)
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            imageVector = Icons.Default.WarningAmber,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onTertiaryContainer,
-            modifier = Modifier.size(16.dp),
-        )
-        Spacer(Modifier.width(8.dp))
-        Text(
-            text = stringResource("ibm_mq_partial_scan_banner").withArg(names),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onTertiaryContainer,
-        )
-        Spacer(Modifier.width(8.dp))
-        Text(
-            text = stringResource("ibm_mq_partial_scan_hint"),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.75f),
-        )
-    }
+    PartialScanBanner(
+        failureNames = types.map { stringResource(it.i18nKey()) },
+        messageKey = "ibm_mq_partial_scan_banner",
+        hintKey = "ibm_mq_partial_scan_hint",
+        modifier = modifier,
+    )
 }
 
 /**

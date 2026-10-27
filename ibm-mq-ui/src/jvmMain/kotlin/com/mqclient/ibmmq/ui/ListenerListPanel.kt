@@ -25,6 +25,7 @@ import com.mqclient.uicommon.LocalAiAsk
 import com.mqclient.uicommon.LocalSnackbarHostState
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
+import com.mqclient.mqui.common.rememberDebouncedValue
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
@@ -59,6 +60,7 @@ fun ListenerListPanel(
     modifier: Modifier = Modifier,
 ) {
     var searchText by remember { mutableStateOf("") }
+    val appliedSearch = rememberDebouncedValue(searchText)
     var showSystem by remember { mutableStateOf(false) }
     // 对象属性对话框（双击卡片 / 属性按钮打开；统一入口持有状态与渲染）。
     val propertiesController = rememberObjectPropertiesDialogController(connectionId)
@@ -179,7 +181,7 @@ fun ListenerListPanel(
             // 「询问 AI」宿主入口（null = 宿主未提供，卡片不显示 AI 图标）。
             val aiAsk = LocalAiAsk.current
             val filtered = listeners
-                .filter { it.name.contains(searchText, ignoreCase = true) }
+                .filter { it.name.contains(appliedSearch, ignoreCase = true) }
                 .filter { showSystem || !isSystemObject(it.name) }
             ObjectListPanel(
                 items = filtered.map { listener ->

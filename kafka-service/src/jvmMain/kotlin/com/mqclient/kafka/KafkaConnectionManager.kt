@@ -1,184 +1,102 @@
 package com.mqclient.kafka
 
 import com.mqclient.core.ConnectionInfo
-import com.mqclient.core.ConnectionStatus
-import com.mqclient.core.ConnectionStore
-import com.mqclient.core.cache.CacheManager
-import com.mqclient.core.concurrent.KeyedMutex
 import com.mqclient.core.scheduler.ScheduledJob
 import com.mqclient.core.spi.ServiceContext
-import com.mqclient.core.spi.emit
+import com.mqclient.mq.base.AbstractConnectionManager
 import java.time.Duration
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.coroutineContext
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.apache.kafka.clients.admin.AdminClient
 import org.apache.kafka.clients.admin.DescribeClusterOptions
 
 /**
- * Kafka 连接的生命周期管理：**显式连接模型**的中枢，与 ibm-mq 的
- * IbmMQConnectionManager 同构。
+ * Kafka 连接的生命周期管理：**显式连接模型**的中枢。
  *
- *  - 程序启动 / `connection.added` 只 [ensureContext] —— 登记 DISCONNECTED 上下文，
- *    **不连接**；
- *  - 用户显式动作才 [connect]：建 AdminClient → describeCluster 验证连通性 →
- *    建 cache → 按配置间隔注册扫描任务（对象慢扫 + Lag 心跳）→ 报 CONNECTED；
- *  - [disconnectNow] / 删除 / 模块关闭：取消扫描任务 → 关 AdminClient → 清缓存 →
- *    报 DISCONNECTED。状态事实同时喂 `ConnectionStore.reportStatus`（侧边栏）与
- *    [KafkaConnectionContext.status]（模块内守卫），见 [setStatus]。
+ * 生命周期模板（状态机 / 每连接锁 / 事件 / 扫描任务 / 连续失败阈值与自愈）全部在
+ * [AbstractConnectionManager]，本类只提供 Kafka 特有部分：
  *
- * 并发：同一连接的 connect / disconnect / 删除用**每连接一把 [Mutex]** 串行；
- * 不同连接互不阻塞。
- *
- * Kafka 与 MQ 的连接差异：`AdminClient.create` 是惰性的（不真的建 TCP），真正的
- * 连通性验证要靠一次 API 调用 —— 这里用 `describeCluster`（还会顺带把 broker 列表
- * 拿到手，后续扫描直接复用）。超时由两处兜底：AdminClient 属性
- * （`request.timeout.ms` / `default.api.timeout.ms`，见 [KafkaConfig.toAdminProperties]）
- * 与 `KafkaFuture.get(timeout)` 本身。
+ *  - [open]：`AdminClient.create` + `describeCluster` 验证（create 是惰性的，真正的
+ *    TCP 连接发生在第一次 API 调用 —— 所以验证必须发一次请求，顺带把 broker 列表拿到手）；
+ *  - [closeResources]：关 AdminClient + 共享 consumer / producer（先 wakeup 打断 poll）；
+ *  - [onConnected]：复位句柄槽（必须在置 Connected 之前）。
  */
 class KafkaConnectionManager(
-    private val context: ServiceContext,
+    context: ServiceContext,
     private val service: KafkaScanService,
-) {
+) : AbstractConnectionManager<KafkaConnectionContext>(context, MODULE_ID) {
 
-    private val contexts = ConcurrentHashMap<String, KafkaConnectionContext>()
-    private val locks = KeyedMutex()
+    /* ------------------------------ 基类钩子 ------------------------------ */
 
-    /* ------------------------------ 查询 ------------------------------ */
+    override fun createContext(connectionId: String, connection: ConnectionInfo): KafkaConnectionContext =
+        KafkaConnectionContext(connectionId, kafkaConfigFromOptions(connection.options))
 
-    fun contextOrNull(connectionId: String): KafkaConnectionContext? = contexts[connectionId]
-
-    fun allContexts(): List<KafkaConnectionContext> = contexts.values.toList()
-
-    /* ------------------------------ 登记与注销 ------------------------------ */
-
-    /**
-     * 建立（或取回）一条连接的 DISCONNECTED 上下文：启动补登记与 `connection.added`
-     * 共用。**只登记，不连接** —— AdminClient 留给 [connect]。
-     */
-    fun ensureContext(connection: ConnectionInfo): KafkaConnectionContext {
-        var created = false
-        val ctx = contexts.compute(connection.id) { id, existing ->
-            if (existing == null) created = true
-            existing ?: KafkaConnectionContext(id, kafkaConfigFromOptions(connection.options))
-        }!!
-        kafkaLog.debug(
-            "context ${if (created) "created" else "reused"}: connection=${connection.id} " +
-                "bootstrap=${ctx.config.bootstrapServers}",
-        )
-        return ctx
-    }
-
-    /**
-     * `connection.updated`：换配置快照。已连接 / 连接中的先断开 —— 配置变了继续用
-     * 旧连接没有意义，下次显式连接自然用新配置。
-     */
-    fun updateContextConfig(connection: ConnectionInfo) {
-        val ctx = contexts[connection.id] ?: run {
-            kafkaLog.debug("config update ignored (no context): connection=${connection.id}")
-            return
-        }
+    override fun applyConfig(ctx: KafkaConnectionContext, connection: ConnectionInfo) {
         ctx.config = kafkaConfigFromOptions(connection.options)
-        kafkaLog.debug("context config updated: connection=${connection.id} bootstrap=${ctx.config.bootstrapServers}")
-        if (ctx.status == ConnectionStatus.Connected || ctx.status == ConnectionStatus.Connecting) {
-            kafkaLog.info(
-                "disconnecting active connection for config update: connection=${connection.id} status=${ctx.status}",
-            )
-            disconnectAsync(connection.id, reason = "config updated")
-        }
     }
 
-    /** `connection.deleted`：断开 + 摘除上下文。 */
-    fun remove(connectionId: String) {
-        kafkaLog.debug("connection remove requested: connection=$connectionId")
-        context.coroutineScope.launch {
-            disconnectNow(connectionId, reason = "connection deleted")
-            contexts.remove(connectionId)
-        }
+    override fun describe(ctx: KafkaConnectionContext): String = "bootstrap=${ctx.config.bootstrapServers}"
+
+    override suspend fun open(ctx: KafkaConnectionContext) {
+        ctx.adminClient = createVerifiedAdmin(ctx.config)
     }
 
-    /* ------------------------------ 连接 / 断开 ------------------------------ */
+    override suspend fun onConnected(ctx: KafkaConnectionContext) {
+        ctx.messageClients.reopen()
+    }
+
+    override suspend fun onBeforeDisconnect(ctx: KafkaConnectionContext) {
+        service.cancelScan(ctx.connectionId)
+        KafkaModule.clearScanFailures(ctx.connectionId)
+    }
+
+    override fun isHandlePresent(ctx: KafkaConnectionContext): Boolean = ctx.adminClient != null
+
+    /** 解掉 `ExecutionException` 包装（KafkaFuture.get 会包一层）。 */
+    override fun errorMessage(error: Throwable): String =
+        (error as? ExecutionException)?.cause?.message ?: super.errorMessage(error)
+
+    override val connectedEvent: String = KafkaEvents.CONNECTED
+    override val connectFailedEvent: String = KafkaEvents.CONNECT_FAILED
+    override val disconnectedEvent: String = KafkaEvents.DISCONNECTED
 
     /**
-     * 显式建立连接。DISCONNECTED / FAILED 才真正发起；CONNECTED 直接复用；
-     * CONNECTING 忽略重复触发。连接成功后报 CONNECTED。
+     * Lag 心跳（快扫，runOnStart）+ 对象慢扫（晚 5 秒起步，把首拍让给心跳）。
+     * 间隔来自用户建连接时的配置，**不硬编码**。
      */
-    suspend fun connect(connectionId: String): Result<Unit> = locks.withLock(connectionId) {
-        val ctx = contexts[connectionId]
-            ?: return@withLock Result.failure(IllegalStateException("连接 $connectionId 未登记"))
-        when (ctx.status) {
-            ConnectionStatus.Connected -> return@withLock Result.success(Unit)
-            ConnectionStatus.Connecting -> {
-                kafkaLog.info("connect ignored (already connecting): connection=$connectionId")
-                return@withLock Result.failure(IllegalStateException("连接正在进行中"))
-            }
-            else -> Unit
-        }
-
-        val start = System.currentTimeMillis()
-        kafkaLog.debug(
-            "connect start: connection=$connectionId bootstrap=${ctx.config.bootstrapServers} " +
-                "timeout=${ctx.config.connectionTimeout}s",
+    override fun scanJobs(ctx: KafkaConnectionContext): List<ScheduledJob> {
+        val config = ctx.config
+        return listOf(
+            ScheduledJob(
+                id = ScheduledJob.idFor(MODULE_ID, ctx.connectionId, JOB_SCAN_LAG),
+                intervalMs = config.lagScanIntervalSeconds * 1_000L,
+                runOnStart = true,
+                action = { service.scanGroupLags(ctx.connectionId) },
+            ),
+            ScheduledJob(
+                id = ScheduledJob.idFor(MODULE_ID, ctx.connectionId, JOB_SCAN_OBJECTS),
+                intervalMs = config.objectScanIntervalMinutes * 60_000L,
+                initialDelayMs = OBJECTS_FIRST_DELAY_MS,
+                action = { service.scanObjects(ctx.connectionId) },
+            ),
         )
-        // FAILED 状态下可能残留坏句柄：先悄悄扔掉，connect 只管建新的。
-        closeQuietly(ctx)
-
-        setStatus(ctx, ConnectionStatus.Connecting)
-        ctx.lastError = null
-        try {
-            ctx.adminClient = createVerifiedAdmin(ctx.config)
-            // 缓存与扫描任务只属于活连接（与 ibm-mq 同一生命周期）。
-            ctx.cache = CacheManager()
-            // 复位句柄槽 — 必须在上报 Connected **之前**：否则读路径可能先看到
-            // Connected，再撞上仍为断开的槽，拿到一个误导性的「已断开」拒绝。
-            // （上面 closeQuietly 已经把槽置为断开，这一步是重连时的必要解锁。）
-            ctx.messageClients.reopen()
-            setStatus(ctx, ConnectionStatus.Connected)
-            registerScanJobs(ctx)
-            context.emit(KafkaEvents.CONNECTED, mapOf("connectionId" to connectionId))
-            kafkaLog.info(
-                "connected: connection=$connectionId bootstrap=${ctx.config.bootstrapServers} " +
-                    "duration=${System.currentTimeMillis() - start}ms",
-            )
-            Result.success(Unit)
-        } catch (error: Throwable) {
-            // 取消（模块 shutdown 等）必须原样上抛，否则取消语义被吞。
-            // 句柄已由 createVerifiedAdmin 在失败路径自行关闭，这里只做记账。
-            if (error is CancellationException) throw error
-            ctx.adminClient = null
-            ctx.lastError = errorMessage(error)
-            setStatus(ctx, ConnectionStatus.Failed)
-            context.emit(
-                name = KafkaEvents.CONNECT_FAILED,
-                payload = mapOf("connectionId" to connectionId, "message" to ctx.lastError),
-            )
-            kafkaLog.warn(
-                "connect failed: connection=$connectionId reason=${ctx.lastError} " +
-                    "duration=${System.currentTimeMillis() - start}ms",
-            )
-            Result.failure(error)
-        }
     }
+
+    /* ------------------------------ 模块特有 ------------------------------ */
 
     /**
      * 「测试连接」：用给定配置发起一次**临时连接**（describeCluster 验证后立刻关掉，
-     * 不影响任何正式连接的状态），失败抛异常 —— 成功返回即连通。成功路径也必须关：
-     * 句柄是这里建的，丢弃不关等于每次测试泄漏一个连接。
+     * 不影响任何正式连接的状态），失败抛异常 —— 成功返回即连通。
      */
     suspend fun testConnection(config: KafkaConfig) {
         val admin = createVerifiedAdmin(config)
         try {
-            // 验证已由 createVerifiedAdmin 完成，这里没有别的活要干；留 this try 是为
-            // 了让 close 落进 finally —— 它是本方法唯一的清理义务。
+            // 验证已由 createVerifiedAdmin 完成，这里唯一的义务是把句柄关掉。
             //
             // 显式过一道取消检查：旧实现用 `catch (Throwable)` 包 close，把取消信号
             // 一起吞了 —— 外层 withTimeout 超时后 UI 会当成「测试通过」继续落盘
@@ -190,96 +108,15 @@ class KafkaConnectionManager(
             // 句柄照样漏（AdminClient 的 sender / metrics 线程留到进程退出）。
             withContext(NonCancellable + Dispatchers.IO) {
                 runCatching { admin.close(Duration.ZERO) }
-                    .onFailure { error -> kafkaLog.warn("test connection close failed: error=$error") }
+                    .onFailure { error -> log.warn("test connection close failed: error=$error") }
             }
         }
     }
 
-    /** UI / 删除链路的入口：fire-and-forget，结果走状态上报与事件，不阻塞点击。 */
-    fun disconnectAsync(connectionId: String, reason: String? = null) {
-        context.coroutineScope.launch { disconnectNow(connectionId, reason) }
-    }
-
     /**
-     * 断开：取消该连接全部定时任务 → 关 AdminClient → 清缓存 → 状态回 DISCONNECTED。
-     * 已经是 DISCONNECTED 时是空操作（重复点「断开」无副作用）。
-     */
-    suspend fun disconnectNow(connectionId: String, reason: String? = null) =
-        locks.withLock(connectionId) {
-            val ctx = contexts[connectionId] ?: return@withLock
-            if (ctx.status == ConnectionStatus.Disconnected) return@withLock
-
-            unregisterScanJobs(connectionId)
-            // 手动刷新（UI 按钮）的协程也要收：它占着该连接的 scanLocks，句柄又要关了。
-            service.cancelScan(connectionId)
-            // 「部分数据未刷新」的旧结论不能诈尸到重连后（新连接可能权限不同）。
-            KafkaModule.clearScanFailures(connectionId)
-            closeQuietly(ctx)
-            ctx.cleanup()
-            setStatus(ctx, ConnectionStatus.Disconnected)
-            context.emit(
-                name = KafkaEvents.DISCONNECTED,
-                payload = mapOf("connectionId" to connectionId, "reason" to (reason ?: "")),
-            )
-            kafkaLog.info("disconnected: connection=$connectionId reason=${reason ?: "user"}")
-        }
-
-    /** 模块销毁：全部连接断开 + 注册表清空（顺序：先断连接再摘表）。 */
-    suspend fun shutdownAll() {
-        kafkaLog.info("shutdown all connections: count=${contexts.size}")
-        contexts.keys.toList().forEach { disconnectNow(it, reason = "module shutdown") }
-        contexts.clear()
-    }
-
-    /* ------------------------------ 定时任务 ------------------------------ */
-
-    /**
-     * 按配置注册两条扫描任务（与 ibm-mq 的 registerScanJobs 同构）—— 间隔来自用户
-     * 建连接时的配置，**不再硬编码**：
-     *  - Lag 心跳（快扫）：`lagScanIntervalSeconds`（默认 30 秒），runOnStart 立即首拍；
-     *  - 对象（慢扫）：`objectScanIntervalMinutes`（默认 10 分钟），晚 5 秒起步，
-     *    把首拍让给心跳。
-     *
-     * 幂等：同 ID 重复注册会顶掉旧的（见 JobScheduler），重连时直接重注册即可。
-     */
-    private fun registerScanJobs(ctx: KafkaConnectionContext) {
-        val scheduler = context.jobScheduler
-        val config = ctx.config
-        scheduler.schedule(
-            ScheduledJob(
-                id = ScheduledJob.idFor(MODULE_ID, ctx.connectionId, JOB_SCAN_LAG),
-                intervalMs = config.lagScanIntervalSeconds * 1_000L,
-                runOnStart = true,
-                action = { service.scanGroupLags(ctx.connectionId) },
-            ),
-        )
-        scheduler.schedule(
-            ScheduledJob(
-                id = ScheduledJob.idFor(MODULE_ID, ctx.connectionId, JOB_SCAN_OBJECTS),
-                intervalMs = config.objectScanIntervalMinutes * 60_000L,
-                initialDelayMs = OBJECTS_FIRST_DELAY_MS,
-                action = { service.scanObjects(ctx.connectionId) },
-            ),
-        )
-        kafkaLog.info(
-            "scan jobs registered: connection=${ctx.connectionId} " +
-                "lag=${config.lagScanIntervalSeconds}s objects=${config.objectScanIntervalMinutes}min",
-        )
-    }
-
-    /** 按前缀收掉该连接的全部定时任务（连接断开 / 删除）。 */
-    private fun unregisterScanJobs(connectionId: String) {
-        kafkaLog.debug("scan jobs unregistering: connection=$connectionId")
-        context.jobScheduler.cancelByPrefix(ScheduledJob.prefixFor(MODULE_ID, connectionId))
-    }
-
-    /* ------------------------------ 内部 ------------------------------ */
-
-    /**
-     * 建 AdminClient 并用 describeCluster 验证连通性。AdminClient.create 只校验配置
-     * （bootstrap 为空等在这里爆），真正的 TCP 连接发生在 describeCluster —— 超时由
-     * 两处兜底：AdminClient 属性（request/default API timeout，见
-     * [KafkaConfig.toAdminProperties]）与 `KafkaFuture.get(timeout)` 本身。
+     * 建 AdminClient 并用 describeCluster 验证连通性。超时由两处兜底：AdminClient
+     * 属性（request/default API timeout，见 [KafkaConfig.toAdminProperties]）与
+     * `KafkaFuture.get(timeout)` 本身。
      *
      * 失败（含取消）时自己把刚建的句柄关掉再抛，成功时把可用的 AdminClient 交给调用方。
      */
@@ -300,60 +137,8 @@ class KafkaConnectionManager(
         }
     }
 
-    /** 状态双写：模块内守卫（ctx.status）+ 核心事实（reportStatus → 侧边栏）。 */
-    private fun setStatus(ctx: KafkaConnectionContext, status: ConnectionStatus) {
-        ctx.status = status
-        ConnectionStore.reportStatus(ctx.connectionId, status, MODULE_ID)
-    }
-
-    /**
-     * 定时扫描的一次失败：**连续** [SCAN_FAILURE_THRESHOLD] 次才把连接判为 Failed。
-     *
-     * 单次失败不再判死：代理回收连接或单个 broker 短暂不答都是可恢复的请求失败。
-     * 返回 true 表示这次失败**触发了**状态翻转。
-     */
-    fun onScanFailed(connectionId: String, message: String): Boolean {
-        val ctx = contexts[connectionId] ?: return false
-        // 没有客户端就是真的没连接（或已断开），交给 connect 路径，不走阈值。
-        if (ctx.adminClient == null) return false
-        val failures = ctx.recordScanFailure()
-        if (failures < SCAN_FAILURE_THRESHOLD) {
-            kafkaLog.info(
-                "scan failure tolerated: connection=$connectionId " +
-                    "consecutive=$failures/$SCAN_FAILURE_THRESHOLD reason=$message",
-            )
-            return false
-        }
-        if (ctx.status == ConnectionStatus.Failed) return false
-        ctx.lastError = message
-        setStatus(ctx, ConnectionStatus.Failed)
-        kafkaLog.warn(
-            "connection marked FAILED after $failures consecutive scan failures: " +
-                "connection=$connectionId reason=$message",
-        )
-        return true
-    }
-
-    /**
-     * 定时扫描成功：计数归零；如果之前被判为 Failed（但客户端还在），**自动恢复**
-     * 成 Connected。自愈的前提是扫描入口不再看 status（只看 AdminClient 在不在）。
-     */
-    fun onScanSucceeded(connectionId: String) {
-        val ctx = contexts[connectionId] ?: return
-        val previous = ctx.scanFailureCount()
-        ctx.resetScanFailures()
-        if (ctx.status == ConnectionStatus.Failed && ctx.adminClient != null) {
-            ctx.lastError = null
-            setStatus(ctx, ConnectionStatus.Connected)
-            kafkaLog.info(
-                "connection recovered after $previous consecutive scan failures: connection=$connectionId",
-            )
-        }
-    }
-
-    private fun lockFor(connectionId: String): KeyedMutex = locks
-
-    private suspend fun closeQuietly(ctx: KafkaConnectionContext) {
+    /** 关 AdminClient + 共享消息客户端；失败只记日志（断开路径不能被句柄拖住）。 */
+    override suspend fun closeResources(ctx: KafkaConnectionContext) {
         val admin = ctx.adminClient
         ctx.adminClient = null
         // 「mark disposed + 取走引用」在同一监视器里完成，然后才在锁外关。
@@ -362,9 +147,9 @@ class KafkaConnectionManager(
         if (admin != null) {
             try {
                 withContext(Dispatchers.IO) { admin.close(Duration.ZERO) }
-                kafkaLog.debug("admin client closed: connection=${ctx.connectionId}")
+                log.debug("admin client closed: connection=${ctx.connectionId}")
             } catch (error: Throwable) {
-                kafkaLog.warn("admin client close failed: connection=${ctx.connectionId} error=$error")
+                log.warn("admin client close failed: connection=${ctx.connectionId} error=$error")
             }
         }
         // 共享 consumer / producer：先 wakeup 打断可能在跑的 poll，再带超时 close。
@@ -372,17 +157,10 @@ class KafkaConnectionManager(
         if (clients != null) {
             try {
                 clients.closeQuietly()
-                kafkaLog.debug("shared message clients closed: connection=${ctx.connectionId}")
+                log.debug("shared message clients closed: connection=${ctx.connectionId}")
             } catch (error: Throwable) {
-                kafkaLog.warn("shared message clients close failed: connection=${ctx.connectionId} error=$error")
+                log.warn("shared message clients close failed: connection=${ctx.connectionId} error=$error")
             }
         }
     }
-
-    /** 给用户的失败原因：解掉 ExecutionException 包装，拿根因的消息。 */
-    private fun errorMessage(error: Throwable): String =
-        (error as? ExecutionException)?.cause?.message
-            ?: error.message
-            ?: error::class.simpleName
-            ?: "unknown"
 }

@@ -23,6 +23,7 @@ import com.mqclient.mqui.state.LoadStateContent
 import com.mqclient.mqui.CommandOutcome
 import com.mqclient.mqui.PollOutcome
 import com.mqclient.mqui.pollUntil
+import com.mqclient.mqui.common.rememberDebouncedValue
 import com.mqclient.uicommon.LocalAiAsk
 import com.mqclient.uicommon.LocalSnackbarHostState
 import com.mqclient.uicommon.i18n.stringResource
@@ -62,6 +63,8 @@ fun ChannelListPanel(
     modifier: Modifier = Modifier,
 ) {
     var searchText by remember { mutableStateOf("") }
+    // 防抖：输入框立即回显，过滤用 300ms 后生效的值（通道多时逐键过滤会一直重建卡片）。
+    val appliedSearch = rememberDebouncedValue(searchText)
     var showSystem by remember { mutableStateOf(false) }
     // 对象属性对话框（双击卡片 / 属性按钮打开；统一入口持有状态与渲染）。
     val propertiesController = rememberObjectPropertiesDialogController(connectionId)
@@ -184,7 +187,7 @@ fun ChannelListPanel(
             // 「询问 AI」宿主入口（null = 宿主未提供，卡片不显示 AI 图标）。
             val aiAsk = LocalAiAsk.current
             val filtered = channels
-                .filter { it.name.contains(searchText, ignoreCase = true) }
+                .filter { it.name.contains(appliedSearch, ignoreCase = true) }
                 .filter { showSystem || !isSystemObject(it.name) }
             ObjectListPanel(
                 items = filtered.map { channel ->

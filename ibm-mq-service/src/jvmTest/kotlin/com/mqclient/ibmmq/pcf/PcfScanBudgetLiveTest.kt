@@ -19,6 +19,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
+import com.mqclient.testing.assumeNotNull
 
 /**
  * 真机验证：**协作式超时改造后的完整扫描链路**（`scanAll` → `withAgent` → `ScanBudget`）。
@@ -44,11 +45,12 @@ class PcfScanBudgetLiveTest {
 
     @Test
     fun liveScanAllThroughBudgetPathKeepsEverythingHealthy() = runBlocking {
-        val info = ConnectionStore.connections.value.firstOrNull { it.serviceId == "ibm-mq" }
-        if (info == null) {
-            println("LIVE SKIP: config.toml 里没有 IBM MQ 连接")
-            return@runBlocking
-        }
+        // 无环境 = SKIP（assumption），不是 PASSED；必须放在 try 之外（见同目录
+        // PcfObjectScannerLiveTest 的说明：假设异常会被宽 catch 吞掉）。
+        val info = assumeNotNull(
+            "LIVE SKIP: config.toml 里没有 IBM MQ 连接",
+            ConnectionStore.connections.value.firstOrNull { it.serviceId == "ibm-mq" },
+        )
         println("=========== PCF SCAN BUDGET DIAG (withAgent 路径) ===========")
         println("  connection = ${info.name} (${info.id})")
 
@@ -66,8 +68,7 @@ class PcfScanBudgetLiveTest {
             } ?: false
             if (!connected) {
                 val reason = IbmMQModule.connectionOrNull(info.id)?.lastError
-                println("LIVE SKIP: 连接未成功（QMGR 不在线 / 凭据失效）：$reason")
-                return@runBlocking
+                com.mqclient.testing.assumeLive("LIVE SKIP: 连接未成功（QMGR 不在线 / 凭据失效）：$reason", false)
             }
             println("  connect ok: status=Connected")
 

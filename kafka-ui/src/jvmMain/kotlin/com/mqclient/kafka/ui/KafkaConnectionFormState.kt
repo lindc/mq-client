@@ -4,8 +4,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import com.mqclient.core.ConnectionFormState
 import com.mqclient.core.ConnectionInfo
+import com.mqclient.mqui.state.AbstractConnectionFormState
 import com.mqclient.core.ConnectionPersistence
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.newConnectionId
@@ -13,7 +13,6 @@ import com.mqclient.kafka.KafkaConfig
 import com.mqclient.kafka.KafkaModule
 import com.mqclient.kafka.kafkaConfigFromOptions
 import com.mqclient.kafka.toOptions
-import com.mqclient.mqui.state.SaveState
 import com.mqclient.uicommon.file.normalizePath
 import com.mqclient.uicommon.file.pickFile
 import com.mqclient.uicommon.i18n.stringResource
@@ -66,7 +65,7 @@ class KafkaConnectionFormState(
     private val scope: CoroutineScope,
     /** 落盘端口：默认直连 ConnectionStore，测试注入记录线程的替身。 */
     private val persistence: ConnectionPersistence = ConnectionPersistence.Default,
-) : ConnectionFormState {
+) : AbstractConnectionFormState<KafkaConfig>(scope) {
 
     companion object {
         /** 「保存前测试连接」的超时：与 IBM MQ 表单同款，15 秒不返回按超时处理。 */
@@ -95,26 +94,19 @@ class KafkaConnectionFormState(
 
     /** ---------------- 宿主契约（busy / onSaved）---------------- */
 
-    override val busy: Boolean get() = saveState == SaveState.Testing || saving
-
     /** ---------------- 流程状态 ---------------- */
 
     var defaultName by mutableStateOf(defaultName); private set
     var errors by mutableStateOf(KafkaFieldErrors()); private set
-    var saveError by mutableStateOf<String?>(null); private set
-    var saveState by mutableStateOf<SaveState>(SaveState.Idle); private set
 
     /**
      * 落盘进行中（「仍要保存」路径）：落盘已挪到 IO 线程，这段窗口里必须挡住重复提交，
      * 否则双击会写出两条连接（[ConnectionStore.update] 每次都换发新 id，不会报「已存在」）。
      */
-    private var saving by mutableStateOf(false)
 
     /** 测试失败待确认的配置快照：用户选「仍要保存」时按它落盘。 */
-    var pendingConfig by mutableStateOf<KafkaConfig?>(null); private set
 
     /** 编辑模式的目标连接 id；null = 新建。 */
-    var editingId by mutableStateOf<String?>(null); private set
 
     /** ---------------- 字段草稿（数字存原字符串，构建时解析）---------------- */
 
@@ -155,7 +147,7 @@ class KafkaConnectionFormState(
     }
 
     /** 分字段校验：错误写进 [errors]（字段下方红字），全部通过返回 true。 */
-    fun validate(): Boolean {
+    override fun validate(): Boolean {
         var e = KafkaFieldErrors()
         if (bootstrapServers.isBlank()) {
             e = e.copy(bootstrapServers = stringResource("kafka_ui_error_bootstrap_required"))
@@ -181,7 +173,7 @@ class KafkaConnectionFormState(
     }
 
     /** 组装强类型配置：数字字段解析失败回落默认值（边界已由 [validate] 拦住）。 */
-    fun buildConfig(): KafkaConfig = KafkaConfig(
+    override fun buildConfig(): KafkaConfig = KafkaConfig(
         bootstrapServers = bootstrapServers.trim(),
         securityProtocol = securityProtocol,
         saslMechanism = saslMechanism,
@@ -221,9 +213,7 @@ class KafkaConnectionFormState(
         originalTruststorePassword = ""
         truststorePasswordChanged = false
         errors = KafkaFieldErrors()
-        saveError = null
-        pendingConfig = null
-        saveState = SaveState.Idle
+        resetSaveFlow()
     }
 
     /**
@@ -254,9 +244,7 @@ class KafkaConnectionFormState(
         truststorePasswordChanged = false
 
         errors = KafkaFieldErrors()
-        saveError = null
-        pendingConfig = null
-        saveState = SaveState.Idle
+        resetSaveFlow()
     }
 
     /** 清掉全部分字段错误：任一字段被编辑时调用（错误在下次提交时重算）。 */
@@ -275,77 +263,27 @@ class KafkaConnectionFormState(
      * 全程返回 false（测试是慢操作，无法同步给最终结果；宿主对 false 的唯一
      * 反应就是保持对话框打开）。
      */
-    override fun submit(): Boolean {
-        if (saveState != SaveState.Idle) return false
-        saveError = null
-        if (!validate()) return false
+    /* ------------------------- 基类钩子（保存链路） ------------------------- */
 
-        val config = buildConfig()
-        saveState = SaveState.Testing
-        scope.launch {
-            try {
-                withTimeout(TEST_TIMEOUT_MS) { KafkaModule.testConnection(config) }
-                doSave(config)
-            } catch (e: TimeoutCancellationException) {
-                // 超时不算「正常取消」，按失败处理（确认框可仍要保存）。
-                fail(config, stringResource("kafka_ui_test_timeout"))
-            } catch (e: CancellationException) {
-                // 对话框关闭 / 面板被销毁：正常退出，不落盘、不提示。
-                throw e
-            } catch (e: Exception) {
-                fail(config, stringResource("kafka_ui_test_fail_prefix") + failureMessage(e))
-            }
-        }
-        return false
+    override suspend fun testConnection(config: KafkaConfig) {
+        KafkaModule.testConnection(config)
     }
 
-    /** 用户在确认框选「仍要保存」：按测试时的配置快照落盘。 */
-    fun confirmSave() {
-        val config = pendingConfig ?: return
-        // 先摘掉待保存配置并关掉确认框（它只在 Failed 时渲染）：落盘已改为异步，
-        // 不清的话这段窗口里还能再点一次「保存」，写出两条连接。
-        pendingConfig = null
-        saveState = SaveState.Idle
-        saving = true
-        scope.launch {
-            try {
-                doSave(config)
-            } finally {
-                saving = false
-            }
-        }
-    }
+    override fun testTimeoutMessage(): String = stringResource("kafka_ui_test_timeout")
 
-    /** 用户在确认框选「取消」：只关确认框，回到 Idle —— 主对话框保留，表单原样可改。 */
-    fun dismissFailed() {
-        pendingConfig = null
-        saveState = SaveState.Idle
-    }
+    override fun testFailurePrefix(): String = stringResource("kafka_ui_test_fail_prefix")
 
-    /** ---------------- 内部 ---------------- */
+    /** 测试失败与落盘失败都走同一套友好文案（解包 future 包装 + 本地化分类）。 */
+    override fun describeFailure(error: Throwable): String = kafkaErrorText(error)
 
-    private fun fail(config: KafkaConfig, message: String) {
-        pendingConfig = config
-        saveState = SaveState.Failed(message)
-    }
+    override fun saveFailureMessage(error: Throwable): String = kafkaErrorText(error)
 
     /**
-     * 失败原因转提示文案：统一走 [kafkaErrorText]（解包 KafkaFuture 的
-     * ExecutionException / CompletionException + 按异常类型给本地化说明）。
-     *
-     * 旧实现在这里把 cause 链用 `"  ←  "` 拼成一行，用户看到的是一串英文类名
-     * （`TimeoutException: Topic xxx not present in metadata after 60000 ms`），
-     * 既读不懂也不知道该改什么 —— 与其它四个面板的错误展示口径也不一致。
+     * 落盘：新建走 [ConnectionStore.create]、编辑走 [ConnectionStore.update]（core 换发
+     * 新 UUID）。写盘要读整份 config.toml + 敏感字段加密 + 原子换文件，走 IO 不压 UI；
+     * `NonCancellable` 保证点了「完成」之后的落盘不会因对话框关闭而半途作废。
      */
-    private fun failureMessage(error: Throwable): String = kafkaErrorText(error)
-
-    /**
-     * 落盘：新建走 [ConnectionStore.create]、编辑走 [ConnectionStore.update]（core
-     * 换发新 UUID：旧连接废弃、新连接接任）。事件广播是 ConnectionStore 的事（落盘
-     * 成功自动发 `core.connection.added/updated`），这里不重复发。敏感键（password）
-     * 落盘时由 SensitiveOptionsSerializer 自动加密，这里保持明文。
-     */
-    private suspend fun doSave(config: KafkaConfig) {
+    override suspend fun persist(config: KafkaConfig): Result<Unit> {
         // host / port 取第一个 broker（endpoint 只是展示用途）；无端口的条目按
         // Kafka 客户端同款默认 9092。
         val first = config.bootstrapServers.split(",").firstOrNull()?.trim().orEmpty()
@@ -361,32 +299,11 @@ class KafkaConnectionFormState(
             port = port,
             options = config.toOptions(),
         )
-        // 写盘（读整份 config.toml + 敏感字段加密 + 原子换文件）走 IO，不压 UI 线程。
-        // NonCancellable：点了「完成」之后的落盘不该因对话框关闭而半途作废。
-        val result = withContext(Dispatchers.IO + NonCancellable) {
+        return withContext(Dispatchers.IO + NonCancellable) {
             if (editingId == null) persistence.create(info) else persistence.update(info)
         }
-        val failure = result.exceptionOrNull()
-        if (failure != null) {
-            pendingConfig = null
-            saveState = SaveState.Idle
-            // 落盘失败（读不到 config.toml / 加密失败…）：同一套友好文案出口。
-            saveError = kafkaErrorText(failure)
-            return
-        }
-        pendingConfig = null
-        saveState = SaveState.Idle
-        savedCallback?.invoke()
     }
 
-    // 真正的存储槽；接口默认实现的 setter 是空操作，不持有它的话宿主赋值会被丢掉。
-    private var savedCallback: (() -> Unit)? = null
-
-    override var onSaved: (() -> Unit)?
-        get() = savedCallback
-        set(value) { savedCallback = value }
-
-    /** 面板内容；布局与动态显示见 [KafkaConnectionFormContent]。 */
     @Composable
     override fun Content() = KafkaConnectionFormContent(this)
 }

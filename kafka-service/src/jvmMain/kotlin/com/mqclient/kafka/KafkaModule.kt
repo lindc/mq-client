@@ -47,7 +47,9 @@ internal const val OBJECTS_FIRST_DELAY_MS = 5_000L
  * broker 短暂不答是常事，下一次就好 —— 判死一条健康连接比多等几轮代价大得多。
  * 为什么不是更大：真正断网 / 凭据失效也该在半分钟内于侧边栏变红。
  */
-internal const val SCAN_FAILURE_THRESHOLD = 3
+// 单一来源：实际阈值定义在基类（mq-base 的 AbstractConnectionManager）。
+internal const val SCAN_FAILURE_THRESHOLD: Int =
+    com.mqclient.mq.base.AbstractConnectionManager.SCAN_FAILURE_THRESHOLD
 
 /**
  * Kafka 模块的初始化入口 —— **显式连接模型**（与 ibm-mq 的 IbmMQModule 同构）。

@@ -1,8 +1,7 @@
 package com.mqclient.ibmmq
 
 import com.ibm.mq.MQQueueManager
-import com.mqclient.core.ConnectionStatus
-import com.mqclient.core.cache.CacheManager
+import com.mqclient.mq.base.AbstractConnectionContext
 import kotlinx.coroutines.sync.Mutex
 
 /**
@@ -26,29 +25,13 @@ import kotlinx.coroutines.sync.Mutex
  * 换快照，后者更简单。
  */
 class IbmMQConnectionContext(
-    val connectionId: String,
-    @Volatile
-    var config: IbmMQConfig,
-) {
-
-    /** 连接状态；写入口在 [IbmMQConnectionManager.setStatus]（同时上报核心）。 */
-    @Volatile
-    var status: ConnectionStatus = ConnectionStatus.Disconnected
+    connectionId: String,
+    config: IbmMQConfig,
+) : AbstractConnectionContext<IbmMQConfig>(connectionId, config) {
 
     /** 连接成功后的 MQ 句柄；断开 / 失败 / 未连接时为 null。 */
     @Volatile
     var mqConnection: MQQueueManager? = null
-
-    /** 最近一次失败的原因（连接或扫描），UI 可以展示；成功连接时清空。 */
-    @Volatile
-    var lastError: String? = null
-
-    /**
-     * 本连接专属的缓存实例：**连接成功时才创建**，断开时清空并置 null ——
-     * 「没连上就没有数据」在缓存层也成立。扫描链路写、读入口只读缓存不碰 MQ。
-     */
-    @Volatile
-    var cache: CacheManager? = null
 
     /**
      * 该连接 **MQI 调用的唯一互斥锁**：PCF 扫描（慢扫 / 心跳 / 单对象查询 / MQSC 控制台）
@@ -71,13 +54,12 @@ class IbmMQConnectionContext(
     val mqiLock: Mutex = Mutex()
 
     /**
-     * 断开 / 删除时的清理：清空 cache、丢弃 MQ 句柄引用。
-     * MQ 句柄的 disconnect、定时任务的取消由 [IbmMQConnectionManager] 负责
-     * （「谁创建谁清理」：句柄是它连的，任务是它注册的）。
+     * 断开 / 删除时的清理：丢弃 MQ 句柄引用；缓存与失败计数由基类
+     * [AbstractConnectionContext.cleanup] 处理（句柄的 disconnect 由 manager 的
+     * closeResources 负责 —— 「谁创建谁清理」）。
      */
-    fun cleanup() {
-        cache?.clear()
-        cache = null
+    override fun cleanup() {
         mqConnection = null
+        super.cleanup()
     }
 }

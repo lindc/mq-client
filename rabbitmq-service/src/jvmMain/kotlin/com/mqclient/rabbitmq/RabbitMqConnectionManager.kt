@@ -2,183 +2,110 @@ package com.mqclient.rabbitmq
 
 import com.mqclient.core.ConnectionInfo
 import com.mqclient.core.ConnectionStatus
-import com.mqclient.core.ConnectionStore
-import com.mqclient.core.cache.CacheManager
-import com.mqclient.core.concurrent.KeyedMutex
 import com.mqclient.core.scheduler.ScheduledJob
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.emit
+import com.mqclient.mq.base.AbstractConnectionManager
 import com.rabbitmq.client.Connection
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /**
- * RabbitMQ 连接的生命周期管理：**显式连接模型**的中枢，与 KafkaConnectionManager 同构。
+ * RabbitMQ 连接的生命周期管理：**显式连接模型**的中枢。
  *
- *  - 程序启动 / `connection.added` 只 [ensureContext] —— 登记 DISCONNECTED 上下文，
- *    **不连接**；
- *  - 用户显式动作才 [connect]：建管理 API 客户端 → `GET /api/overview` 验证连通 →
- *    建 cache → 按配置间隔注册扫描任务（对象慢扫 + 状态快扫）→ 报 CONNECTED；
- *  - [disconnectNow] / 删除 / 模块关闭：取消扫描任务 → 关 HTTP 客户端 → 清缓存 →
- *    报 DISCONNECTED。状态事实同时喂 `ConnectionStore.reportStatus`（侧边栏）与
- *    [RabbitMqConnectionContext.status]（模块内守卫），见 [setStatus]。
+ * 生命周期模板（状态机 / 每连接锁 / 事件 / 扫描任务 / 连续失败阈值与自愈）全部在
+ * [AbstractConnectionManager]，本类只提供 RabbitMQ 特有部分：
  *
- * 并发：同一连接的 connect / disconnect / 删除用**每连接一把 [Mutex]** 串行；
- * 不同连接互不阻塞。
+ *  - [open]：建管理 API 客户端 + `GET /api/overview` 验证（顺带拿集群元信息）；
+ *  - [closeResources]：关管理 API 客户端 + 共享 AMQP 连接（后者带 3s 超时，失败 abort 兜底）；
+ *  - [amqpConnection]：**懒建**共享 AMQP 连接（消息浏览 / 发送共用），走 [withConnectionLock]。
  *
- * 与 Kafka 的差异：没有惰性句柄——HttpClient 建立本身不连网，「验证连通」就是
- * 第一次真实请求（overview）。超时由 [RabbitMqAdminClient] 内的 HttpTimeout 兜底。
- * 第一阶段无常驻 AMQP 连接（消息收发在后续阶段引入，届时这里挂第二个句柄）。
+ * 与 Kafka 的差异：没有惰性句柄 —— HttpClient 建立本身不连网，「验证连通」就是第一次
+ * 真实请求（overview）。`connect()` 不建 AMQP 连接：只想看队列列表的用户不该为一次
+ * AMQP 握手买单，也不该承担 AMQP 失败风险。
  */
 class RabbitMqConnectionManager(
-    private val context: ServiceContext,
+    context: ServiceContext,
     private val service: RabbitMqScanService,
-) {
+) : AbstractConnectionManager<RabbitMqConnectionContext>(context, MODULE_ID) {
 
-    private val contexts = java.util.concurrent.ConcurrentHashMap<String, RabbitMqConnectionContext>()
-    private val locks = KeyedMutex()
+    /* ------------------------------ 基类钩子 ------------------------------ */
 
-    /* ------------------------------ 查询 ------------------------------ */
+    override fun createContext(connectionId: String, connection: ConnectionInfo): RabbitMqConnectionContext =
+        RabbitMqConnectionContext(connectionId, rabbitMqConfigFromOptions(connection.options))
 
-    fun contextOrNull(connectionId: String): RabbitMqConnectionContext? = contexts[connectionId]
-
-    fun allContexts(): List<RabbitMqConnectionContext> = contexts.values.toList()
-
-    /* ------------------------------ 登记与注销 ------------------------------ */
-
-    /**
-     * 建立（或取回）一条连接的 DISCONNECTED 上下文：启动补登记与 `connection.added`
-     * 共用。**只登记，不连接** —— HTTP 客户端留给 [connect]。
-     */
-    fun ensureContext(connection: ConnectionInfo): RabbitMqConnectionContext {
-        var created = false
-        val ctx = contexts.compute(connection.id) { id, existing ->
-            if (existing == null) created = true
-            existing ?: RabbitMqConnectionContext(id, rabbitMqConfigFromOptions(connection.options))
-        }!!
-        rabbitMqLog.debug(
-            "context ${if (created) "created" else "reused"}: connection=${connection.id} " +
-                "host=${ctx.config.host}:${ctx.config.managementPort} vhost=${ctx.config.vhost}",
-        )
-        return ctx
-    }
-
-    /**
-     * `connection.updated`：换配置快照。已连接 / 连接中的先断开 —— 配置变了继续用
-     * 旧连接没有意义，下次显式连接自然用新配置。
-     */
-    fun updateContextConfig(connection: ConnectionInfo) {
-        val ctx = contexts[connection.id] ?: run {
-            rabbitMqLog.debug("config update ignored (no context): connection=${connection.id}")
-            return
-        }
+    override fun applyConfig(ctx: RabbitMqConnectionContext, connection: ConnectionInfo) {
         ctx.config = rabbitMqConfigFromOptions(connection.options)
-        rabbitMqLog.debug(
-            "context config updated: connection=${connection.id} host=${ctx.config.host}:${ctx.config.managementPort}",
-        )
-        if (ctx.status == ConnectionStatus.Connected || ctx.status == ConnectionStatus.Connecting) {
-            rabbitMqLog.info(
-                "disconnecting active connection for config update: connection=${connection.id} status=${ctx.status}",
-            )
-            disconnectAsync(connection.id, reason = "config updated")
-        }
     }
 
-    /** `connection.deleted`：断开 + 摘除上下文。 */
-    fun remove(connectionId: String) {
-        rabbitMqLog.debug("connection remove requested: connection=$connectionId")
-        context.coroutineScope.launch {
-            disconnectNow(connectionId, reason = "connection deleted")
-            contexts.remove(connectionId)
-            // 锁不用手工清：KeyedMutex 在最后一个持有者离开时自己裁剪条目。
-            // （原先这里有 locks.remove —— 那把 Map 只增不减，才需要补这一步。）
-        }
-    }
+    override fun describe(ctx: RabbitMqConnectionContext): String =
+        "host=${ctx.config.host}:${ctx.config.managementPort} vhost=${ctx.config.vhost}"
 
-    /* ------------------------------ 连接 / 断开 ------------------------------ */
+    override suspend fun open(ctx: RabbitMqConnectionContext) {
+        val (admin, clusterInfo) = createVerifiedAdmin(ctx.config)
+        ctx.admin = admin
+        ctx.pendingClusterInfo = clusterInfo
+    }
 
     /**
-     * 显式建立连接。DISCONNECTED / FAILED 才真正发起；CONNECTED 直接复用；
-     * CONNECTING 忽略重复触发。连接成功后报 CONNECTED。
+     * 集群元信息（clusterName / 版本 / 节点）随建连验证顺带入缓存 —— 概览页顶部
+     * 从这里读，不再单独发请求。永不过期（TTL 0）：生命周期由整个缓存托管（断开即清）。
+     *
+     * 放在 [onConnected] 而不是 [open]：基类在 open 之后才创建 cache。
      */
-    suspend fun connect(connectionId: String): Result<Unit> = locks.withLock(connectionId) {
-        val ctx = contexts[connectionId]
-            ?: return@withLock Result.failure(IllegalStateException("连接 $connectionId 未登记"))
-        when (ctx.status) {
-            ConnectionStatus.Connected -> return@withLock Result.success(Unit)
-            ConnectionStatus.Connecting -> {
-                rabbitMqLog.info("connect ignored (already connecting): connection=$connectionId")
-                return@withLock Result.failure(IllegalStateException("连接正在进行中"))
-            }
-            else -> Unit
-        }
-
-        val start = System.currentTimeMillis()
-        rabbitMqLog.debug(
-            "connect start: connection=$connectionId host=${ctx.config.host}:${ctx.config.managementPort} " +
-                "vhost=${ctx.config.vhost} timeout=${ctx.config.connectionTimeout}s",
-        )
-        // FAILED 状态下可能残留坏句柄：先悄悄扔掉，connect 只管建新的。
-        closeQuietly(ctx)
-
-        setStatus(ctx, ConnectionStatus.Connecting)
-        ctx.lastError = null
-        try {
-            val (admin, clusterInfo) = createVerifiedAdmin(ctx.config)
-            ctx.admin = admin
-            // 缓存与扫描任务只属于活连接（与 kafka / ibm-mq 同一生命周期）。
-            ctx.cache = CacheManager()
-            // 集群元信息（clusterName / 版本 / 节点）随建连验证顺带入缓存 —— 概览页
-            // 顶部的集群信息从这里读，不再单独发请求。永不过期（TTL 0）：生命周期
-            // 由整个缓存托管（断开即清）。
-            ctx.cache?.put(KEY_CLUSTER_INFO, clusterInfo, ttlMs = 0L)
-            setStatus(ctx, ConnectionStatus.Connected)
-            registerScanJobs(ctx)
-            context.emit(RabbitMqEvents.CONNECTED, mapOf("connectionId" to connectionId))
-            rabbitMqLog.info(
-                "connected: connection=$connectionId host=${ctx.config.host}:${ctx.config.managementPort} " +
-                    "duration=${System.currentTimeMillis() - start}ms",
-            )
-            Result.success(Unit)
-        } catch (error: Throwable) {
-            // 取消（模块 shutdown 等）必须原样上抛，否则取消语义被吞。
-            if (error is CancellationException) throw error
-            ctx.admin = null
-            ctx.lastError = errorMessage(error)
-            setStatus(ctx, ConnectionStatus.Failed)
-            context.emit(
-                name = RabbitMqEvents.CONNECT_FAILED,
-                payload = mapOf("connectionId" to connectionId, "message" to ctx.lastError),
-            )
-            rabbitMqLog.warn(
-                "connect failed: connection=$connectionId reason=${ctx.lastError} " +
-                    "duration=${System.currentTimeMillis() - start}ms",
-            )
-            Result.failure(error)
-        }
+    override suspend fun onConnected(ctx: RabbitMqConnectionContext) {
+        val info = ctx.pendingClusterInfo ?: return
+        ctx.pendingClusterInfo = null
+        ctx.cache?.put(KEY_CLUSTER_INFO, info, ttlMs = 0L)
     }
+
+    override suspend fun onBeforeDisconnect(ctx: RabbitMqConnectionContext) {
+        service.cancelScan(ctx.connectionId)
+        RabbitMqModule.clearScanFailures(ctx.connectionId)
+    }
+
+    override fun isHandlePresent(ctx: RabbitMqConnectionContext): Boolean = ctx.admin != null
+
+    override val connectedEvent: String = RabbitMqEvents.CONNECTED
+    override val connectFailedEvent: String = RabbitMqEvents.CONNECT_FAILED
+    override val disconnectedEvent: String = RabbitMqEvents.DISCONNECTED
+
+    /**
+     * 状态快扫（runOnStart）+ 对象慢扫（晚 5 秒起步，把首拍让给快扫）。
+     * 间隔来自用户建连接时的配置，**不硬编码**。
+     */
+    override fun scanJobs(ctx: RabbitMqConnectionContext): List<ScheduledJob> {
+        val config = ctx.config
+        return listOf(
+            ScheduledJob(
+                id = ScheduledJob.idFor(MODULE_ID, ctx.connectionId, JOB_SCAN_STATUS),
+                intervalMs = config.statusScanIntervalSeconds * 1_000L,
+                runOnStart = true,
+                action = { service.scanStatus(ctx.connectionId) },
+            ),
+            ScheduledJob(
+                id = ScheduledJob.idFor(MODULE_ID, ctx.connectionId, JOB_SCAN_OBJECTS),
+                intervalMs = config.objectScanIntervalMinutes * 60_000L,
+                initialDelayMs = OBJECTS_FIRST_DELAY_MS,
+                action = { service.scanObjects(ctx.connectionId) },
+            ),
+        )
+    }
+
+    /* ------------------------------ 模块特有 ------------------------------ */
 
     /**
      * 「测试连接」：用给定配置发起一次**临时连接**（overview 验证后立刻关掉，不影响
-     * 任何正式连接的状态），失败抛异常 —— 成功返回即连通。成功路径也必须关：句柄是
-     * 这里建的，丢弃不关等于每次测试泄漏一个客户端。
+     * 任何正式连接的状态），失败抛异常 —— 成功返回即连通。
      */
     suspend fun testConnection(config: RabbitMqConfig) {
         val (admin, _) = createVerifiedAdmin(config)
         try {
             admin.close()
         } catch (error: Throwable) {
-            rabbitMqLog.warn("test connection close failed: error=$error")
+            log.warn("test connection close failed: error=$error")
         }
-    }
-
-    /** UI / 删除链路的入口：fire-and-forget，结果走状态上报与事件，不阻塞点击。 */
-    fun disconnectAsync(connectionId: String, reason: String? = null) {
-        context.coroutineScope.launch { disconnectNow(connectionId, reason) }
     }
 
     /**
@@ -186,27 +113,24 @@ class RabbitMqConnectionManager(
      *
      * 设计要点：
      *
-     *  1. **懒建**：`connect()` 不建它。只想看队列列表的用户不必为一次 AMQP 握手买单，
-     *     也不承担 AMQP 失败风险。首次读 / 发消息才建。
+     *  1. **懒建**：[connect] 不建它（理由见类 KDoc）。
      *  2. **判死整条连接**（产品决定）：AMQP 建不起来时把连接置 `Failed` 并发
-     *     `CONNECT_FAILED`。理由：管理 API 能连但 AMQP 连不上，通常意味着端口 / 证书 /
-     *     权限配置里有一项是错的 —— 把它当「只是消息读不了」会让用户以为连接健康，
-     *     反而更难定位。
+     *     `CONNECT_FAILED`。管理 API 能连但 AMQP 连不上，通常意味着端口 / 证书 /
+     *     权限配置里有一项是错的。
      *  3. **双检锁**：两个对话框同时首开只建一条物理连接。
      *  4. 超时全部由 [rabbitMqConnectionFactory] 提供（握手 10s、shutdown 3s、
      *     channel RPC 5s），这里不再叠协程层 `withTimeout`。
-     *  5. **死连接必须关掉再覆盖**（见下方 `stale`）：`ctx.amqp` 可能指向一条
-     *     `isOpen == false` 的连接（broker 重启 / 心跳超时 / 网络中断）。直接
-     *     `ctx.amqp = created` 会让那条旧连接**永远失去引用** —— 它的 socket、
-     *     心跳线程、SSL 上下文再也没人能释放，反复重连就是稳定泄漏。
+     *  5. **死连接必须关掉再覆盖**（见 `stale`）：`ctx.amqp` 可能指向一条 `isOpen == false`
+     *     的连接。直接覆盖会让旧连接**永远失去引用** —— socket、心跳线程、SSL 上下文
+     *     再也没人能释放，反复重连就是稳定泄漏。
      *
      * 抛出的异常已转成人类可读文案（[mapAmqpOpenError]），由调用方转「加载失败」。
      */
     suspend fun amqpConnection(ctx: RabbitMqConnectionContext): Connection {
         ctx.amqp?.takeIf { it.isOpen }?.let { return it }
-        return locks.withLock(ctx.connectionId) {
+        return withConnectionLock(ctx.connectionId) {
             // 双检：排队期间可能已被另一个调用方建好。
-            ctx.amqp?.takeIf { it.isOpen }?.let { return@withLock it }
+            ctx.amqp?.takeIf { it.isOpen }?.let { return@withConnectionLock it }
 
             // 走到这里说明旧连接不存在或已死。先取出来：新连接建好之后要负责把它关掉。
             val stale = ctx.amqp
@@ -222,28 +146,22 @@ class RabbitMqConnectionManager(
                     // **只关已死的**。isOpen 为真的连接说明它还在为我们工作，
                     // 关掉会把正在读消息的对话框一起断掉。
                     if (!stale.isOpen) {
-                        rabbitMqLog.info(
-                            "disposing stale amqp connection before replacing: " +
-                                "connection=${ctx.connectionId}",
-                        )
+                        log.info("disposing stale amqp connection before replacing: connection=${ctx.connectionId}")
                         runCatching { withContext(Dispatchers.IO) { stale.close(AMQP_SHUTDOWN_TIMEOUT_MS) } }
                             .onFailure { e ->
                                 // close 失败要 abort 兜底：否则 socket 会留在半开 / TIME_WAIT。
                                 runCatching { stale.abort() }
-                                rabbitMqLog.warn(
+                                log.warn(
                                     "stale amqp connection close failed (aborted): " +
                                         "connection=${ctx.connectionId} error=$e",
                                 )
                             }
                     } else {
-                        rabbitMqLog.debug(
-                            "skipping stale connection disposal (still open): " +
-                                "connection=${ctx.connectionId}",
-                        )
+                        log.debug("skipping stale connection disposal (still open): connection=${ctx.connectionId}")
                     }
                 }
 
-                rabbitMqLog.debug(
+                log.debug(
                     "amqp connection opened (lazy): connection=${ctx.connectionId} " +
                         "host=${ctx.config.host}:${ctx.config.amqpPort}",
                 )
@@ -258,93 +176,17 @@ class RabbitMqConnectionManager(
                     name = RabbitMqEvents.CONNECT_FAILED,
                     payload = mapOf("connectionId" to ctx.connectionId, "message" to reason),
                 )
-                rabbitMqLog.warn("amqp connection failed: connection=${ctx.connectionId} reason=$reason")
+                log.warn("amqp connection failed: connection=${ctx.connectionId} reason=$reason")
                 throw mapAmqpOpenError(error, ctx.config)
             }
         }
-    }
-
-    /**
-     * 断开：取消该连接全部定时任务 → 关 HTTP 客户端 → 清缓存 → 状态回 DISCONNECTED。
-     * 已经是 DISCONNECTED 时是空操作（重复点「断开」无副作用）。
-     */
-    suspend fun disconnectNow(connectionId: String, reason: String? = null) =
-        locks.withLock(connectionId) {
-            val ctx = contexts[connectionId] ?: return@withLock
-            if (ctx.status == ConnectionStatus.Disconnected) return@withLock
-
-            unregisterScanJobs(connectionId)
-            // 手动刷新（UI 按钮）的协程也要收：它占着该连接的 scanLocks，句柄又要关了。
-            service.cancelScan(connectionId)
-            // 「部分数据未刷新」的旧结论不能诈尸到重连后（新连接可能权限不同）。
-            RabbitMqModule.clearScanFailures(connectionId)
-            closeQuietly(ctx)
-            ctx.cleanup()
-            setStatus(ctx, ConnectionStatus.Disconnected)
-            context.emit(
-                name = RabbitMqEvents.DISCONNECTED,
-                payload = mapOf("connectionId" to connectionId, "reason" to (reason ?: "")),
-            )
-            rabbitMqLog.info("disconnected: connection=$connectionId reason=${reason ?: "user"}")
-        }
-
-    /** 模块销毁：全部连接断开 + 注册表清空（顺序：先断连接再摘表）。 */
-    suspend fun shutdownAll() {
-        rabbitMqLog.info("shutdown all connections: count=${contexts.size}")
-        contexts.keys.toList().forEach { disconnectNow(it, reason = "module shutdown") }
-        contexts.clear()
-        // 锁不用手工清：KeyedMutex 在最后一个持有者离开时自己裁剪条目。
-    }
-
-    /* ------------------------------ 定时任务 ------------------------------ */
-
-    /**
-     * 按配置注册两条扫描任务（与 kafka 的 registerScanJobs 同构）—— 间隔来自用户
-     * 建连接时的配置，**不再硬编码**：
-     *  - 状态快扫：`statusScanIntervalSeconds`（默认 10 秒），runOnStart 立即首拍；
-     *  - 对象慢扫：`objectScanIntervalMinutes`（默认 5 分钟），晚 5 秒起步，把首拍
-     *    让给快扫。
-     *
-     * 幂等：同 ID 重复注册会顶掉旧的（见 JobScheduler），重连时直接重注册即可。
-     */
-    private fun registerScanJobs(ctx: RabbitMqConnectionContext) {
-        val scheduler = context.jobScheduler
-        val config = ctx.config
-        scheduler.schedule(
-            ScheduledJob(
-                id = ScheduledJob.idFor(MODULE_ID, ctx.connectionId, JOB_SCAN_STATUS),
-                intervalMs = config.statusScanIntervalSeconds * 1_000L,
-                runOnStart = true,
-                action = { service.scanStatus(ctx.connectionId) },
-            ),
-        )
-        scheduler.schedule(
-            ScheduledJob(
-                id = ScheduledJob.idFor(MODULE_ID, ctx.connectionId, JOB_SCAN_OBJECTS),
-                intervalMs = config.objectScanIntervalMinutes * 60_000L,
-                initialDelayMs = OBJECTS_FIRST_DELAY_MS,
-                action = { service.scanObjects(ctx.connectionId) },
-            ),
-        )
-        rabbitMqLog.info(
-            "scan jobs registered: connection=${ctx.connectionId} " +
-                "status=${config.statusScanIntervalSeconds}s objects=${config.objectScanIntervalMinutes}min",
-        )
-    }
-
-    /** 按前缀收掉该连接的全部定时任务（连接断开 / 删除）。 */
-    private fun unregisterScanJobs(connectionId: String) {
-        rabbitMqLog.debug("scan jobs unregistering: connection=$connectionId")
-        context.jobScheduler.cancelByPrefix(ScheduledJob.prefixFor(MODULE_ID, connectionId))
     }
 
     /* ------------------------------ 内部 ------------------------------ */
 
     /**
      * 建管理 API 客户端并用 `GET /api/overview` 验证连通性（认证 + 地址 + vhost 一次
-     * 验完）。失败（含取消）时自己把刚建的客户端关掉再抛，成功时把客户端与集群元
-     * 信息（clusterName / 版本 / 节点）一起交给调用方。错误文案已在
-     * [RabbitMqAdminClient] 里转成人类可读。
+     * 验完）。失败（含取消）时自己把刚建的客户端关掉再抛。
      */
     private suspend fun createVerifiedAdmin(
         config: RabbitMqConfig,
@@ -358,7 +200,7 @@ class RabbitMqConnectionManager(
                 rabbitmqVersion = overview.rabbitmqVersion,
                 node = overview.node,
             )
-            rabbitMqLog.info(
+            log.info(
                 "management api verified: cluster=${info.clusterName} " +
                     "rabbitmq=${info.rabbitmqVersion} node=${info.node}",
             )
@@ -369,74 +211,14 @@ class RabbitMqConnectionManager(
         }
     }
 
-    /** 状态双写：模块内守卫（ctx.status）+ 核心事实（reportStatus → 侧边栏）。 */
-    private fun setStatus(ctx: RabbitMqConnectionContext, status: ConnectionStatus) {
-        ctx.status = status
-        ConnectionStore.reportStatus(ctx.connectionId, status, MODULE_ID)
-    }
-
     /**
-     * 定时扫描的一次失败：**连续** [SCAN_FAILURE_THRESHOLD] 次才把连接判为 Failed。
-     *
-     * 单次失败不再判死（旧行为）：管理 API 经代理时常会撞上被回收的空闲 socket，
-     * 那是一次可恢复的请求失败，不是连接死亡。只有连续多轮都读不通才当作真断。
-     *
-     * 返回 true 表示这次失败**触发了**状态翻转（用于日志区分「记了一笔」与「判死了」）。
-     */
-    fun onScanFailed(connectionId: String, message: String): Boolean {
-        val ctx = contexts[connectionId] ?: return false
-        // 没有客户端就是真的没连接（或已断开），交给 connect 路径，不走阈值。
-        if (ctx.admin == null) return false
-        val failures = ctx.recordScanFailure()
-        if (failures < SCAN_FAILURE_THRESHOLD) {
-            rabbitMqLog.info(
-                "scan failure tolerated: connection=$connectionId " +
-                    "consecutive=$failures/$SCAN_FAILURE_THRESHOLD reason=$message",
-            )
-            return false
-        }
-        if (ctx.status == ConnectionStatus.Failed) return false
-        ctx.lastError = message
-        setStatus(ctx, ConnectionStatus.Failed)
-        rabbitMqLog.warn(
-            "connection marked FAILED after $failures consecutive scan failures: " +
-                "connection=$connectionId reason=$message",
-        )
-        return true
-    }
-
-    /**
-     * 定时扫描成功：计数归零；如果之前被判为 Failed（但客户端还在），**自动恢复**
-     * 成 Connected。
-     *
-     * 这是整套修复的自愈环节：判死之后扫描仍会继续跑（扫描入口只看客户端在不在，
-     * 不看 status），所以第一次成功就是恢复时机 —— 不需要用户手点重连，也不需要
-     * 额外的定时器。
-     */
-    fun onScanSucceeded(connectionId: String) {
-        val ctx = contexts[connectionId] ?: return
-        val previous = ctx.scanFailureCount()
-        ctx.resetScanFailures()
-        if (ctx.status == ConnectionStatus.Failed && ctx.admin != null) {
-            ctx.lastError = null
-            setStatus(ctx, ConnectionStatus.Connected)
-            rabbitMqLog.info(
-                "connection recovered after $previous consecutive scan failures: connection=$connectionId",
-            )
-        }
-    }
-
-    private fun lockFor(connectionId: String): KeyedMutex = locks
-
-    /**
-     * 关掉本连接的两类句柄：管理 API 客户端与共享 AMQP 连接。切到 IO 线程；失败只记
-     * 日志 —— 断开路径不能被一个关不掉的句柄中断。
+     * 关掉本连接的两类句柄：管理 API 客户端与共享 AMQP 连接。
      *
      * AMQP 用 `close(AMQP_SHUTDOWN_TIMEOUT_MS)`（≤3s）而不是无参 `close()`：后者等
      * close-ok 的默认上限是 **10 秒**，broker 不应答时断开路径会卡住整整 10s ——
      * 这正是「点关闭没反应」的形态之一。
      */
-    private suspend fun closeQuietly(ctx: RabbitMqConnectionContext) {
+    override suspend fun closeResources(ctx: RabbitMqConnectionContext) {
         val admin = ctx.admin
         val amqp = ctx.amqp
         ctx.admin = null
@@ -444,26 +226,20 @@ class RabbitMqConnectionManager(
         if (admin != null) {
             try {
                 withContext(Dispatchers.IO) { admin.close() }
-                rabbitMqLog.debug("management api client closed: connection=${ctx.connectionId}")
+                log.debug("management api client closed: connection=${ctx.connectionId}")
             } catch (error: Throwable) {
-                rabbitMqLog.warn("management api client close failed: connection=${ctx.connectionId} error=$error")
+                log.warn("management api client close failed: connection=${ctx.connectionId} error=$error")
             }
         }
         if (amqp != null) {
             try {
                 withContext(Dispatchers.IO) { amqp.close(AMQP_SHUTDOWN_TIMEOUT_MS) }
-                rabbitMqLog.debug("amqp connection closed: connection=${ctx.connectionId}")
+                log.debug("amqp connection closed: connection=${ctx.connectionId}")
             } catch (error: Throwable) {
                 // close 失败要 abort 兜底：否则底层 socket 会留在 TIME_WAIT / 半开状态。
                 runCatching { amqp.abort() }
-                rabbitMqLog.warn("amqp connection close failed (aborted): connection=${ctx.connectionId} error=$error")
+                log.warn("amqp connection close failed (aborted): connection=${ctx.connectionId} error=$error")
             }
         }
     }
-
-    /** 给用户的失败原因：RabbitMqAdminClient 的 IllegalStateException 已是可读文案，直接取 message。 */
-    private fun errorMessage(error: Throwable): String =
-        error.message
-            ?: error::class.simpleName
-            ?: "unknown"
 }

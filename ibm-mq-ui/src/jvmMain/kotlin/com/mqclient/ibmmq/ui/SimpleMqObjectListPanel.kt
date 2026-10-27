@@ -28,6 +28,7 @@ import com.mqclient.mqui.objectlist.ObjectListPanel
 import com.mqclient.mqui.state.LoadStateContent
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
+import com.mqclient.mqui.common.rememberDebouncedValue
 
 /**
  * 「简单对象」的声明式配置：这类对象没有队列深度 / 运行状态 / 启停这类强类型语义，
@@ -108,6 +109,7 @@ fun SimpleMqObjectListPanel(
     onOpenProperties: (String) -> Unit = {},
 ) {
     var searchText by remember { mutableStateOf("") }
+    val appliedSearch = rememberDebouncedValue(searchText)
     var showSystem by remember { mutableStateOf(false) }
     // 对象属性对话框（双击卡片 / 属性按钮打开；统一入口持有状态与渲染）。
     val propertiesController = rememberObjectPropertiesDialogController(connectionId)
@@ -133,7 +135,7 @@ fun SimpleMqObjectListPanel(
         emptyCheck = { false },
         content = { objects ->
             val filtered = objects
-                .filter { it.name.contains(searchText, ignoreCase = true) }
+                .filter { it.name.contains(appliedSearch, ignoreCase = true) }
                 .filter { showSystem || !isSystemObject(it.name) }
             ObjectListPanel(
                 items = filtered.map { obj ->

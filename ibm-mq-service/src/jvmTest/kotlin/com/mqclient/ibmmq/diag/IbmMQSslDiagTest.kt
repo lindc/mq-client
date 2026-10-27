@@ -8,6 +8,7 @@ import javax.net.ssl.KeyManagerFactory
 import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManagerFactory
 import kotlin.test.Test
+import com.mqclient.testing.assumeLive
 
 /**
  * IBM MQ SSL 连接的最小基准测试（无 UI、无项目依赖，只隔离验证 TLS 链路）。
@@ -73,10 +74,12 @@ class IbmMQSslDiagTest {
 
     @Test
     fun connect() {
-        if (!prop("enabled", "false").toBoolean()) {
-            println("IbmMQSslDiagTest skipped — set -Dmqdiag.enabled=true to run against a real queue manager")
-            return
-        }
+        // 默认不连远端 = SKIP（不是 PASSED）：否则 CI 报告里这个「诊断测试」
+        // 永远是绿的，看不出它其实一次都没跑。
+        assumeLive(
+            "IbmMQSslDiagTest skipped — set -Dmqdiag.enabled=true to run against a real queue manager",
+            prop("enabled", "false").toBoolean(),
+        )
         val cfg = props()
 
         // javax.net.debug 必须在任何 JSSE 类加载前设置；gradle 每次跑测试都是新 JVM，

@@ -53,7 +53,9 @@ internal const val OBJECTS_FIRST_DELAY_MS = 5_000L
  * 连接比多等 30s 代价大得多。为什么不是更大：真正断网 / 凭据失效也应该在半分钟内
  * 在侧边栏变红。
  */
-internal const val SCAN_FAILURE_THRESHOLD = 3
+// 单一来源：实际阈值定义在基类（mq-base 的 AbstractConnectionManager）。
+internal const val SCAN_FAILURE_THRESHOLD: Int =
+    com.mqclient.mq.base.AbstractConnectionManager.SCAN_FAILURE_THRESHOLD
 
 /**
  * RabbitMQ 模块的初始化入口 —— **显式连接模型**（与 kafka / ibm-mq 同构）。

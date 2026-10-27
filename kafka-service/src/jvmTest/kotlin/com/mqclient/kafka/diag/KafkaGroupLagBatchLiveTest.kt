@@ -19,6 +19,8 @@ import org.apache.kafka.clients.admin.ListConsumerGroupOffsetsOptions
 import org.apache.kafka.clients.admin.ListConsumerGroupOffsetsSpec
 import org.apache.kafka.clients.admin.ListConsumerGroupsOptions
 import org.apache.kafka.common.TopicPartition
+import com.mqclient.testing.assumeLive
+import com.mqclient.testing.assumeNotNull
 
 /**
  * 真机验证：`KafkaScanService.scanAllGroupLags` 的**批量**取位点真的成立，且不比逐组
@@ -39,16 +41,17 @@ class KafkaGroupLagBatchLiveTest {
 
     @Test
     fun liveBatchedGroupOffsetsMatchSerial() = runBlocking {
-        val info = ConnectionStore.connections.value.firstOrNull { it.serviceId == "kafka" }
-        if (info == null) {
-            println("LIVE SKIP: config.toml 里没有 Kafka 连接")
-            return@runBlocking
-        }
+        // 无环境 = SKIP（assumption），不是 PASSED —— 见 test-support 的
+        // LiveTestAssumptions：旧写法 return 之后 JUnit 记的是「通过」，CI 永远绿。
+        val info = assumeNotNull(
+            "LIVE SKIP: config.toml 里没有 Kafka 连接",
+            ConnectionStore.connections.value.firstOrNull { it.serviceId == "kafka" },
+        )
         val config = kafkaConfigFromOptions(info.options)
-        if (!config.truststoreAvailable()) {
-            println("LIVE SKIP: 信任库不存在，本机连不上该集群：${config.truststorePath}")
-            return@runBlocking
-        }
+        assumeLive(
+            "LIVE SKIP: 信任库不存在，本机连不上该集群：${config.truststorePath}",
+            config.truststoreAvailable(),
+        )
         val timeoutMs = config.connectionTimeout * 1_000L
         println("=========== KAFKA GROUP LAG BATCH DIAG ===========")
         println("  bootstrap = ${config.bootstrapServers}")
@@ -64,10 +67,8 @@ class KafkaGroupLagBatchLiveTest {
                     .sorted()
             }
             println("  集团数 = ${groupIds.size}: $groupIds")
-            if (groupIds.isEmpty()) {
-                println("LIVE SKIP: 集群上没有任何消费组，无法比较两种取法")
-                return@runBlocking
-            }
+            // 在 try 里：assumption 异常会穿出 finally 正常关 admin 后再被 JUnit 记为 skipped。
+            assumeLive("LIVE SKIP: 集群上没有任何消费组，无法比较两种取法", groupIds.isNotEmpty())
 
             val serialStart = System.currentTimeMillis()
             val serial = serialOffsets(admin, groupIds, timeoutMs)

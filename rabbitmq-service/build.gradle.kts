@@ -29,6 +29,8 @@ kotlin {
             implementation(libs.kotlinx.serialization.json)
         }
         jvmTest.dependencies {
+            // JUnit assumption 包装：LiveTest 无环境时记 SKIP 而不是 PASSED。
+            implementation(projects.testSupport)
             implementation(kotlin("test"))
             // 管理 API 写操作契约测试：MockEngine 替换真实网络（不碰集群）。
             implementation(libs.ktor.client.mock)

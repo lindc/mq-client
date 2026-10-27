@@ -38,6 +38,9 @@ include(
     ":ui-common",
     // Compose UI 测试工具（画布手势 / 语义定位），各 UI 模块 jvmTest 共用。
     ":ui-test-kit",
+    // 测试辅助件（JUnit assumption 包装）：各 service 模块的 LiveTest / DiagTest 共用，
+    // 让「没有测试环境」记成 SKIP 而不是 PASSED（见 LiveTestAssumptions.kt）。
+    ":test-support",
     // AI 核心层（契约 + 基建 + 注册表），不认识任何具体 provider。
     ":ai-core",
     // 每个 provider 一个模块，平级：删掉某个 provider 不影响 AI 栈其余部分。

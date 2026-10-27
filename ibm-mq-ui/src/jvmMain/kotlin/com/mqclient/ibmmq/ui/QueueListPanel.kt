@@ -22,6 +22,7 @@ import com.mqclient.mqui.state.LoadStateContent
 import com.mqclient.uicommon.LocalAiAsk
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
+import com.mqclient.mqui.common.rememberDebouncedValue
 
 /**
  * 队列列表（导航 `queues` Tab）：复用 [rememberMqObjectListState] 统一加载状态机 +
@@ -40,6 +41,8 @@ fun QueueListPanel(
     modifier: Modifier = Modifier,
 ) {
     var searchText by remember { mutableStateOf("") }
+    // 防抖：输入框立即回显，过滤用 300ms 后生效的值。
+    val appliedSearch = rememberDebouncedValue(searchText)
     // 默认隐藏系统 / 临时队列（SYSTEM.* / AMQ.*），列表更清爽；按钮切换显示。
     var showSystem by remember { mutableStateOf(false) }
 
@@ -84,9 +87,9 @@ fun QueueListPanel(
             val aiAsk = LocalAiAsk.current
             // 过滤 + 卡片数据构建较重（每张卡新建 action lambda，ObjectCardData 恒不等），
             // remember 隔离：搜索敲键 / isRefreshing 翻转之外不重建，网格不跟随全量重组。
-            val filtered = remember(queues, searchText, showSystem, warningThreshold) {
+            val filtered = remember(queues, appliedSearch, showSystem, warningThreshold) {
                 queues
-                    .filter { q -> q.name.contains(searchText, ignoreCase = true) }
+                    .filter { q -> q.name.contains(appliedSearch, ignoreCase = true) }
                     .filter { q -> showSystem || !isSystemOrTempQueue(q.name) }
                     .map { queue ->
                         queue.toQueueCardData(

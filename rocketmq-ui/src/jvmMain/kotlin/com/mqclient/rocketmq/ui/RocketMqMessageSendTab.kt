@@ -71,6 +71,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.mqclient.mqui.send.SendTaskRow as MqSendTaskRow
+import com.mqclient.mqui.send.SendTaskStatus
+import com.mqclient.mqui.send.SmallSendButton as SmallSecondaryButton
 
 /** 单文件预览的截断阈值：> 100KB 只显示前 10000 字符（发送仍发完整内容，除非编辑过）。 */
 private const val TRUNCATION_THRESHOLD_BYTES = 100_000
@@ -525,111 +528,40 @@ private fun MultiSendPane(state: RocketMqSendMessagesState) {
 
 @Composable
 private fun SendTaskRow(task: RocketMqSendTask, state: RocketMqSendMessagesState) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val hovered by interactionSource.collectIsHoveredAsState()
-    val background = if (hovered) {
-        MaterialTheme.colorScheme.surfaceContainerHigh
-    } else {
-        Color.Transparent
+    // 行渲染（悬停 / 文件名 / 大小 / 状态图标 / 动作按钮 / 失败原因）在 mq-ui 的
+    // SendTaskRow 里三模块共用；这里只负责「本协议的状态怎么映射 + 文案怎么翻译」。
+    val action: Pair<String, () -> Unit>? = when {
+        task.status == SendStatus.WAITING && state.canRemove(task) ->
+            stringResource("rocketmq_ui_send_remove") to { state.removeTask(task.id) }
+        task.status == SendStatus.FAILED && !state.busy ->
+            stringResource("rocketmq_ui_send_retry") to { state.retryTask(task.id) }
+        else -> null
     }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .hoverable(interactionSource)
-            .background(background)
-            .padding(horizontal = RMSG_ROW_HPADDING, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        com.mqclient.uicommon.AppTooltip(text = task.fileName, modifier = Modifier.weight(1f)) {
-            Text(
-                text = task.fileName,
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        Text(
-            text = formatSize(task.fileSize),
-            style = MaterialTheme.typography.bodySmall,
-            maxLines = 1,
-            modifier = Modifier.width(80.dp),
-        )
-        Box(modifier = Modifier.width(110.dp)) {
-            StatusCell(task)
-        }
-        Box(modifier = Modifier.width(80.dp)) {
-            when {
-                task.status == SendStatus.WAITING && state.canRemove(task) ->
-                    SmallSecondaryButton(
-                        stringResource("rocketmq_ui_send_remove"),
-                        onClick = { state.removeTask(task.id) },
-                    )
-                task.status == SendStatus.FAILED && !state.busy ->
-                    SmallSecondaryButton(
-                        stringResource("rocketmq_ui_send_retry"),
-                        onClick = { state.retryTask(task.id) },
-                    )
-            }
-        }
-    }
+    MqSendTaskRow(
+        fileName = task.fileName,
+        sizeBytes = task.fileSize,
+        status = task.status.toSharedStatus(),
+        statusText = stringResource(task.status.i18nKey()),
+        errorMessage = task.errorMessage,
+        actionLabel = action?.first,
+        onAction = action?.second,
+    )
 }
 
-@Composable
-private fun StatusCell(task: RocketMqSendTask) {
-    val cell: @Composable () -> Unit = {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            when (task.status) {
-                SendStatus.WAITING -> {
-                    Box(Modifier.size(8.dp).clip(CircleShape).background(WaitingGray))
-                    StatusText(stringResource("rocketmq_ui_send_status_waiting"))
-                }
-                SendStatus.SENDING -> {
-                    CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
-                    StatusText(stringResource("rocketmq_ui_send_status_sending"))
-                }
-                SendStatus.SUCCESS -> {
-                    Icon(
-                        imageVector = Icons.Default.CheckCircle,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = SuccessGreen,
-                    )
-                    StatusText(stringResource("rocketmq_ui_send_status_success"))
-                }
-                SendStatus.FAILED -> {
-                    Icon(
-                        imageVector = Icons.Default.Cancel,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = FailedRed,
-                    )
-                    StatusText(stringResource("rocketmq_ui_send_status_failed"))
-                }
-            }
-        }
-    }
-    // 失败项 hover 显示错误原因。
-    if (task.status == SendStatus.FAILED && task.errorMessage != null) {
-        com.mqclient.uicommon.AppTooltip(text = task.errorMessage!!, modifier = Modifier) { cell() }
-    } else {
-        cell()
-    }
+/** 本模块的四态 → mq-ui 的共用四态（两边语义一致，改名只是为了避免枚举撞名）。 */
+private fun SendStatus.toSharedStatus(): SendTaskStatus = when (this) {
+    SendStatus.WAITING -> SendTaskStatus.WAITING
+    SendStatus.SENDING -> SendTaskStatus.SENDING
+    SendStatus.SUCCESS -> SendTaskStatus.SUCCESS
+    SendStatus.FAILED -> SendTaskStatus.FAILED
 }
 
-@Composable
-private fun StatusText(text: String) {
-    Text(text = text, style = MaterialTheme.typography.bodySmall, maxLines = 1)
-}
-
-@Composable
-private fun SmallSecondaryButton(text: String, onClick: () -> Unit) {
-    SecondaryButton(
-        onClick = onClick,
-        standardMinWidth = false,
-    ) { Text(text) }
+/** 状态 → 本模块 i18n 键（`when` 穷举：新增状态时编译器会在这里报错）。 */
+private fun SendStatus.i18nKey(): String = when (this) {
+    SendStatus.WAITING -> "rocketmq_ui_send_status_waiting"
+    SendStatus.SENDING -> "rocketmq_ui_send_status_sending"
+    SendStatus.SUCCESS -> "rocketmq_ui_send_status_success"
+    SendStatus.FAILED -> "rocketmq_ui_send_status_failed"
 }
 
 /* ------------------------------- 底部 ------------------------------- */

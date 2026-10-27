@@ -15,6 +15,7 @@ import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
 import kotlin.test.assertTrue
 import kotlin.test.fail
+import com.mqclient.testing.assumeLive
 
 /**
  * 真机验证（需要 ~/.mqclient/config.toml 里有可用的 IBM MQ 连接 + QMGR 在线）：
@@ -28,10 +29,10 @@ class PcfObjectScannerLiveTest {
     @Test
     fun liveScanAllObjectTypes() = runBlocking {
         val connections = ConnectionStore.connections.value.filter { it.serviceId == "ibm-mq" }
-        if (connections.isEmpty()) {
-            println("LIVE SKIP: config.toml 里没有 IBM MQ 连接")
-            return@runBlocking
-        }
+        // 无环境 = SKIP（JUnit assumption），不是 PASSED —— 否则离线 CI 上这个测试
+        // 永远「绿」，等于没跑。assumption 必须放在 try 之外：假设失败抛的是
+        // AssumptionViolatedException（RuntimeException），会被下面的宽 catch 吞掉。
+        assumeLive("LIVE SKIP: config.toml 里没有 IBM MQ 连接", connections.isNotEmpty())
         val info = connections.first()
         val config: IbmMQConfig = ibmMQConfigFromOptions(info.options)
         println("LIVE connect: name=${info.name} qmgr=${config.queueManager} host=${config.host}:${config.port} channel=${config.channel}")
@@ -43,8 +44,9 @@ class PcfObjectScannerLiveTest {
                 MQQueueManager(config.queueManager, mqProperties(config))
             }
         } catch (t: Throwable) {
-            println("LIVE SKIP: 连接失败（QMGR 不在线？）：${t.message}")
-            return@runBlocking
+            assumeLive("LIVE SKIP: 连接失败（QMGR 不在线？）：${t.message}", false)
+            @Suppress("UNREACHABLE_CODE")
+            throw t
         }
 
         try {
@@ -131,15 +133,12 @@ class PcfObjectScannerLiveTest {
      * 回归：INQUIRE_Q 显式请求 MQIACF_Q_ATTRS 后，alias 队列快照必须带
      * MQIA_DEF_READ_AHEAD / MQIA_DEF_PUT_RESPONSE_TYPE（属性对话框 Extended 页）。
      * QMGR 对 alias 的默认应答不含这两个 attr，漏请求时 UI 只能少行。
-     * 没有配置 / 没有网络 / 无 alias 队列时打印 SKIP 并通过。
+     * 没有配置 / 没有网络 / 无 alias 队列时记 SKIP（assumption），不是 PASSED。
      */
     @Test
     fun aliasQueuesExposeExtendedAttrs() = runBlocking {
         val connections = ConnectionStore.connections.value.filter { it.serviceId == "ibm-mq" }
-        if (connections.isEmpty()) {
-            println("LIVE SKIP: config.toml 里没有 IBM MQ 连接")
-            return@runBlocking
-        }
+        assumeLive("LIVE SKIP: config.toml 里没有 IBM MQ 连接", connections.isNotEmpty())
         val info = connections.first()
         val config: IbmMQConfig = ibmMQConfigFromOptions(info.options)
         val manager = try {
@@ -147,8 +146,9 @@ class PcfObjectScannerLiveTest {
                 MQQueueManager(config.queueManager, mqProperties(config))
             }
         } catch (t: Throwable) {
-            println("LIVE SKIP: 连接失败（QMGR 不在线？）：${t.message}")
-            return@runBlocking
+            assumeLive("LIVE SKIP: 连接失败（QMGR 不在线？）：${t.message}", false)
+            @Suppress("UNREACHABLE_CODE")
+            throw t
         }
         try {
             val agent = PCFMessageAgent(manager)
@@ -156,10 +156,7 @@ class PcfObjectScannerLiveTest {
             try {
                 val aliases = PcfObjectScanner().scanQueuesWith(session)
                     .filter { it.attributes["MQIA_Q_TYPE"] == MQConstants.MQQT_ALIAS }
-                if (aliases.isEmpty()) {
-                    println("LIVE SKIP: 无 alias 队列")
-                    return@runBlocking
-                }
+                assumeLive("LIVE SKIP: 无 alias 队列", aliases.isNotEmpty())
                 aliases.forEach { q ->
                     println(
                         "LIVE alias ${q.name}: defReadAhead=${q.attributes["MQIA_DEF_READ_AHEAD"]} " +
@@ -193,22 +190,24 @@ class PcfObjectScannerLiveTest {
     @Test
     fun liveStopListenerPoll() = runBlocking {
         val connections = ConnectionStore.connections.value.filter { it.serviceId == "ibm-mq" }
-        if (connections.isEmpty()) { println("LIVE SKIP: config.toml 里没有 IBM MQ 连接"); return@runBlocking }
+        assumeLive("LIVE SKIP: config.toml 里没有 IBM MQ 连接", connections.isNotEmpty())
         val info = connections.first()
         val config = ibmMQConfigFromOptions(info.options)
 
         val manager = try {
             withTimeout(config.connectionTimeout * 1_000L) { MQQueueManager(config.queueManager, mqProperties(config)) }
-        } catch (t: Throwable) { println("LIVE SKIP: 连接失败（QMGR 不在线？）：${t.message}"); return@runBlocking }
+        } catch (t: Throwable) {
+            assumeLive("LIVE SKIP: 连接失败（QMGR 不在线？）：${t.message}", false)
+            @Suppress("UNREACHABLE_CODE")
+            throw t
+        }
 
         val agent = PCFMessageAgent(manager)
         val session = ScanSession(agent)
         try {
             val scanner = PcfObjectScanner()
             val name = "LSNR.QM1"
-            if (scanner.scanListenersWith(session).none { it.name == name }) {
-                println("LIVE SKIP: $name 不存在"); return@runBlocking
-            }
+            assumeLive("LIVE SKIP: $name 不存在", scanner.scanListenersWith(session).any { it.name == name })
 
             fun runMqsc(cmd: String) {
                 val req = PCFMessage(MQConstants.MQCMD_ESCAPE).apply {
@@ -227,7 +226,7 @@ class PcfObjectScannerLiveTest {
                 if (s.isNotEmpty()) { running = true; return@repeat }
             }
             println("LIVE start '$name' running=$running")
-            if (!running) { println("LIVE SKIP: 无法让 $name 进入 RUNNING，跳过停止验证"); return@runBlocking }
+            assumeLive("LIVE SKIP: 无法让 $name 进入 RUNNING，跳过停止验证", running)
 
             // 复刻 UI：发 STOP，命令成功即进入轮询。
             runMqsc("STOP LISTENER('$name')")

@@ -4,8 +4,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import com.mqclient.core.ConnectionFormState
 import com.mqclient.core.ConnectionInfo
+import com.mqclient.mqui.state.AbstractConnectionFormState
 import com.mqclient.core.ConnectionPersistence
 import com.mqclient.core.ConnectionStore
 import com.mqclient.ibmmq.ConnectionMode
@@ -17,7 +17,6 @@ import com.mqclient.uicommon.file.normalizePath
 import com.mqclient.uicommon.file.pickFile
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.core.newConnectionId
-import com.mqclient.mqui.state.SaveState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -69,7 +68,7 @@ class IbmMqConnectionFormState(
      * 落盘端口：默认直连 [ConnectionStore]，测试注入记录线程的替身以断言 IO 不在 UI 线程。
      */
     private val persistence: ConnectionPersistence = ConnectionPersistence.Default,
-) : ConnectionFormState {
+) : AbstractConnectionFormState<IbmMQConfig>(scope) {
 
     companion object {
         /** 「保存前测试连接」的超时：15 秒不返回即按超时处理。 */
@@ -87,37 +86,20 @@ class IbmMqConnectionFormState(
         const val THRESHOLD_MAX = 100
     }
 
-    /** ---------------- 宿主契约（busy / onSaved）---------------- */
-
-    override val busy: Boolean get() = saveState == SaveState.Testing || saving
-
-    // 真正的存储槽是 savedCallback；接口默认实现的 setter 是空操作，不 override
-    // 的话宿主赋值会被静默丢掉。
-    override var onSaved: (() -> Unit)?
-        get() = savedCallback
-        set(value) { savedCallback = value }
-
-    private var savedCallback: (() -> Unit)? = null
-
-    /** ---------------- 流程状态 ---------------- */
+    /* ---------------- 流程状态 ---------------- */
 
     var defaultName by mutableStateOf(defaultName); private set
-    var saveState by mutableStateOf<SaveState>(SaveState.Idle); private set
 
     /**
      * 落盘进行中（「仍要保存」/ 无模块时直接落盘）：落盘已挪到 IO 线程，这段窗口里
      * 必须挡住重复提交，否则双击会写出两条连接（[ConnectionStore.update] 每次都会
      * 换发新 id，重复执行不会报「已存在」）。
      */
-    private var saving by mutableStateOf(false)
     var errors by mutableStateOf(IbmMQFieldErrors()); private set
-    var saveError by mutableStateOf<String?>(null); private set
 
     /** 测试失败待确认的配置快照：用户选「仍要保存」时按它落盘。 */
-    var pendingConfig by mutableStateOf<IbmMQConfig?>(null); private set
 
     /** 编辑模式的目标连接 id；null = 新建。 */
-    var editingId by mutableStateOf<String?>(null); private set
 
     /** ---------------- 字段草稿（数字存原字符串，构建时解析）---------------- */
 
@@ -175,7 +157,7 @@ class IbmMqConnectionFormState(
      * 分字段校验：错误写进 [errors]（字段下方红字），全部通过返回 true。
      * 网络相关字段只在 CLIENT 模式校验 —— BINDING 模式它们不显示、不参与提交。
      */
-    fun validate(): Boolean {
+    override fun validate(): Boolean {
         var e = IbmMQFieldErrors()
         if (queueManager.isBlank()) {
             e = e.copy(queueManager = stringResource("ibm_mq_error_queue_manager_required"))
@@ -225,7 +207,7 @@ class IbmMqConnectionFormState(
      * 组装强类型配置：数字字段解析失败回落默认值（边界值已由 [validate] 拦住，
      * 这里的回落只兜「BINDING 模式隐藏字段的默认值」）。
      */
-    fun buildConfig(): IbmMQConfig = IbmMQConfig(
+    override fun buildConfig(): IbmMQConfig = IbmMQConfig(
         mode = mode,
         queueManager = queueManager.trim(),
         host = host.trim(),
@@ -286,9 +268,7 @@ class IbmMqConnectionFormState(
         trustStorePasswordChanged = false
         keyStorePasswordChanged = false
         errors = IbmMQFieldErrors()
-        saveError = null
-        pendingConfig = null
-        saveState = SaveState.Idle
+        resetSaveFlow()
     }
 
     /**
@@ -329,9 +309,7 @@ class IbmMqConnectionFormState(
         keyStorePasswordChanged = false
 
         errors = IbmMQFieldErrors()
-        saveError = null
-        pendingConfig = null
-        saveState = SaveState.Idle
+        resetSaveFlow()
     }
 
     /**
@@ -345,101 +323,36 @@ class IbmMqConnectionFormState(
      * 全程返回 false（测试是慢操作，无法同步给最终结果；宿主对 false 的唯一
      * 反应就是保持对话框打开）。
      */
-    override fun submit(): Boolean {
-        if (saveState != SaveState.Idle) return false
-        saveError = null
-        if (!validate()) return false
-
-        val config = buildConfig()
-        val service = IbmMQModule.serviceOrNull()
-        if (service == null) {
-            // 模块未初始化（只出现在测试 / 无头环境）：跳过测试直接落盘，
-            // 配置对不对由保存后的扫描链路兜底上报。
-            saveAndNotify(config)
-            return false
-        }
-        saveState = SaveState.Testing
-        scope.launch {
-            try {
-                withTimeout(TEST_TIMEOUT_MS) { service.testConnection(config) }
-                doSave(config)
-            } catch (e: TimeoutCancellationException) {
-                // 超时不算「正常取消」，按失败处理（确认框可仍要保存）。
-                fail(config, stringResource("ibm_mq_test_timeout"))
-            } catch (e: CancellationException) {
-                // 对话框关闭 / 面板被销毁：正常退出，不落盘、不提示。
-                throw e
-            } catch (e: Exception) {
-                fail(config, stringResource("ibm_mq_test_fail_prefix") + failureMessage(e))
-            }
-        }
-        return false
-    }
-
-    /** 用户在确认框选「仍要保存」：按测试时的配置快照落盘。 */
-    fun confirmSave() {
-        val config = pendingConfig ?: return
-        // 先摘掉待保存配置并关掉确认框（它只在 Failed 时渲染）：落盘已改为异步，
-        // 不清的话这段窗口里还能再点一次「保存」，写出两条连接。
-        pendingConfig = null
-        saveState = SaveState.Idle
-        saveAndNotify(config)
-    }
-
-    /**
-     * 后台落盘 + 收尾：落盘走 IO（写 config.toml 要读整份配置、做敏感字段 AES 加密、
-     * 再原子换文件，不能压在 UI 线程上），状态回写仍在原调度器（Compose Main）。
-     */
-    private fun saveAndNotify(config: IbmMQConfig) {
-        saving = true
-        scope.launch {
-            try {
-                doSave(config)
-            } finally {
-                saving = false
-            }
-        }
-    }
-
-    /** 用户在确认框选「取消」：只关确认框，回到 Idle —— 主对话框保留，表单原样可改。 */
-    fun dismissFailed() {
-        pendingConfig = null
-        saveState = SaveState.Idle
-    }
-
     /** 清掉全部分字段错误：任一字段被编辑时调用（错误在下次提交时重算）。 */
     fun clearErrors() {
         errors = IbmMQFieldErrors()
     }
 
-    /** ---------------- 内部 ---------------- */
+    /* ------------------------- 基类钩子（保存链路） ------------------------- */
 
-    private fun fail(config: IbmMQConfig, message: String) {
-        pendingConfig = config
-        saveState = SaveState.Failed(message)
+    /**
+     * 模块未初始化（只出现在测试 / 无头环境）时跳过测试直接落盘 —— 配置对不对由
+     * 保存后的扫描链路兜底上报。这是 IBM MQ 表单的既有行为，其余模块没有这一条。
+     */
+    override fun canTestConnection(): Boolean = IbmMQModule.serviceOrNull() != null
+
+    override suspend fun testConnection(config: IbmMQConfig) {
+        // canTestConnection 已保证非空；这里兜底只是为了不让 NPE 逃出去。
+        val service = IbmMQModule.serviceOrNull()
+            ?: throw IllegalStateException("IBM MQ 模块未初始化，无法测试连接")
+        service.testConnection(config)
     }
 
-    /**
-     * 失败原因转提示文案：MQException 顶层消息只有 `MQJE001...Reason xxxx` 一行，
-     * 真正的细节（本地映射失败 / 服务端 AMQ9641 拒绝）在 cause 链里 —— 沿链取前
-     * 几条去重拼起来，确认框里才能看出到底是谁在拒绝。
-     */
-    private fun failureMessage(error: Throwable): String =
-        generateSequence(error) { it.cause }
-            .take(4)
-            .mapNotNull { it.message?.takeIf(String::isNotBlank) }
-            .distinct()
-            .joinToString("  ←  ")
-            .ifBlank { error::class.simpleName ?: "unknown" }
+    override fun testTimeoutMessage(): String = stringResource("ibm_mq_test_timeout")
+
+    override fun testFailurePrefix(): String = stringResource("ibm_mq_test_fail_prefix")
 
     /**
-     * 落盘 + 收尾：新建走 [ConnectionStore.create]、编辑走 [ConnectionStore.update]
-     * （同 id 原位替换，serviceId 不变）。事件广播是 ConnectionStore 的事（落盘
-     * 成功自动发 `core.connection.added/updated`），这里不重复发。敏感键
-     * （password / trustStorePassword / keyStorePassword）落盘时由
-     * SensitiveOptionsSerializer 自动加密，这里保持明文。
+     * 落盘：新建走 [ConnectionStore.create]、编辑走 [ConnectionStore.update]（core 换发
+     * 新 UUID）。写盘要读整份 config.toml + 敏感字段加密 + 原子换文件，走 IO 不压 UI；
+     * `NonCancellable` 保证点了「完成」之后的落盘不会因对话框关闭而半途作废。
      */
-    private suspend fun doSave(config: IbmMQConfig) {
+    override suspend fun persist(config: IbmMQConfig): Result<Unit> {
         val info = ConnectionInfo(
             id = editingId ?: newConnectionId(),
             name = name.ifBlank { defaultName },
@@ -450,23 +363,9 @@ class IbmMqConnectionFormState(
             port = config.port,
             options = config.toOptions(),
         )
-        // 写盘（读整份 config.toml + 敏感字段加密 + 原子换文件）走 IO：这几步是纯阻塞的
-        // 文件 IO，留在 Compose 主线程上会随着连接数增长明显卡顿（网络盘 / 杀软扫描更糟）。
-        // NonCancellable：用户点了「完成」之后的这次落盘不该因为对话框被关掉而半途作废
-        // —— 旧实现是同步调用，天然不会被取消；异步化后必须显式保留这个保证。
-        val result = withContext(Dispatchers.IO + NonCancellable) {
+        return withContext(Dispatchers.IO + NonCancellable) {
             if (editingId == null) persistence.create(info) else persistence.update(info)
         }
-        val failure = result.exceptionOrNull()
-        if (failure != null) {
-            pendingConfig = null
-            saveState = SaveState.Idle
-            saveError = failure.message ?: failure::class.simpleName
-            return
-        }
-        pendingConfig = null
-        saveState = SaveState.Idle
-        savedCallback?.invoke()
     }
 
     /** 面板内容；布局与动态显示见 [IbmMQConnectionFormContent]。 */

@@ -28,6 +28,7 @@ import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.errors.UnknownTopicOrPartitionException
 import org.apache.kafka.common.serialization.ByteArrayDeserializer
 import org.apache.kafka.common.serialization.ByteArraySerializer
+import com.mqclient.testing.assumeLive
 
 /**
  * 消费组「按时间点重置位移」的实连基准测试（无 UI，验证 [KafkaScanService.resetGroupOffsets]
@@ -84,10 +85,11 @@ class KafkaGroupResetDiagTest {
 
     @Test
     fun resetByTimestamp() = runBlocking {
-        if (!prop("enabled", "false").toBoolean()) {
-            println("KafkaGroupResetDiagTest skipped — set -Dkafkadiag.enabled=true to run against a real cluster")
-            return@runBlocking
-        }
+        // 默认不连远端 = SKIP，不是 PASSED。
+        assumeLive(
+            "KafkaGroupResetDiagTest skipped — set -Dkafkadiag.enabled=true to run against a real cluster",
+            prop("enabled", "false").toBoolean(),
+        )
         val config = config()
         val timeoutMs = config.connectionTimeout * 1_000L
         val topic = prop("topic", "app-diag-reset")

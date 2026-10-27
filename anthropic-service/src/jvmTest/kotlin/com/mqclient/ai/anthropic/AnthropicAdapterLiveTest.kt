@@ -10,6 +10,7 @@ import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertTrue
 import kotlin.test.fail
+import com.mqclient.testing.assumeNotNull
 
 /**
  * Anthropic 适配器真机验证（需要 ~/.mqclient/config.toml 里有 providerId="anthropic"
@@ -24,12 +25,11 @@ class AnthropicAdapterLiveTest {
 
     @Test
     fun liveChatAndStream() = runBlocking {
-        val connection = ConfigStore.loadConfig().ai.connections
-            .firstOrNull { it.providerId == "anthropic" && it.enabled }
-        if (connection == null) {
-            println("LIVE SKIP: config.toml 里没有启用的 anthropic 连接")
-            return@runBlocking
-        }
+        // 无环境 = SKIP（assumption），不是 PASSED。
+        val connection = assumeNotNull(
+            "LIVE SKIP: config.toml 里没有启用的 anthropic 连接",
+            ConfigStore.loadConfig().ai.connections.firstOrNull { it.providerId == "anthropic" && it.enabled },
+        )
         println(
             "LIVE connect: name=${connection.name} baseUrl=${connection.baseUrl} " +
                 "model=${connection.model} tokenLen=${connection.token.length}",

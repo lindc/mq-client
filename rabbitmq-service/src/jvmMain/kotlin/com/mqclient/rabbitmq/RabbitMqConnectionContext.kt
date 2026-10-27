@@ -1,7 +1,7 @@
 package com.mqclient.rabbitmq
 
 import com.mqclient.core.ConnectionStatus
-import com.mqclient.core.cache.CacheManager
+import com.mqclient.mq.base.AbstractConnectionContext
 import com.rabbitmq.client.Connection
 
 /**
@@ -38,14 +38,9 @@ internal fun connectionRefusalText(ctx: RabbitMqConnectionContext): String = whe
  * （val 是为了构造期不可变，运行期换快照经 `@Volatile var` 保证可见性）。
  */
 class RabbitMqConnectionContext(
-    val connectionId: String,
-    @Volatile
-    var config: RabbitMqConfig,
-) {
-
-    /** 连接状态；写入口在 RabbitMqConnectionManager.setStatus（同时上报核心）。 */
-    @Volatile
-    var status: ConnectionStatus = ConnectionStatus.Disconnected
+    connectionId: String,
+    config: RabbitMqConfig,
+) : AbstractConnectionContext<RabbitMqConfig>(connectionId, config) {
 
     /**
      * 连接成功后的管理 API 客户端（Ktor HttpClient 挂在它内部）；断开 / 失败 / 未连接
@@ -73,49 +68,24 @@ class RabbitMqConnectionContext(
     var amqp: Connection? = null
 
     /**
-     * 本连接专属的扫描缓存（[CacheManager]，扫描链路 write-through、读口只读）。
-     * 连接成功时创建、断开 / 失败时置空 —— 与 kafka / ibm-mq 同一生命周期。
-     */
-    @Volatile
-    var cache: CacheManager? = null
-
-    /** 最近一次失败的原因（连接或后续操作），UI 可以展示；成功连接时清空。 */
-    @Volatile
-    var lastError: String? = null
-
-    /**
-     * 连续失败的心跳（状态快扫）次数。成功一次归零，见 [resetScanFailures]。
+     * 建连验证（`GET /api/overview`）顺带拿到的集群元信息，等待 [cleanup] / 断开丢弃。
      *
-     * 为什么要计数而不是「失败一次就判死」：管理 API 走的是长连接池，代理 / 端口
-     * 转发会回收空闲 socket，偶尔一次请求会拿到已被对端关掉的那条（日志里表现为
-     * `HTTP/1.1 header parser received no bytes`）。那不是连接断了，下一次请求
-     * 就好 —— 单次失败直接置 `Failed` 会把一条完全健康的连接误判为死亡，而且
-     * 由于扫描入口本身要求 `Connected`，判死之后心跳再也不跑，**永远不会自愈**。
+     * 为什么要暂存：cache 由基类在 `open` **之后**创建（「没连上就没有数据」在缓存层
+     * 也成立），所以 open 阶段拿到的元信息没地方放；基类的 `onConnected` 钩子正好在
+     * cache 创建后、置 Connected 前，那里写进去。
      */
-    private val scanFailures = java.util.concurrent.atomic.AtomicInteger(0)
-
-    /** 记一次心跳失败，返回累计连续失败次数。 */
-    fun recordScanFailure(): Int = scanFailures.incrementAndGet()
-
-    /** 心跳成功：连续失败计数归零（下一次失败重新从 1 数起）。 */
-    fun resetScanFailures() {
-        scanFailures.set(0)
-    }
-
-    /** 当前连续失败次数（日志 / 恢复提示用）。 */
-    fun scanFailureCount(): Int = scanFailures.get()
+    @Volatile
+    var pendingClusterInfo: RabbitMqClusterInfoSnapshot? = null
 
     /**
-     * 断开 / 删除时的清理：丢弃 admin 引用并**清空缓存**（连接断开不留历史）。
-     * HttpClient 本身的 close 由 [RabbitMqConnectionManager] 负责（「谁创建谁清理」：
-     * 句柄是它连的）。
+     * 断开 / 删除时的清理：丢弃 admin / amqp 引用；缓存与失败计数由基类
+     * [AbstractConnectionContext.cleanup] 处理。AMQP 连接的关闭是 suspend + 带超时的，
+     * 由 manager 的 closeResources 负责（不能进这个同步清理）。
      */
-    fun cleanup() {
+    override fun cleanup() {
         admin = null
-        // amqp 的关闭是 suspend + 带超时的，必须在 IO 上做，不能进这个同步清理；
-        // 它由 RabbitMqConnectionManager.closeQuietly 负责关掉并置空。
-        cache?.clear()
-        cache = null
-        resetScanFailures()
+        amqp = null
+        pendingClusterInfo = null
+        super.cleanup()
     }
 }

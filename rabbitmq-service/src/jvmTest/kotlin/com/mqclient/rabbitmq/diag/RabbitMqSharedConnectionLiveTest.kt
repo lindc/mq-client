@@ -13,6 +13,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import com.mqclient.testing.assumeNotNull
+import com.mqclient.testing.assumeLive
 
 /**
  * 真机验证：**共享连接**被多个会话复用，且单个会话关闭不影响其它会话。
@@ -33,31 +35,33 @@ class RabbitMqSharedConnectionLiveTest {
 
     @Test
     fun liveSharedConnectionServesMultipleSessions() = runBlocking {
-        val info = ConnectionStore.connections.value.firstOrNull { it.serviceId == "rabbitmq" }
-        if (info == null) {
-            println("LIVE SKIP: config.toml 里没有 RabbitMQ 连接")
-            return@runBlocking
-        }
+        // 无环境 = SKIP（assumption），不是 PASSED —— 旧写法 return 让 CI 永远绿。
+        val info = assumeNotNull(
+            "LIVE SKIP: config.toml 里没有 RabbitMQ 连接",
+            ConnectionStore.connections.value.firstOrNull { it.serviceId == "rabbitmq" },
+        )
         val config = rabbitMqConfigFromOptions(info.options)
         println("=========== RABBITMQ SHARED CONNECTION DIAG ===========")
         println("  connection = ${info.name} (${info.id})")
         println("  target     = ${config.host}:${config.amqpPort} vhost=${config.vhost}")
 
+        // 注意：assumption 异常会穿出 withTimeout（它不是 CancellationException），
+        // 所以下面两处可以直接 assume，不需要「返回 null 再判空」的老写法。
         val queueName = withTimeout(20_000) {
             RabbitMqAdminClient(config).use { admin ->
                 val queues = runCatching { admin.queues() }.getOrElse { error ->
-                    println("LIVE SKIP: 管理 API 不可用（${error.message}）")
-                    return@withTimeout null
+                    assumeLive("LIVE SKIP: 管理 API 不可用（${error.message}）", false)
+                    @Suppress("UNREACHABLE_CODE")
+                    throw error
                 }
-                val picked = queues.firstOrNull { it.messages > 0 } ?: queues.firstOrNull()
-                if (picked == null) {
-                    println("LIVE SKIP: vhost 里没有队列")
-                    return@withTimeout null
-                }
+                val picked = assumeNotNull(
+                    "LIVE SKIP: vhost 里没有队列",
+                    queues.firstOrNull { it.messages > 0 } ?: queues.firstOrNull(),
+                )
                 println("  queue      = ${picked.name} (messages=${picked.messages})")
                 picked.name
             }
-        } ?: return@runBlocking
+        }
 
         // 模拟 ConnectionManager.amqpConnection 的懒建：整个进程只建这一条。
         val shared = withContext(Dispatchers.IO) {

@@ -1,8 +1,8 @@
 package com.mqclient.rocketmq
 
 import com.mqclient.core.ConnectionStatus
-import com.mqclient.core.cache.CacheManager
 import com.mqclient.core.concurrent.HandleSlot
+import com.mqclient.mq.base.AbstractConnectionContext
 
 /**
  * 「为什么拒结」的唯一判定点：请求入口只在**真的没有客户端**时才拒结，并且按
@@ -32,25 +32,13 @@ internal fun connectionRefusalText(ctx: RocketMqConnectionContext): String = whe
  * 每次改状态都同时喂这两处。
  */
 class RocketMqConnectionContext(
-    val connectionId: String,
-    @Volatile
-    var config: RocketMqConfig,
-) {
-
-    /** 连接状态；写入口在 [RocketMqConnectionManager.setStatus]（同时上报核心）。 */
-    @Volatile
-    var status: ConnectionStatus = ConnectionStatus.Disconnected
+    connectionId: String,
+    config: RocketMqConfig,
+) : AbstractConnectionContext<RocketMqConfig>(connectionId, config) {
 
     /** 连接成功后的管理客户端；断开 / 失败 / 未连接时为 null。 */
     @Volatile
     var adminClient: RocketMqAdminClient? = null
-
-    /**
-     * 本连接专属的扫描缓存（[CacheManager]，扫描链路 write-through、读口只读）。
-     * 连接成功时创建、断开 / 失败时置空。
-     */
-    @Volatile
-    var cache: CacheManager? = null
 
     /**
      * 本连接的**共享消息客户端**（PullConsumer + Producer + TLS 持有），懒建、随连接存活。
@@ -66,42 +54,13 @@ class RocketMqConnectionContext(
      */
     val messageClients = HandleSlot<RocketMqMessageClients>("${connectionId} 消息句柄")
 
-    /** 最近一次失败的原因（连接或后续操作），UI 可以展示；成功连接时清空。 */
-    @Volatile
-    var lastError: String? = null
-
     /**
-     * 连续失败的心跳（Lag 快扫）次数。成功一次归零，见 [resetScanFailures]。
-     *
-     * 为什么要计数而不是「失败一次就判死」：Remoting 请求经代理 / NameServer 路由时，
-     * 单次超时或某个 broker 短暂不答是常事，下一次就好。单次失败直接置 `Failed` 会把
-     * 健康连接误判为死亡，而扫描入口又要求 `Connected` —— 判死之后心跳再也不跑，
-     * **永远不会自愈**。
+     * 断开 / 删除时的清理：丢弃 AdminExt 引用；缓存与失败计数由基类
+     * [AbstractConnectionContext.cleanup] 处理（messageClients 的 shutdown 是
+     * suspend + 要删临时 PEM，由 manager 的 closeResources 通过 take() 取走再关）。
      */
-    private val scanFailures = java.util.concurrent.atomic.AtomicInteger(0)
-
-    /** 记一次心跳失败，返回累计连续失败次数。 */
-    fun recordScanFailure(): Int = scanFailures.incrementAndGet()
-
-    /** 心跳成功：连续失败计数归零（下一次失败重新从 1 数起）。 */
-    fun resetScanFailures() {
-        scanFailures.set(0)
-    }
-
-    /** 当前连续失败次数（日志 / 恢复提示用）。 */
-    fun scanFailureCount(): Int = scanFailures.get()
-
-    /**
-     * 断开 / 删除时的清理：丢弃 AdminExt 引用并**清空缓存**（连接断开不留历史）。
-     * AdminExt 本身的 close 由 [RocketMqConnectionManager] 负责（「谁创建谁清理」）。
-     */
-    fun cleanup() {
+    override fun cleanup() {
         adminClient = null
-        // messageClients 的 shutdown 是 suspend + 要删临时 PEM，必须在 IO 上做，
-        // 不能进这个同步清理；由 RocketMqConnectionManager.closeQuietly 通过 take()
-        // 取走并在监视器外关闭。
-        cache?.clear()
-        cache = null
-        resetScanFailures()
+        super.cleanup()
     }
 }

@@ -2,6 +2,61 @@
 
 本文件记录 MQClient 的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [Unreleased] — 2026-10-27 (3)
+
+第三阶段重构：修测试假绿、抽连接生命周期基类、下沉跨模块复制的 UI。
+
+### Fixed
+
+- **LiveTest / DiagTest 的「假绿」**（13 个文件、23 处跳过点）：旧写法是
+  `println("SKIP"); return` —— JUnit 把它记成 **passed**，于是离线 CI 上这些「真机
+  验证」测试永远显示通过，实际上一次都没跑过（`KafkaGroupLagBatchLiveTest` 在无环境时
+  也是「绿」的）。全部改成 JUnit assumption：新增 `:test-support` 模块提供
+  `assumeLive(msg, cond)` / `assumeNotNull(msg, value)`，无环境时报告记 **skipped**，
+  Gradle 能直接数出「有几个没跑」。
+  两个坑已在 test-support 的 KDoc 里写明：①`AssumptionViolatedException` 是
+  `RuntimeException`，被 `catch (Throwable)` 吞掉就会退回 PASSED —— 假设必须放在
+  try 之外；②assumption 不做 smart-cast，需要非空值时用 `assumeNotNull`。
+- **`graph-core` / `mq-base` / `hex` / `idoc` / `text` 解释器没有一行测试**：补
+  `TopologyGraphTest`(5)、`MQServiceAdapterTest`(4)、`AbstractConnectionManagerTest`(10)、
+  `HexInterpreterTest`(6)、`IdocInterpreterTest`(12)、`TextInterpreterTest`(6)，
+  重点覆盖解析/渲染的异常边界（空输入、非法序列、未知字符集、未认领格式）。
+
+### Changed
+
+- **四个 `*ConnectionManager` 合并到 `mq-base` 的 `AbstractConnectionManager<Ctx>`**：
+  `ensureContext` / `updateContextConfig` / `remove` / `connect` 状态机 / `disconnectNow`
+  收尾顺序 / `registerScanJobs` / `onScanFailed` 的连续失败阈值与自愈 / `setStatus`
+  双写，四条逐字副本合并成一份。上下文侧新增 `AbstractConnectionContext<C>`
+  （status / lastError / cache / 连续失败计数 / cleanup）。
+  子类只实现 `createContext` / `applyConfig` / `open` / `closeResources` / `scanJobs` /
+  `isHandlePresent` / 事件名，外加可选钩子 `onConnected` / `onBeforeDisconnect` /
+  `describe` / `errorMessage`。四个 manager 从 388+469+319+291 行降到
+  约 200+180+160+200 行；`SCAN_FAILURE_THRESHOLD` 收敛为基类常量（各模块常量指向它）。
+  **行为保持**：IBM MQ 的扫描失败仍按旧语义在 `IbmMQService` 里直接置 Failed（没有
+  夹带「接入阈值」这类行为变更）。
+- **`PartialScanBanner` 下沉到 `ui-common`**：四个模块的外壳（悬停配色 / 图标 / 两段
+  文案）逐字相同，只保留「本连接失败了哪些类型 + 类型名怎么翻译」在各模块。
+- **`SendTaskRow` 下沉到 `mq-ui`**：IBM MQ / Kafka / RocketMQ 三个发送页的任务行
+  （文件名 tooltip / 大小列 / 四态图标 / 行尾动作 / 失败原因 hover）合并；
+  各模块只留「状态 → 共用四态」与「状态 → i18n 键」两张映射表。
+- **`AbstractConnectionFormState<C>` 提取到 `mq-ui`**：四个连接表单的「完成」链路
+  （校验 → 15s 临时连接测试 → 落盘 → 失败弹「是否仍要保存」）合并为模板；
+  子类只实现 `validate` / `buildConfig` / `testConnection` / `testTimeoutMessage` /
+  `testFailurePrefix` / `persist`，可选 `canTestConnection`（IBM MQ 无头环境跳过测试）、
+  `describeFailure` / `saveFailureMessage`（Kafka 用本地化文案）。
+  落盘失败的收尾（清 `pendingConfig`、复位状态、回调宿主）从四份变成一份。
+- **列表搜索加 300ms 防抖**：新增 `mq-ui` 的 `rememberDebouncedValue`，
+  用于 IBM MQ 的通道 / 监听器 / 队列 / 通用对象列表：输入框仍即时回显，
+  过滤用防抖后的值（清空输入立即生效，不让「取消筛选」有滞后感）。
+
+### Tests
+
+- `:test-support`（新模块，jvmMain）：`assumeLive` / `assumeNotNull`。
+- 全量 `assemble jvmTest`：663 例、9 skipped（真机测试在无环境时正确记 SKIP）、
+  唯一失败仍是 `KafkaGroupLagBatchLiveTest`（本机 truststore 与该集群证书不匹配，
+  环境问题，自第一阶段起就在干净 HEAD 上复现）。
+
 ## [Unreleased] — 2026-10-27 (2)
 
 ### Fixed

@@ -5,6 +5,7 @@ import com.mqclient.rocketmq.RocketMqConfig
 import kotlinx.coroutines.runBlocking
 import kotlin.system.measureTimeMillis
 import kotlin.test.Test
+import com.mqclient.testing.assumeLive
 
 /**
  * RocketMQ 实连诊断（默认跳过，照 kafka-service 的 `KafkaMessageDiagTest` 同一套
@@ -30,10 +31,11 @@ class RocketMqConnectionDiagTest {
     @Test
     fun connectAndProbe() {
         val sk = prop("sk")
-        if (!prop("enabled").toBoolean() || sk.isBlank()) {
-            println("[rocketmqdiag] skipped（-Drocketmqdiag.enabled=true -Drocketmqdiag.sk=... 打开）")
-            return
-        }
+        // 默认不连远端 = SKIP（assumption），不是 PASSED。
+        assumeLive(
+            "[rocketmqdiag] skipped（-Drocketmqdiag.enabled=true -Drocketmqdiag.sk=... 打开）",
+            prop("enabled").toBoolean() && sk.isNotBlank(),
+        )
         val config = RocketMqConfig(
             namesrvAddr = prop("namesrv", "www.chillbear.top:15672"),
             accessKey = prop("ak", "reader-app"),

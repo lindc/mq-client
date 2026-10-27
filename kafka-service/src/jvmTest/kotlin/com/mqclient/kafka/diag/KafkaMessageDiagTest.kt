@@ -9,6 +9,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
+import com.mqclient.testing.assumeLive
 
 /**
  * Kafka 消息读写的实连基准测试（无 UI，验证 [KafkaMessageService] 的读 / 发 / 续读
@@ -55,10 +56,11 @@ class KafkaMessageDiagTest {
 
     @Test
     fun sendThenRead() = runBlocking {
-        if (!prop("enabled", "false").toBoolean()) {
-            println("KafkaMessageDiagTest skipped — set -Dkafkadiag.enabled=true to run against a real cluster")
-            return@runBlocking
-        }
+        // 默认不连远端 = SKIP，不是 PASSED（旧写法 return 让报告里永远显示「通过」）。
+        assumeLive(
+            "KafkaMessageDiagTest skipped — set -Dkafkadiag.enabled=true to run against a real cluster",
+            prop("enabled", "false").toBoolean(),
+        )
         val config = config()
         val topic = prop("topic", "app-diag")
         println("=========== KAFKA MESSAGE DIAG ===========")

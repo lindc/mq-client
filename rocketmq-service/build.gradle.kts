@@ -24,6 +24,8 @@ kotlin {
             implementation(projects.messageInterpreterApi)
         }
         jvmTest.dependencies {
+            // JUnit assumption 包装：LiveTest 无环境时记 SKIP 而不是 PASSED。
+            implementation(projects.testSupport)
             implementation(kotlin("test"))
         }
     }

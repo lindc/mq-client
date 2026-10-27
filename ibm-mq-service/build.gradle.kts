@@ -21,6 +21,8 @@ kotlin {
             implementation("com.ibm.mq:com.ibm.mq.allclient:10.0.0.5")
         }
         jvmTest.dependencies {
+            // JUnit assumption 包装：LiveTest 无环境时记 SKIP 而不是 PASSED。
+            implementation(projects.testSupport)
             implementation(kotlin("test"))
         }
     }

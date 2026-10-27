@@ -7,6 +7,9 @@ kotlin {
     jvmToolchain(25)
 
     sourceSets {
+        jvmTest.dependencies {
+            implementation(kotlin("test"))
+        }
         commonMain.dependencies {
             implementation(projects.messageInterpreterApi)
         }

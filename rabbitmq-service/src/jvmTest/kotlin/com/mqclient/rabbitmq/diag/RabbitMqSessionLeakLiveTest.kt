@@ -11,6 +11,8 @@ import kotlin.system.measureTimeMillis
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import com.mqclient.testing.assumeNotNull
+import com.mqclient.testing.assumeLive
 
 /**
  * 真机验证：消息会话的 open / fetch / close 循环**不泄漏连接**。
@@ -34,11 +36,11 @@ class RabbitMqSessionLeakLiveTest {
 
     @Test
     fun liveSessionOpenCloseDoesNotLeakConnections() = runBlocking {
-        val info = ConnectionStore.connections.value.firstOrNull { it.serviceId == "rabbitmq" }
-        if (info == null) {
-            println("LIVE SKIP: config.toml 里没有 RabbitMQ 连接")
-            return@runBlocking
-        }
+        // 无环境 = SKIP（assumption），不是 PASSED。
+        val info = assumeNotNull(
+            "LIVE SKIP: config.toml 里没有 RabbitMQ 连接",
+            ConnectionStore.connections.value.firstOrNull { it.serviceId == "rabbitmq" },
+        )
         val config = rabbitMqConfigFromOptions(info.options)
         println("=========== RABBITMQ SESSION LEAK DIAG ===========")
         println("  connection = ${info.name} (${info.id})")
@@ -46,27 +48,27 @@ class RabbitMqSessionLeakLiveTest {
         println("  user       = ${config.username}")
 
         // ---- 选一个能拉取的队列：优先有消息的，其次任意一个 ----
-        // 注意：withTimeout 的 lambda 不是 inline，里面不能 return@runBlocking ——
-        // 用 null 表示「环境不满足，跳过」。
+        // assumption 异常会穿出 withTimeout（它不是 CancellationException），所以
+        // 直接 assume 即可 —— 不再需要「返回 null 再在表达式外判空」的老写法。
         val queueName = withTimeout(20_000) {
             RabbitMqAdminClient(config).use { admin ->
                 val queues = runCatching { admin.queues() }.getOrElse { error ->
-                    println("LIVE SKIP: 管理 API 不可用（${error.message}）")
-                    return@withTimeout null
+                    assumeLive("LIVE SKIP: 管理 API 不可用（${error.message}）", false)
+                    @Suppress("UNREACHABLE_CODE")
+                    throw error
                 }
                 val withMessages = queues.firstOrNull { it.messages > 0 }
-                val picked = withMessages ?: queues.firstOrNull()
-                if (picked == null) {
-                    println("LIVE SKIP: vhost 里没有队列")
-                    return@withTimeout null
-                }
+                val picked = assumeNotNull(
+                    "LIVE SKIP: vhost 里没有队列",
+                    withMessages ?: queues.firstOrNull(),
+                )
                 println(
                     "  queue      = ${picked.name} (messages=${picked.messages}" +
                         "${if (withMessages != null) "，有消息可拉" else "，空队列"}）",
                 )
                 picked.name
             }
-        } ?: return@runBlocking
+        }
 
         // ---- 基线：先跑一次让 amqp-client 的线程池建起来，再记基线 ----
         withTimeout(30_000) {

@@ -1,8 +1,8 @@
 package com.mqclient.kafka
 
 import com.mqclient.core.ConnectionStatus
-import com.mqclient.core.cache.CacheManager
 import com.mqclient.core.concurrent.HandleSlot
+import com.mqclient.mq.base.AbstractConnectionContext
 import org.apache.kafka.clients.admin.AdminClient
 
 /**
@@ -38,26 +38,13 @@ internal fun connectionRefusalText(ctx: KafkaConnectionContext): String = when (
  * （val 是为了构造期不可变，运行期换快照经 `@Volatile var` 保证可见性）。
  */
 class KafkaConnectionContext(
-    val connectionId: String,
-    @Volatile
-    var config: KafkaConfig,
-) {
-
-    /** 连接状态；写入口在 [KafkaConnectionManager.setStatus]（同时上报核心）。 */
-    @Volatile
-    var status: ConnectionStatus = ConnectionStatus.Disconnected
+    connectionId: String,
+    config: KafkaConfig,
+) : AbstractConnectionContext<KafkaConfig>(connectionId, config) {
 
     /** 连接成功后的 AdminClient；断开 / 失败 / 未连接时为 null。 */
     @Volatile
     var adminClient: AdminClient? = null
-
-    /**
-     * 本连接专属的扫描缓存（[CacheManager]，扫描链路 write-through、读口只读）。
-     * 连接成功时创建、断开 / 失败时置空 —— 与 ibm-mq 的 IbmMQConnectionContext.cache
-     * 同一生命周期。
-     */
-    @Volatile
-    var cache: CacheManager? = null
 
     /**
      * 本连接的**共享消息客户端**（浏览 consumer + producer），懒建、随连接存活。
@@ -76,43 +63,13 @@ class KafkaConnectionContext(
      */
     val messageClients = HandleSlot<KafkaMessageClients>("${connectionId} 消息句柄")
 
-    /** 最近一次失败的原因（连接或后续操作），UI 可以展示；成功连接时清空。 */
-    @Volatile
-    var lastError: String? = null
-
     /**
-     * 连续失败的心跳（Lag 快扫）次数。成功一次归零，见 [resetScanFailures]。
-     *
-     * 为什么要计数而不是「失败一次就判死」：AdminClient 经代理 / 负载均衡时，单次
-     * 请求撞上被回收的连接或某个 broker 短暂不答是常事，下一次就好。单次失败直接置
-     * `Failed` 会把健康连接误判为死亡，而扫描入口又要求 `Connected` —— 判死之后
-     * 心跳再也不跑，**永远不会自愈**。
+     * 断开 / 删除时的清理：丢弃 AdminClient 引用；缓存与失败计数由基类
+     * [AbstractConnectionContext.cleanup] 处理。messageClients 的关闭是 suspend +
+     * 带超时的（还要先 wakeup 打断 poll），由 manager 的 closeResources 用 take() 取走。
      */
-    private val scanFailures = java.util.concurrent.atomic.AtomicInteger(0)
-
-    /** 记一次心跳失败，返回累计连续失败次数。 */
-    fun recordScanFailure(): Int = scanFailures.incrementAndGet()
-
-    /** 心跳成功：连续失败计数归零（下一次失败重新从 1 数起）。 */
-    fun resetScanFailures() {
-        scanFailures.set(0)
-    }
-
-    /** 当前连续失败次数（日志 / 恢复提示用）。 */
-    fun scanFailureCount(): Int = scanFailures.get()
-
-    /**
-     * 断开 / 删除时的清理：丢弃 AdminClient 引用并**清空缓存**（连接断开不留历史）。
-     * AdminClient 本身的 close 由 [KafkaConnectionManager] 负责（「谁创建谁清理」：
-     * 句柄是它连的）。
-     */
-    fun cleanup() {
+    override fun cleanup() {
         adminClient = null
-        // messageClients 的关闭是 suspend + 带超时的（还要先 wakeup 打断 poll），
-        // 必须在 IO 上做，不能进这个同步清理；由 KafkaConnectionManager.closeQuietly
-        // 通过 take() 取走并在监视器外关闭。
-        cache?.clear()
-        cache = null
-        resetScanFailures()
+        super.cleanup()
     }
 }

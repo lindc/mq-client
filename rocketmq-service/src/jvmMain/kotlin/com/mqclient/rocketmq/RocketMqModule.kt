@@ -44,7 +44,10 @@ internal const val OBJECTS_FIRST_DELAY_MS = 5_000L
  * 单次失败不判死：Remoting 请求经代理 / NameServer 路由时，单次超时或某个 broker
  * 短暂不答都是可恢复的请求失败；真正断线也该在半分钟内于侧边栏变红。
  */
-internal const val SCAN_FAILURE_THRESHOLD = 3
+// 单一来源：实际阈值定义在基类（mq-base 的 AbstractConnectionManager），
+// 这里保留同名常量供模块内与测试引用，改一处即全局生效。
+internal const val SCAN_FAILURE_THRESHOLD: Int =
+    com.mqclient.mq.base.AbstractConnectionManager.SCAN_FAILURE_THRESHOLD
 
 /**
  * RocketMQ 模块入口：SPI 生命周期与显式动作事件的中枢，与 KafkaModule 同构。
