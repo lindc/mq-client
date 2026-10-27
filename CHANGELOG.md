@@ -2,6 +2,46 @@
 
 本文件记录 MQClient 的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [Unreleased] — 2026-10-27 (6)
+
+### Changed
+
+- **三个 `*ScanService` 的扫描骨架合并到 `mq-base` 的 `AbstractScanService<Ctx, Kind>`**
+  （与上一阶段的 `AbstractConnectionManager` 同构）。此前 Kafka / RabbitMQ / RocketMQ
+  各有一份逐字重复的骨架，约 90 行 × 3：
+
+  | 成员 | 之前的重复情况 |
+  | --- | --- |
+  | `scanLocks` + 加锁包装 | 三份逐字相同 |
+  | `manualScans` + `launchManualScan` + `cancelScan` | 三份逐字相同 |
+  | `objectsTtlMs` / 快扫 TTL | 公式相同，只差取的配置字段名 |
+  | `cacheOf` | 三份逐字相同 |
+  | `markFailed` | 三份逐字相同 |
+  | `isConnectionBroken` | Kafka/Rocket 是成员、Rabbit 是顶层函数，语义相同 |
+  | 单类兜底 | 实现相同，**名字三种**：`safely` / `scanTypeOr` / `scanKindOr` |
+  | 「全部失败」收尾（清标记 → 发事件 → 记账） | Kafka 有、Rabbit 缺 `clearScanFailures`、Rocket 走异常路径 |
+
+  名字不统一本身就是漂移的证据 —— 同一个语义三个名字，读代码的人得先确认它们真的一样。
+  现在统一为 `scanKindOr`，三个模块的调用点与时序不变。
+  扫描本体（扫哪些对象、并发几路、事件 payload）仍留在各模块：它们的类型与业务语义
+  确实不同，抽成泛型模板只会换来 `Any` 与强转。
+
+### Fixed（顺带对齐的小偏差）
+
+- RabbitMQ 的「四类全失败」路径此前**没有**清掉「部分数据未刷新」标记，而 Kafka 有。
+  合并到基类后两者一致（整体不可用时「部分」已无意义，界面走连接错误态
+  —— 见 Kafka 侧原有注释）。这是本轮唯一的行为变化，方向是让 RabbitMQ 向 Kafka 对齐。
+
+### Tests
+
+- 新增 `AbstractScanServiceTest`（mq-base，10 例）：单类兜底登记失败 / **不吞取消** /
+  成功不记账、单类失败不算断连、全类失败才算、TTL 倍率（慢扫 ×1.5 / 快扫 ×2）、
+  缓存取用、全类失败收尾、手动扫描触发与空转取消。
+- 三个模块的既有失败隔离测试改用统一名字（`safely` / `scanTypeOr` → `scanKindOr`；
+  RabbitMQ 的顶层 `isConnectionBroken` → 实例方法）。
+- 变异验证：把 `scanKindOr` 的取消分支删掉 → 「does not swallow cancellation」变红；
+  把「全类失败」误写成「一半失败」→ 「单类失败不算断连」变红；恢复后全绿。
+
 ## [Unreleased] — 2026-10-27 (5)
 
 ### Changed

@@ -12,7 +12,6 @@ import com.mqclient.rabbitmq.RabbitMqEvents
 import com.mqclient.rabbitmq.RabbitMqModule
 import com.mqclient.rabbitmq.RabbitMqScanService
 import com.mqclient.rabbitmq.RabbitMqScanType
-import com.mqclient.rabbitmq.isConnectionBroken
 import com.mqclient.rabbitmq.rabbitMqConfigFromOptions
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -166,16 +165,16 @@ class RabbitMqScanPartialLiveTest {
         val counts = LinkedHashMap<RabbitMqScanType, Int>()
 
         RabbitMqAdminClient(limited).use { admin ->
-            counts[RabbitMqScanType.EXCHANGES] = service.scanTypeOr(failures, RabbitMqScanType.EXCHANGES, emptyList<Any>()) {
+            counts[RabbitMqScanType.EXCHANGES] = service.scanKindOr(failures, RabbitMqScanType.EXCHANGES, emptyList<Any>()) {
                 admin.exchanges()
             }.size
-            counts[RabbitMqScanType.QUEUES] = service.scanTypeOr(failures, RabbitMqScanType.QUEUES, emptyList<Any>()) {
+            counts[RabbitMqScanType.QUEUES] = service.scanKindOr(failures, RabbitMqScanType.QUEUES, emptyList<Any>()) {
                 admin.queues()
             }.size
-            counts[RabbitMqScanType.BINDINGS] = service.scanTypeOr(failures, RabbitMqScanType.BINDINGS, emptyList<Any>()) {
+            counts[RabbitMqScanType.BINDINGS] = service.scanKindOr(failures, RabbitMqScanType.BINDINGS, emptyList<Any>()) {
                 admin.bindings()
             }.size
-            counts[RabbitMqScanType.NODES] = service.scanTypeOr(failures, RabbitMqScanType.NODES, emptyList<Any>()) {
+            counts[RabbitMqScanType.NODES] = service.scanKindOr(failures, RabbitMqScanType.NODES, emptyList<Any>()) {
                 admin.nodes()
             }.size
         }
@@ -192,7 +191,7 @@ class RabbitMqScanPartialLiveTest {
         assertTrue(counts.getValue(RabbitMqScanType.QUEUES) > 0, "queues 应当仍能读到")
 
         // 2) 判定正确：单类失败**不**等于连接断开（旧实现会在这里把连接标 Failed）。
-        assertTrue(!isConnectionBroken(failures.keys), "单类失败不该判连接已断开")
+        assertTrue(!service.isConnectionBroken(failures.keys), "单类失败不该判连接已断开")
 
         // 3) 状态正确：提示条数据源恰好包含 nodes。
         val probeId = "probe-partial"

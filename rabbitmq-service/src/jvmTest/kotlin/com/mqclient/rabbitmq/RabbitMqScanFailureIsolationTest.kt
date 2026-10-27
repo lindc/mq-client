@@ -28,26 +28,30 @@ class RabbitMqScanFailureIsolationTest {
 
     @Test
     fun `a single failing type does not count as a broken connection`() {
+        // isConnectionBroken 现在是 mq-base 的成员（三模块统一语义），需要实例。
+        val service = RabbitMqScanService(context())
         // nodes 失败 = 只读账号的常态，不是连接故障。
         assertTrue(
-            !isConnectionBroken(setOf(RabbitMqScanType.NODES)),
+            !service.isConnectionBroken(setOf(RabbitMqScanType.NODES)),
             "单类失败不该判定连接已断",
         )
         assertTrue(
-            !isConnectionBroken(setOf(RabbitMqScanType.QUEUES, RabbitMqScanType.BINDINGS)),
+            !service.isConnectionBroken(setOf(RabbitMqScanType.QUEUES, RabbitMqScanType.BINDINGS)),
             "部分失败不该判定连接已断",
         )
     }
 
     @Test
     fun `no failures is not a broken connection`() {
-        assertTrue(!isConnectionBroken(emptySet()), "全成功当然不算断")
+        val service = RabbitMqScanService(context())
+        assertTrue(!service.isConnectionBroken(emptySet()), "全成功当然不算断")
     }
 
     @Test
     fun `all four failing means the connection is broken`() {
+        val service = RabbitMqScanService(context())
         assertTrue(
-            isConnectionBroken(RabbitMqScanType.entries.toSet()),
+            service.isConnectionBroken(RabbitMqScanType.entries.toSet()),
             "四类全读不通才是连接真的断了",
         )
     }
@@ -91,11 +95,11 @@ class RabbitMqScanFailureIsolationTest {
     }
 
     @Test
-    fun `scanTypeOr records the failure and returns the fallback`() = runBlocking {
+    fun `scanKindOr records the failure and returns the fallback`() = runBlocking {
         val failures = java.util.concurrent.ConcurrentHashMap<RabbitMqScanType, String>()
         val service = RabbitMqScanService(context())
 
-        val rows = service.scanTypeOr(failures, RabbitMqScanType.NODES, emptyList<String>()) {
+        val rows = service.scanKindOr(failures, RabbitMqScanType.NODES, emptyList<String>()) {
             throw IllegalStateException("HTTP 403 from /api/nodes")
         }
 
@@ -108,12 +112,12 @@ class RabbitMqScanFailureIsolationTest {
     }
 
     @Test
-    fun `scanTypeOr does not swallow cancellation`() = runBlocking {
+    fun `scanKindOr does not swallow cancellation`() = runBlocking {
         val failures = java.util.concurrent.ConcurrentHashMap<RabbitMqScanType, String>()
         val service = RabbitMqScanService(context())
 
         assertFailsWith<CancellationException> {
-            service.scanTypeOr(failures, RabbitMqScanType.QUEUES, emptyList<String>()) {
+            service.scanKindOr(failures, RabbitMqScanType.QUEUES, emptyList<String>()) {
                 throw CancellationException("用户点了停止")
             }
         }
@@ -121,11 +125,11 @@ class RabbitMqScanFailureIsolationTest {
     }
 
     @Test
-    fun `successful scanTypeOr records nothing`() = runBlocking {
+    fun `successful scanKindOr records nothing`() = runBlocking {
         val failures = java.util.concurrent.ConcurrentHashMap<RabbitMqScanType, String>()
         val service = RabbitMqScanService(context())
 
-        val rows = service.scanTypeOr(failures, RabbitMqScanType.EXCHANGES, emptyList<String>()) {
+        val rows = service.scanKindOr(failures, RabbitMqScanType.EXCHANGES, emptyList<String>()) {
             listOf("amq.direct")
         }
 

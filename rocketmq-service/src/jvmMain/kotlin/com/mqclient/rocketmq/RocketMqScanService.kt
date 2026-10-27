@@ -3,8 +3,6 @@ package com.mqclient.rocketmq
 import com.mqclient.core.db.CommandAudit
 import com.mqclient.core.cache.CacheManager
 import com.mqclient.core.cache.putIfScanned
-import com.mqclient.core.concurrent.KeyedJobRegistry
-import com.mqclient.core.concurrent.KeyedMutex
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.emit
 import org.apache.rocketmq.client.exception.MQBrokerException
@@ -18,9 +16,9 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import com.mqclient.mq.base.AbstractScanService
 
 /**
  * RocketMQ 扫描服务：定时快扫 / 慢扫 + 缓存写入 + 事件通知，与 kafka 的
@@ -42,7 +40,9 @@ import kotlinx.coroutines.withContext
  * 刷新 —— 缓存优先、事件驱动的统一消费模式。全程不碰 UI 线程（AdminExt 调用在
  * Dispatchers.IO）。
  */
-class RocketMqScanService(private val context: ServiceContext) {
+class RocketMqScanService(
+    context: ServiceContext,
+) : AbstractScanService<RocketMqConnectionContext, RocketMqScanKind>(context, MODULE_ID) {
 
     private companion object {
         /** 缓存 key：集群元信息（nameServers + brokers）。 */
@@ -111,34 +111,40 @@ class RocketMqScanService(private val context: ServiceContext) {
         }
     }
 
-    /** 按连接分组的扫描锁：同一条连接串行（防重叠扫描互相覆盖结果），不同连接并发。 */
-    private val scanLocks = KeyedMutex()
+    /* ------------------------------ 基类钩子 ------------------------------ */
 
-    /**
-     * 手动刷新（UI 的「重新扫描」按钮）的协程：同一连接只留一条。
-     *
-     * 定时任务的协程归 `JobScheduler` 管，这里只收「用户点出来的那一次」。断开 / 删除
-     * 连接时必须经 [cancelScan] 收掉 —— 否则它会拿着已经 `shutdown()` 的 AdminExt
-     * 继续跑，而且一直占着 [scanLocks] 的 key，重连后的第一次刷新要排在它后面等
-     * （表现是「点刷新没反应」）。
-     */
-    private val manualScans = KeyedJobRegistry()
+    override fun contextOrNull(connectionId: String): RocketMqConnectionContext? =
+        RocketMqModule.connectionOrNull(connectionId)
 
-    /**
-     * 启动一次手动对象扫描：与定时慢扫共用 [scanLocks]，所以不会与正在跑的那一轮重叠；
-     * 同一连接重复点击顶掉上一轮（与 JobScheduler 的「同 ID 重注册」同口径）。
-     */
-    fun launchManualScan(connectionId: String) {
-        manualScans.launch(context.coroutineScope, connectionId) { scanObjects(connectionId) }
+    override val allKinds: Collection<RocketMqScanKind> = RocketMqScanKind.entries
+
+    override fun describeKind(kind: RocketMqScanKind): String = kind.label
+
+    override fun objectsScanIntervalMs(ctx: RocketMqConnectionContext): Long =
+        ctx.config.objectScanIntervalMinutes * 60_000L
+
+    override fun fastScanIntervalMs(ctx: RocketMqConnectionContext): Long =
+        ctx.config.statusScanIntervalSeconds * 1_000L
+
+    override fun reportScanFailure(connectionId: String, message: String): Boolean =
+        RocketMqModule.reportScanFailure(connectionId, message)
+
+    override fun reportScanFailures(connectionId: String, kinds: Set<RocketMqScanKind>) {
+        RocketMqModule.reportScanFailures(connectionId, kinds)
     }
 
-    /**
-     * 取消该连接上正在进行的手动扫描（断开 / 删除连接时由连接管理器调用）。
-     * 只 cancel 不 join：阻塞中的 Remoting 调用不会被立刻打断，断开路径不能被一次慢查询拖住。
-     */
-    fun cancelScan(connectionId: String) {
-        manualScans.cancel(connectionId)
+    override fun clearScanFailures(connectionId: String) {
+        RocketMqModule.clearScanFailures(connectionId)
     }
+
+    override val objectsScanFailedEvent: String = RocketMqEvents.OBJECTS_SCAN_FAILED
+
+    /** 解掉 `ExecutionException` 包装：Remoting future 的根因藏在 cause 里。 */
+    override fun errorMessage(error: Throwable): String =
+        (error as? ExecutionException)?.cause?.message ?: super.errorMessage(error)
+
+    /** 快扫 TTL 的模块内别名（基类公式见 [fastTtlMs]）。 */
+    private fun lagTtlMs(ctx: RocketMqConnectionContext): Long = fastTtlMs(ctx)
 
     /**
      * 「至少完成过一轮对象慢扫」标记（connectionId → true）。UI 用它区分「还在等
@@ -161,29 +167,6 @@ class RocketMqScanService(private val context: ServiceContext) {
      * `topics` 缓存 —— 那等于告诉 UI「这个集群里没有 topic」。
      */
 
-    /**
-     * 单类查询的兜底：失败 → [fallback] 并登记到 [failures]。
-     *
-     * 取消除外，原样上抛 —— 以前的写法是 `runCatching { ... }.getOrElse { emptyList() }`，
-     * 它连 CancellationException 一起吞，于是「用户点停止 / 模块关闭」会被当成「这一类
-     * 扫空了」，还要继续跑完剩下的请求。
-     */
-    internal suspend fun <T> scanKindOr(
-        failures: MutableMap<RocketMqScanKind, String>,
-        kind: RocketMqScanKind,
-        fallback: T,
-        block: suspend () -> T,
-    ): T = try {
-        block()
-    } catch (cancellation: CancellationException) {
-        throw cancellation
-    } catch (error: Throwable) {
-        val message = errorMessage(error)
-        failures[kind] = message
-        rocketMqLog.warn("objects scan kind skipped: kind=${kind.label} error=$message")
-        fallback
-    }
-
     /** 断开 / 清缓存时同步清除扫描标记（ConnectionManager.disconnectNow 调用）。 */
     fun clearScanState(connectionId: String) {
         objectsScannedOnce.remove(connectionId)
@@ -192,8 +175,8 @@ class RocketMqScanService(private val context: ServiceContext) {
     // ---------------------------------------------------------------- 对象慢扫
 
     /** 定时任务入口（`rocketmq.<connectionId>.scan.objects`）。 */
-    suspend fun scanObjects(connectionId: String) = scanLocks.withLock(connectionId) {
-        val (ctx, admin) = scanTargetOrNull(connectionId) ?: return@withLock
+    override suspend fun scanObjects(connectionId: String) = withScanLock(connectionId) {
+        val (ctx, admin) = scanTargetOrNull(connectionId) ?: return@withScanLock
         val objectsTtl = objectsTtlMs(ctx)
         // 两路 async 并发写，用线程安全容器（每类只写自己的 key）。
         val failures = ConcurrentHashMap<RocketMqScanKind, String>()
@@ -275,8 +258,8 @@ class RocketMqScanService(private val context: ServiceContext) {
     // ---------------------------------------------------------------- 心跳快扫
 
     /** 定时任务入口（`rocketmq.<connectionId>.scan.lag`）：全部组的 Lag 统计。 */
-    suspend fun scanGroupLags(connectionId: String) = scanLocks.withLock(connectionId) {
-        val (ctx, admin) = scanTargetOrNull(connectionId) ?: return@withLock
+    suspend fun scanGroupLags(connectionId: String) = withScanLock(connectionId) {
+        val (ctx, admin) = scanTargetOrNull(connectionId) ?: return@withScanLock
         try {
             val groups = withContext(Dispatchers.IO) { admin.fetchConsumerGroupList() }
             val lags = withContext(Dispatchers.IO) {
@@ -613,14 +596,6 @@ class RocketMqScanService(private val context: ServiceContext) {
         }
     }
 
-    /** 慢扫数据 TTL：配置的慢扫间隔 × 1.5。 */
-    private fun objectsTtlMs(ctx: RocketMqConnectionContext): Long =
-        ctx.config.objectScanIntervalMinutes * 60_000L * OBJECTS_TTL_FACTOR.toLong()
-
-    /** 快扫数据 TTL：配置的心跳间隔 × 2。 */
-    private fun lagTtlMs(ctx: RocketMqConnectionContext): Long =
-        ctx.config.statusScanIntervalSeconds * 1_000L * LAG_TTL_FACTOR.toLong()
-
     /**
      * 请求入口的**统一守卫**：只看「有没有管理客户端」，不拿 status 当否决票。
      *
@@ -654,20 +629,6 @@ class RocketMqScanService(private val context: ServiceContext) {
         return ScanTarget(ctx, admin)
     }
 
-    private fun cacheOf(connectionId: String): CacheManager? =
-        RocketMqModule.connectionOrNull(connectionId)?.cache
-
-    /**
-     * 整轮扫描失败 → 交给连接管理器按「连续失败阈值」判定是否置 Failed。
-     *
-     * 旧写法是这里直接写 `ctx.status = Failed`：单次失败就判死，而扫描入口本身又
-     * 要求 `Connected` —— 判死之后心跳再也不跑，健康连接被永久误判为「未连接」。
-     * 现在状态翻转集中在 [RocketMqConnectionManager.onScanFailed]。
-     */
-    private fun markFailed(connectionId: String, message: String) {
-        RocketMqModule.reportScanFailure(connectionId, message)
-    }
-
     /** ClusterInfo（5.x 在 remoting.protocol.body）→ 模块快照（角色按 brokerId 推导）。 */
     private fun clusterSnapshot(ci: ClusterInfo): RocketMqClusterInfoSnapshot =
         RocketMqClusterInfoSnapshot(
@@ -686,12 +647,6 @@ class RocketMqScanService(private val context: ServiceContext) {
             },
         )
 
-    /** 给日志 / 事件的失败原因：解掉 ExecutionException 包装，拿根因的消息。 */
-    private fun errorMessage(error: Throwable): String =
-        (error as? ExecutionException)?.cause?.message
-            ?: error.message
-            ?: error::class.simpleName
-            ?: "unknown"
 }
 
 /**
@@ -715,6 +670,7 @@ fun isSystemTopic(name: String): Boolean =
  */
 fun isSystemGroup(name: String): Boolean =
     name.startsWith("CID_RMQ_SYS_") || name.startsWith("CID_ONS_")
+
 /**
  * 对象慢扫里两类**可局部失败**的查询（cluster 不属于它：NameServer 不可达等于连接
  * 已断，直接让整轮失败）。

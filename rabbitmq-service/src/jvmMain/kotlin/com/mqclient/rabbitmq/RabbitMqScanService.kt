@@ -1,7 +1,5 @@
 package com.mqclient.rabbitmq
 
-import com.mqclient.core.concurrent.KeyedJobRegistry
-import com.mqclient.core.concurrent.KeyedMutex
 import com.mqclient.core.cache.allKindsFailed
 import com.mqclient.core.cache.putIfScanned
 import com.mqclient.core.db.CommandAudit
@@ -12,10 +10,10 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import com.mqclient.mq.base.AbstractScanService
 
 /**
  * RabbitMQ 对象 / 状态扫描：定时快扫 / 慢扫 + 缓存写入 + 事件通知，与 kafka 的
@@ -80,13 +78,12 @@ enum class RabbitMqScanType(val label: String) {
  * 单类失败不改连接状态：四类端点的权限要求不同（`/api/nodes` 要 `monitor` tag），
  * 只读账号读不到节点是**正常现象**，不是连接故障。
  */
-internal fun isConnectionBroken(failedTypes: Collection<RabbitMqScanType>): Boolean =
-    allKindsFailed(failedTypes, RabbitMqScanType.entries)
-
 /** 四元组（Kotlin 只有 Triple；四类并发结果 + 折叠成一个）。 */
 private data class Quad<A, B, C, D>(val a: A, val b: B, val c: C, val d: D)
 
-class RabbitMqScanService(private val context: ServiceContext) {
+class RabbitMqScanService(
+    context: ServiceContext,
+) : AbstractScanService<RabbitMqConnectionContext, RabbitMqScanType>(context, MODULE_ID) {
 
     private companion object {
         /** 缓存 key：交换机列表（慢扫）。 */
@@ -104,41 +101,38 @@ class RabbitMqScanService(private val context: ServiceContext) {
         /** 缓存 key：集群节点列表（慢扫，概览页节点区块）。 */
         const val KEY_NODES = "nodes"
 
-        /** 慢扫数据的 TTL 倍率：慢扫间隔 × 1.5 —— 失联后数据别永远烂在缓存里的兜底。 */
-        const val OBJECTS_TTL_FACTOR = 1.5f
-
-        /** 快扫数据的 TTL 倍率：快扫间隔 × 2。 */
-        const val STATUS_TTL_FACTOR = 2f
     }
 
-    /** 按连接分组的扫描锁：同一条连接串行（防重叠扫描互相覆盖结果），不同连接并发。 */
-    private val scanLocks = KeyedMutex()
+    /* ------------------------------ 基类钩子 ------------------------------ */
 
-    /**
-     * 手动刷新（UI 的「重新扫描」按钮）的协程：同一连接只留一条。
-     *
-     * 定时任务的协程归 `JobScheduler` 管，这里只收「用户点出来的那一次」。断开 / 删除
-     * 连接时必须经 [cancelScan] 收掉 —— 否则它会拿着已经 `close()` 的 HttpClient
-     * 继续跑，而且一直占着 [scanLocks] 的 key，重连后的第一次刷新要排在它后面等
-     * （表现是「点刷新没反应」）。
-     */
-    private val manualScans = KeyedJobRegistry()
+    override fun contextOrNull(connectionId: String): RabbitMqConnectionContext? =
+        RabbitMqModule.connectionOrNull(connectionId)
 
-    /**
-     * 启动一次手动对象扫描：与定时慢扫共用 [scanLocks]，所以不会与正在跑的那一轮重叠；
-     * 同一连接重复点击顶掉上一轮（与 JobScheduler 的「同 ID 重注册」同口径）。
-     */
-    fun launchManualScan(connectionId: String) {
-        manualScans.launch(context.coroutineScope, connectionId) { scanObjects(connectionId) }
+    override val allKinds: Collection<RabbitMqScanType> = RabbitMqScanType.entries
+
+    override fun describeKind(kind: RabbitMqScanType): String = kind.label
+
+    override fun objectsScanIntervalMs(ctx: RabbitMqConnectionContext): Long =
+        ctx.config.objectScanIntervalMinutes * 60_000L
+
+    override fun fastScanIntervalMs(ctx: RabbitMqConnectionContext): Long =
+        ctx.config.statusScanIntervalSeconds * 1_000L
+
+    override fun reportScanFailure(connectionId: String, message: String): Boolean =
+        RabbitMqModule.reportScanFailure(connectionId, message)
+
+    override fun reportScanFailures(connectionId: String, kinds: Set<RabbitMqScanType>) {
+        RabbitMqModule.reportScanFailures(connectionId, kinds)
     }
 
-    /**
-     * 取消该连接上正在进行的手动扫描（断开 / 删除连接时由连接管理器调用）。
-     * 只 cancel 不 join：阻塞中的 HTTP 调用不会被立刻打断，断开路径不能被一次慢查询拖住。
-     */
-    fun cancelScan(connectionId: String) {
-        manualScans.cancel(connectionId)
+    override fun clearScanFailures(connectionId: String) {
+        RabbitMqModule.clearScanFailures(connectionId)
     }
+
+    override val objectsScanFailedEvent: String = RabbitMqEvents.OBJECTS_SCAN_FAILED
+
+    /** 快扫 TTL 的模块内别名（基类公式见 [fastTtlMs]）。 */
+    private fun statusTtlMs(ctx: RabbitMqConnectionContext): Long = fastTtlMs(ctx)
 
     // ---------------------------------------------------------------- 对象慢扫
 
@@ -152,8 +146,8 @@ class RabbitMqScanService(private val context: ServiceContext) {
      *  - 四类全失败 → 管理 API 一条都读不通，判定连接真的断了：发
      *    `OBJECTS_SCAN_FAILED` 并 `markFailed`，让界面给「重连」。
      */
-    suspend fun scanObjects(connectionId: String) = scanLocks.withLock(connectionId) {
-        val (ctx, admin) = scanTargetOrNull(connectionId) ?: return@withLock
+    override suspend fun scanObjects(connectionId: String) = withScanLock(connectionId) {
+        val (ctx, admin) = scanTargetOrNull(connectionId) ?: return@withScanLock
         val objectsTtl = objectsTtlMs(ctx)
         // 四路 async 并发写，用线程安全容器（每类只写自己的 key）。
         val failures = ConcurrentHashMap<RabbitMqScanType, String>()
@@ -161,16 +155,16 @@ class RabbitMqScanService(private val context: ServiceContext) {
             val (exchangeDtos, queueDtos, bindingDtos, nodeDtos) = withContext(Dispatchers.IO) {
                 coroutineScope {
                     val exchanges = async {
-                        scanTypeOr(failures, RabbitMqScanType.EXCHANGES, emptyList()) { admin.exchanges() }
+                        scanKindOr(failures, RabbitMqScanType.EXCHANGES, emptyList()) { admin.exchanges() }
                     }
                     val queues = async {
-                        scanTypeOr(failures, RabbitMqScanType.QUEUES, emptyList()) { admin.queues() }
+                        scanKindOr(failures, RabbitMqScanType.QUEUES, emptyList()) { admin.queues() }
                     }
                     val bindings = async {
-                        scanTypeOr(failures, RabbitMqScanType.BINDINGS, emptyList()) { admin.bindings() }
+                        scanKindOr(failures, RabbitMqScanType.BINDINGS, emptyList()) { admin.bindings() }
                     }
                     val nodes = async {
-                        scanTypeOr(failures, RabbitMqScanType.NODES, emptyList()) { admin.nodes() }
+                        scanKindOr(failures, RabbitMqScanType.NODES, emptyList()) { admin.nodes() }
                     }
                     Quad(exchanges.await(), queues.await(), bindings.await(), nodes.await())
                 }
@@ -223,18 +217,10 @@ class RabbitMqScanService(private val context: ServiceContext) {
             // 四类全失败：管理 API 一条都读不通，连接大概率真的断了（或者凭据失效）。
             // 只有这种情况才动连接状态 —— 单类（尤其是只为 `monitor` tag 才有的 nodes）
             // 失败是权限缺口，不是连接坏了。
+            // 四类全失败：管理 API 一条都读不通 —— 收尾逻辑在基类（与 Kafka 同一份）。
             if (isConnectionBroken(failures.keys)) {
-                val message = failures.values.firstOrNull() ?: "管理 API 全部端点均不可达"
-                rabbitMqLog.error(
-                    "objects scan failed (all endpoints): connection=$connectionId " +
-                        "errors=" + failures.entries.joinToString(", ") { "${it.key.label}=${it.value}" },
-                )
-                context.emit(
-                    name = RabbitMqEvents.OBJECTS_SCAN_FAILED,
-                    payload = mapOf("connectionId" to connectionId, "message" to message),
-                )
-                markFailed(connectionId, message)
-                return@withLock
+                reportAllKindsFailed(connectionId, failures, "管理 API 全部端点均不可达")
+                return@withScanLock
             }
 
             context.emit(
@@ -284,8 +270,8 @@ class RabbitMqScanService(private val context: ServiceContext) {
      * 计数字段全量替换进 `queueStatus`。跑通即保活（reportStatus Connected，核心侧
      * 状态没变时直接忽略）。
      */
-    suspend fun scanStatus(connectionId: String) = scanLocks.withLock(connectionId) {
-        val (ctx, admin) = scanTargetOrNull(connectionId) ?: return@withLock
+    suspend fun scanStatus(connectionId: String) = withScanLock(connectionId) {
+        val (ctx, admin) = scanTargetOrNull(connectionId) ?: return@withScanLock
         try {
             val queueDtos = withContext(Dispatchers.IO) { admin.queues() }
             val status = queueDtos.associate { dto ->
@@ -707,28 +693,6 @@ class RabbitMqScanService(private val context: ServiceContext) {
         }
     }
 
-    private fun objectsTtlMs(ctx: RabbitMqConnectionContext): Long =
-        ctx.config.objectScanIntervalMinutes * 60_000L * OBJECTS_TTL_FACTOR.toLong()
-
-    private fun statusTtlMs(ctx: RabbitMqConnectionContext): Long =
-        ctx.config.statusScanIntervalSeconds * 1_000L * STATUS_TTL_FACTOR.toLong()
-
-    private fun cacheOf(connectionId: String): com.mqclient.core.cache.CacheManager? =
-        RabbitMqModule.connectionOrNull(connectionId)?.cache
-
-    /**
-     * 整轮扫描失败 → 交给连接管理器按「连续失败阈值」判定是否置 Failed。
-     *
-     * 旧写法是这里直接写 `ctx.status = Failed`：单次失败就判死，而扫描入口本身
-     * 又要求 `Connected` —— 判死之后心跳再也不跑，于是一条健康连接被永久误判为
-     * 「未连接」（真实现场见 mqclient.log：四类对象扫描刚全部成功，5 秒后一次
-     * `header parser received no bytes` 就把连接标成 FAILED）。现在状态翻转集中在
-     * [RabbitMqConnectionManager.onScanFailed]，单次抖动只计数、不翻状态。
-     */
-    private fun markFailed(connectionId: String, message: String) {
-        RabbitMqModule.reportScanFailure(connectionId, message)
-    }
-
     /**
      * 请求入口的**统一守卫**：只看「有没有管理 API 客户端」，不拿 status 当否决票。
      *
@@ -763,32 +727,4 @@ class RabbitMqScanService(private val context: ServiceContext) {
         return ScanTarget(ctx, admin)
     }
 
-    /** 给日志 / 事件的失败原因：RabbitMqAdminClient 已产出人类可读文案，直接取 message。 */
-    private fun errorMessage(error: Throwable): String =
-        error.message
-            ?: error::class.simpleName
-            ?: "unknown"
-
-    /**
-     * 单类查询的兜底：失败 → [fallback] 且把该类登记进 [failures]（带错误文案）。
-     *
-     * 取消除外：取消不是「这个类失败了」，原样上抛让整轮退出。
-     */
-    internal suspend fun <T> scanTypeOr(
-        failures: MutableMap<RabbitMqScanType, String>,
-        type: RabbitMqScanType,
-        fallback: T,
-        block: suspend () -> T,
-    ): T = try {
-        block()
-    } catch (cancellation: CancellationException) {
-        throw cancellation
-    } catch (error: Throwable) {
-        val message = errorMessage(error)
-        failures[type] = message
-        // WARN 而不是 ERROR：单类失败很可能是权限缺口（预期内的，比如只读账号读 nodes），
-        // 真正「整轮不可用」由调用方在四类全失败时升为 ERROR。
-        rabbitMqLog.warn("objects scan type skipped: kind=${type.label} error=$message")
-        fallback
-    }
 }

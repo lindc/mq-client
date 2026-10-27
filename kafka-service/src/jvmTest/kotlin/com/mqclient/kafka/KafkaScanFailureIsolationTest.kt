@@ -41,11 +41,11 @@ class KafkaScanFailureIsolationTest {
     }
 
     @Test
-    fun `safely records the failure and returns the fallback`() = runBlocking {
+    fun `scanKindOr records the failure and returns the fallback`() = runBlocking {
         val failures = java.util.concurrent.ConcurrentHashMap<KafkaScanKind, String>()
         val service = KafkaScanService(context())
 
-        val rows = service.safely(failures, KafkaScanKind.TOPICS, emptyList<String>()) {
+        val rows = service.scanKindOr(failures, KafkaScanKind.TOPICS, emptyList<String>()) {
             throw IllegalStateException("ACL 拒绝列出主题")
         }
 
@@ -54,12 +54,12 @@ class KafkaScanFailureIsolationTest {
     }
 
     @Test
-    fun `safely does not swallow cancellation`() = runBlocking {
+    fun `scanKindOr does not swallow cancellation`() = runBlocking {
         val failures = java.util.concurrent.ConcurrentHashMap<KafkaScanKind, String>()
         val service = KafkaScanService(context())
 
         assertFailsWith<CancellationException> {
-            service.safely(failures, KafkaScanKind.GROUPS, emptyList<String>()) {
+            service.scanKindOr(failures, KafkaScanKind.GROUPS, emptyList<String>()) {
                 throw CancellationException("模块关闭")
             }
         }
@@ -67,11 +67,11 @@ class KafkaScanFailureIsolationTest {
     }
 
     @Test
-    fun `successful safely records nothing`() = runBlocking {
+    fun `successful scanKindOr records nothing`() = runBlocking {
         val failures = java.util.concurrent.ConcurrentHashMap<KafkaScanKind, String>()
         val service = KafkaScanService(context())
 
-        val rows = service.safely(failures, KafkaScanKind.BROKERS, emptyList<String>()) {
+        val rows = service.scanKindOr(failures, KafkaScanKind.BROKERS, emptyList<String>()) {
             listOf("b1")
         }
 

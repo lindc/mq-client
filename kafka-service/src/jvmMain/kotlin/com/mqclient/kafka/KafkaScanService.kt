@@ -2,10 +2,7 @@ package com.mqclient.kafka
 
 import com.mqclient.core.db.CommandAudit
 import com.mqclient.core.cache.CacheManager
-import com.mqclient.core.cache.allKindsFailed
 import com.mqclient.core.cache.putIfScanned
-import com.mqclient.core.concurrent.KeyedJobRegistry
-import com.mqclient.core.concurrent.KeyedMutex
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.emit
 import java.util.concurrent.ConcurrentHashMap
@@ -14,7 +11,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.apache.kafka.clients.admin.AdminClient
 import org.apache.kafka.common.config.ConfigResource
@@ -27,6 +23,7 @@ import org.apache.kafka.clients.admin.OffsetSpec
 import org.apache.kafka.clients.consumer.OffsetAndMetadata
 import org.apache.kafka.common.TopicCollection
 import org.apache.kafka.common.TopicPartition
+import com.mqclient.mq.base.AbstractScanService
 
 /**
  * Kafka 扫描服务：定时快扫 / 慢扫 + 缓存写入 + 事件通知，与 ibm-mq 的
@@ -49,7 +46,9 @@ import org.apache.kafka.common.TopicPartition
  * —— 缓存优先、事件驱动的统一消费模式，与 ibm-mq 完全一致。全程不碰 UI 线程
  * （AdminClient 调用在 Dispatchers.IO）。
  */
-class KafkaScanService(private val context: ServiceContext) {
+class KafkaScanService(
+    context: ServiceContext,
+) : AbstractScanService<KafkaConnectionContext, KafkaScanKind>(context, MODULE_ID) {
 
     private companion object {
         /** 缓存 key：broker 列表。 */
@@ -77,34 +76,38 @@ class KafkaScanService(private val context: ServiceContext) {
         const val LAG_TTL_FACTOR = 2f
     }
 
-    /** 按连接分组的扫描锁：同一条连接串行（防重叠扫描互相覆盖结果），不同连接并发。 */
-    private val scanLocks = KeyedMutex()
+    /* ------------------------------ 基类钩子 ------------------------------ */
 
-    /**
-     * 手动刷新（UI 的「重新扫描」按钮）的协程：同一连接只留一条。
-     *
-     * 定时任务的协程归 `JobScheduler` 管，这里只收「用户点出来的那一次」。断开 / 删除
-     * 连接时必须经 [cancelScan] 收掉 —— 否则它会拿着已经 `close()` 的 AdminClient
-     * 继续跑，而且一直占着 [scanLocks] 的 key，重连后的第一次刷新要排在它后面等
-     * （表现是「点刷新没反应」）。
-     */
-    private val manualScans = KeyedJobRegistry()
+    override fun contextOrNull(connectionId: String): KafkaConnectionContext? =
+        KafkaModule.connectionOrNull(connectionId)
 
-    /**
-     * 启动一次手动对象扫描：与定时慢扫共用 [scanLocks]，所以不会与正在跑的那一轮重叠；
-     * 同一连接重复点击顶掉上一轮（与 JobScheduler 的「同 ID 重注册」同口径）。
-     */
-    fun launchManualScan(connectionId: String) {
-        manualScans.launch(context.coroutineScope, connectionId) { scanObjects(connectionId) }
+    override val allKinds: Collection<KafkaScanKind> = KafkaScanKind.entries
+
+    override fun describeKind(kind: KafkaScanKind): String = kind.label
+
+    override fun objectsScanIntervalMs(ctx: KafkaConnectionContext): Long =
+        ctx.config.objectScanIntervalMinutes * 60_000L
+
+    override fun fastScanIntervalMs(ctx: KafkaConnectionContext): Long =
+        ctx.config.lagScanIntervalSeconds * 1_000L
+
+    override fun reportScanFailure(connectionId: String, message: String): Boolean =
+        KafkaModule.reportScanFailure(connectionId, message)
+
+    override fun reportScanFailures(connectionId: String, kinds: Set<KafkaScanKind>) {
+        KafkaModule.reportScanFailures(connectionId, kinds)
     }
 
-    /**
-     * 取消该连接上正在进行的手动扫描（断开 / 删除连接时由连接管理器调用）。
-     * 只 cancel 不 join：阻塞中的 AdminClient 调用不会被立刻打断，断开路径不能被一次慢查询拖住。
-     */
-    fun cancelScan(connectionId: String) {
-        manualScans.cancel(connectionId)
+    override fun clearScanFailures(connectionId: String) {
+        KafkaModule.clearScanFailures(connectionId)
     }
+
+    override val objectsScanFailedEvent: String = KafkaEvents.OBJECTS_SCAN_FAILED
+
+    /** 解掉 `ExecutionException` 包装：KafkaFuture 的根因藏在 cause 里。 */
+    override fun errorMessage(error: Throwable): String =
+        (error as? java.util.concurrent.ExecutionException)?.cause?.message
+            ?: super.errorMessage(error)
 
     // ---------------------------------------------------------------- 对象慢扫
 
@@ -117,8 +120,8 @@ class KafkaScanService(private val context: ServiceContext) {
      *
      * topic 的 configs 不取（describeConfigs 每主题一调用太重），第一版只要布局快照。
      */
-    suspend fun scanObjects(connectionId: String) = scanLocks.withLock(connectionId) {
-        val (ctx, admin) = scanTargetOrNull(connectionId) ?: return@withLock
+    override suspend fun scanObjects(connectionId: String) = withScanLock(connectionId) {
+        val (ctx, admin) = scanTargetOrNull(connectionId) ?: return@withScanLock
         val timeoutMs = ctx.config.connectionTimeout * 1_000L
         val objectsTtl = objectsTtlMs(ctx)
         // 三路 async 并发写，用线程安全容器（每类只写自己的 key）。
@@ -130,13 +133,13 @@ class KafkaScanService(private val context: ServiceContext) {
                 coroutineScope {
                     val brokers = async {
                         val empty = ClusterScan(emptyList(), KafkaClusterSnapshot(null, null))
-                        safely(failures, KafkaScanKind.BROKERS, empty) { scanBrokers(admin, timeoutMs) }
+                        scanKindOr(failures, KafkaScanKind.BROKERS, empty) { scanBrokers(admin, timeoutMs) }
                     }
                     val topics = async {
-                        safely(failures, KafkaScanKind.TOPICS, emptyList()) { scanTopics(admin, timeoutMs) }
+                        scanKindOr(failures, KafkaScanKind.TOPICS, emptyList()) { scanTopics(admin, timeoutMs) }
                     }
                     val groups = async {
-                        safely(failures, KafkaScanKind.GROUPS, emptyList()) { scanGroups(admin, timeoutMs) }
+                        scanKindOr(failures, KafkaScanKind.GROUPS, emptyList()) { scanGroups(admin, timeoutMs) }
                     }
                     ScanResult(brokers.await(), topics.await(), groups.await())
                 }
@@ -154,20 +157,11 @@ class KafkaScanService(private val context: ServiceContext) {
             }
 
             // 三类全失败：AdminClient 一条都读不通，连接大概率真的断了。
+            // 三类全失败：一条都读不通，连接大概率真的断了 —— 收尾逻辑在基类
+            // （清失败标记 → 发失败事件 → 交连接管理器按连续失败阈值判定）。
             if (isConnectionBroken(failures.keys)) {
-                val message = failures.values.firstOrNull() ?: "Admin API 全部请求均失败"
-                kafkaLog.error(
-                    "objects scan failed (all kinds): connection=$connectionId " +
-                        "errors=" + failures.entries.joinToString(", ") { "${it.key.label}=${it.value}" },
-                )
-                // 整体不可用时「部分」已无意义：界面走连接错误态，旧的残数据提示要让位。
-                KafkaModule.clearScanFailures(connectionId)
-                context.emit(
-                    name = KafkaEvents.OBJECTS_SCAN_FAILED,
-                    payload = mapOf("connectionId" to connectionId, "message" to message),
-                )
-                markFailed(connectionId, message)
-                return@withLock
+                reportAllKindsFailed(connectionId, failures, "Admin API 全部请求均失败")
+                return@withScanLock
             }
 
             // 把「哪几类没取到」交给模块存起来：UI 的提示条要能在页面切来切去后
@@ -220,8 +214,8 @@ class KafkaScanService(private val context: ServiceContext) {
      * 单组失败（无权 / 组消失 / 超时）只跳过该组（受限账号的预期现象）；list
      * consumer groups 与 listOffsets 这两步失败才是整轮失败。
      */
-    suspend fun scanGroupLags(connectionId: String) = scanLocks.withLock(connectionId) {
-        val (ctx, admin) = scanTargetOrNull(connectionId) ?: return@withLock
+    suspend fun scanGroupLags(connectionId: String) = withScanLock(connectionId) {
+        val (ctx, admin) = scanTargetOrNull(connectionId) ?: return@withScanLock
         try {
             val timeoutMs = ctx.config.connectionTimeout * 1_000L
             val lags = withContext(Dispatchers.IO) { scanAllGroupLags(admin, timeoutMs) }
@@ -898,29 +892,8 @@ class KafkaScanService(private val context: ServiceContext) {
     )
 
     /** 单类扫描兜底：任何失败 → [empty]（取消除外），并把该类登记进 [failures]。 */
-    internal suspend fun <T> safely(
-        failures: MutableMap<KafkaScanKind, String>,
-        kind: KafkaScanKind,
-        empty: T,
-        block: suspend () -> T,
-    ): T = try {
-        block()
-    } catch (cancellation: CancellationException) {
-        throw cancellation
-    } catch (error: Throwable) {
-        val message = errorMessage(error)
-        failures[kind] = message
-        kafkaLog.warn("objects scan kind skipped: kind=${kind.label} error=$message")
-        empty
-    }
-
-    /** 慢扫数据 TTL：配置的慢扫间隔 × 1.5。 */
-    private fun objectsTtlMs(ctx: KafkaConnectionContext): Long =
-        (ctx.config.objectScanIntervalMinutes * 60_000L * OBJECTS_TTL_FACTOR).toLong()
-
-    /** 快扫数据 TTL：配置的心跳间隔 × 2。 */
-    private fun lagTtlMs(ctx: KafkaConnectionContext): Long =
-        ctx.config.lagScanIntervalSeconds * 1_000L * LAG_TTL_FACTOR.toLong()
+    /** 快扫 TTL 的模块内别名（基类公式见 [fastTtlMs]）。 */
+    private fun lagTtlMs(ctx: KafkaConnectionContext): Long = fastTtlMs(ctx)
 
     /**
      * 请求入口的**统一守卫**：只看「有没有 AdminClient」，不拿 status 当否决票。
@@ -996,35 +969,6 @@ class KafkaScanService(private val context: ServiceContext) {
         }
     }
 
-    private fun cacheOf(connectionId: String): CacheManager? =
-        KafkaModule.connectionOrNull(connectionId)?.cache
-
-    /**
-     * 整轮扫描失败 → 交给连接管理器按「连续失败阈值」判定是否置 Failed。
-     *
-     * 旧写法是这里直接写 `ctx.status = Failed`：单次失败就判死，而扫描入口本身又
-     * 要求 `Connected` —— 判死之后心跳再也不跑，健康连接被永久误判为「未连接」。
-     * 现在状态翻转集中在 [KafkaConnectionManager.onScanFailed]。
-     */
-    private fun markFailed(connectionId: String, message: String) {
-        KafkaModule.reportScanFailure(connectionId, message)
-    }
-
-    /**
-     * 三类全失败才算连接断了。
-     *
-     * 单类失败不改连接状态：受限账号的 ACL / 某个 broker 临时不答都是局部问题，
-     * 不是「连不上集群」。真正的断连还会被 30s 一条的 lag 心跳捕获。
-     */
-    internal fun isConnectionBroken(failedKinds: Collection<KafkaScanKind>): Boolean =
-        allKindsFailed(failedKinds, KafkaScanKind.entries)
-
-    /** 给日志 / 事件的失败原因：解掉 ExecutionException 包装，拿根因的消息。 */
-    private fun errorMessage(error: Throwable): String =
-        (error as? java.util.concurrent.ExecutionException)?.cause?.message
-            ?: error.message
-            ?: error::class.simpleName
-            ?: "unknown"
 }
 
 /**
