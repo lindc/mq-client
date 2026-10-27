@@ -19,10 +19,8 @@ internal fun MqObjectSnapshot.toQueueCardData(
     warningThreshold: Int,
     actions: List<CardAction> = emptyList(),
 ): ObjectCardData {
-    val currentDepth = currentDepth ?: 0
-    val maxDepth = maxDepth ?: 0
-    val usageRatio = if (maxDepth > 0) currentDepth.toFloat() / maxDepth else 0f
-    val hasWarning = maxDepth > 0 && usageRatio >= warningThreshold / 100f
+    // 判定与拓扑图共用一份（见 isQueueDepthWarning 的 KDoc：两份实现曾分叉）。
+    val hasWarning = isQueueDepthWarning(this.currentDepth, this.maxDepth, warningThreshold)
 
     return ObjectCardData(
         id = name,

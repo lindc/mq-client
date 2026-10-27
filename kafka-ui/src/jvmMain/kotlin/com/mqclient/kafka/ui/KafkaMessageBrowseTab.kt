@@ -66,6 +66,7 @@ import com.mqclient.kafka.KafkaMessageSummary
 import com.mqclient.kafka.KafkaReadStart
 import com.mqclient.mqui.common.CompactSearchField
 import com.mqclient.mqui.objectlist.ObjectListEmptyState
+import com.mqclient.mqui.common.rememberDebouncedValue
 import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.dialog.DateTimePickerDialog
@@ -83,7 +84,6 @@ import java.time.ZoneOffset
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /** 消息表格的固定列宽：Offset / Key / Timestamp / Partition / 操作（Value 弹性）。
@@ -272,12 +272,9 @@ internal fun KafkaMessageBrowseTab(
     }
 
     // 搜索：输入即时回显，防抖 300ms 后进过滤；只过滤已加载消息，不触发读取。
+    // 防抖实现在 mq-ui 的 rememberDebouncedValue（与对象列表页同一份）。
     var rawSearch by remember { mutableStateOf("") }
-    var appliedSearch by remember { mutableStateOf("") }
-    LaunchedEffect(rawSearch) {
-        delay(300)
-        appliedSearch = rawSearch
-    }
+    val appliedSearch = rememberDebouncedValue(rawSearch)
 
     val ready = uiState as? BrowseUiState.Ready
     val filtered = ready?.messages?.let { filterMessages(it, appliedSearch) } ?: emptyList()
@@ -766,7 +763,7 @@ private fun BrowseErrorView(
 /* ------------------------------- 纯函数 ------------------------------- */
 
 /** 本地过滤：key 预览 / value 预览 / hex / 时间文本的大小写不敏感 contains。 */
-private fun filterMessages(
+internal fun filterMessages(
     messages: List<KafkaMessageSummary>,
     search: String,
 ): List<KafkaMessageSummary> {

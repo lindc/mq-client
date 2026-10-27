@@ -2,6 +2,57 @@
 
 本文件记录 MQClient 的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [Unreleased] — 2026-10-27 (7)
+
+### Fixed
+
+- **队列深度告警的两份实现对 threshold=0 结论相反**（IBM MQ）。同一判定写在
+  `QueueCardAdapter.toQueueCardData`（`maxDepth > 0 && ratio >= t/100`）与
+  `TopologyGraphBuilder`（`ratio >= t/100`，未知 maxDepth 时 ratio=0）两处；正常阈值
+  （表单限制 50..100）下等价，但 threshold=0 时拓扑把所有 **maxDepth 未知**的本地队列
+  标成 WARNING，而列表页不标 —— `ibmMQConfigFromOptions` 对 config.toml 不钳制，
+  手改配置即可触发。抽出 `isQueueDepthWarning(currentDepth, maxDepth, thresholdPercent)`
+  作为唯一判定，两处共用。
+
+### Changed
+
+- **消息浏览页的搜索防抖统一到 `rememberDebouncedValue`**（P2.6 收尾）：IBM MQ /
+  Kafka / RocketMQ 三个浏览页此前各写一份
+  `LaunchedEffect(rawSearch) { delay(300); appliedSearch = rawSearch }`，与四个对象
+  列表页已经用的共享实现并存 —— 同一语义两套实现。现在 8 处调用点共用一份。
+- **把 UI 里的纯逻辑从 Composable 中提出来**（P1.3）：UI 层测试密度只有 8-12%，而
+  git 历史显示缺陷恰恰集中在那里。本轮不提覆盖率数字，只把「伪装成 Composable 的
+  纯函数」提出到可测位置：
+  - `filterMessages`（三个浏览页）`private` → `internal`；IBM 版的 `now` 改为参数
+    注入，相对时间窗的端点边界才测得准。
+  - 新增 `canLoadMore` / `canRefresh`（IBM 浏览页）：翻页与刷新的进入条件此前是
+    `loadMore()` / `refresh()` 里的裸 `if`，与协程启动混在一起。它们坏掉的表现是
+    「按钮点了没反应」或「列表重复/错乱」。
+  - `BrowseUiState` / `BrowseTimeRange` `private` → `internal`（测试可见）。
+
+### Tests
+
+- 新增 5 个测试类、40 例：
+  - `QueueDepthWarningTest`(7)：端点包含、未知 maxDepth 不告警、**threshold=0 的分叉格**、
+    null 当前深度、超容量。
+  - `MessageBrowseFilterTest`(12)：搜索大小写/多项匹配/trim、相对时间窗（5min/1h/24h）
+    边界含端点、脏时间戳只在「全部」可见、CUSTOM 单侧开放区间、搜索与时间窗是 AND。
+  - `BrowsePageGuardTest`(9)：exhausted / loadingMore / refreshing 三种互斥、
+    非 Ready 态一律不可动作、刷新在 exhausted 下仍允许（新消息可能已到货）。
+  - `KafkaMessageFilterTest`(7) / `RocketMqMessageFilterTest`(7)：多字段匹配
+    （key hex / value hex / offset / 时间文本）、**可空 key/tags 不因 "null" 命中**、
+    空查询返回同一列表实例（组合期每帧调用，不该复制）。
+  - `DebouncedValueTest`(5，`mq-ui` 首个 Compose 运行时测试)：用 `mainClock` 虚拟时钟
+    验证首帧立即生效、299ms 不生效 / 300ms 生效、连打只生效最终值、清空立即生效、
+    自定义间隔。
+- `mq-ui` 的 jvmTest 增加 Compose 运行时依赖（`ui-test-kit` + `desktop.currentOs`）：
+  防抖的定义就是时间，假时钟才有意义。
+- 变异验证（全部确认能红）：
+  - 队列告警判定换回拓扑旧实现 → 「threshold=0 的分叉格」变红；
+  - `canLoadMore` 漏判 exhausted → 对应用例变红；
+  - 防抖去掉首帧立即生效 → 4 例变红；
+  - 防抖去掉「清空立即生效」→ 对应用例变红。
+
 ## [Unreleased] — 2026-10-27 (6)
 
 ### Changed

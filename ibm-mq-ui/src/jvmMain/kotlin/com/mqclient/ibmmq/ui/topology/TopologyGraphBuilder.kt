@@ -12,6 +12,7 @@ import com.mqclient.graph.TopologyData
 import com.mqclient.graph.NodeSeverity
 import com.mqclient.ibmmq.IbmMQModule
 import com.mqclient.ibmmq.pcf.MqObjectType
+import com.mqclient.ibmmq.ui.isQueueDepthWarning
 import com.mqclient.ibmmq.pcf.MqObjectSnapshot
 import com.mqclient.core.log.Log
 import androidx.compose.ui.unit.dp
@@ -81,12 +82,9 @@ fun buildKuiverFromCache(connectionId: String, warningThreshold: Int): TopologyD
             it.isTransmission() -> TopologyNodeType.TRANSMISSION_QUEUE
             else -> TopologyNodeType.LOCAL_QUEUE
         }
-        // 消息积压：currentDepth / maxDepth ≥ 阈值（与队列列表页同一判定，maxDepth 未知不算）。
-        val ratio = it.maxDepth?.takeIf { max -> max > 0 }?.let { max ->
-            (it.currentDepth ?: 0).toFloat() / max
-        } ?: 0f
+        // 消息积压：与队列列表页**同一份**判定（isQueueDepthWarning；两份实现曾分叉）。
         val severity = if (type == TopologyNodeType.LOCAL_QUEUE &&
-            ratio >= warningThreshold / 100f
+            isQueueDepthWarning(it.currentDepth, it.maxDepth, warningThreshold)
         ) {
             NodeSeverity.WARNING
         } else {

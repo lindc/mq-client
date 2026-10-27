@@ -58,6 +58,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mqclient.mqui.common.CompactSearchField
 import com.mqclient.mqui.objectlist.ObjectListEmptyState
+import com.mqclient.mqui.common.rememberDebouncedValue
 import com.mqclient.rocketmq.RocketMqMessage
 import com.mqclient.rocketmq.RocketMqModule
 import com.mqclient.uicommon.PrimaryButton
@@ -71,7 +72,6 @@ import com.mqclient.uicommon.table.formatSize
 import com.mqclient.uicommon.table.formatTimestamp
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /** 消息表格的固定列宽：Queue / Offset / MsgId / Tags / Keys / Timestamp / Size / 操作（Value 弹性）。 */
@@ -212,12 +212,9 @@ internal fun RocketMqMessageBrowseTab(
     }
 
     // 搜索：输入即时回显，防抖 300ms 后进过滤；只过滤已加载消息，不触发读取。
+    // 防抖实现在 mq-ui 的 rememberDebouncedValue（与对象列表页同一份）。
     var rawSearch by remember { mutableStateOf("") }
-    var appliedSearch by remember { mutableStateOf("") }
-    LaunchedEffect(rawSearch) {
-        delay(300)
-        appliedSearch = rawSearch
-    }
+    val appliedSearch = rememberDebouncedValue(rawSearch)
 
     val ready = uiState as? BrowseUiState.Ready
     val filtered = ready?.messages?.let { filterMessages(it, appliedSearch) } ?: emptyList()
@@ -641,7 +638,7 @@ private fun BrowseErrorView(
 /* ------------------------------- 纯函数 ------------------------------- */
 
 /** 本地过滤：msgId / tags / keys / value 预览 / hex / 时间文本的大小写不敏感 contains。 */
-private fun filterMessages(
+internal fun filterMessages(
     messages: List<RocketMqMessage>,
     search: String,
 ): List<RocketMqMessage> {

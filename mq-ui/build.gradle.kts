@@ -33,6 +33,10 @@ kotlin {
         jvmTest.dependencies {
             // pollUntil 的取消语义契约测试（纯协程，不需要 Compose 运行时）。
             implementation(kotlin("test"))
+            // rememberDebouncedValue 的**时序**测试需要真实的 Compose 运行时 +
+            // 虚拟时钟（mainClock）：防抖的本质是「300ms 内不生效」，用假时钟才测得准。
+            implementation(projects.uiTestKit)
+            implementation(compose.desktop.currentOs)
         }
     }
 }

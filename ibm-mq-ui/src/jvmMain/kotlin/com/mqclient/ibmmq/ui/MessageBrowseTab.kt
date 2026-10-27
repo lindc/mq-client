@@ -73,6 +73,7 @@ import com.mqclient.ibmmq.messaging.MessageSummary
 import com.mqclient.ibmmq.messaging.browseErrorText
 import com.mqclient.mqui.common.CompactSearchField
 import com.mqclient.mqui.objectlist.ObjectListEmptyState
+import com.mqclient.mqui.common.rememberDebouncedValue
 import com.mqclient.uicommon.DangerButton
 import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.AppTooltip
@@ -113,7 +114,7 @@ private val TIME_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("yyy
 private val DISPLAY_TIME_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
 
 /** 时间范围预设；CUSTOM 的起止由自定义输入框给出（留空 = 该侧不限制）。 */
-private enum class BrowseTimeRange(val labelKey: String) {
+internal enum class BrowseTimeRange(val labelKey: String) {
     LAST_5_MIN("ibm_mq_msg_time_5min"),
     LAST_1_HOUR("ibm_mq_msg_time_1hour"),
     LAST_24_HOURS("ibm_mq_msg_time_24hour"),
@@ -125,7 +126,7 @@ private enum class BrowseTimeRange(val labelKey: String) {
  * 浏览页三态：初始加载 / 失败（带原因 + 重试）/ 就绪。「队列为空」「过滤无结果」
  * 在就绪态内按列表与过滤结果分流，不单独建模。
  */
-private sealed interface BrowseUiState {
+internal sealed interface BrowseUiState {
     data object Loading : BrowseUiState
     data class Failed(val reason: String) : BrowseUiState
     data class Ready(
@@ -187,12 +188,10 @@ internal fun MessageBrowseTab(
     }
 
     // 搜索：输入即时回显，防抖 300ms 后进过滤；只过滤已加载消息，不触发 browse。
+    // 防抖实现在 mq-ui 的 rememberDebouncedValue（与四个对象列表页同一份）——
+    // 这里曾经手写 delay(300)，同一个语义两套实现。
     var rawSearch by remember { mutableStateOf("") }
-    var appliedSearch by remember { mutableStateOf("") }
-    LaunchedEffect(rawSearch) {
-        delay(300)
-        appliedSearch = rawSearch
-    }
+    val appliedSearch = rememberDebouncedValue(rawSearch)
 
     var timeRange by remember { mutableStateOf(BrowseTimeRange.ALL) }
     var customStart by remember { mutableStateOf<LocalDateTime?>(null) }
@@ -213,8 +212,9 @@ internal fun MessageBrowseTab(
 
     fun loadMore() {
         val opened = session ?: return
+        // 进页条件统一在 canLoadMore（含「刷新中不翻页」—— 两条路径都会动列表）。
+        if (!canLoadMore(uiState)) return
         val current = uiState as? BrowseUiState.Ready ?: return
-        if (current.loadingMore || current.exhausted) return
         scope.launch {
             uiState = current.copy(loadingMore = true)
             try {
@@ -236,8 +236,8 @@ internal fun MessageBrowseTab(
 
     fun refresh() {
         val opened = session ?: return
+        if (!canRefresh(uiState)) return
         val current = uiState as? BrowseUiState.Ready ?: return
-        if (current.refreshing || current.loadingMore) return
         scope.launch {
             uiState = current.copy(refreshing = true)
             try {
@@ -856,16 +856,22 @@ private fun TimeRangeRow(
 
 /* ------------------------------- 纯函数 ------------------------------- */
 
-/** 本地过滤：hex 串大小写不敏感 contains + 时间范围（解析不出时间的消息只对「全部」可见）。 */
-private fun filterMessages(
+/**
+ * 本地过滤：hex 串大小写不敏感 contains + 时间范围（解析不出时间的消息只对「全部」可见）。
+ *
+ * [now] 由调用方注入而不是内部取 `LocalDateTime.now()`：相对区间（最近 5 分钟 /
+ * 1 小时 / 24 小时）的边界条件只有用固定「现在」才测得准 —— 这条逻辑曾经是
+ * Composable 里的私有函数，边界（含端点？跨日？脏时间戳？）完全没有测试。
+ */
+internal fun filterMessages(
     messages: List<MessageSummary>,
     search: String,
     range: BrowseTimeRange,
     customStart: LocalDateTime?,
     customEnd: LocalDateTime?,
+    now: LocalDateTime = LocalDateTime.now(),
 ): List<MessageSummary> {
     val query = search.trim()
-    val now = LocalDateTime.now()
     val start = when (range) {
         BrowseTimeRange.LAST_5_MIN -> now.minusMinutes(5)
         BrowseTimeRange.LAST_1_HOUR -> now.minusHours(1)
