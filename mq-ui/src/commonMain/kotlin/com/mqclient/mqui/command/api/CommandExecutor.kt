@@ -7,6 +7,10 @@ import com.mqclient.mqui.command.model.CommandResult
  *
  * 实现方负责：命令展开（如缩写）、发送请求、把响应格式化为可读文本（放进
  * [CommandResult.output]）、错误码翻译（放进 errorCode / errorMessage）。
+ *
+ * 线程契约：调用方（[com.mqclient.mqui.command.CommandConsoleViewModel]）**已经把
+ * 本方法切到后台 IO 调度器**执行，所以实现方无需再自行 `withContext`；但也**不得
+ * 假设自己跑在主线程** —— 它不在。阻塞 IO 就写在本方法里，直接写。
  */
 interface CommandExecutor {
 
