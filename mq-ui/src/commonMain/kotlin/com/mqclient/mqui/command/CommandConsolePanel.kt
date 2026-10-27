@@ -26,9 +26,9 @@ import io.github.vinceglb.filekit.dialogs.FileKitType
 import io.github.vinceglb.filekit.dialogs.compose.rememberFilePickerLauncher
 import io.github.vinceglb.filekit.dialogs.compose.rememberFileSaverLauncher
 import io.github.vinceglb.filekit.name
+import com.mqclient.mqui.command.file.FileNotUtf8Exception
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
-import java.nio.charset.CharacterCodingException
 
 private const val MIN_RATIO = 0.2f
 private const val MAX_RATIO = 0.8f
@@ -141,7 +141,7 @@ private fun onOpenFileResult(
             state.appendText(content)
         }.onFailure { e ->
             val msg = when (e) {
-                is CharacterCodingException -> stringResource("console_file_not_utf8")
+                is FileNotUtf8Exception -> stringResource("console_file_not_utf8")
                 is IllegalArgumentException -> stringResource("console_file_too_large").withArg(e.message ?: "")
                 else -> stringResource("console_file_read_failed").withArg(e.message ?: e::class.simpleName ?: "")
             }
