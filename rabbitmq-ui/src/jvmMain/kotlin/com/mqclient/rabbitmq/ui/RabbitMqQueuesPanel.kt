@@ -85,6 +85,96 @@ fun RabbitMqQueuesPanel(
         }
     }
 
+    // ---- 卡片模型缓存 ----
+    //
+    // 为什么要 remember：打开/关闭队列消息对话框会触发本面板重组，而 `items` 是
+    // `state.filtered.map { ... }` —— 不做缓存就每次为**全部**队列重建 ObjectCardData
+    // （逐条查 i18n、分配 indicator / action 列表与 lambdas）。队列多时这一下是
+    // 肉眼可见的顿挫，正是「弹窗慢」的一半。
+    //
+    // 组合读数（stringResource / MaterialTheme）必须先提到 remember 之外：remember
+    // 的 lambda 不是 @Composable 上下文，里面调不了。提到外面后它们同时成为 key ——
+    // 切语言 / 换主题时会重建，不会留下旧文案。
+    //
+    // `state.filtered` 每次读取都新建一个 List，但元素是同一批 data class 实例，
+    // `List.equals` 是结构相等，所以内容不变时 remember 命中的是缓存。
+    val queuesTypeLabel = stringResource("rabbitmq_ui_nav_queues")
+    val messagesLabel = stringResource("rabbitmq_ui_queue_field_messages")
+    val blockedLabel = stringResource("rabbitmq_ui_queue_state_blocked")
+    val indicatorTint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+    val filteredQueues = state.filtered
+    val cardItems =
+        remember(filteredQueues, queuesTypeLabel, messagesLabel, blockedLabel, indicatorTint, aiAsk, connectionId) {
+            filteredQueues.map { info ->
+                // 状态色点：running 绿 / idle 灰 / flow·down·crashed 红（危险）/
+                // 未知或快扫未到灰。文字颜色随色点（共享卡片「同色」约定）。
+                // 映射收敛在 rabbitMqQueueStateColor（与拓扑 severity 同口径）。
+                val statusTint = rabbitMqQueueStateColor(info.state)
+                val statusWord = when (info.state) {
+                    // flow = 内存/磁盘告警被阻塞，必须直白说出「阻塞」。
+                    "flow" -> blockedLabel
+                    else -> info.state
+                }
+                // 消息数告警：> 0 且确认无消费者 → 警告橙（积压无人消费）。
+                val backlog = (info.messages ?: 0) > 0 && info.consumers == 0
+                val metricColor = if (backlog) RabbitMqWarningOrange else null
+                ObjectCardData(
+                    id = info.name,
+                    title = info.name,
+                    typeIcon = Icons.Default.Forum,
+                    typeLabel = queuesTypeLabel,
+                    // 右上角：消息总数（Ready + Unacked）。
+                    metricValue = messagesLabel.withArg(info.messages.orDash()),
+                    metricColor = metricColor,
+                    // 左下：状态色点；running 只留绿点（共享卡 statusText=null
+                    // 不渲染文字），idle 灰点灰字，flow/down 红点红字。
+                    statusIcon = Icons.Filled.Circle,
+                    statusIconTint = statusTint,
+                    statusText = statusWord?.takeIf { it != "running" },
+                    // 右下：消费者指标（icon + 数字，纯展示）+ 查看消息 / 属性。
+                    indicators =
+                        listOf(
+                            ObjectCardIndicator(
+                                icon = Icons.Default.People,
+                                label = info.consumers.orDash(),
+                                // 纯数据弱化：统一 60% 次要灰，与可点操作区拉开层级。
+                                tint = indicatorTint,
+                            ),
+                        ),
+                    // 积压告警边框：默认态与悬停态都保留（共享卡 alertTint 槽位）。
+                    alertTint = if (backlog) RabbitMqWarningOrange.copy(alpha = 0.5f) else null,
+                    actions =
+                        buildList {
+                            // AI 绝对最左（三家同一拼接约定）。
+                            if (aiAsk != null) {
+                                add(
+                                    askAiCardAction {
+                                        RabbitMqAiChainBuilder.buildForQueue(connectionId, info.name)
+                                            ?.let(aiAsk::onAsk)
+                                    },
+                                )
+                            }
+                            add(
+                                CardAction(
+                                    id = "messages",
+                                    icon = Icons.Default.Email,
+                                    tooltip = "rabbitmq_ui_queue_action_messages",
+                                    onClick = { msgQueue = info },
+                                ),
+                            )
+                            add(
+                                CardAction(
+                                    id = "properties",
+                                    icon = Icons.Default.Info,
+                                    tooltip = "rabbitmq_ui_queue_action_props",
+                                    onClick = { propsQueue = info },
+                                ),
+                            )
+                        },
+                )
+            }
+        }
+
     Box(modifier.fillMaxSize()) {
         Column(modifier.fillMaxSize()) {
             Row(
@@ -137,77 +227,7 @@ fun RabbitMqQueuesPanel(
                     emptyContent = {
                         ObjectListEmptyState(stringResource("rabbitmq_ui_queue_empty"))
                     },
-                    items =
-                        state.filtered.map { info ->
-                            // 状态色点：running 绿 / idle 灰 / flow·down·crashed 红（危险）/
-                            // 未知或快扫未到灰。文字颜色随色点（共享卡片「同色」约定）。
-                            // 映射收敛在 rabbitMqQueueStateColor（与拓扑 severity 同口径）。
-                            val statusTint = rabbitMqQueueStateColor(info.state)
-                            val statusWord = when (info.state) {
-                                // flow = 内存/磁盘告警被阻塞，必须直白说出「阻塞」。
-                                "flow" -> stringResource("rabbitmq_ui_queue_state_blocked")
-                                else -> info.state
-                            }
-                            // 消息数告警：> 0 且确认无消费者 → 警告橙（积压无人消费）。
-                            val backlog = (info.messages ?: 0) > 0 && info.consumers == 0
-                            val metricColor = if (backlog) RabbitMqWarningOrange else null
-                            ObjectCardData(
-                                id = info.name,
-                                title = info.name,
-                                typeIcon = Icons.Default.Forum,
-                                typeLabel = stringResource("rabbitmq_ui_nav_queues"),
-                                // 右上角：消息总数（Ready + Unacked）。
-                                metricValue = stringResource("rabbitmq_ui_queue_field_messages")
-                                    .withArg(info.messages.orDash()),
-                                metricColor = metricColor,
-                                // 左下：状态色点；running 只留绿点（共享卡 statusText=null
-                                // 不渲染文字），idle 灰点灰字，flow/down 红点红字。
-                                statusIcon = Icons.Filled.Circle,
-                                statusIconTint = statusTint,
-                                statusText = statusWord?.takeIf { it != "running" },
-                                // 右下：消费者指标（icon + 数字，纯展示）+ 查看消息 / 属性
-                                //（第一阶段 Snackbar 占位）。
-                                indicators =
-                                    listOf(
-                                        ObjectCardIndicator(
-                                            icon = Icons.Default.People,
-                                            label = info.consumers.orDash(),
-                                            // 纯数据弱化：统一 60% 次要灰，与可点操作区拉开层级。
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                                        ),
-                                    ),
-                                // 积压告警边框：默认态与悬停态都保留（共享卡 alertTint 槽位）。
-                                alertTint = if (backlog) RabbitMqWarningOrange.copy(alpha = 0.5f) else null,
-                                actions =
-                                    buildList {
-                                        // AI 绝对最左（三家同一拼接约定）。
-                                        if (aiAsk != null) {
-                                            add(
-                                                askAiCardAction {
-                                                    RabbitMqAiChainBuilder.buildForQueue(connectionId, info.name)
-                                                        ?.let(aiAsk::onAsk)
-                                                },
-                                            )
-                                        }
-                                        add(
-                                            CardAction(
-                                                id = "messages",
-                                                icon = Icons.Default.Email,
-                                                tooltip = "rabbitmq_ui_queue_action_messages",
-                                                onClick = { msgQueue = info },
-                                            ),
-                                        )
-                                        add(
-                                            CardAction(
-                                                id = "properties",
-                                                icon = Icons.Default.Info,
-                                                tooltip = "rabbitmq_ui_queue_action_props",
-                                                onClick = { propsQueue = info },
-                                            ),
-                                        )
-                                    },
-                            )
-                        },
+                    items = cardItems,
                     onCardClick = {},
                     onCardDoubleClick = {},
                     modifier = Modifier.fillMaxSize(),

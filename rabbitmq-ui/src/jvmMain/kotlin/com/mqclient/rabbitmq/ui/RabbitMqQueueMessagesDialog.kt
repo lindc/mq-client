@@ -68,11 +68,26 @@ import com.mqclient.uicommon.failureText
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 
 /** 拉取条数上限：basicGet 逐条循环，防大队列一次拉爆内存。 */
 private const val FETCH_HARD_LIMIT = 100
+
+/**
+ * 单次 AMQP 调用的硬超时（建会话 / basicGet / requeue / ack / heldCount）。
+ *
+ * 为什么需要它：AMQP 的调用是**阻塞式**的，默认 RPC 超时以分钟计。broker 不应答时
+ * 会话会一直挂在 `basicGet` 里，UI 侧 `fetching` / `sessionState` 永远不会落地。
+ * 5s 到了就当成失败把状态置下去。
+ *
+ * **局限（必须知道）**：`withTimeout` 只能让**等待方**放弃，不能杀死已经在阻塞
+ * socket 上的那个调用——它会在后台线程里继续挂着，直到连接层自身超时。要真正
+ * 回收线程，得靠 AMQP 客户端自己的超时配置；这里保证的是「界面绝不无限期转圈」。
+ */
+private const val MESSAGE_TIMEOUT_MS = 5_000L
 
 private val SuccessGreen = Color(0xFF2E7D32)
 private val FailedRed = Color(0xFFD32F2F)
@@ -126,8 +141,9 @@ fun RabbitMqQueueMessagesDialog(
     // 会话的**所有者**：开会话只能经它（内部先关旧的），UI 侧的 `session` 只是镜像。
     val sessionSlot = remember(openSession) { QueueSessionSlot(openSession) }
     var session by remember { mutableStateOf<RabbitMqQueueSession?>(null) }
+    // Idle = **还没开过会话**（对话框刚开、用户还没点任何动作）。
+    // 与「正在开」区分开是 P2-1 的前提：只有用户显式动作才会把它推进到 Loading。
     var sessionState by remember(queueName) { mutableStateOf<LoadState<Unit>>(LoadState.Idle) }
-    var sessionRetry by remember(queueName) { mutableIntStateOf(0) }
     var selectedTab by remember { mutableIntStateOf(0) }
 
     // ---- 浏览状态 ----
@@ -151,7 +167,11 @@ fun RabbitMqQueueMessagesDialog(
         onDispose { RabbitMqModule.closeMessageSessionAsync(sessionSlot.detach()) }
     }
 
-    // 会话三态：打开即建 AMQP 连接（passive 校验队列存在）。
+    // 会话状态机：**建连推迟到用户的第一个显式动作**（拉取 / 发送）。
+    //
+    // 为什么不打开就建：打开对话框原本会另开一条 AMQP 连接（TCP + 握手 + passive
+    // 声明），对远程 broker + TLS 是几百毫秒到数秒。用户只是想看一眼，却要等一次
+    // 完整建连——这就是「弹出很慢」的来源。现在打开只渲染外壳，点「拉取消息」才连。
     //
     // 重开（换队列 / 重试）一律经 [QueueSessionSlot.open]：它保证**先关旧会话再开新的**。
     // `session` 只是给 UI 读的镜像，不是句柄的所有者 —— 开新会话只有槽这一条路。
@@ -159,7 +179,13 @@ fun RabbitMqQueueMessagesDialog(
     // 关掉之后消息列表上的 deliveryTag 全部作废：tag 是 channel 级、新 channel 从 1 重新
     // 计数，旧 tag 拿去 ack 会命中新会话里的**另一条**消息。所以一并清空列表，让用户
     // 在新会话上重新拉取。
-    LaunchedEffect(connectionId, queueName, sessionRetry) {
+    // 超时文案先取好：LaunchedEffect / launch / 异常分支都不是 @Composable 上下文。
+    val timeoutText = stringResource("rabbitmq_ui_msg_timeout").withArg(MESSAGE_TIMEOUT_MS / 1_000)
+
+    // 只重置状态、**不建连**。
+    LaunchedEffect(connectionId, queueName) {
+        // 换队列时把上一队列的会话交出去关掉，不必等下一个 open 才回收。
+        RabbitMqModule.closeMessageSessionAsync(sessionSlot.detach())
         session = null
         messages = emptyList()
         held = 0
@@ -167,26 +193,46 @@ fun RabbitMqQueueMessagesDialog(
         // 详情 / 转发选择都持有旧会话的消息对象，同样作废。
         detail = null
         forwarding = emptyList()
+        sessionState = LoadState.Idle
+    }
+
+    /**
+     * 确保会话已开（幂等）；失败返回 null 并把原因写进 [sessionState]。
+     *
+     * 超时分支必须排在取消分支**之前**：`TimeoutCancellationException` 是
+     * `CancellationException` 的子类，顺序反了会把超时当成外部取消原样上抛，
+     * 协程直接死掉、状态永远停在 Loading。
+     */
+    suspend fun ensureSession(): RabbitMqQueueSession? {
+        session?.let { return it }
         sessionState = LoadState.Loading
-        sessionState = runCatching {
-            val s = sessionSlot.open(connectionId, queueName)
-            session = s
-            LoadState.Success(Unit)
-        }.getOrElse { e ->
-            if (e is CancellationException) throw e
-            LoadState.Error(failureText(e))
+        return try {
+            val opened = withTimeout(MESSAGE_TIMEOUT_MS) { sessionSlot.open(connectionId, queueName) }
+            session = opened
+            sessionState = LoadState.Success(Unit)
+            opened
+        } catch (e: TimeoutCancellationException) {
+            sessionState = LoadState.Error(timeoutText)
+            null
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            sessionState = LoadState.Error(failureText(e))
+            null
         }
     }
 
     fun fetchMore() {
-        val s = session ?: return
         scope.launch {
             fetching = true
             try {
-                val batch = s.fetchNext(effectiveLimit(limit))
+                val s = ensureSession() ?: return@launch
+                val batch = withTimeout(MESSAGE_TIMEOUT_MS) { s.fetchNext(effectiveLimit(limit)) }
                 messages = messages + batch
                 exhausted = batch.isEmpty()
-                held = s.heldCount()
+                held = withTimeout(MESSAGE_TIMEOUT_MS) { s.heldCount() }
+            } catch (e: TimeoutCancellationException) {
+                snackbar.showSnackbar(timeoutText)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -198,17 +244,19 @@ fun RabbitMqQueueMessagesDialog(
     }
 
     fun refreshQueue() {
-        val s = session ?: return
         scope.launch {
             fetching = true
             try {
-                s.requeueAll()
+                val s = ensureSession() ?: return@launch
+                withTimeout(MESSAGE_TIMEOUT_MS) { s.requeueAll() }
                 messages = emptyList()
                 exhausted = false
-                val batch = s.fetchNext(effectiveLimit(limit))
+                val batch = withTimeout(MESSAGE_TIMEOUT_MS) { s.fetchNext(effectiveLimit(limit)) }
                 messages = batch
                 exhausted = batch.isEmpty()
-                held = s.heldCount()
+                held = withTimeout(MESSAGE_TIMEOUT_MS) { s.heldCount() }
+            } catch (e: TimeoutCancellationException) {
+                snackbar.showSnackbar(timeoutText)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -224,7 +272,20 @@ fun RabbitMqQueueMessagesDialog(
         if (deleteSource) {
             val tags = forwarded.map { it.deliveryTag }.toSet()
             messages = messages.filterNot { it.deliveryTag in tags }
-            scope.launch { held = session?.heldCount() ?: held }
+            // heldCount 也是 AMQP 往返，同样封顶：拿不到计数就不刷新，不拖死对话框。
+            scope.launch {
+                held =
+                    try {
+                        withTimeout(MESSAGE_TIMEOUT_MS) { session?.heldCount() } ?: held
+                    } catch (e: TimeoutCancellationException) {
+                        held
+                    } catch (e: CancellationException) {
+                        // runCatching 在这里是错的：它会把取消一并吞掉。手写分支保住语义。
+                        throw e
+                    } catch (e: Exception) {
+                        held
+                    }
+            }
         }
         scope.launch {
             snackbar.showSnackbar(stringResource("rabbitmq_ui_msg_forward_done_count").withArg(forwarded.size))
@@ -235,10 +296,12 @@ fun RabbitMqQueueMessagesDialog(
         val s = session ?: return
         scope.launch {
             try {
-                s.ack(msg.deliveryTag)
+                withTimeout(MESSAGE_TIMEOUT_MS) { s.ack(msg.deliveryTag) }
                 messages = messages.filterNot { it.deliveryTag == msg.deliveryTag }
-                held = s.heldCount()
+                held = withTimeout(MESSAGE_TIMEOUT_MS) { s.heldCount() }
                 snackbar.showSnackbar(stringResource("rabbitmq_ui_msg_deleted"))
+            } catch (e: TimeoutCancellationException) {
+                snackbar.showSnackbar(timeoutText)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -253,8 +316,12 @@ fun RabbitMqQueueMessagesDialog(
 
     suspend fun sendOneDirect(routingBytes: ByteArray, headers: Map<String, String>, s: RabbitMqQueueSession): Pair<Boolean, String?> {
         return try {
-            s.publishDirect(routingBytes, headers)
+            withTimeout(MESSAGE_TIMEOUT_MS) { s.publishDirect(routingBytes, headers) }
             true to null
+        } catch (e: TimeoutCancellationException) {
+            // 超时不能当取消抛出：publishDirect 的 TimeoutCancellationException 也是
+            // CancellationException，若漏给下面那个分支会把整批发送协程连带杀掉。
+            false to timeoutText
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -263,11 +330,12 @@ fun RabbitMqQueueMessagesDialog(
     }
 
     fun sendBatch() {
-        val s = session ?: return
         scope.launch {
             sending = true
             sendError = null
             try {
+                // 发送同样需要会话：延迟建连后不能再假定它已经在。
+                val s = ensureSession() ?: return@launch
                 val headers = sendHeaders.filter { it.first.isNotBlank() }.associate { it.first.trim() to it.second }
                 var sent = 0
                 for (task in batchTasks.filter { it.status == BatchStatus.WAITING }) {
@@ -280,15 +348,17 @@ fun RabbitMqQueueMessagesDialog(
                 }
                 if (sent > 0) {
                     // 有成功投递 → 自动重新拉取刷新列表（新消息在队列头部）。
-                    s.requeueAll()
+                    withTimeout(MESSAGE_TIMEOUT_MS) { s.requeueAll() }
                     messages = emptyList()
                     exhausted = false
-                    messages = s.fetchNext(effectiveLimit(limit))
+                    messages = withTimeout(MESSAGE_TIMEOUT_MS) { s.fetchNext(effectiveLimit(limit)) }
                     exhausted = messages.isEmpty()
-                    held = s.heldCount()
+                    held = withTimeout(MESSAGE_TIMEOUT_MS) { s.heldCount() }
                 }
                 val failed = batchTasks.count { it.status == BatchStatus.FAILED }
                 if (failed == 0) snackbar.showSnackbar(stringResource("rabbitmq_ui_msg_batch_done"))
+            } catch (e: TimeoutCancellationException) {
+                sendError = timeoutText
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -314,8 +384,8 @@ fun RabbitMqQueueMessagesDialog(
     }
 
     fun retryBatchTask(task: BatchTask) {
-        val s = session ?: return
         scope.launch {
+            val s = ensureSession() ?: return@launch
             updateBatchTask(task.id) { it.copy(status = BatchStatus.SENDING, errorMessage = null) }
             val headers = sendHeaders.filter { it.first.isNotBlank() }.associate { it.first.trim() to it.second }
             val (ok, err) = sendOneDirect(task.content, headers, s)
@@ -339,20 +409,27 @@ fun RabbitMqQueueMessagesDialog(
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             when (val ss = sessionState) {
-                is LoadState.Idle, is LoadState.Loading -> {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-                }
+                // Error：会话没开成。错误整页呈现 + 重试（重试 = 再走一次 ensureSession，
+                // 由 fetchMore 触发）。
                 is LoadState.Error -> {
-                    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center) {
+                    Column(
+                        modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp),
+                        verticalArrangement = Arrangement.Center,
+                    ) {
                         Text(
                             text = stringResource("rabbitmq_ui_msg_session_failed").withArg(ss.message),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.error,
                         )
-                        TextButtonCompat { sessionRetry++ }
+                        TextButtonCompat { fetchMore() }
                     }
                 }
-                is LoadState.Success -> {
+                // Idle / Loading / Success 一律渲染外壳：
+                //  - Idle = 还没开过会话（打开对话框的常态），用户要能看到 Tab 与
+                //    「拉取消息」按钮，才有办法触发第一次建连；
+                //  - Loading = 正在开，外壳不动，只把 busy 传给浏览区（按钮置灰 + 转圈）；
+                //  - Success = 已开。
+                else -> {
                     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp)) {
                         PrimaryTabRow(selectedTabIndex = selectedTab) {
                             Tab(
@@ -370,7 +447,8 @@ fun RabbitMqQueueMessagesDialog(
                             if (selectedTab == 0) {
                                 BrowsePane(
                                     messages = messages,
-                                    fetching = fetching,
+                                    // 建会话与拉取都算 busy：按钮都该置灰，转圈都该转。
+                                    fetching = fetching || sessionState is LoadState.Loading,
                                     limit = limit,
                                     onLimitChange = { limit = it.filter(Char::isDigit).take(3) },
                                     exhausted = exhausted,

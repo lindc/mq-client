@@ -192,6 +192,7 @@
   "rabbitmq_ui_queue_delete_done": "队列 %1$s 已删除",
   "rabbitmq_ui_msg_title": "队列消息：%1$s",
   "rabbitmq_ui_msg_session_failed": "消息会话建立失败：%1$s",
+  "rabbitmq_ui_msg_timeout": "操作超时（%1$s 秒）：broker 未响应，已放弃本次操作",
   "rabbitmq_ui_msg_tab_browse": "浏览消息",
   "rabbitmq_ui_msg_tab_send": "发送消息",
   "rabbitmq_ui_msg_fetch": "拉取消息",

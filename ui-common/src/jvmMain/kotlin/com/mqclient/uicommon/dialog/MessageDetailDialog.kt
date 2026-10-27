@@ -66,9 +66,12 @@ import com.mqclient.uicommon.file.saveFileBytes
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 
 /** 正文预览长度上限（字符）：超出只显示前段，底部「展开全部」。 */
 private const val MAX_PREVIEW_CHARS = 20_000
@@ -88,11 +91,30 @@ private val LargeBodyWarning = Color(0xFFED6C02)
 /** 「Hex 预览」解释器（message-interpreter-hex）的 id：二进制内容默认选中它。 */
 private const val HEX_INTERPRETER_ID = "hex"
 
+/**
+ * 正文解码 / 解释器渲染的硬超时。
+ *
+ * 这一段全在本地跑（字节 → 文本 → 解释器格式化），不碰网络；但它是本对话框**唯一**
+ * 能让界面停在「加载中」的异步环节——解释器是 SPI，第三方实现在大消息上退化完全
+ * 可能。5s 到点就按失败处理并回退到原文，界面不会无限期挂着。
+ */
+private const val RENDER_TIMEOUT_MS = 5_000L
+
 /** 解释器渲染结果：展示文本 + 解析失败原因（失败时展示原始内容 + 提示）。 */
 private data class RenderedText(val text: String, val parseError: String? = null)
 
-/** 正文基线：二进制判定结果 + 原始文本（非二进制）或 hex 预览（二进制）。 */
-private data class ContentPreview(val isBinary: Boolean, val rawText: String, val hex: String)
+/**
+ * 正文基线：二进制判定结果 + 原始文本（非二进制）或 hex 预览（二进制）。
+ *
+ * [decodeError] 非 null 表示解码本身超时 / 抛异常：这时连“原文”都拿不到，正文区
+ * 必须直接给原因而不是继续转圈。
+ */
+private data class ContentPreview(
+    val isBinary: Boolean,
+    val rawText: String,
+    val hex: String,
+    val decodeError: String? = null,
+)
 
 /**
  * 消息详情对话框（公用，IBM MQ / Kafka / RabbitMQ 三家共用，外观 100% 一致）：
@@ -140,7 +162,12 @@ fun MessageDetailDialog(
     // 读取当前展示的文本、二进制标志与选中解释器（原先在 ContentTab 内部拿不到）。
     val interpreters = remember { MessageInterpreters.loadAll() }
     val oversized = rawBody.size > MAX_BODY_BYTES
-    val effectiveBody = if (oversized) rawBody.copyOf(MAX_BODY_BYTES) else rawBody
+    // remember(rawBody)：超大消息的截断拷贝**不能**每次重组都重做。之前写成裸的
+    // `if (oversized) rawBody.copyOf(...)`，数组身份每次都变 → remember / LaunchedEffect
+    // 的 key 每次都变 → 解码与渲染无限重启，最终表现就是转圈不停。
+    val effectiveBody = remember(rawBody) {
+        if (rawBody.size > MAX_BODY_BYTES) rawBody.copyOf(MAX_BODY_BYTES) else rawBody
+    }
     val binary = remember(effectiveBody, codedCharSetId) { isProbablyBinary(effectiveBody, codedCharSetId) }
     var selectedId by remember(effectiveBody) {
         val initial = if (binary && interpreters.any { it.id == HEX_INTERPRETER_ID }) {
@@ -158,26 +185,67 @@ fun MessageDetailDialog(
     var rendered by remember(effectiveBody) { mutableStateOf<RenderedText?>(null) }
     var rendering by remember(effectiveBody) { mutableStateOf(false) }
 
-    LaunchedEffect(effectiveBody, binary) {
-        preview = withContext(Dispatchers.Default) {
-            ContentPreview(
-                isBinary = binary,
-                rawText = if (binary) "" else MessageCharsets.decode(effectiveBody, codedCharSetId),
-                hex = if (binary) hexPreview(effectiveBody) else "",
-            )
-        }
+    // 超时 / 解码失败文案先在这里取好：LaunchedEffect 与异常分支都不是 @Composable
+    // 上下文，里面拿不到 stringResource。
+    val decodeFailedMessage = stringResource("msg_detail_decode_failed")
+    val renderTimeoutReason = stringResource("msg_detail_render_timeout").withArg(RENDER_TIMEOUT_MS / 1_000)
+
+    LaunchedEffect(effectiveBody, binary, codedCharSetId) {
+        preview =
+            try {
+                withTimeout(RENDER_TIMEOUT_MS) {
+                    withContext(Dispatchers.Default) {
+                        ContentPreview(
+                            isBinary = binary,
+                            rawText = if (binary) "" else MessageCharsets.decode(effectiveBody, codedCharSetId),
+                            hex = if (binary) hexPreview(effectiveBody) else "",
+                        )
+                    }
+                }
+            } catch (e: TimeoutCancellationException) {
+                // 超时不是取消：状态必须落地，否则正文区永远停在转圈。
+                ContentPreview(isBinary = binary, rawText = "", hex = "", decodeError = decodeFailedMessage)
+            } catch (e: CancellationException) {
+                // 真正的取消（对话框已关）原样抛出，不写任何状态。
+                throw e
+            } catch (e: Exception) {
+                ContentPreview(isBinary = binary, rawText = "", hex = "", decodeError = decodeFailedMessage)
+            }
     }
     LaunchedEffect(effectiveBody, interpreter, params, preview) {
         val base = preview ?: return@LaunchedEffect
         // 二进制只支持 Hex 解释器（对字节流跑文本解释器无意义）。
         if (base.isBinary && interpreter?.id != HEX_INTERPRETER_ID) return@LaunchedEffect
+        // 解码本身没成功：没有可渲染的文本，详情页直接展示解码失败原因。
+        if (base.decodeError != null) return@LaunchedEffect
         val target = interpreter ?: return@LaunchedEffect
         rendering = true
-        rendered = withContext(Dispatchers.Default) {
-            when (val result = target.interpret(effectiveBody, encoding, codedCharSetId, params)) {
-                is InterpreterResult.Success -> RenderedText(result.formatted)
-                is InterpreterResult.Failure -> RenderedText(base.rawText, result.message)
-            }
+        try {
+            rendered =
+                withTimeout(RENDER_TIMEOUT_MS) {
+                    withContext(Dispatchers.Default) {
+                        when (val result = target.interpret(effectiveBody, encoding, codedCharSetId, params)) {
+                            is InterpreterResult.Success -> RenderedText(result.formatted)
+                            is InterpreterResult.Failure -> RenderedText(base.rawText, result.message)
+                        }
+                    }
+                }
+        } catch (e: TimeoutCancellationException) {
+            // 超时只影响“格式化”：原文照样展示，原因走解析失败条。
+            rendered = RenderedText(base.rawText, renderTimeoutReason)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // 解释器抛异常 = 渲染失败：回退原文。
+            // 关键：异常绝不能穿出 LaunchedEffect —— Compose 会因此取消整个组合的
+            // 作用域，之后再也不重组，按钮照旧收到点击但界面不再响应（
+            // “关闭没反应”就是这么来的）。
+            rendered = RenderedText(base.rawText, e.message ?: e::class.simpleName ?: "")
+        } finally {
+            // ← 本次 bug 的根：这个标志是右上角“渲染中”小转圈的开关，之前只置
+            // true、从未置 false，于是“正文已渲染 + 小转圈永不停”同时成立。
+            // 成功 / 失败 / 超时 / 取消一律清掉，状态不可能停在加载中。
+            rendering = false
         }
     }
 
@@ -233,6 +301,9 @@ fun MessageDetailDialog(
                 enabled = rawBody.isNotEmpty(),
             ) { Text(stringResource("msg_detail_copy_body")) }
             Spacer(Modifier.weight(1f))
+            // 关闭必须无条件、立即生效：**不要**给它加 `enabled = !rendering` 之类的
+            // 门禁。渲染 / 下载可以慢，退出不能慢 —— 一旦这里被拦，用户能选的只剩
+            // 杀进程。界面上清理状态的职责在渲染协程的 finally，不在这个按钮。
             SecondaryButton(
                 onClick = onDismiss,
             ) { Text(stringResource("common_close")) }
@@ -422,6 +493,16 @@ private fun ContentTab(
                 // 首帧：基线还没算完。
                 base == null -> CircularProgressIndicator(
                     modifier = Modifier.align(Alignment.CenterHorizontally).padding(24.dp),
+                )
+                // 解码超时 / 抛异常：既拿不到文本也没有 hex，直接给原因，**不转圈**。
+                base.decodeError != null -> Text(
+                    text = base.decodeError,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f))
+                        .padding(8.dp),
                 )
                 // 二进制：提示行 + hex 预览（Hex 解释器的结果就是同款 hex 文本）。
                 base.isBinary -> {

@@ -192,6 +192,7 @@
   "rabbitmq_ui_queue_delete_done": "Queue %1$s deleted",
   "rabbitmq_ui_msg_title": "Queue messages: %1$s",
   "rabbitmq_ui_msg_session_failed": "Failed to open message session: %1$s",
+  "rabbitmq_ui_msg_timeout": "Operation timed out after %1$s s: broker did not respond, operation abandoned",
   "rabbitmq_ui_msg_tab_browse": "Browse",
   "rabbitmq_ui_msg_tab_send": "Send",
   "rabbitmq_ui_msg_fetch": "Fetch messages",

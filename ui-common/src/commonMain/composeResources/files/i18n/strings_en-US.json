@@ -198,6 +198,8 @@
   "msg_detail_empty_body": "Message body is empty",
   "msg_detail_binary_notice": "Binary content — shown as hex preview (switch to the Hex interpreter on the right)",
   "msg_detail_parse_failed": "Parse failed: %1$s (raw content shown instead)",
+  "msg_detail_render_timeout": "did not finish within %1$s s",
+  "msg_detail_decode_failed": "Body decoding failed or timed out; text preview unavailable",
   "msg_detail_expand": "Expand all",
   "msg_detail_collapse": "Collapse",
   "msg_detail_copy_body": "Copy body",

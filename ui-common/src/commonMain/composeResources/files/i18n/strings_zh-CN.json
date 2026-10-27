@@ -198,6 +198,8 @@
   "msg_detail_empty_body": "消息体为空",
   "msg_detail_binary_notice": "二进制内容，已按十六进制预览（可在右侧切换 Hex 解释器）",
   "msg_detail_parse_failed": "解析失败：%1$s（已回退原始内容）",
+  "msg_detail_render_timeout": "超过 %1$s 秒未完成",
+  "msg_detail_decode_failed": "正文解码失败或超时，无法预览文本",
   "msg_detail_expand": "展开全部",
   "msg_detail_collapse": "折叠",
   "msg_detail_copy_body": "复制正文",
