@@ -199,6 +199,12 @@ graph TB
 
 **Layering rule**: `*-service` modules never depend on Compose; `*-ui` modules never depend on a concrete protocol implementation. They meet only through `app-core` SPI contracts and the event bus. **Delete any one MQ module and the rest still starts.**
 
+> This is enforced, not just documented: `scripts/check_architecture.py` (run by
+> `./scripts/verify.sh`) fails when a service module references Compose or a UI module,
+> or when a protocol UI depends on another protocol's service. Adapters that implement a
+> UI contract (MQSC parsing / highlighting / execution) therefore live in the matching
+> `*-ui`; the protocol itself stays in `*-service`.
+
 ---
 
 ## ✨ Engineering highlights
@@ -338,13 +344,14 @@ mq-client/
 
 ```bash
 # before committing
-./gradlew assemble jvmTest
-python scripts/check_i18n_refs.py   # new i18n keys need both zh-CN and en-US
+./scripts/verify.sh                   # architecture + build + tests + i18n (same as CI)
+python scripts/check_architecture.py  # architecture only (after touching build.gradle.kts)
+python scripts/check_i18n_refs.py     # i18n only (new keys need both zh-CN and en-US)
 ```
 
 **Conventions**:
 
-- `*-service` modules **must not** depend on Compose
+- `*-service` modules **must not** depend on Compose (`scripts/check_architecture.py` fails otherwise)
 - New i18n keys must be added to both `zh-CN` and `en-US` (the script fails otherwise)
 - The UI layer never shows raw error codes; the service layer translates them
 - Don't wrap suspend calls in `runCatching` (use `runCatchingCancellable`)

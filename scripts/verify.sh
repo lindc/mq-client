@@ -6,8 +6,9 @@
 # 这里只有一个真相：CI 调这个脚本，你本地也调这个脚本。
 #
 # 用法：
-#   ./scripts/verify.sh              # 全量：编译 + 全部单测 + i18n 检查
-#   ./scripts/verify.sh --i18n-only  # 只跑 i18n 检查（改文案时用，几秒钟）
+#   ./scripts/verify.sh               # 全量：分层检查 + 编译 + 全部单测 + i18n
+#   ./scripts/verify.sh --i18n-only   # 只跑 i18n 检查（改文案时用，几秒钟）
+#   ./scripts/verify.sh --arch-only   # 只跑分层架构检查（改 build.gradle.kts 时用）
 #
 # 退出码：0 = 全部通过；非 0 = 有失败（CI 据此判定）
 
@@ -16,23 +17,53 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 I18N_ONLY=0
+ARCH_ONLY=0
 for arg in "$@"; do
     case "$arg" in
         --i18n-only) I18N_ONLY=1 ;;
+        --arch-only) ARCH_ONLY=1 ;;
         *) echo "unknown argument: $arg" >&2; exit 2 ;;
     esac
 done
+
+find_python() {
+    if command -v python3 > /dev/null 2>&1; then
+        echo python3
+    elif command -v python > /dev/null 2>&1; then
+        echo python
+    else
+        echo ""
+    fi
+}
+
+# ---------- 分层架构检查 ----------
+#
+# README 写着「*-service 不依赖 Compose / *-ui 不依赖具体协议实现」。这两条曾各被
+# 违反过一次（ibm-mq-service 依赖 mq-ui、MqscSyntaxHighlighter 在 service 里产出
+# AnnotatedString）。文档没有约束力，所以做成会失败的检查。
+run_arch_check() {
+    PY="$(find_python)"
+    if [ -z "$PY" ]; then
+        echo "!! 找不到 python3 / python，跳过分层架构检查" >&2
+        return 1
+    fi
+    echo "--- architecture check ---"
+    PYTHONIOENCODING=utf-8 "$PY" scripts/check_architecture.py
+}
+
+if [ "$ARCH_ONLY" -eq 1 ]; then
+    run_arch_check
+    echo "OK: architecture checks passed"
+    exit 0
+fi
 
 # ---------- i18n 键引用检查 ----------
 #
 # 覆盖三类问题：静态引用写错键名、运行时拼接的键查不到、同一张表两种语种键集合不相等。
 # 两种语言各跑一次：脚本以 LANG 决定「已知键」的取表范围，只跑一种会漏掉另一种的差异。
 run_i18n_check() {
-    if command -v python3 > /dev/null 2>&1; then
-        PY=python3
-    elif command -v python > /dev/null 2>&1; then
-        PY=python
-    else
+    PY="$(find_python)"
+    if [ -z "$PY" ]; then
         echo "!! 找不到 python3 / python，跳过 i18n 检查" >&2
         return 1
     fi
@@ -49,10 +80,13 @@ if [ "$I18N_ONLY" -eq 1 ]; then
     exit 0
 fi
 
+# ---------- 分层架构 ----------
+run_arch_check
+
 # ---------- 编译 + 全部单元测试 ----------
 #
 # `assemble` 保证所有模块的产物都能构建（含资源处理 / SQLDelight 生成），
-# `jvmTest` 跑全仓 508 个用例。真机测试（*LiveTest）在没有 config.toml 时自行 SKIP，
+# `jvmTest` 跑全仓全部用例。真机测试（*LiveTest）在没有 config.toml 时自行 SKIP，
 # 所以这条在干净环境里也能过 —— 不会因为 CI 没有 broker 而红。
 echo "--- assemble + jvmTest ---"
 # GRADLE_CMD overrides the wrapper, for CI images that pre-install Gradle:
@@ -66,4 +100,4 @@ echo "gradle: $GRADLE_CMD"
 # ---------- i18n ----------
 run_i18n_check
 
-echo "OK: 全部通过（assemble + jvmTest + i18n）"
+echo "OK: 全部通过（architecture + assemble + jvmTest + i18n）"

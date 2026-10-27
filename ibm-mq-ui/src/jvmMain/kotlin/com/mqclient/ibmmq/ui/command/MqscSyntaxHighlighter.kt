@@ -1,4 +1,4 @@
-package com.mqclient.ibmmq.command
+package com.mqclient.ibmmq.ui.command
 
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
@@ -13,6 +13,11 @@ import com.mqclient.mqui.command.api.SyntaxHighlighter
  * 字符串 / 数字 / 注释分色。纯展示层变换 —— 只附加 SpanStyle，不改文本内容；
  * 编辑器侧以 VisualTransformation（Identity offset mapping）包装。
  * 配色是 VS Code Dark+ 的惯用值 —— 只用在字符上，深浅主题都可读。
+ *
+ * 为什么在 `ibm-mq-ui` 而不是 `ibm-mq-service`：它直接产出 Compose 的
+ * `AnnotatedString` / `SpanStyle`，而 `*-service` 是「不得依赖 Compose」的层
+ * （见 README 分层原则）。语法高亮本来就是展示逻辑，归 UI 模块才名副其实 ——
+ * 放在 service 时，整个 service 编译期被迫依赖 mq-ui（进而依赖 compose.ui）。
  */
 class MqscSyntaxHighlighter : SyntaxHighlighter {
 

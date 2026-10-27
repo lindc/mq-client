@@ -199,6 +199,11 @@ graph TB
 
 **分层原则**：`*-service` 不依赖 Compose，`*-ui` 不依赖具体协议实现，两者只通过 `app-core` 的 SPI 契约与事件总线通信。**删除任意一个 MQ 模块，其余部分照常启动。**
 
+> 这条不是口头约定：`scripts/check_architecture.py`（`./scripts/verify.sh` 里跑）会失败于
+> 「service 引用了 Compose 或 UI 模块」「protocol UI 依赖了别的协议的 service」。
+> 实现 UI 契约的适配器（如 MQSC 的解析 / 高亮 / 执行器）因此必须放在对应 `*-ui`，
+> 协议本体留在 `*-service`。
+
 ---
 
 ## ✨ 工程亮点
@@ -337,13 +342,14 @@ mq-client/
 
 ```bash
 # 提交前跑一遍
-./gradlew assemble jvmTest
-python scripts/check_i18n_refs.py   # 新增文案键必须中英文都补
+./scripts/verify.sh                 # 分层检查 + 编译 + 全部单测 + i18n（与 CI 同一份）
+python scripts/check_architecture.py  # 只跑分层检查（改 build.gradle.kts 后）
+python scripts/check_i18n_refs.py     # 只跑 i18n（新增文案键必须中英文都补）
 ```
 
 **约定**：
 
-- `*-service` 模块**不得**依赖 Compose
+- `*-service` 模块**不得**依赖 Compose（`scripts/check_architecture.py` 会失败）
 - 新增 i18n 键必须同时补 `zh-CN` 与 `en-US`（脚本会失败）
 - UI 层不展示原始错误码，service 层负责翻译
 - 挂起调用不要用 `runCatching`（用 `runCatchingCancellable`）

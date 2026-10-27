@@ -12,10 +12,11 @@ kotlin {
             // MQ 公共基类（MQServiceAdapter：category="MQ"）。api 暴露，
             // 消费方（app-ui SPI 注册）能看到完整父类链。
             api(projects.mqBase)
-            // mq-ui 通用命令控制台的接口与模型（CommandExecutor / CommandParser /
-            // SyntaxHighlighter / CommandResult…）。语法高亮的 AnnotatedString 等
-            // compose ui-text 类型由 mq-ui 以 api 传递过来，本模块不直接引 compose。
-            implementation(projects.mqUi)
+            // 注意：这里**不**依赖 mq-ui。命令控制台的三个适配器
+            // （MqscCommandParser / MqscCommandExecutor / MqscSyntaxHighlighter）
+            // 实现的是 UI 契约，已放在 ibm-mq-ui；本模块只保留协议本体
+            // （MqscParser / MqscCommandExpander / MqscExecutor / MqscPcfSender）。
+            // 「*-service 不得依赖 Compose」由 scripts/check_architecture.py 守。
         }
         jvmMain.dependencies {
             implementation("com.ibm.mq:com.ibm.mq.allclient:10.0.0.5")

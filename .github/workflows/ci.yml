@@ -1,6 +1,6 @@
 name: CI
 
-# 门槛：编译全部模块 + 跑全部单元测试 + i18n 键引用检查。
+# 门槛：分层架构检查 + 编译全部模块 + 跑全部单元测试 + i18n 键引用检查。
 #
 # 唯一的失败源应该是代码问题，不是环境问题 —— 因此：
 #   - 真机测试（*LiveTest / *DiagTest）在没有 ~/.mqclient/config.toml 时自行打印 SKIP
@@ -43,7 +43,7 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Verify (assemble + jvmTest + i18n)
+      - name: Verify (architecture + assemble + jvmTest + i18n)
         run: ./scripts/verify.sh
 
       # 失败时把测试报告捞出来 —— 否则只能看到「某模块 exit 1」，还得本地复现。

@@ -2,6 +2,43 @@
 
 本文件记录 MQClient 的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [Unreleased] — 2026-10-27 (4)
+
+### Fixed
+
+- **`ibm-mq-service` 依赖 `mq-ui`（进而编译期依赖 Compose），违反 README 的分层原则**。
+  根因不是 build 文件多了一行，而是**三个 UI 适配器放错了层**：
+  `MqscCommandParser` / `MqscCommandExecutor` / `MqscSyntaxHighlighter` 实现的都是
+  `mq-ui` 的 UI 契约（`CommandParser` / `CommandExecutor` / `SyntaxHighlighter`，而后者的
+  签名就是 Compose 的 `AnnotatedString`），却住在 service 模块里。于是整个
+  `ibm-mq-service` 被迫 `implementation(projects.mqUi)`，而 `mq-ui` 以
+  `api(compose.ui)` 传递 Compose；`MqscSyntaxHighlighter` 更是直接
+  `import androidx.compose.ui.text.*`。
+  修法是**把三个适配器移到 `ibm-mq-ui`**（`com.mqclient.ibmmq.ui.command`，与使用它们的
+  `IbmMqCommandConsolePanel` 同包），协议本体（`MqscParser` / `MqscCommandExpander` /
+  `MqscExecutor` / `MqscPcfSender`）留在 service。`ibm-mq-service` 不再声明 `mq-ui`，
+  全模块零 Compose 引用。
+  没有选「新建 command-api 模块」：那只是把 Compose 契约换个地方放，适配器本身仍是
+  展示逻辑住在服务层 —— 移层才是根治。
+
+### Added
+
+- **分层架构门禁 `scripts/check_architecture.py`**（接进 `scripts/verify.sh`，CI 同步）：
+  文档写了「`*-service` 不依赖 Compose / `*-ui` 不依赖具体协议实现」，但两条各被违反过
+  一次。现在做成会失败的检查：①service 的 build 文件不得出现 compose 依赖；
+  ②service 不得依赖任何 UI 模块；③service 源码不得 `import androidx.compose.*`；
+  ④protocol UI 不得依赖别的协议的 service（`app-ui` 宿主机豁免）；⑤共享 UI 不依赖
+  任何 service。单行 `// arch-allow: <原因>` 可显式豁免并留下痕迹。
+  变异验证：临时注回 `implementation(projects.mqUi)` 与注入一行
+  `import androidx.compose.ui.text.AnnotatedString`，检查分别以退出码 1 命中，恢复后归零。
+  `./scripts/verify.sh --arch-only` 可单独跑。
+
+### Tests
+
+- 迁移出来的适配器补上测试（此前 service 里一条都没有）：
+  `MqscCommandConsoleAdapterTest`（3 例：逐行对齐 / SKIPPED 标记 / 危险命令判定含缩写）、
+  `MqscSyntaxHighlighterTest`（5 例：**文本内容不被改写**、动词加粗、注释斜体、空文本安全）。
+
 ## [Unreleased] — 2026-10-27 (3)
 
 第三阶段重构：修测试假绿、抽连接生命周期基类、下沉跨模块复制的 UI。
