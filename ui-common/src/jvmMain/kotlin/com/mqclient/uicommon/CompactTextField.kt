@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -35,7 +36,11 @@ import androidx.compose.ui.unit.dp
  *  - **placeholder**：空值时框内灰字；
  *  - **边框**：6dp 圆角，焦点 primary / isError error / 平时 outlineVariant
  *    （`collectIsFocusedAsState` 驱动，Material 原生焦点语义）；
- *  - **supportingText**：框下红字（错误原因直出，替代各模块手写的错误 Text）。
+ *  - **supportingText**：框下红字（错误原因直出，替代各模块手写的错误 Text）；
+ *  - **keyboardOptions**：透传给 [BasicTextField]，默认 [KeyboardOptions.Default]（行为不变）。
+ *    桌面端没有软键盘，`KeyboardType.Number` 不会阻止物理键盘敲字母 —— 真正的数字限制
+ *    仍在调用方（如 `filter(Char::isDigit).take(3)`）。留着它是为了语义完整，
+ *    将来若上移动端会真的生效。
  */
 @Composable
 fun CompactTextField(
@@ -48,6 +53,7 @@ fun CompactTextField(
     supportingText: String? = null,
     enabled: Boolean = true,
     readOnly: Boolean = false,
+    keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
@@ -71,6 +77,7 @@ fun CompactTextField(
             enabled = enabled,
             readOnly = readOnly,
             singleLine = true,
+            keyboardOptions = keyboardOptions,
             textStyle = TextStyle(
                 fontSize = MaterialTheme.typography.bodyMedium.fontSize,
                 color = if (enabled) {

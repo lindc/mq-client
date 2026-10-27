@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -29,7 +30,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Tab
@@ -48,6 +48,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mqclient.mqui.objectlist.ObjectListEmptyState
@@ -56,6 +57,7 @@ import com.mqclient.rabbitmq.RabbitMqFetchedMessage
 import com.mqclient.rabbitmq.RabbitMqModule
 import com.mqclient.rabbitmq.RabbitMqQueueSession
 import com.mqclient.rabbitmq.RabbitMqSessionOpener
+import com.mqclient.uicommon.CompactTextField
 import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
@@ -526,7 +528,9 @@ private fun BrowsePane(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            PrimaryButton(onClick = onFetch, enabled = !fetching) { Text(stringResource("rabbitmq_ui_msg_fetch")) }
+            PrimaryButton(onClick = onFetch, enabled = !fetching) {
+                Text(stringResource("rabbitmq_ui_msg_fetch"))
+            }
             SecondaryButton(
                 onClick = onRefresh,
                 enabled = !fetching,
@@ -535,15 +539,29 @@ private fun BrowsePane(
                 onClick = onForwardAll,
                 enabled = !fetching && messages.isNotEmpty(),
             ) { Text(stringResource("rabbitmq_ui_msg_forward_all")) }
-            OutlinedTextField(
+
+            // 条数标签刻意做成 Row 的**兄弟节点**，而不是 CompactTextField 的 label：
+            // 后者的 label 画在框体上方（labelSmall + 4dp 间距），整块会变成约 60dp，
+            // 比 40dp 的按钮高一截 —— Row 虽然 CenterVertically，框体本身反而会低下去。
+            // 放成兄弟节点，它只有一行高，不参与框体的高度。
+            Text(
+                text = stringResource("rabbitmq_ui_msg_fetch_limit"),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            // 80dp：两侧各 12dp 内边距后还剩 56dp，够放三位数字（上限就是 3 位）。
+            // 不传 modifier.height —— 组件自己是 heightIn(min = 40.dp)，与 M3 Button 同高，
+            // 这也正是原来 height(52.dp) 该去掉的原因（52 既不是 56 也不是 40）。
+            // 数字限制仍是双保险：KeyboardOptions 在桌面端没有软键盘可作用，真正的
+            // 关卡在调用方的 filter(Char::isDigit).take(3) 与 effectiveLimit 的 coerceIn。
+            CompactTextField(
                 value = limit,
                 onValueChange = onLimitChange,
-                singleLine = true,
                 enabled = !fetching,
-                label = { Text(stringResource("rabbitmq_ui_msg_fetch_limit"), style = MaterialTheme.typography.bodySmall) },
-                textStyle = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.width(100.dp).height(52.dp),
+                modifier = Modifier.width(80.dp),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             )
+
             Text(
                 text = stringResource("rabbitmq_ui_msg_fetch_hint"),
                 style = MaterialTheme.typography.bodySmall,
