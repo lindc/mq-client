@@ -14,6 +14,7 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
@@ -221,11 +222,34 @@ object RabbitMqModule {
         return RabbitMqMessageSession.open(ctx.config, queueName).also { openSessions.add(it) }
     }
 
-    /** 会话关闭的异步兜底（对话框 onDispose 是同步回调，挂起 close 另起协程跑）。 */
+    /**
+     * 会话关闭的异步兜底（对话框 onDispose 是同步回调，挂起 close 另起协程跑）。
+     *
+     * 两条路径都不能丢会话：
+     *  - **scope 可用**：launch 去关，而且**关完才从账上摘牌**。原先反过来（先 remove
+     *    再 launch），若 launch 因 scope 取消而静默失效，这条会话就既不在账上、也没
+     *    关，彻底丢失。
+     *  - **scope 已不可用**（模块已 shutdown / 已取消）：`launch` 什么都不做，所以
+     *    起一条守护线程同步关 —— 关闭一条 AMQP 连接只是几次 socket 写，代价可接受，
+     *    而漏一条连接会累积成「越开越卡」。
+     */
     fun closeMessageSessionAsync(session: RabbitMqQueueSession?) {
         if (session == null) return
-        openSessions.remove(session)
-        moduleContext?.coroutineScope?.launch { runCatching { session.close() } }
+        val scope = moduleContext?.coroutineScope
+        if (scope == null || !scope.isActive) {
+            Thread(
+                {
+                    runCatching { runBlocking { session.close() } }
+                    openSessions.remove(session)
+                },
+                "rabbitmq-session-close",
+            ).apply { isDaemon = true }.start()
+            return
+        }
+        scope.launch {
+            runCatching { session.close() }
+            openSessions.remove(session)
+        }
     }
 
     /**

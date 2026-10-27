@@ -126,6 +126,53 @@ class QueueSessionSlotTest {
         assertNull(slot.detach(), "取走后再取应该是空 —— 避免同一句柄被关两次")
     }
 
+    @Test
+    fun `dispose hands over the current session and refuses later opens`() = runBlocking {
+        val events = mutableListOf<String>()
+        val old = RecordingSession("old", events)
+        val late = RecordingSession("late", events)
+        var opened = 0
+        val slot = QueueSessionSlot(
+            opener = object : RabbitMqSessionOpener {
+                override suspend fun open(
+                    connectionId: String,
+                    queueName: String,
+                ): RabbitMqQueueSession {
+                    events += "open:$queueName"
+                    return if (opened++ == 0) old else late
+                }
+            },
+        )
+        slot.open(connectionId = "c1", queueName = "q1")
+
+        assertSame(old, slot.dispose(), "dispose 应把当前会话交出去关")
+        assertNull(slot.detach(), "dispose 之后槽里不该再有会话")
+        assertFailsWith<IllegalStateException>(
+            "槽已随对话框作废，再开会话必须被拒绝",
+        ) {
+            slot.open(connectionId = "c1", queueName = "q2")
+        }
+        assertTrue(
+            late.isClosed,
+            "被拒绝的那次 open 已经建好的连接必须当场关掉 —— 否则就是一条无人认领的泄漏",
+        )
+    }
+
+    @Test
+    fun `detach keeps the slot usable`() = runBlocking {
+        val events = mutableListOf<String>()
+        val first = RecordingSession("first", events)
+        val second = RecordingSession("second", events)
+        val slot = QueueSessionSlot(sequenceOpener(events, first, second))
+        slot.open(connectionId = "c1", queueName = "q1")
+
+        assertSame(first, slot.detach())
+        val next = slot.open(connectionId = "c1", queueName = "q2")
+
+        assertSame(second, next, "detach 不是销毁 —— 之后再开必须正常返回新会话")
+        assertTrue(first.isClosed.not(), "detach 不负责关句柄（调用方接手）")
+    }
+
     /** 每次 open 依序返回 [sessions] 里的会话（用完后重复最后一个）。 */
     private fun sequenceOpener(
         events: MutableList<String>,

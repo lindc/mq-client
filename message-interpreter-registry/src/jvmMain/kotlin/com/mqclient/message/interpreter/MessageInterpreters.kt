@@ -57,15 +57,35 @@ object MessageInterpreters {
         return out.sortedBy { it.sortOrder }
     }
 
+    /**
+     * 进程级缓存的解释器清单（[loadAll] 的只读视图）。
+     *
+     * 为什么需要：消息详情对话框**每开一次**都会读解释器清单，而 [loadAll] 每次都要
+     * 走一遍 ServiceLoader（扫 classpath + 实例化全部 provider）。解释器集合在运行期内
+     * 不会变（SPI 实现是编译期打进 classpath 的），所以缓存一次就够 —— 把「每开一次
+     * 对话框扫一次 classpath」变成「整个进程只扫一次」。
+     *
+     * 刻意做成**同步**的 `by lazy` 而不是异步加载：异步会让对话框首帧拿到空列表，
+     * 于是「二进制内容默认选中 Hex 解释器」这条逻辑要推迟到列表到达后才生效，
+     * 用户会先看到文本解释器的结果、再被切成 Hex —— 那是可见的行为回退。
+     *
+     * 与 [loadAll] 的关系：`loadAll()` 保持原语义（每次重新扫描，测试与诊断用），
+     * `all()` 只是它的缓存视图，两者返回**同一批实例**。
+     */
+    private val cached: List<MessageInterpreter> by lazy { loadAll() }
+
+    /** 缓存版 [loadAll]：首次调用扫描 classpath，之后直接返回同一份列表。 */
+    fun all(): List<MessageInterpreter> = cached
+
     /** 按 id 查找（恢复选中项用）；找不到返回 null，调用方回落 [default]。 */
     fun byId(id: String): MessageInterpreter? =
-        loadAll().firstOrNull { it.id == id }
+        all().firstOrNull { it.id == id }
 
     /**
      * 默认解释器：sortOrder 最小者（内置即 text = 10）。classpath 上一个实现都
      * 没有属于装配错误，宁可尽早抛也不要静默错行为。
      */
-    fun default(): MessageInterpreter = loadAll().first()
+    fun default(): MessageInterpreter = all().first()
 
     /**
      * 各解释器的私有 i18n 表：`base = "msg_interp_<id>"`，reader 从实现自身的

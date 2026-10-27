@@ -161,10 +161,11 @@ fun RabbitMqQueueMessagesDialog(
     var sending by remember { mutableStateOf(false) }
     var sendError by remember { mutableStateOf<String?>(null) }
 
-    // 对话框销毁 → 收会话（onDispose 同步，挂起 close 另起协程；未 ack 自动重入队）。
-    // 走槽的 detach：取走「当前」会话（而不是读某个可能过时的 state 变量）。
+    // 对话框销毁 → 永久作废本槽，并把当前会话交给模块异步关。
+    // 用 dispose() 而不是 detach()：若此刻恰有 open() 在建连中，它回来时会被拒绝
+    // 并把手里的连接当场关掉 —— 否则那条连接无人认领，就是一条泄漏。
     DisposableEffect(Unit) {
-        onDispose { RabbitMqModule.closeMessageSessionAsync(sessionSlot.detach()) }
+        onDispose { RabbitMqModule.closeMessageSessionAsync(sessionSlot.dispose()) }
     }
 
     // 会话状态机：**建连推迟到用户的第一个显式动作**（拉取 / 发送）。
@@ -778,22 +779,62 @@ private fun TextButtonCompat(onClick: () -> Unit) {
  */
 internal class QueueSessionSlot(private val opener: RabbitMqSessionOpener) {
 
+    private val lock = Any()
     private var current: RabbitMqQueueSession? = null
+
+    /**
+     * 槽是否已跟对话框一起作废。
+     *
+     * 堵的是这个竞态：`open()` 在 `opener.open(...)` **返回之后**才把新会话放进槽，
+     * 若这期间对话框已销毁、`detach()` 早已返回过 null，那个新会话就**没有任何人
+     * 认领** —— 直到应用退出才被 `shutdown()` 收走。每「建连中→关闭」一次漏一条
+     * Connection。有了这个标记，迟到的 open 会把刚建好的会话当场关掉。
+     */
+    private var disposed = false
 
     /** 关掉旧会话（如果有）再开新的。返回新会话。 */
     suspend fun open(connectionId: String, queueName: String): RabbitMqQueueSession {
+        // 先把旧会话从槽里摘走再关：关闭是挂起调用，不能占着监视器。
+        val previous = synchronized(lock) { current.also { current = null } }
         // 关闭失败不拦重开：旧连接已不可用时，能开新的比卡在旧的上更有用。
         //（close 自身已对未 ack 做了 requeue；失败时 broker 也会在连接断开后重入队。）
-        current?.let { runCatching { it.close() } }
-        current = null
-        return opener.open(connectionId, queueName).also { current = it }
+        previous?.let { runCatching { it.close() } }
+
+        val opened = opener.open(connectionId, queueName)
+        val adopted =
+            synchronized(lock) {
+                if (disposed) {
+                    false
+                } else {
+                    current = opened
+                    true
+                }
+            }
+        if (!adopted) {
+            // 槽已销毁：刚建好的连接绝不能留在外面，否则就是一条泄漏。
+            runCatching { opened.close() }
+            throw IllegalStateException("消息会话已随对话框销毁，新建的连接已关闭")
+        }
+        return opened
     }
 
     /**
-     * 取走当前会话（对话框销毁时把它交给模块异步关闭）。
+     * 取走当前会话（**换队列**时用：槽仍然可用，只是交出了旧句柄）。
      *
      * 取走而不是读取：槽不再持有它，避免关闭与重开同时对同一个句柄动手。
      */
-    fun detach(): RabbitMqQueueSession? = current.also { current = null }
+    fun detach(): RabbitMqQueueSession? = synchronized(lock) { current.also { current = null } }
+
+    /**
+     * 对话框销毁：永久关闭此槽并交出当前会话。
+     *
+     * 与 [detach] 的区别就是那个永久性：之后再 [open] 会把新会话立刻关掉并抛错，
+     * 而不是默默留下一份无人认领的连接。
+     */
+    fun dispose(): RabbitMqQueueSession? =
+        synchronized(lock) {
+            disposed = true
+            current.also { current = null }
+        }
 }
 

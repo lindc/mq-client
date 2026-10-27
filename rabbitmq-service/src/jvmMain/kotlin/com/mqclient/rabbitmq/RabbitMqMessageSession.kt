@@ -9,6 +9,7 @@ import java.io.IOException
 import java.net.ConnectException
 import java.util.Date
 import java.util.concurrent.TimeoutException
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -105,7 +106,9 @@ data class RabbitMqFetchedMessage(
  *  - [close]：关 channel/connection —— 未 ack 的消息由 broker 自动重入队
  *    （RabbitMQ 原生机制），close 前仍显式 requeue 一遍，双保险。
  *
- * 线程纪律：channel 非线程安全，所有操作经 [lock] 串行、跑在 Dispatchers.IO。
+ * 线程纪律：channel 非线程安全，所有 channel 调用经 [channelOps] 串行、跑在
+ * Dispatchers.IO；会话状态（[heldTags] / [closed]）另用 [stateLock] 保护，
+ * 从不在它们上面等 IO。
  * 拉取上限由 UI 控制（≤ 100），本类不重复设限。
  */
 class RabbitMqMessageSession private constructor(
@@ -113,67 +116,98 @@ class RabbitMqMessageSession private constructor(
     private val connection: Connection,
     private val channel: Channel,
 ) : RabbitMqQueueSession {
-    private val lock = Mutex()
+    /**
+     * 串行化 channel 访问的互斥量（AMQP channel 非线程安全）。
+     *
+     * **只包住 channel 调用本身**，每一处都写成
+     * `withContext(IO) { channelOps.withLock { ... } }` —— IO 切线程在**外**，锁在**内**。
+     * 原先反着写（`lock.withLock { withContext(IO) { ... } }`），`basicGet` 卡在阻塞
+     * socket 上时这把锁永不释放，`close()` 就排在后面等死，Connection / Channel 一个
+     * 都关不掉 —— 每开一次对话框漏一条连接。
+     */
+    private val channelOps = Mutex()
 
-    /** 本会话手上未 ack 的 deliveryTag（按拉取顺序）。 */
+    /**
+     * 会话内部状态（[heldTags] / [closed]）的监视器。
+     *
+     * 用 JVM 的 `synchronized` 而不是 [channelOps]：临界区只有「加一个 tag」「读 size」
+     * 这种微秒级操作，从不在里面等 IO，因此**不可能**被卡住的网络调用拖住。
+     */
+    private val stateLock = Any()
+
+    /** 本会话手上未 ack 的 deliveryTag（按拉取顺序）。受 [stateLock] 保护。 */
     private val heldTags = mutableListOf<Long>()
 
+    @Volatile
     private var closed = false
+
+    /** 保证 [close] 的收尾只跑一次（幂等），且不依赖任何 suspended 锁。 */
+    private val closeStarted = AtomicBoolean(false)
+
+    private inline fun <T> withState(block: () -> T): T = synchronized(stateLock, block)
 
     /** 拉取下一批（**不 requeue 已拉取的** —— 同一 channel 的 basicGet 天然继续
      *  往后发；已拉取的仍挂在手上未 ack）。返回空表 = 队列当前没有更多可见消息。 */
-    override suspend fun fetchNext(limit: Int): List<RabbitMqFetchedMessage> = lock.withLock {
+    override suspend fun fetchNext(limit: Int): List<RabbitMqFetchedMessage> =
         withContext(Dispatchers.IO) {
-            checkOpen()
-            val out = mutableListOf<RabbitMqFetchedMessage>()
-            while (out.size < limit) {
-                val get = channel.basicGet(queueName, false) ?: break
-                val tag = get.envelope.deliveryTag
-                heldTags += tag
-                val body = get.body ?: ByteArray(0)
-                val props = get.props
-                out += RabbitMqFetchedMessage(
-                    deliveryTag = tag,
-                    body = body,
-                    size = body.size.toLong(),
-                    probablyBinary = isProbablyBinary(body, 1208),
-                    messageId = props.messageId,
-                    timestamp = props.timestamp,
-                    persistent = props.deliveryMode == 2,
-                    contentType = props.contentType,
-                    contentEncoding = props.contentEncoding,
-                    priority = props.priority,
-                    expiration = props.expiration,
-                    correlationId = props.correlationId,
-                    replyTo = props.replyTo,
-                    headers = props.headers?.mapValues { (_, v) -> v?.toString().orEmpty() } ?: emptyMap(),
-                )
+            channelOps.withLock {
+                checkOpen()
+                val out = mutableListOf<RabbitMqFetchedMessage>()
+                while (out.size < limit) {
+                    val get = channel.basicGet(queueName, false) ?: break
+                    val tag = get.envelope.deliveryTag
+                    withState { heldTags += tag }
+                    val body = get.body ?: ByteArray(0)
+                    val props = get.props
+                    out += RabbitMqFetchedMessage(
+                        deliveryTag = tag,
+                        body = body,
+                        size = body.size.toLong(),
+                        probablyBinary = isProbablyBinary(body, 1208),
+                        messageId = props.messageId,
+                        timestamp = props.timestamp,
+                        persistent = props.deliveryMode == 2,
+                        contentType = props.contentType,
+                        contentEncoding = props.contentEncoding,
+                        priority = props.priority,
+                        expiration = props.expiration,
+                        correlationId = props.correlationId,
+                        replyTo = props.replyTo,
+                        headers = props.headers?.mapValues { (_, v) -> v?.toString().orEmpty() } ?: emptyMap(),
+                    )
+                }
+                out
             }
-            out
         }
-    }
 
-    /** 当前手上未 ack 的条数（对话框底部「M 条待处理」用）。 */
-    override suspend fun heldCount(): Int = lock.withLock { heldTags.size }
+    /**
+     * 当前手上未 ack 的条数（对话框底部「M 条待处理」用）。
+     *
+     * 不取 [channelOps]：只读状态监视器。这样即使有协程正卡在 `basicGet` 里，
+     * 「刷新计数」也不会跟着卡死 —— 旧实现 `lock.withLock { heldTags.size }` 会。
+     */
+    override suspend fun heldCount(): Int = withState { heldTags.size }
 
     /** 彻底消费一条（用户点删除）：basicAck 从队列移除。 */
-    override suspend fun ack(deliveryTag: Long) = lock.withLock {
+    override suspend fun ack(deliveryTag: Long) =
         withContext(Dispatchers.IO) {
-            checkOpen()
-            channel.basicAck(deliveryTag, false)
-            heldTags.remove(deliveryTag)
-            // 显式 Unit：heldTags.remove 返回 Boolean，不写的话整个函数会推出 Boolean。
-            Unit
+            channelOps.withLock {
+                checkOpen()
+                channel.basicAck(deliveryTag, false)
+                withState { heldTags.remove(deliveryTag) }
+                // 显式 Unit：heldTags.remove 返回 Boolean，不写的话整个 lambda 会推出 Boolean。
+                Unit
+            }
         }
-    }
 
     /** 全部重新入队（「重新拉取」用）：basicNack(requeue = true) 放回队列。 */
-    override suspend fun requeueAll() = lock.withLock {
+    override suspend fun requeueAll() =
         withContext(Dispatchers.IO) {
-            checkOpen()
-            requeueHeldLocked()
+            channelOps.withLock {
+                checkOpen()
+                requeueHeldOnChannel()
+            }
         }
-    }
 
     /**
      * 通用发布（消息重发 / 搬移用）：任意 exchange + routing key；[props] 传
@@ -184,8 +218,8 @@ class RabbitMqMessageSession private constructor(
      * 审计表 —— 与 IBM MQ 的 MqscExecutor 咽喉点口径一致）。
      */
     suspend fun publish(exchange: String, routingKey: String, body: ByteArray, props: AMQP.BasicProperties?) =
-        lock.withLock {
-            withContext(Dispatchers.IO) {
+        withContext(Dispatchers.IO) {
+            channelOps.withLock {
                 checkOpen()
                 channel.basicPublish(exchange, routingKey, props ?: AMQP.BasicProperties.Builder().build(), body)
             }
@@ -219,27 +253,51 @@ class RabbitMqMessageSession private constructor(
             .headers(message.headers)
             .build()
 
-    /** 优雅关闭：显式 requeue 全部未 ack（broker 本也会自动重入队，双保险）→ 关 channel → 关 connection。 */
-    override suspend fun close() = lock.withLock {
-        if (closed) return@withLock
+    /**
+     * 优雅关闭：显式 requeue 全部未 ack（broker 本也会自动重入队，双保险）→
+     * 关 channel → 关 connection。
+     *
+     * **绝不在 [channelOps] 上等待**。这是本轮最关键的一处：如果另一个协程正卡在
+     * `channel.basicGet` 的阻塞 socket 上（协程层的 `withTimeout` 只能让**等待方**放弃，
+     * 杀不掉那个调用），[channelOps] 会一直被它持有。旧实现在这里 `withLock` 排同一把
+     * 锁，于是 `close()` 永久挂起，Connection / Channel 一个都关不掉 ——
+     * 每开一次对话框漏一条连接，这就是「第一次快、第二次慢、第三次更慢」。
+     *
+     * 现在：
+     *  1. 先用 [AtomicBoolean] 抢占（幂等），不碰任何 suspended 锁；
+     *  2. 立刻置 [closed]，后续操作快速失败而不是排队；
+     *  3. requeue 只在**能立刻拿到** [channelOps] 时做（`tryLock`），拿不到就跳过 ——
+     *     关闭的语义优先于 requeue，而 broker 在连接断开时本来也会重入队；
+     *  4. 无条件关 channel / connection —— 这也是把卡在 `basicGet` 里的线程**唯一**
+     *     能放出来的手段。
+     */
+    override suspend fun close(): Unit =
         withContext(Dispatchers.IO) {
-            runCatching { requeueHeldLocked() }
+            if (!closeStarted.compareAndSet(false, true)) return@withContext
+            closed = true
+            // best-effort requeue：只在锁空闲时做，绝不为它等待。
+            if (channelOps.tryLock()) {
+                try {
+                    runCatching { requeueHeldOnChannel() }
+                } finally {
+                    channelOps.unlock()
+                }
+            }
             runCatching { channel.close() }
             runCatching { connection.close() }
-            closed = true
         }
-    }
 
     private fun checkOpen() {
         if (closed) throw IllegalStateException("消息会话已关闭")
     }
 
-    /** 已持锁调用。单条 nack 失败不中断（channel 断开时 broker 会整体重入队）。 */
-    private fun requeueHeldLocked() {
-        for (tag in heldTags) {
+    /** 已持 [channelOps] 调用。先把 tag 摘出来再 nack，避免 nack 期间占着状态监视器。 */
+    private fun requeueHeldOnChannel() {
+        val tags = withState { heldTags.toList().also { heldTags.clear() } }
+        for (tag in tags) {
+            // 单条 nack 失败不中断（channel 断开时 broker 会整体重入队）。
             runCatching { channel.basicNack(tag, false, true) }
         }
-        heldTags.clear()
     }
 
     companion object {

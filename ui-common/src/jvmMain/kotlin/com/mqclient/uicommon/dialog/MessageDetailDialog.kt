@@ -160,7 +160,11 @@ fun MessageDetailDialog(
 
     // 解释器选择与渲染状态：提升到对话框级 —— footer 的「下载消息 / 复制正文」需要
     // 读取当前展示的文本、二进制标志与选中解释器（原先在 ContentTab 内部拿不到）。
-    val interpreters = remember { MessageInterpreters.loadAll() }
+    //
+    // 用 [MessageInterpreters.all]（进程级缓存）而不是 loadAll()：后者每次都要走一遍
+    // ServiceLoader 扫 classpath，而本对话框每开一次都会读它 —— 开销落在 composition
+    // 线程上。缓存后只有进程内首次要付这个代价。
+    val interpreters = remember { MessageInterpreters.all() }
     val oversized = rawBody.size > MAX_BODY_BYTES
     // remember(rawBody)：超大消息的截断拷贝**不能**每次重组都重做。之前写成裸的
     // `if (oversized) rawBody.copyOf(...)`，数组身份每次都变 → remember / LaunchedEffect
