@@ -26,6 +26,27 @@ internal const val AMQP_SHUTDOWN_TIMEOUT_MS = 3_000
 internal const val AMQP_HANDSHAKE_TIMEOUT_MS = 10_000
 
 /**
+ * 心跳间隔（秒）。**这是「静默死连接」的唯一探测手段**。
+ *
+ * amqp-client 默认 `requestedHeartbeat = 0`（禁用），而本项目的共享连接是长期存活的。
+ * 两个后果叠加起来就是灾难：
+ *
+ *  - 断网 / 休眠 / 中间设备静默丢包时，TCP 不会主动告知，`Connection.isOpen` 仍为
+ *    `true`；
+ *  - 于是 [RabbitMqConnectionManager.amqpConnection] 认为连接可用、不会重建，每次
+ *    `basicGet` 都要硬等满 `channelRpcTimeout`（5s）才报超时 —— 界面重现「每次点
+ *    都转 5 秒」的卡顿。
+ *
+ * 开启心跳后，服务端或客户端在 1–2 个周期（60–120s）内发现对方不应答，主动关闭
+ * 连接，使 `isOpen` 翻假。之后下一次取用会走「旧连接已死 → 关掉并重建」的路径
+ * （见 `amqpConnection`）。
+ *
+ * 60s 是 RabbitMQ 官方文档的推荐值：太短会增加空转流量，太长（如 600s）则死连接
+ * 要十分钟才能被发现，用户体验上等于没有。
+ */
+internal const val AMQP_REQUESTED_HEARTBEAT_S = 60
+
+/**
  * AMQP 操作超时的**领域异常**，公开给 UI 层。
  *
  * 为什么需要它：[ChannelContinuationTimeoutException] 来自 `amqp-client`，而它在
@@ -58,8 +79,13 @@ internal fun rabbitMqConnectionFactory(config: RabbitMqConfig): ConnectionFactor
         // ← 让 basicGet / basicAck / basicPublish / channel.close 自己在 5s 后抛，
         //   而不是靠协程 withTimeout 放弃等待。
         channelRpcTimeout = AMQP_CHANNEL_RPC_TIMEOUT_MS
+        // 心跳：探测静默死连接（断网 / 休眠 / 中间设备丢包），详见 [AMQP_REQUESTED_HEARTBEAT_S]。
+        // 不开心跳时，这种连接的 isOpen 永远是 true，每次 basicGet 都硬等满 5s。
+        requestedHeartbeat = AMQP_REQUESTED_HEARTBEAT_S
         // 会话生命周期由对话框 / 连接上下文显式管理，不走自动恢复
         // （自动重连会让 close 语义变得不可预测）。
+        // 注意：关自动恢复 + 开心跳 是刻意搭配 —— 心跳负责「发现死连接」，
+        // 重建由 amqpConnection 的显式逻辑做，两者分工，不能让自动恢复插手。
         isAutomaticRecoveryEnabled = false
         if (config.useTls) {
             rabbitMqSslContext(config.tlsTruststorePath, config.tlsTruststorePassword)

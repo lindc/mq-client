@@ -815,7 +815,17 @@ internal class QueueSessionSlot(private val opener: RabbitMqSessionOpener) {
         val previous = synchronized(lock) { current.also { current = null } }
         // 关闭失败不拦重开：旧连接已不可用时，能开新的比卡在旧的上更有用。
         //（close 自身已对未 ack 做了 requeue；失败时 broker 也会在连接断开后重入队。）
-        previous?.let { runCatching { it.close() } }
+        //
+        // 不能写 `runCatching { it.close() }`：runCatching 会连 CancellationException
+        // 一起吞掉，协程被取消时下一个 `opener.open` 仍会发出去 —— 那就是一条没人
+        // 认领的连接。取消必须原样上抛。
+        try {
+            previous?.close()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // 旧会话关不掉不影响重开，忽略。
+        }
 
         val opened = opener.open(connectionId, queueName)
         val adopted =
@@ -829,7 +839,14 @@ internal class QueueSessionSlot(private val opener: RabbitMqSessionOpener) {
             }
         if (!adopted) {
             // 槽已销毁：刚建好的连接绝不能留在外面，否则就是一条泄漏。
-            runCatching { opened.close() }
+            // 同上：取消不吞，但不影响「已建好的必须关」这个语义 —— 先关再抛。
+            try {
+                opened.close()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // 关不掉也只能放弃：此时没有别的手段回收它。
+            }
             throw IllegalStateException("消息会话已随对话框销毁，新建的连接已关闭")
         }
         return opened

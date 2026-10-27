@@ -93,6 +93,9 @@ class RabbitMqConnectionManager(
         context.coroutineScope.launch {
             disconnectNow(connectionId, reason = "connection deleted")
             contexts.remove(connectionId)
+            // 这个 id 不会再回来（删除是永久的），锁留着就是纯泄漏。
+            // 此时已退出 disconnectNow 的 withLock，没有在飞的持锁操作。
+            locks.remove(connectionId)
         }
     }
 
@@ -192,6 +195,10 @@ class RabbitMqConnectionManager(
      *  3. **双检锁**：两个对话框同时首开只建一条物理连接。
      *  4. 超时全部由 [rabbitMqConnectionFactory] 提供（握手 10s、shutdown 3s、
      *     channel RPC 5s），这里不再叠协程层 `withTimeout`。
+     *  5. **死连接必须关掉再覆盖**（见下方 `stale`）：`ctx.amqp` 可能指向一条
+     *     `isOpen == false` 的连接（broker 重启 / 心跳超时 / 网络中断）。直接
+     *     `ctx.amqp = created` 会让那条旧连接**永远失去引用** —— 它的 socket、
+     *     心跳线程、SSL 上下文再也没人能释放，反复重连就是稳定泄漏。
      *
      * 抛出的异常已转成人类可读文案（[mapAmqpOpenError]），由调用方转「加载失败」。
      */
@@ -200,11 +207,42 @@ class RabbitMqConnectionManager(
         return lockFor(ctx.connectionId).withLock {
             // 双检：排队期间可能已被另一个调用方建好。
             ctx.amqp?.takeIf { it.isOpen }?.let { return@withLock it }
+
+            // 走到这里说明旧连接不存在或已死。先取出来：新连接建好之后要负责把它关掉。
+            val stale = ctx.amqp
+
             try {
                 val created = withContext(Dispatchers.IO) {
                     rabbitMqConnectionFactory(ctx.config).newConnection()
                 }
+                // 先赋值再回收旧连接：新连接已经接上了，期间若回收慢也不影响可用性。
                 ctx.amqp = created
+
+                if (stale != null) {
+                    // **只关已死的**。isOpen 为真的连接说明它还在为我们工作，
+                    // 关掉会把正在读消息的对话框一起断掉。
+                    if (!stale.isOpen) {
+                        rabbitMqLog.info(
+                            "disposing stale amqp connection before replacing: " +
+                                "connection=${ctx.connectionId}",
+                        )
+                        runCatching { withContext(Dispatchers.IO) { stale.close(AMQP_SHUTDOWN_TIMEOUT_MS) } }
+                            .onFailure { e ->
+                                // close 失败要 abort 兜底：否则 socket 会留在半开 / TIME_WAIT。
+                                runCatching { stale.abort() }
+                                rabbitMqLog.warn(
+                                    "stale amqp connection close failed (aborted): " +
+                                        "connection=${ctx.connectionId} error=$e",
+                                )
+                            }
+                    } else {
+                        rabbitMqLog.debug(
+                            "skipping stale connection disposal (still open): " +
+                                "connection=${ctx.connectionId}",
+                        )
+                    }
+                }
+
                 rabbitMqLog.debug(
                     "amqp connection opened (lazy): connection=${ctx.connectionId} " +
                         "host=${ctx.config.host}:${ctx.config.amqpPort}",
@@ -255,6 +293,12 @@ class RabbitMqConnectionManager(
         rabbitMqLog.info("shutdown all connections: count=${contexts.size}")
         contexts.keys.toList().forEach { disconnectNow(it, reason = "module shutdown") }
         contexts.clear()
+        // Mutex Map 随连接 id 累积：连接删了 / 换了 id，旧 key 没人再取，就是稳定的
+        // 内存微增长（Mutex 本身很小，但这是无谓保留）。模块关闭时一并清空。
+        //
+        // 为什么能安全清：此刻所有 disconnectNow 已返回（上面的 forEach 是串行的），
+        // 没有在飞的持锁操作；之后的取用会由 lockFor 重新 computeIfAbsent。
+        locks.clear()
     }
 
     /* ------------------------------ 定时任务 ------------------------------ */

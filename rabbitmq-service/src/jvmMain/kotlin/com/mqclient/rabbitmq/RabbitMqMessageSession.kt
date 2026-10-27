@@ -126,6 +126,23 @@ data class RabbitMqFetchedMessage(
  * Dispatchers.IO；会话状态（[heldTags] / [channel] 引用 / 标志位）另用
  * [stateLock] 保护 —— 临界区全是微秒级内存操作，从不在它们上面等 IO。
  * 拉取上限由 UI 控制（≤ 100），本类不重复设限。
+ *
+ * ## ⚠️ 未 Ack 消息的生命周期与**共享长连接**绑定
+ *
+ * `basicGet(autoAck = false)` 拉到的消息处于 unacked，凭据（`deliveryTag`）是
+ * **channel 级**的。共享连接之后，这些 unacked 消息的生命周期不再只取决于本会话 ——
+ * 只要 channel 还在，消息就一直卡在 unacked（对其他消费者不可见）。
+ *
+ * 正常路径下 `close()` 会把它们 requeue 回去（并关闭 channel），而 `close()` 由
+ * 对话框的 `onDispose` → `RabbitMqModule.closeMessageSessionAsync` 触发。但那依赖
+ * **组合真的走到 dispose**。极端情况下（进程被强杀、Compose 异常导致组合未正常
+ * 拆束、`onDispose` 里的 close 协程被取消）channel 可能没关，这些消息就会一直卡在
+ * unacked，直到连接本身断掉。
+ *
+ * **兜底手段：主动断开该 MQ 连接**（侧边栏断开 / 删除连接 / 退出程序）。
+ * 连接一断，broker 会把该连接上所有未 ack 消息自动重入队 —— 这是 RabbitMQ 的
+ * 原生语义，不依赖客户端做任何事。心跳（[AMQP_REQUESTED_HEARTBEAT_S]）保证死连接
+ * 不会无限期拖着这些消息。
  */
 class RabbitMqMessageSession private constructor(
     private val queueName: String,
@@ -431,11 +448,22 @@ class RabbitMqMessageSession private constructor(
 
     companion object {
         /**
-         * 独占连接版本：自己建连、自己关。测试与「不想碰共享连接」的调用方用。
+         * 独占连接版本：自己建连、自己关。**仅限测试 / 诊断**。
          *
          * 生产路径走 [onSharedConnection] —— 复用 ConnectionManager 的共享连接，
          * 每次打开对话框只 createChannel，不再 newConnection。
+         *
+         * 为什么标 `@Deprecated`：集中搜过，**没有任何生产代码**调用它（只有
+         * rabbitmq-service 的 diag 真机测试在用，因为那些测试没有 ConnectionManager
+         * 可以拿共享连接）。它很容易被误用 —— 谁在 UI 代码里调一次，就回到「每次
+         * newConnection」的老路。标掉之后 IDE 会在调用点直接提示改用
+         * [onSharedConnection]。
          */
+        @Deprecated(
+            message = "生产路径请用 onSharedConnection 复用 ConnectionManager 的共享连接；" +
+                "本方法每次 newConnection，仅限测试 / 诊断使用",
+            level = DeprecationLevel.WARNING,
+        )
         suspend fun open(config: RabbitMqConfig, queueName: String): RabbitMqMessageSession =
             withContext(Dispatchers.IO) {
                 val factory = rabbitMqConnectionFactory(config)
