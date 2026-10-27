@@ -2,6 +2,40 @@
 
 本文件记录 MQClient 的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [Unreleased] — 2026-10-27 (5)
+
+### Changed
+
+- **AI 连接表单从两份逐字副本合并成一份**（`openai-ui` + `anthropic-ui` 去重）：
+  `OpenAiConnectionForm` 与 `AnthropicConnectionForm` 各 229/237 行，逐行 diff 后
+  **唯一差异是预选哪个 provider**。现在表单本体是 `ai-ui` 的
+  `AiProviderConnectionForm`（构造参数 `presetProviderId`），两个 provider 模块各留
+  19/21 行的声明（`serviceId` + 预选 id）。净减约 430 行。
+- **`ModelComboBox` 移到 `ai-ui`**：它是 AI 专属控件，两个 provider 都要用；此前放在
+  `openai-ui` 导致 `anthropic-ui` 必须 `implementation(projects.openaiUi)` —— 两个平级
+  provider 之间的**横向依赖**，使「删掉一个 provider 不影响其余」不成立。该依赖已删除。
+- 两个 provider UI 模块的依赖表收紧到实际所需（去掉 ai-service / ui-common /
+  compose.foundation / material3 / materialIconsExtended；补 ui-graphics，因为
+  `ModuleIcon.painter()` 的返回类型 `Painter` 在那里）。
+
+### 澄清（重要）
+
+- 上一轮质量扫描把 `openai-ui` / `anthropic-ui` 判为「约 740 行死代码」是**错的**。
+  当时的依据是 `grep` 直接引用，而它们的调用发生在**运行时**：
+  `META-INF/services/com.mqclient.core.ConnectionFormUi` / `ModuleIcon`
+  → `ModuleRegistry.forms` / `.icons` → `NewConnectionDialog` 遍历装配、
+  `AiSettingsPane` 按 providerId 取品牌图标。若照当时的结论删除，后果是
+  「新建连接 → AI」整条路径只剩 `new_connection_form_todo` 占位，且 Anthropic 连接
+  在设置页会显示成 OpenAI 的 logo（回落分支 `?: openAiIcon()`）。
+
+### Tests
+
+- 新增 `AiProviderSpiTest`（app-ui，4 例）：按**装配结果**而非源码引用断言 ——
+  每个 AI provider 都有 ConnectionFormUi 与 ModuleIcon 注册、都在 AI 类目里、
+  无重复注册。这正是上一轮误判的那个盲区。
+  变异验证：删掉 anthropic 的 `ConnectionFormUi` 注册文件 → 4 例中 1 例变红；
+  恢复 → 全绿。
+
 ## [Unreleased] — 2026-10-27 (4)
 
 ### Fixed

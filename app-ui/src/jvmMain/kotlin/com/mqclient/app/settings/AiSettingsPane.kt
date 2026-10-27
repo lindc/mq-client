@@ -47,7 +47,7 @@ import com.mqclient.core.AiConfig
 import com.mqclient.core.AiConnection
 import com.mqclient.core.ModuleRegistry
 import com.mqclient.aiui.AiSslHint
-import com.mqclient.openai.ui.ModelComboBox
+import com.mqclient.aiui.ModelComboBox
 import com.mqclient.openai.ui.openAiIcon
 import com.mqclient.uicommon.LabeledField
 import com.mqclient.uicommon.DangerButton

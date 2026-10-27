@@ -67,7 +67,9 @@ private enum class NewConnectionStep { SELECT, CREATE }
  *    任何硬编码的类目清单；
  *  - **第二步**：**面板完全归模块** —— 宿主按选中的 [ServiceAdapter.id] 找
  *    [ModuleRegistry.forms] 里的 [com.mqclient.core.ConnectionFormUi]（SPI 注册，
- *    如 openai-ui 的 `OpenAiConnectionForm`），只渲染 [com.mqclient.core.ConnectionFormState.Content]；
+ *    如 openai-ui 的 `OpenAiConnectionForm`，其表单本体在 ai-ui 的
+ *    [com.mqclient.aiui.AiProviderConnectionForm]），只渲染
+ *    [com.mqclient.core.ConnectionFormState.Content]；
  *    字段、校验、错误展示、落盘都是模块自己的事。没有注册表单的类型显示占位提示。
  *
  * 「完成」是宿主 footer 触发 [com.mqclient.core.ConnectionFormState.submit] 的入口：

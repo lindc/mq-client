@@ -10,23 +10,18 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
+            // ModuleIcon / ConnectionFormUi 契约（本模块两个 SPI 实现）。
             implementation(projects.appCore)
-            // 新建连接表单（ConnectionFormUi 实现）用本模块对应的 service：
-            // Provider 列表来自 AiAdapterRegistry。
+            // Provider 预置（AiProviders）在 openai-service；ai-core 的契约类型随它传出。
             implementation(projects.openaiService)
-            // 注册表 / 契约（openai-service 已 api 传递，这里显式声明表明直接使用）。
             implementation(projects.aiCore)
-            // 连接落盘（AiConnectionRepository）现在归 AI 模块（ai-service）。
-            implementation(projects.aiService)
+            // 「新建连接」表单本体与 ModelComboBox 都在 ai-ui（两个 provider 共用一份）。
+            implementation(projects.aiUi)
             implementation(libs.compose.runtime)
-            implementation(libs.compose.foundation)
-            implementation(compose.material3)
-            // Material Icons Extended：跨平台一致的矢量图标（Linux 无 Emoji 字体也能正常显示）。
-            implementation(compose.materialIconsExtended)
-            // composeResources（logo 等品牌素材）需要资源 API 才能生成访问器。
+            // Painter（ModuleIcon 的返回类型）在 ui-graphics 里。
+            implementation(libs.compose.ui.graphics)
+            // composeResources（品牌 logo）需要资源 API 才能生成访问器。
             implementation(compose.components.resources)
-            // 表单字段组件（LabeledField / SettingsDropdownRow）与 i18n。
-            implementation(projects.uiCommon)
         }
     }
 }

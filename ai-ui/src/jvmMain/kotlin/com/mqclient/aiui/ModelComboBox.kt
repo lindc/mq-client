@@ -1,4 +1,4 @@
-package com.mqclient.openai.ui
+package com.mqclient.aiui
 
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.DropdownMenuItem
@@ -19,7 +19,9 @@ import com.mqclient.ai.AiProvider
  * 可编辑的模型组合框：直接往框里敲，或打开菜单从 Provider 的 [AiProvider.defaultModels]
  * 里挑。Provider 未知（id 对不上注册表）时退化成纯文本输入。
  *
- * AI 专属控件所以归 openai-ui（新建连接表单与设置页的 AI 卡片共用）。
+ * AI 专属控件所以归 ai-ui（新建连接表单与设置页的 AI 卡片共用）。
+ * 放在 ai-ui 而不是某个 provider 的 ui 模块：两个 provider 都要用，放任何一边
+ * 都会逼另一边横向依赖（Anthropic 表单曾经 `implementation(projects.openaiUi)`）。
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
