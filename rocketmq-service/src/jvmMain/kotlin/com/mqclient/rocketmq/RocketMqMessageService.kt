@@ -1,9 +1,9 @@
 package com.mqclient.rocketmq
 
 import com.mqclient.message.interpreter.isProbablyBinary
-import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.apache.rocketmq.client.consumer.DefaultMQPullConsumer
 import org.apache.rocketmq.client.consumer.PullStatus
@@ -119,38 +119,32 @@ class RocketMqMessageService {
         offset: Long,
         count: Int,
     ): RocketMqMessagePage {
-        val config = connectedContext(connectionId).config
+        val ctx = connectedContext(connectionId)
         val capped = count.coerceIn(1, MAX_READ_COUNT)
+        val clients = ctx.clients()
+        // 共享 PullConsumer：**整段持锁** —— fetchSubscribeMessageQueues / pull /
+        // maxOffset 是不可分割的序列（客户端内部有队列缓存状态），只锁创建等于没锁。
         return withContext(Dispatchers.IO) {
-            RocketMqTlsStart(config).use { tls ->
-                val consumer =
-                    DefaultMQPullConsumer(BROWSE_GROUP_PREFIX + UUID.randomUUID(), tls.rpcHook).apply {
-                        setNamesrvAddr(config.namesrvAddr.trim())
-                        setUseTLS(config.tlsEnabled)
-                    }
-                tls.start { consumer.start() }
-                try {
-                    val mq = consumer.fetchSubscribeMessageQueues(topic)
-                        .firstOrNull { it.queueId == queueId }
-                        ?: throw IllegalStateException("队列 $queueId 不存在（topic 路由可能已变化，请重新「读取」）")
-                    val pullResult = consumer.pull(mq, "*", offset, capped)
-                    val messages = if (pullResult.pullStatus == PullStatus.FOUND) {
-                        pullResult.msgFoundList.orEmpty().map { it.toMessage() }
-                    } else {
-                        emptyList()
-                    }
-                    // 队列尾判定：nextBeginOffset >= maxOffset → 无更多。maxOffset 查询
-                    // 失败（-1）时不误判「已耗尽」，把游标交回调用方再试一轮。
-                    val maxOffset = runCatching { consumer.maxOffset(mq) }.getOrDefault(-1L)
-                    val next = pullResult.nextBeginOffset
-                    val hasMore = pullResult.pullStatus == PullStatus.FOUND && (maxOffset < 0 || next < maxOffset)
-                    RocketMqMessagePage(
-                        messages = messages,
-                        nextBeginOffset = if (hasMore) next else null,
-                    )
-                } finally {
-                    runCatching { consumer.shutdown() }
+            clients.access.withLock {
+                val consumer = clients.pullConsumer()
+                val mq = consumer.fetchSubscribeMessageQueues(topic)
+                    .firstOrNull { it.queueId == queueId }
+                    ?: throw IllegalStateException("队列 $queueId 不存在（topic 路由可能已变化，请重新「读取」）")
+                val pullResult = consumer.pull(mq, "*", offset, capped)
+                val messages = if (pullResult.pullStatus == PullStatus.FOUND) {
+                    pullResult.msgFoundList.orEmpty().map { it.toMessage() }
+                } else {
+                    emptyList()
                 }
+                // 队列尾判定：nextBeginOffset >= maxOffset → 无更多。maxOffset 查询
+                // 失败（-1）时不误判「已耗尽」，把游标交回调用方再试一轮。
+                val maxOffset = runCatching { consumer.maxOffset(mq) }.getOrDefault(-1L)
+                val next = pullResult.nextBeginOffset
+                val hasMore = pullResult.pullStatus == PullStatus.FOUND && (maxOffset < 0 || next < maxOffset)
+                RocketMqMessagePage(
+                    messages = messages,
+                    nextBeginOffset = if (hasMore) next else null,
+                )
             }
         }
     }
@@ -176,16 +170,13 @@ class RocketMqMessageService {
         body: ByteArray,
         userProperties: List<Pair<String, String>> = emptyList(),
     ): RocketMqSendResult {
-        val config = connectedContext(connectionId).config
-        val timeoutMs = config.connectionTimeout * 1_000L
+        val ctx = connectedContext(connectionId)
+        val timeoutMs = ctx.config.connectionTimeout * 1_000L
+        val clients = ctx.clients()
         return withContext(Dispatchers.IO) {
-            RocketMqTlsStart(config).use { tls ->
-                val producer =
-                    DefaultMQProducer(SEND_GROUP_PREFIX + UUID.randomUUID(), tls.rpcHook).apply {
-                        setNamesrvAddr(config.namesrvAddr.trim())
-                        setUseTLS(config.tlsEnabled)
-                    }
-                tls.start { producer.start() }
+            // 共享 Producer：整段持锁（与 pull consumer 共用同一把 access 锁）。
+            clients.access.withLock {
+                val producer = clients.producer()
                 try {
                     val message = Message(
                         topic,
@@ -215,9 +206,8 @@ class RocketMqMessageService {
                     throw cancellation
                 } catch (error: Exception) {
                     RocketMqSendResult.failure(sendErrorMessage(error, timeoutMs))
-                } finally {
-                    runCatching { producer.shutdown() }
                 }
+                // 不 shutdown：producer 是连接级共享句柄，随连接断开 / 程序退出统一关。
             }
         }
     }
@@ -229,6 +219,16 @@ class RocketMqMessageService {
      * `status` 当否决票 —— 与扫描 / 请求入口同一口径。否则一次抖动误标的 `Failed`
      * 会把消息浏览 / 发送也一并堵死，而底层连接其实还能用。
      */
+    /**
+     * 取本连接的共享消息客户端（懒建，挂在 context 上）。
+     *
+     * 创建点**只有这里一处**：再加第二个创建点就会出现两把锁、两份句柄。
+     */
+    private fun RocketMqConnectionContext.clients(): RocketMqMessageClients =
+        messageClients ?: synchronized(this) {
+            messageClients ?: RocketMqMessageClients(config).also { messageClients = it }
+        }
+
     private fun connectedContext(connectionId: String): RocketMqConnectionContext =
         RocketMqModule.connectionOrNull(connectionId)
             ?.takeIf { it.adminClient != null }

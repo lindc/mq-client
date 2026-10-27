@@ -51,6 +51,17 @@ class RocketMqConnectionContext(
     @Volatile
     var cache: CacheManager? = null
 
+    /**
+     * 本连接的**共享消息客户端**（PullConsumer + Producer + TLS 持有），懒建、随连接存活。
+     *
+     * 为什么要挂在上下而而不是每次新建：见 [RocketMqMessageClients] 的 KDoc —— 两者
+     * 构造 + start 都要拉路由、注册组、起线程，且旧实现每次用新组名，broker 侧会
+     * 稳定积累幽灵组。生命周期：首次读 / 发时创建，`disconnect` / 删除 / 模块关闭时
+     * 由 [RocketMqConnectionManager.closeQuietly] 关闭并置 null。
+     */
+    @Volatile
+    var messageClients: RocketMqMessageClients? = null
+
     /** 最近一次失败的原因（连接或后续操作），UI 可以展示；成功连接时清空。 */
     @Volatile
     var lastError: String? = null
@@ -82,6 +93,9 @@ class RocketMqConnectionContext(
      */
     fun cleanup() {
         adminClient = null
+        // messageClients 的 shutdown 是 suspend + 要删临时 PEM，必须在 IO 上做，
+        // 不能进这个同步清理；由 RocketMqConnectionManager.closeQuietly 负责关闭并置空。
+        messageClients = null
         cache?.clear()
         cache = null
         resetScanFailures()

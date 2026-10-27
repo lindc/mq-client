@@ -284,13 +284,26 @@ class RocketMqConnectionManager(
 
     /** 关 AdminExt（切到 IO 线程）；失败只记日志 —— 断开路径不能被一个关不掉的句柄中断。 */
     private suspend fun closeQuietly(ctx: RocketMqConnectionContext) {
-        val admin = ctx.adminClient ?: return
+        val admin = ctx.adminClient
+        val clients = ctx.messageClients
         ctx.adminClient = null
-        try {
-            withContext(Dispatchers.IO) { admin.close() }
-            rocketMqLog.debug("admin client closed: connection=" + ctx.connectionId)
-        } catch (error: Throwable) {
-            rocketMqLog.warn("admin client close failed: connection=" + ctx.connectionId + " error=$error")
+        ctx.messageClients = null
+        if (admin != null) {
+            try {
+                withContext(Dispatchers.IO) { admin.close() }
+                rocketMqLog.debug("admin client closed: connection=" + ctx.connectionId)
+            } catch (error: Throwable) {
+                rocketMqLog.warn("admin client close failed: connection=" + ctx.connectionId + " error=$error")
+            }
+        }
+        // 共享 PullConsumer / Producer：不等待 access 锁（等锁等于把断开路径一起拖死）。
+        if (clients != null) {
+            try {
+                clients.shutdown()
+                rocketMqLog.debug("shared message clients shut down: connection=" + ctx.connectionId)
+            } catch (error: Throwable) {
+                rocketMqLog.warn("shared message clients shutdown failed: connection=" + ctx.connectionId + " error=$error")
+            }
         }
     }
 

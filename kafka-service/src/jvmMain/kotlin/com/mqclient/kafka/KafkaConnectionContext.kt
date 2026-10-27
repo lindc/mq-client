@@ -58,6 +58,17 @@ class KafkaConnectionContext(
     @Volatile
     var cache: CacheManager? = null
 
+    /**
+     * 本连接的**共享消息客户端**（浏览 consumer + producer），懒建、随连接存活。
+     *
+     * 为什要挂在上下而而不是每次新建：见 [KafkaMessageClients] 的 KDoc ——
+     * consumer 构造要拉元数据、producer 构造要起 sender 线程，逐次新建是“越用越慢”
+     * 的直接原因。生命周期：首次读 / 发时创建，`disconnect` / 删除 / 模块关闭时由
+     * [KafkaConnectionManager.closeQuietly] 关闭并置 null。
+     */
+    @Volatile
+    var messageClients: KafkaMessageClients? = null
+
     /** 最近一次失败的原因（连接或后续操作），UI 可以展示；成功连接时清空。 */
     @Volatile
     var lastError: String? = null
@@ -90,6 +101,9 @@ class KafkaConnectionContext(
      */
     fun cleanup() {
         adminClient = null
+        // messageClients 的关闭是 suspend + 带超时的（还要先 wakeup 打断 poll），
+        // 必须在 IO 上做，不能进这个同步清理；由 KafkaConnectionManager.closeQuietly 负责关闭并置空。
+        messageClients = null
         cache?.clear()
         cache = null
         resetScanFailures()

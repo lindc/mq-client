@@ -335,15 +335,28 @@ class KafkaConnectionManager(
     private fun lockFor(connectionId: String): Mutex =
         locks.computeIfAbsent(connectionId) { Mutex() }
 
-    /** 关 AdminClient（切到 IO 线程）；失败只记日志 —— 断开路径不能被一个关不掉的句柄中断。 */
     private suspend fun closeQuietly(ctx: KafkaConnectionContext) {
-        val admin = ctx.adminClient ?: return
+        val admin = ctx.adminClient
+        val clients = ctx.messageClients
         ctx.adminClient = null
-        try {
-            withContext(Dispatchers.IO) { admin.close(Duration.ZERO) }
-            kafkaLog.debug("admin client closed: connection=${ctx.connectionId}")
-        } catch (error: Throwable) {
-            kafkaLog.warn("admin client close failed: connection=${ctx.connectionId} error=$error")
+        ctx.messageClients = null
+        if (admin != null) {
+            try {
+                withContext(Dispatchers.IO) { admin.close(Duration.ZERO) }
+                kafkaLog.debug("admin client closed: connection=${ctx.connectionId}")
+            } catch (error: Throwable) {
+                kafkaLog.warn("admin client close failed: connection=${ctx.connectionId} error=$error")
+            }
+        }
+        // 共享 consumer / producer：先 wakeup 打断可能在跑的 poll，再带超时 close。
+        // 不等待 consumerAccess —— 等锁等于把断开路径一起拖死。
+        if (clients != null) {
+            try {
+                clients.closeQuietly()
+                kafkaLog.debug("shared message clients closed: connection=${ctx.connectionId}")
+            } catch (error: Throwable) {
+                kafkaLog.warn("shared message clients close failed: connection=${ctx.connectionId} error=$error")
+            }
         }
     }
 

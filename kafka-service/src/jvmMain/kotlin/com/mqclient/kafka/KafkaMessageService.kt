@@ -2,27 +2,30 @@ package com.mqclient.kafka
 
 import com.mqclient.message.interpreter.isProbablyBinary
 import java.time.Duration
-import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.apache.kafka.clients.consumer.KafkaConsumer
 import org.apache.kafka.clients.producer.KafkaProducer
 import org.apache.kafka.clients.producer.ProducerRecord
 import org.apache.kafka.common.TopicPartition
-import org.apache.kafka.common.serialization.ByteArrayDeserializer
-import org.apache.kafka.common.serialization.ByteArraySerializer
 
 /**
  * Kafka 消息读写服务：浏览（读）/ 发送（写）/ 详情，与 ibm-mq 的消息层
  * （MessageBrowseSession / MessageSender / MessageAccess）同职责、同「即时查询、
  * 不进缓存、不发事件」的定位。
  *
- * **句柄生命周期：Consumer / Producer 每次操作临时创建、finally 里 close** ——
- * 不挂 [KafkaConnectionContext]（consumer 非线程安全且有 poll 心跳语义，常驻管理
- * 成本远高于百 ms 级临时建连；断开连接时也没有游散句柄要追杀）。
+ * **句柄生命周期：每条连接一份共享 consumer / producer**（[KafkaMessageClients]，
+ * 挂在 [KafkaConnectionContext] 上，懒建、随连接存活、断开 / 退出时统一关闭）。
+ * 旧实现每次操作临时新建再 close，那才是「越用越慢」的来源：consumer 构造要拉
+ * 元数据、producer 构造要起 sender 线程与 broker 连接池。
+ *
+ * consumer 非线程安全，所有 `assign / seek / poll` 整段持
+ * [KafkaMessageClients.consumerAccess]；producer 线程安全，可直接并发。
+ * 仍只有 `config` 的重载（diag / 单测）没有连接上下文，退回临时句柄用完即关。
  *
  * **浏览不消费**：consumer 走 `assign + seek + poll`（不 subscribe、不 join group），
  * `enable.auto.commit=false` 且全程不 commit —— 不产生任何提交位移，不影响任何
@@ -72,8 +75,10 @@ class KafkaMessageService {
         partition: Int?,
         startFrom: KafkaReadStart,
         count: Int,
-    ): KafkaMessagePage =
-        readMessages(connectedContext(connectionId).config, topic, partition, startFrom, count)
+    ): KafkaMessagePage {
+        val ctx = connectedContext(connectionId)
+        return readMessages(ctx.config, topic, partition, startFrom, count, ctx)
+    }
 
     /**
      * [readMessages] 的实现体：按 [KafkaConfig] 直调（diag 测试不经模块连接守卫也能
@@ -85,12 +90,12 @@ class KafkaMessageService {
         partition: Int?,
         startFrom: KafkaReadStart,
         count: Int,
+        ctx: KafkaConnectionContext? = null,
     ): KafkaMessagePage {
         val timeoutMs = config.connectionTimeout * 1_000L
         val capped = count.coerceIn(1, MAX_READ_COUNT)
         return withContext(Dispatchers.IO) {
-            val consumer = newConsumer(config, capped)
-            try {
+            withBrowseConsumer(ctx, config, capped) { consumer ->
                 val tps = resolvePartitions(consumer, topic, partition)
                 consumer.assign(tps)
                 when (startFrom) {
@@ -116,7 +121,8 @@ class KafkaMessageService {
                             .offsetsForTimes(tps.associateWith { startFrom.epochMillis }, Duration.ofMillis(timeoutMs))
                             .filterValues { it != null }
                         if (found.isEmpty()) {
-                            return@withContext KafkaMessagePage(emptyList(), nextCursor = null)
+                            // withBrowseConsumer 的 lambda 不是 inline，只能返回到它。
+                            return@withBrowseConsumer KafkaMessagePage(emptyList(), nextCursor = null)
                         }
                         val seekable = found.keys.toList()
                         consumer.assign(seekable)
@@ -124,8 +130,6 @@ class KafkaMessageService {
                     }
                 }
                 collectPage(consumer, topic, capped, timeoutMs, previousCursor = null)
-            } finally {
-                runCatching { consumer.close(CLOSE_TIMEOUT) }
             }
         }
     }
@@ -140,8 +144,10 @@ class KafkaMessageService {
         topic: String,
         cursor: Map<Int, Long>,
         count: Int,
-    ): KafkaMessagePage =
-        readMoreMessages(connectedContext(connectionId).config, topic, cursor, count)
+    ): KafkaMessagePage {
+        val ctx = connectedContext(connectionId)
+        return readMoreMessages(ctx.config, topic, cursor, count, ctx)
+    }
 
     /** [readMoreMessages] 的实现体（按 config 直调，同 [readMessages] 的拆分理由）。 */
     internal suspend fun readMoreMessages(
@@ -149,18 +155,16 @@ class KafkaMessageService {
         topic: String,
         cursor: Map<Int, Long>,
         count: Int,
+        ctx: KafkaConnectionContext? = null,
     ): KafkaMessagePage {
         val timeoutMs = config.connectionTimeout * 1_000L
         val capped = count.coerceIn(1, MAX_READ_COUNT)
         return withContext(Dispatchers.IO) {
-            val consumer = newConsumer(config, capped)
-            try {
+            withBrowseConsumer(ctx, config, capped) { consumer ->
                 val tps = cursor.keys.map { TopicPartition(topic, it) }
                 consumer.assign(tps)
                 cursor.forEach { (p, offset) -> consumer.seek(TopicPartition(topic, p), offset) }
                 collectPage(consumer, topic, capped, timeoutMs, previousCursor = cursor)
-            } finally {
-                runCatching { consumer.close(CLOSE_TIMEOUT) }
             }
         }
     }
@@ -174,8 +178,10 @@ class KafkaMessageService {
         topic: String,
         partition: Int,
         offset: Long,
-    ): KafkaMessageDetail =
-        readMessageDetail(connectedContext(connectionId).config, topic, partition, offset)
+    ): KafkaMessageDetail {
+        val ctx = connectedContext(connectionId)
+        return readMessageDetail(ctx.config, topic, partition, offset, ctx)
+    }
 
     /** [readMessageDetail] 的实现体（按 config 直调，同 [readMessages] 的拆分理由）。 */
     internal suspend fun readMessageDetail(
@@ -183,11 +189,11 @@ class KafkaMessageService {
         topic: String,
         partition: Int,
         offset: Long,
+        ctx: KafkaConnectionContext? = null,
     ): KafkaMessageDetail {
         val timeoutMs = config.connectionTimeout * 1_000L
         return withContext(Dispatchers.IO) {
-            val consumer = newConsumer(config, count = 1)
-            try {
+            withBrowseConsumer(ctx, config, maxPollRecords = 1) { consumer ->
                 val tp = TopicPartition(topic, partition)
                 consumer.assign(listOf(tp))
                 consumer.seek(tp, offset)
@@ -200,8 +206,6 @@ class KafkaMessageService {
                 }
                 record?.toDetail()
                     ?: throw IllegalStateException("offset $offset 不存在（可能已过期清除）")
-            } finally {
-                runCatching { consumer.close(CLOSE_TIMEOUT) }
             }
         }
     }
@@ -255,8 +259,10 @@ class KafkaMessageService {
         key: ByteArray? = null,
         partition: Int? = null,
         headers: List<KafkaMessageHeader> = emptyList(),
-    ): KafkaSendResult =
-        sendMessage(connectedContext(connectionId).config, topic, value, key, partition, headers)
+    ): KafkaSendResult {
+        val ctx = connectedContext(connectionId)
+        return sendMessage(ctx.config, topic, value, key, partition, headers, ctx)
+    }
 
     /** [sendMessage] 的实现体（按 config 直调，同 [readMessages] 的拆分理由）。 */
     internal suspend fun sendMessage(
@@ -266,28 +272,48 @@ class KafkaMessageService {
         key: ByteArray? = null,
         partition: Int? = null,
         headers: List<KafkaMessageHeader> = emptyList(),
+        ctx: KafkaConnectionContext? = null,
     ): KafkaSendResult {
         val timeoutMs = config.connectionTimeout * 1_000L
         return withContext(Dispatchers.IO) {
-            val producer = newProducer(config)
-            try {
-                val record = ProducerRecord<ByteArray, ByteArray>(topic, partition, key, value)
-                headers.forEach { record.headers().add(it.key, it.value) }
-                val meta = producer.send(record).get(timeoutMs + SEND_EXTRA_WAIT_MS, TimeUnit.MILLISECONDS)
-                kafkaLog.info(
-                    "message sent: topic=${meta.topic()} " +
-                        "partition=${meta.partition()} offset=${meta.offset()} size=${value.size}",
-                )
-                KafkaSendResult.success(meta)
-            } catch (cancellation: CancellationException) {
-                throw cancellation
-            } catch (error: Exception) {
-                KafkaSendResult.failure(errorMessage(error))
-            } finally {
-                runCatching { producer.close(CLOSE_TIMEOUT) }
+            // 共享 producer 线程安全，可直接并发发送；临时句柄（diag）用完即关。
+            if (ctx != null) {
+                sendBlocking(ctx.clients().producer(), topic, value, key, partition, headers, timeoutMs)
+            } else {
+                val producer = newProducer(config)
+                try {
+                    sendBlocking(producer, topic, value, key, partition, headers, timeoutMs)
+                } finally {
+                    runCatching { producer.close(CLOSE_TIMEOUT) }
+                }
             }
         }
     }
+
+    /** 发送主体（同步等 ack）；共享 / 临时两条路径共用。 */
+    private fun sendBlocking(
+        producer: KafkaProducer<ByteArray, ByteArray>,
+        topic: String,
+        value: ByteArray,
+        key: ByteArray?,
+        partition: Int?,
+        headers: List<KafkaMessageHeader>,
+        timeoutMs: Long,
+    ): KafkaSendResult =
+        try {
+            val record = ProducerRecord<ByteArray, ByteArray>(topic, partition, key, value)
+            headers.forEach { record.headers().add(it.key, it.value) }
+            val meta = producer.send(record).get(timeoutMs + SEND_EXTRA_WAIT_MS, TimeUnit.MILLISECONDS)
+            kafkaLog.info(
+                "message sent: topic=${meta.topic()} " +
+                    "partition=${meta.partition()} offset=${meta.offset()} size=${value.size}",
+            )
+            KafkaSendResult.success(meta)
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (error: Exception) {
+            KafkaSendResult.failure(errorMessage(error))
+        }
 
     // ---------------------------------------------------------------- 内部零件
 
@@ -319,31 +345,48 @@ class KafkaMessageService {
         return infos.sortedBy { it.partition() }.map { TopicPartition(topic, it.partition()) }
     }
 
-    /** browse consumer 属性：连接四块 + assign-only 浏览所需的浏览器侧配置。 */
+    /** 临时浏览 consumer（diag / 单测路径）：属性与共享句柄同源。 */
     private fun newConsumer(config: KafkaConfig, count: Int): KafkaConsumer<ByteArray, ByteArray> =
-        KafkaConsumer(java.util.Properties().apply {
-            putAll(config.toConnectionProperties())
-            put("group.id", "mqclient-browse-${UUID.randomUUID()}")
-            put("enable.auto.commit", false)
-            put("key.deserializer", ByteArrayDeserializer::class.java.name)
-            put("value.deserializer", ByteArrayDeserializer::class.java.name)
-            put("max.poll.records", count)
-            put("max.partition.fetch.bytes", MAX_PARTITION_FETCH_BYTES)
-        })
+        KafkaConsumer(KafkaMessageClients.browseConsumerProperties(config, count))
 
-    /** producer 属性：acks=all + 重试；幂等显式关（3.x acks=all 默认开，需 IdempotentWrite ACL）。 */
+    /** 临时 producer（diag / 单测路径）：属性与共享句柄同源。 */
     private fun newProducer(config: KafkaConfig): KafkaProducer<ByteArray, ByteArray> =
-        KafkaProducer(java.util.Properties().apply {
-            putAll(config.toConnectionProperties())
-            put("key.serializer", ByteArraySerializer::class.java.name)
-            put("value.serializer", ByteArraySerializer::class.java.name)
-            put("acks", "all")
-            put("retries", 10)
-            put("delivery.timeout.ms", DELIVERY_TIMEOUT_MS)
-            put("linger.ms", 5)
-            put("max.block.ms", config.connectionTimeout * 1_000)
-            put("enable.idempotence", false)
-        })
+        KafkaProducer(KafkaMessageClients.producerProperties(config))
+
+    /**
+     * 取本连接的共享消息客户端（懒建，挂在 context 上）。
+     *
+     * 创建点**只有这里一处**：再加第二个创建点就会出现两把锁、两份句柄。
+     */
+    private fun KafkaConnectionContext.clients(): KafkaMessageClients =
+        messageClients ?: synchronized(this) {
+            messageClients ?: KafkaMessageClients(config).also { messageClients = it }
+        }
+
+    /**
+     * 消费者取用：共享（生产路径）或临时（diag）。
+     *
+     * 共享路径**整段持锁** —— `assign / seek / poll` 是一个不可分割的序列，只锁
+     * 句柄创建等于没锁：两个协程同时 seek 同一个 consumer 会互相窜位置。
+     */
+    private suspend fun <T> withBrowseConsumer(
+        ctx: KafkaConnectionContext?,
+        config: KafkaConfig,
+        maxPollRecords: Int,
+        block: suspend (KafkaConsumer<ByteArray, ByteArray>) -> T,
+    ): T =
+        if (ctx == null) {
+            val consumer = newConsumer(config, maxPollRecords)
+            try {
+                block(consumer)
+            } finally {
+                runCatching { consumer.close(CLOSE_TIMEOUT) }
+            }
+        } else {
+            val clients = ctx.clients()
+            val consumer = clients.browseConsumer()
+            clients.consumerAccess.withLock { block(consumer) }
+        }
 
     private fun ConsumerRecord<ByteArray, ByteArray>.toSummary(topic: String): KafkaMessageSummary {
         val value = value()
