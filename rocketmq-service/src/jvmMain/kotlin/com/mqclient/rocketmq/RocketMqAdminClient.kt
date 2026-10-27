@@ -47,12 +47,25 @@ class RocketMqAdminClient(private val config: RocketMqConfig) : AutoCloseable {
             setUseTLS(config.tlsEnabled)
         }
 
-    private var started = false
+    /**
+     * 是否**尝试过** `admin.start()`。
+     *
+     * 不能只在 start 成功后才置位：`DefaultMQAdminExt.start()` 先建 Netty 客户端
+     * （含定时任务线程池、NameServer 通道），再去拉路由 —— 拉路由 / 握手失败时
+     * start 抛异常，那些线程却已经起来了。以「成功」为守卫就会跳过 `shutdown()`，
+     * 线程留到进程退出（[RocketMqConnectionManager.createVerifiedAdmin] 的失败路径
+     * 会走到这里，泄漏是稳定的）。
+     *
+     * `@Volatile`：置位在 start 的协程线程，读在 close()，可能跨线程。
+     */
+    @Volatile
+    private var startAttempted = false
 
     /** start + examineBrokerClusterInfo：NameServer 连通性 / ACL 一次验完。 */
     suspend fun startAndVerify() {
+        // 先置位再 start：start 抛异常时 close() 仍必须走 shutdown()。
+        startAttempted = true
         ioCall { tls.start { admin.start() } }
-        started = true
         ioCall { admin.examineBrokerClusterInfo() }
     }
 
@@ -204,9 +217,10 @@ class RocketMqAdminClient(private val config: RocketMqConfig) : AutoCloseable {
     }
 
     override fun close() {
-        if (started) {
+        if (startAttempted) {
+            // 对「start 抛异常」的实例调 shutdown() 是安全的：内部按句柄判空。
             runCatching { admin.shutdown() }
-            started = false
+            startAttempted = false
         }
         // 临时 PEM 含未加密私钥，用完必须删（不管 start 过没有）。
         tls.close()

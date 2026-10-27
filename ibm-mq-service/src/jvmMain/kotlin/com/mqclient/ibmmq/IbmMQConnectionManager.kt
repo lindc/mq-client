@@ -14,6 +14,7 @@ import com.mqclient.ibmmq.event.IbmMQEvents
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -266,13 +267,23 @@ class IbmMQConnectionManager(
 
     private fun lockFor(connectionId: String): KeyedMutex = locks
 
-    /** 释放 MQ 句柄（阻塞 IO 切到 IO 线程）；失败只记日志 —— 断开路径不能被一个关不掉的句柄中断。 */
+    /**
+     * 释放 MQ 句柄（阻塞 IO 切到 IO 线程）；失败只记日志 —— 断开路径不能被一个关不掉的
+     * 句柄中断。
+     *
+     * `NonCancellable` 是必需的：块体先 `ctx.mqConnection = null` 再断开，若 `withContext`
+     * 在**入口**就因取消而抛，`disconnect()` 一次都不会执行，而句柄引用已经丢了 —— 这个
+     * 连接就永远泄漏到进程退出（GC 也不是确定性的）。断开本来就是不可回退的，做了就要做完。
+     */
     private suspend fun closeQuietly(ctx: IbmMQConnectionContext) {
         val manager = ctx.mqConnection ?: return
         ctx.mqConnection = null
         try {
-            withContext(Dispatchers.IO) { manager.disconnect() }
+            withContext(NonCancellable + Dispatchers.IO) { manager.disconnect() }
             ibmMqLog.debug("mq handle closed: connection=${ctx.connectionId}")
+        } catch (cancellation: CancellationException) {
+            // 取消原样上抛：句柄已释放，但仍然不能让取消语义被吞。
+            throw cancellation
         } catch (error: Throwable) {
             ibmMqLog.warn("mq disconnect failed: connection=${ctx.connectionId} error=$error")
         }

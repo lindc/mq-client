@@ -19,6 +19,8 @@ import kotlinx.coroutines.withContext
 import org.apache.kafka.clients.admin.AdminClient
 import org.apache.kafka.common.config.ConfigResource
 import org.apache.kafka.clients.admin.ListConsumerGroupsOptions
+import org.apache.kafka.clients.admin.ListConsumerGroupOffsetsOptions
+import org.apache.kafka.clients.admin.ListConsumerGroupOffsetsSpec
 import org.apache.kafka.clients.admin.NewTopic
 import org.apache.kafka.clients.admin.ListTopicsOptions
 import org.apache.kafka.clients.admin.OffsetSpec
@@ -760,8 +762,15 @@ class KafkaScanService(private val context: ServiceContext) {
     }
 
     /**
-     * 全部组的 lag：每组一次 listConsumerGroupOffsets（单组失败跳过），收集本轮成功
-     * 组的全部分区后**一次** listOffsets(LATEST) 拿末尾位点（避免逐分区 RPC）。
+     * 全部组的 lag：**一次批量** listConsumerGroupOffsets（AdminClient 内部按 group
+     * coordinator 拆请求、并发下发 —— 实际是「每个 coordinator 一次 RPC」，而不是
+     * 每组一次），单组失败跳过；收集本轮成功组的全部分区后一次 listOffsets(LATEST)
+     * 拿末尾位点（避免逐分区 RPC）。
+     *
+     * 为什么不再逐组串行：旧实现每组一次 `.get(timeoutMs)`，N 个组就是 N 次 RTT
+     * 首尾相接，50 组 × 100ms 就是 5 秒全堆在同一轮心跳里。批量版的 fan-out 由
+     * AdminClient 自己做（受 max.in.flight 约束），既不用手写并发度，也不会把
+     * broker 的连接摊爆。
      */
     private suspend fun scanAllGroupLags(
         admin: AdminClient,
@@ -771,19 +780,26 @@ class KafkaScanService(private val context: ServiceContext) {
             .all()
             .get(timeoutMs, TimeUnit.MILLISECONDS)
             .map { it.groupId() }
-        val committed = mutableMapOf<String, Map<TopicPartition, Long>>()
-        groupIds.forEach { groupId ->
+        if (groupIds.isEmpty()) return emptyMap()
+
+        // 空 spec = 「该组的全部分区」，与原来逐组不带 spec 的语义一致。
+        val offsets = admin.listConsumerGroupOffsets(
+            groupIds.associateWith { ListConsumerGroupOffsetsSpec() },
+            ListConsumerGroupOffsetsOptions().timeoutMs(timeoutMs.toInt()),
+        )
+        val committed = groupIds.mapNotNull { groupId ->
             try {
-                val offsets = admin.listConsumerGroupOffsets(groupId)
-                    .partitionsToOffsetAndMetadata()
+                // 按组分期的 future：单组无权 / 不存在只跳过它自己，不连坐整轮。
+                groupId to offsets.partitionsToOffsetAndMetadata(groupId)
                     .get(timeoutMs, TimeUnit.MILLISECONDS)
-                committed[groupId] = offsets.mapValues { (_, m) -> m.offset() }
+                    .mapValues { (_, m) -> m.offset() }
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (error: Throwable) {
                 kafkaLog.warn("group offsets skipped: group=$groupId error=${errorMessage(error)}")
+                null
             }
-        }
+        }.toMap()
         if (committed.isEmpty()) return emptyMap()
 
         val allPartitions = committed.values.flatMap { it.keys }.toSet()

@@ -12,8 +12,11 @@ import java.time.Duration
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -174,10 +177,21 @@ class KafkaConnectionManager(
     suspend fun testConnection(config: KafkaConfig) {
         val admin = createVerifiedAdmin(config)
         try {
-            // 验证通过即达目的；close 交给 IO 线程，与 closeQuietly 同一套纪律。
-            withContext(Dispatchers.IO) { admin.close(Duration.ZERO) }
-        } catch (error: Throwable) {
-            kafkaLog.warn("test connection close failed: error=$error")
+            // 验证已由 createVerifiedAdmin 完成，这里没有别的活要干；留 this try 是为
+            // 了让 close 落进 finally —— 它是本方法唯一的清理义务。
+            //
+            // 显式过一道取消检查：旧实现用 `catch (Throwable)` 包 close，把取消信号
+            // 一起吞了 —— 外层 withTimeout 超时后 UI 会当成「测试通过」继续落盘
+            // （KafkaConnectionFormState.submit 靠 TimeoutCancellationException 区分
+            // 超时与对话框关闭）。
+            coroutineContext.ensureActive()
+        } finally {
+            // NonCancellable：取消到达时 withContext 在**入口**就抛，块体一次都不执行，
+            // 句柄照样漏（AdminClient 的 sender / metrics 线程留到进程退出）。
+            withContext(NonCancellable + Dispatchers.IO) {
+                runCatching { admin.close(Duration.ZERO) }
+                    .onFailure { error -> kafkaLog.warn("test connection close failed: error=$error") }
+            }
         }
     }
 
