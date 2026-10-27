@@ -2,6 +2,49 @@
 
 本文件记录 MQClient 的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [Unreleased] — 2026-10-27 (9)
+
+### Fixed
+
+- **Live 测试不再把「环境不可用」报成「代码回归」**（`KafkaGroupLagBatchLiveTest`）。
+  排查现场：`verify.sh` 全量跑红，唯一失败是这条；`config.toml` 里 Kafka 指向
+  `11207-11209` 且是 `SASL_SSL`，而该端口当时跑的是 RabbitMQ 管理 API（`curl` 回
+  `401 / not_authorized`，`openssl s_client` 回 `wrong version number`）。服务器资源
+  只够起一种中间件，这几个端口是复用区 —— 配置齐全不代表端口上是 Kafka。
+  旧版只检查「有 Kafka 连接 + truststore 文件在」就直连，于是握手失败被记成 FAILED。
+  现在首次 `listConsumerGroups` 失败即 `assumeLive` 记 **SKIP**，与
+  `PcfScanBudgetLiveTest` / `RabbitMqScanPartialLiveTest` 的探活口径一致；
+  `CancellationException` 单独重抛（不被宽 catch 吞掉），跳过原因取根因文案。
+- **批量取位点的等价断言存在真空通过**（同上测试）。两个取数函数用
+  `runCatching{}.getOrNull()` 静默丢失败组：集群在测试中途掉线时，串行与批量都返回
+  空表，`assertEquals(serial, batched)` 拿两张空表通过 —— 越是环境恶劣越容易变绿。
+  现在取位点结果拆成 `OffsetsProbe(offsets, failures)`，并断言
+  「真实组一个都不许读失败」「批量版覆盖全部消费组」，最后才比等价；
+  坏组那一步另加「失败不得连坐真实组」。
+- **`scripts/verify.sh` 缺执行位，GitHub Actions 的门禁从未真正跑过**：文件在 git 里
+  是 `100644`，而 `.github/workflows/ci.yml` 写的是 `run: ./scripts/verify.sh` ——
+  检出后直接 exit 126。已提交为 `100755`，并把 workflow / `doc/ci-gitee.md` 的调用改成
+  `bash ./scripts/verify.sh`：执行位在不依赖它的前提下才是保险，而不是前提（Windows
+  检出、zip 分发都会丢执行位）。
+
+### Tests
+
+- **`KafkaOffsetsProbeTest`（5 例，离线）**：把「失败必须被记下来」这层机制从 live 测试里
+  抽成可注入的 `probeOffsets(groupIds, read)`，于是在没有 broker 的机器上也能证明它 ——
+  而 broker 恰恰是最难得的资源。覆盖：成败分组、全失败仍留下失败痕迹、文案取根因、
+  取消不被记成失败、空组表。
+- **变异验证**：把 `probeOffsets` 的 `catch` 改回静默丢弃 → 3 例红（分组 / 全失败 /
+  根因各一），确认这几条断言不是摆设。
+
+### 未做（如实记录）
+
+- 这条 live 测试的**新断言仍只在真集群上会执行**：本机 11207 上跑的是 RabbitMQ，
+  今天只能证明「跳过路径 + 机制本身」。等价性 / 不慢于串行 / 单组隔离三条要等
+  Kafka 起来再验（`-Dkafkadiag.enabled=true` 或直接 `:kafka-service:jvmTest`）。
+- 其余 live 测试的开关仍是两套口径：IBM MQ / Kafka 消息面 / RocketMQ 用显式
+  `-D*diag.enabled=true`，RabbitMQ 与 PCF 扫描用「配置在就自动连」。统一成一种需要
+  动 8 个文件，等真机轮换验证过各模块再决定，不在这轮里顺手改。
+
 ## [Unreleased] — 2026-10-27 (8)
 
 ### Tests（先补测试，再动手拆）

@@ -34,8 +34,12 @@ Gitee 流水线（官方文档 `/enterprise/pipeline`）是 *控制台即配置*
      set -e
      chmod +x ./gradlew ./scripts/verify.sh
      command -v python3 >/dev/null 2>&1 || (apt-get update -qq && apt-get install -y -qq python3)
-     ./scripts/verify.sh
+     bash ./scripts/verify.sh
      ```
+
+     `chmod` 保留着：`scripts/verify.sh` 的执行位已经提交为 100755，但插件镜像的检出
+     是否保留它不受仓库控制；`bash ./scripts/verify.sh` 这层不依赖执行位，
+     少了它失败会是 exit 126（看起来像代码问题，实际是权限）。
 
      `python3` 那行是给 i18n 检查用的：插件镜像里若没有 python，`verify.sh` 会在 i18n 段失败。
    - **构建缓存**：填 `~/.gradle/caches` 和 `~/.gradle/wrapper` 两行。第一次冷构建要下几十 MB 依赖，
@@ -105,7 +109,8 @@ Gitee 流水线（官方文档 `/enterprise/pipeline`）是 *控制台即配置*
 - `on.push.branches` → 流水线的「触发」：分支推送 + 精确匹配 `master`
 - `jobs` → 阶段
 - `steps` → 阶段里的任务
-- `run: ./scripts/verify.sh` → Gradle 构建插件的「构建命令」
+- `run: bash ./scripts/verify.sh` → Gradle 构建插件的「构建命令」（用 `bash` 前缀是为了不依赖
+  检出后的执行位，见上文）
 - `setup-java` / `setup-gradle` → 插件的 JDK 版本号 / Gradle 版本号下拉
 - `actions/upload-artifact` → 任务的「暂存构建物」（失败时把 `**/build/test-results/jvmTest/*.xml` 打包，
   便于下载后本地看；不填也行，日志里已经有失败用例名）

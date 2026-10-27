@@ -44,7 +44,10 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Verify (architecture + assemble + jvmTest + i18n)
-        run: ./scripts/verify.sh
+        # 用 `bash` 而不是 `./scripts/verify.sh`：执行位虽然已提交为 100755，但检出后
+        # 是否保留取决于平台（Windows 检出、zip 分发都会丢）。少了它，这一行会以
+        # exit 126 失败，而且看起来像代码问题 —— 门禁本身不该成为失败源。
+        run: bash ./scripts/verify.sh
 
       # 失败时把测试报告捞出来 —— 否则只能看到「某模块 exit 1」，还得本地复现。
       - name: Upload test reports
