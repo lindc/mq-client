@@ -356,11 +356,14 @@ class KafkaMessageService {
     /**
      * 取本连接的共享消息客户端（懒建，挂在 context 上）。
      *
-     * 创建点**只有这里一处**：再加第二个创建点就会出现两把锁、两份句柄。
+     * 创建点**只有这里一处**。守卫用 `adminClient != null` —— 与 [connectedContext]
+     * 完全同口径：只要管理客户端还在（说明这条连接真的连过），就允许建消息句柄。
+     * 不能用 `status == Connected`：扫描连续失败会把状态暂置 `Failed` 而 adminClient
+     * 仍在，那种"可恢复"的窗口里读消息应该继续可用。
      */
     private fun KafkaConnectionContext.clients(): KafkaMessageClients =
-        messageClients ?: synchronized(this) {
-            messageClients ?: KafkaMessageClients(config).also { messageClients = it }
+        messageClients.acquire(canCreate = { adminClient != null }) {
+            KafkaMessageClients(config)
         }
 
     /**

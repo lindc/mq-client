@@ -5,6 +5,7 @@ import com.mqclient.core.ConnectionInfo
 import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.cache.CacheManager
+import com.mqclient.core.concurrent.KeyedMutex
 import com.mqclient.core.concurrent.BlockingCalls
 import com.mqclient.core.scheduler.ScheduledJob
 import com.mqclient.core.spi.ServiceContext
@@ -44,7 +45,7 @@ class IbmMQConnectionManager(
     }
 
     private val contexts = ConcurrentHashMap<String, IbmMQConnectionContext>()
-    private val locks = ConcurrentHashMap<String, Mutex>()
+    private val locks = KeyedMutex()
 
     /* ------------------------------ 查询 ------------------------------ */
 
@@ -106,14 +107,14 @@ class IbmMQConnectionManager(
      * CONNECTING 忽略重复触发。连接成功后：建 cache → 注册定时任务（间隔来自
      * [IbmMQConnectionContext.config]）→ 报 CONNECTED。
      */
-    suspend fun connect(connectionId: String): Result<Unit> = lockFor(connectionId).withLock {
+    suspend fun connect(connectionId: String): Result<Unit> = locks.withLock(connectionId) {
         val ctx = contexts[connectionId]
-            ?: return Result.failure(IllegalStateException("连接 $connectionId 未登记"))
+            ?: return@withLock Result.failure(IllegalStateException("连接 $connectionId 未登记"))
         when (ctx.status) {
-            ConnectionStatus.Connected -> return Result.success(Unit)
+            ConnectionStatus.Connected -> return@withLock Result.success(Unit)
             ConnectionStatus.Connecting -> {
                 ibmMqLog.info("connect ignored (already connecting): connection=$connectionId")
-                return Result.failure(IllegalStateException("连接正在进行中"))
+                return@withLock Result.failure(IllegalStateException("连接正在进行中"))
             }
             else -> Unit
         }
@@ -188,7 +189,7 @@ class IbmMQConnectionManager(
      * 已经是 DISCONNECTED 时是空操作（重复点「断开」无副作用）。
      */
     suspend fun disconnectNow(connectionId: String, reason: String? = null) =
-        lockFor(connectionId).withLock {
+        locks.withLock(connectionId) {
             val ctx = contexts[connectionId] ?: return@withLock
             if (ctx.status == ConnectionStatus.Disconnected) return@withLock
 
@@ -263,8 +264,7 @@ class IbmMQConnectionManager(
         ConnectionStore.reportStatus(ctx.connectionId, status, MODULE_ID)
     }
 
-    private fun lockFor(connectionId: String): Mutex =
-        locks.computeIfAbsent(connectionId) { Mutex() }
+    private fun lockFor(connectionId: String): KeyedMutex = locks
 
     /** 释放 MQ 句柄（阻塞 IO 切到 IO 线程）；失败只记日志 —— 断开路径不能被一个关不掉的句柄中断。 */
     private suspend fun closeQuietly(ctx: IbmMQConnectionContext) {

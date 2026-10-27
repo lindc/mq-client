@@ -4,6 +4,7 @@ import com.mqclient.core.ConnectionInfo
 import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.cache.CacheManager
+import com.mqclient.core.concurrent.KeyedMutex
 import com.mqclient.core.scheduler.ScheduledJob
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.emit
@@ -39,7 +40,7 @@ class RabbitMqConnectionManager(
 ) {
 
     private val contexts = java.util.concurrent.ConcurrentHashMap<String, RabbitMqConnectionContext>()
-    private val locks = java.util.concurrent.ConcurrentHashMap<String, Mutex>()
+    private val locks = KeyedMutex()
 
     /* ------------------------------ 查询 ------------------------------ */
 
@@ -93,9 +94,8 @@ class RabbitMqConnectionManager(
         context.coroutineScope.launch {
             disconnectNow(connectionId, reason = "connection deleted")
             contexts.remove(connectionId)
-            // 这个 id 不会再回来（删除是永久的），锁留着就是纯泄漏。
-            // 此时已退出 disconnectNow 的 withLock，没有在飞的持锁操作。
-            locks.remove(connectionId)
+            // 锁不用手工清：KeyedMutex 在最后一个持有者离开时自己裁剪条目。
+            // （原先这里有 locks.remove —— 那把 Map 只增不减，才需要补这一步。）
         }
     }
 
@@ -105,14 +105,14 @@ class RabbitMqConnectionManager(
      * 显式建立连接。DISCONNECTED / FAILED 才真正发起；CONNECTED 直接复用；
      * CONNECTING 忽略重复触发。连接成功后报 CONNECTED。
      */
-    suspend fun connect(connectionId: String): Result<Unit> = lockFor(connectionId).withLock {
+    suspend fun connect(connectionId: String): Result<Unit> = locks.withLock(connectionId) {
         val ctx = contexts[connectionId]
-            ?: return Result.failure(IllegalStateException("连接 $connectionId 未登记"))
+            ?: return@withLock Result.failure(IllegalStateException("连接 $connectionId 未登记"))
         when (ctx.status) {
-            ConnectionStatus.Connected -> return Result.success(Unit)
+            ConnectionStatus.Connected -> return@withLock Result.success(Unit)
             ConnectionStatus.Connecting -> {
                 rabbitMqLog.info("connect ignored (already connecting): connection=$connectionId")
-                return Result.failure(IllegalStateException("连接正在进行中"))
+                return@withLock Result.failure(IllegalStateException("连接正在进行中"))
             }
             else -> Unit
         }
@@ -204,7 +204,7 @@ class RabbitMqConnectionManager(
      */
     suspend fun amqpConnection(ctx: RabbitMqConnectionContext): Connection {
         ctx.amqp?.takeIf { it.isOpen }?.let { return it }
-        return lockFor(ctx.connectionId).withLock {
+        return locks.withLock(ctx.connectionId) {
             // 双检：排队期间可能已被另一个调用方建好。
             ctx.amqp?.takeIf { it.isOpen }?.let { return@withLock it }
 
@@ -269,7 +269,7 @@ class RabbitMqConnectionManager(
      * 已经是 DISCONNECTED 时是空操作（重复点「断开」无副作用）。
      */
     suspend fun disconnectNow(connectionId: String, reason: String? = null) =
-        lockFor(connectionId).withLock {
+        locks.withLock(connectionId) {
             val ctx = contexts[connectionId] ?: return@withLock
             if (ctx.status == ConnectionStatus.Disconnected) return@withLock
 
@@ -293,12 +293,7 @@ class RabbitMqConnectionManager(
         rabbitMqLog.info("shutdown all connections: count=${contexts.size}")
         contexts.keys.toList().forEach { disconnectNow(it, reason = "module shutdown") }
         contexts.clear()
-        // Mutex Map 随连接 id 累积：连接删了 / 换了 id，旧 key 没人再取，就是稳定的
-        // 内存微增长（Mutex 本身很小，但这是无谓保留）。模块关闭时一并清空。
-        //
-        // 为什么能安全清：此刻所有 disconnectNow 已返回（上面的 forEach 是串行的），
-        // 没有在飞的持锁操作；之后的取用会由 lockFor 重新 computeIfAbsent。
-        locks.clear()
+        // 锁不用手工清：KeyedMutex 在最后一个持有者离开时自己裁剪条目。
     }
 
     /* ------------------------------ 定时任务 ------------------------------ */
@@ -431,8 +426,7 @@ class RabbitMqConnectionManager(
         }
     }
 
-    private fun lockFor(connectionId: String): Mutex =
-        locks.computeIfAbsent(connectionId) { Mutex() }
+    private fun lockFor(connectionId: String): KeyedMutex = locks
 
     /**
      * 关掉本连接的两类句柄：管理 API 客户端与共享 AMQP 连接。切到 IO 线程；失败只记

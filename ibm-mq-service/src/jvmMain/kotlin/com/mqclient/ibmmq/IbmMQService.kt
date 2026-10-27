@@ -318,7 +318,7 @@ class IbmMQService(private val context: ServiceContext) {
      * [IllegalStateException]，由 UI 转「加载失败」。
      */
     suspend fun openBrowseSession(connectionId: String, queueName: String): MessageBrowseSession {
-        val manager = IbmMQModule.connectionOrNull(connectionId)?.mqConnection
+        val manager = connectedContext(connectionId)?.mqConnection
             ?: run {
                 ibmMqLog.warn("browse session aborted (not connected): connection=$connectionId queue=$queueName")
                 throw IllegalStateException("连接 $connectionId 未建立，无法浏览队列消息")
@@ -369,7 +369,7 @@ class IbmMQService(private val context: ServiceContext) {
      * 完整字节，纯浏览不消费、不影响 UI 会话光标。连接未建立返回 failure。
      */
     suspend fun downloadMessageBody(connectionId: String, queueName: String, messageIdHex: String): MessageOperationResult {
-        val manager = IbmMQModule.connectionOrNull(connectionId)?.mqConnection
+        val manager = connectedContext(connectionId)?.mqConnection
             ?: run {
                 ibmMqLog.warn("msg download aborted (not connected): connection=$connectionId queue=$queueName")
                 return MessageOperationResult.failure(null, "连接 $connectionId 未建立")
@@ -382,7 +382,7 @@ class IbmMQService(private val context: ServiceContext) {
      * 读完整 MQMD + 消息体组装 [MessageDetail]。纯浏览不消费；连接未建立返回 failure。
      */
     suspend fun getMessageDetail(connectionId: String, queueName: String, messageIdHex: String): MessageOperationResult {
-        val manager = IbmMQModule.connectionOrNull(connectionId)?.mqConnection
+        val manager = connectedContext(connectionId)?.mqConnection
             ?: run {
                 ibmMqLog.warn("msg detail aborted (not connected): connection=$connectionId queue=$queueName")
                 return MessageOperationResult.failure(null, "连接 $connectionId 未建立")
@@ -395,7 +395,7 @@ class IbmMQService(private val context: ServiceContext) {
      * MQGMO_MSG_UNDER_CURSOR 破坏性 get，只消费该条；删除后由调用方刷新列表。
      */
     suspend fun deleteMessage(connectionId: String, queueName: String, messageIdHex: String): MessageOperationResult {
-        val manager = IbmMQModule.connectionOrNull(connectionId)?.mqConnection
+        val manager = connectedContext(connectionId)?.mqConnection
             ?: run {
                 ibmMqLog.warn("msg delete aborted (not connected): connection=$connectionId queue=$queueName")
                 return MessageOperationResult.failure(null, "连接 $connectionId 未建立")
@@ -423,7 +423,7 @@ class IbmMQService(private val context: ServiceContext) {
         format: String? = null,
         replyToQMgrName: String? = null,
     ): SendResult {
-        val manager = IbmMQModule.connectionOrNull(connectionId)?.mqConnection
+        val manager = connectedContext(connectionId)?.mqConnection
             ?: run {
                 ibmMqLog.warn("send aborted (not connected): connection=$connectionId queue=$queueName")
                 return SendResult.failure(null, "连接 $connectionId 未建立，无法发送消息")

@@ -35,7 +35,14 @@ import javax.net.ssl.X509TrustManager
  * public 化理由同 [aiJson]：所有适配器模块共用同一个客户端（超时策略、日志口径一致）。
  */
 object AiHttp {
-    val client: HttpClient by lazy {
+
+    /**
+     * 严格校验客户端（默认）。
+     *
+     * 保留 [Lazy] 对象而不是直接的 `by lazy` 委托：`close()` 需要 `isInitialized`
+     * 判断「引擎是否真的建过」，而委托属性本身不暴露这个信息。
+     */
+    private val strict: Lazy<HttpClient> = lazy {
         HttpClient(CIO) {
             expectSuccess = false
             install(HttpTimeout) {
@@ -46,12 +53,14 @@ object AiHttp {
         }
     }
 
+    val client: HttpClient get() = strict.value
+
     /** 按连接取客户端：`ignoreSsl=false`（默认）走严格 CIO；true 走 trust-all。 */
     fun clientFor(connection: AiConnection): HttpClient =
-        if (connection.ignoreSsl) trustingClient else client
+        if (connection.ignoreSsl) trusting.value else strict.value
 
     /** trust-all 客户端：惰性创建（绝大多数用户不会开启，零启动成本）。 */
-    private val trustingClient: HttpClient by lazy {
+    private val trusting: Lazy<HttpClient> = lazy {
         // 信任所有证书的 TrustManager：check* 全部空实现 —— 链校验由它接管。
         val trustAll = object : X509TrustManager {
             override fun checkClientTrusted(chain: Array<X509Certificate>?, authType: String?) {}
@@ -75,5 +84,26 @@ object AiHttp {
                 }
             }
         }
+    }
+
+    /**
+     * 关闭两个引擎。由应用退出链（`shutdownApp`）调用。
+     *
+     * 为什么必须关：Ktor 的 CIO / Java 引擎各自持有 selector 线程与 dispatcher。
+     * 桌面应用关窗后进程仍然活着（Nucleus 的窗口生命周期不等于 JVM 退出），这些
+     * 线程就一直留着。虽然它们都是 daemon（不会阻止 JVM 退出），但重复开关窗口
+     * 的场景里会看见线程数只增不减。
+     *
+     * **只关真正创建过的**（`isInitialized`）：`by lazy` 的委托在 `getValue` 之前不
+     * 会构造引擎；对一个从未用过的字段调 `close()` 会**触发初始化**再关 —— 白白起
+     * 一批线程再拆掉，属于「为了清理而制造开销」。
+     *
+     * 幂等性：Ktor 的 `HttpClient.close()` 可以重复调（内部 engine 关闭是幂等的），
+     * 但这里再用 `runCatching` 包一层 —— 关闭失败不应把退出链后续步骤带走。
+     */
+    fun close() {
+        // Lazy.isInitialized() 是函数（接口成员），不是委托属性的那个扩展属性。
+        if (strict.isInitialized()) runCatching { strict.value.close() }
+        if (trusting.isInitialized()) runCatching { trusting.value.close() }
     }
 }

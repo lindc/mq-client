@@ -215,18 +215,18 @@ class RocketMqMessageService {
     // ---------------------------------------------------------------- 内部零件
 
     /**
-     * 消息会话的上下文：只要管理客户端还在（即这条连接真的连上过）就允许，不拿
-     * `status` 当否决票 —— 与扫描 / 请求入口同一口径。否则一次抖动误标的 `Failed`
-     * 会把消息浏览 / 发送也一并堵死，而底层连接其实还能用。
-     */
-    /**
      * 取本连接的共享消息客户端（懒建，挂在 context 上）。
      *
-     * 创建点**只有这里一处**：再加第二个创建点就会出现两把锁、两份句柄。
+     * 创建点**只有这里一处**。守卫用 `adminClient != null` —— 与 [connectedContext]
+     * 同口径：管理客户端还在（即这条连接真的连上过）就允许建消息句柄，不拿 `status`
+     * 当否决票。否则一次抖动误标的 `Failed` 会把消息浏览 / 发送一并堵死，而底层连接
+     * 其实还能用。
+     *
+     * 再加第二个创建点就会出现两把锁、两份句柄 —— 孤儿句柄正是这么来的。
      */
     private fun RocketMqConnectionContext.clients(): RocketMqMessageClients =
-        messageClients ?: synchronized(this) {
-            messageClients ?: RocketMqMessageClients(config).also { messageClients = it }
+        messageClients.acquire(canCreate = { adminClient != null }) {
+            RocketMqMessageClients(config)
         }
 
     private fun connectedContext(connectionId: String): RocketMqConnectionContext =

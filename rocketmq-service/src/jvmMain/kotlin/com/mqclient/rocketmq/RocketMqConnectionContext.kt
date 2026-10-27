@@ -2,6 +2,7 @@ package com.mqclient.rocketmq
 
 import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.cache.CacheManager
+import com.mqclient.core.concurrent.HandleSlot
 
 /**
  * 「为什么拒结」的唯一判定点：请求入口只在**真的没有客户端**时才拒结，并且按
@@ -56,11 +57,14 @@ class RocketMqConnectionContext(
      *
      * 为什么要挂在上下而而不是每次新建：见 [RocketMqMessageClients] 的 KDoc —— 两者
      * 构造 + start 都要拉路由、注册组、起线程，且旧实现每次用新组名，broker 侧会
-     * 稳定积累幽灵组。生命周期：首次读 / 发时创建，`disconnect` / 删除 / 模块关闭时
-     * 由 [RocketMqConnectionManager.closeQuietly] 关闭并置 null。
+     * 稳定积累幽灵组。
+     *
+     * 用 [HandleSlot] 而不是裸的 `@Volatile var`：创建（读 / 发路径）与关闭（断开路径）
+     * 曾用**不同的锁**，交错会产生孤儿句柄。这里后果比其他模块更重：句柄持有 TLS
+     * 构造产生的临时 PEM，**未加密私钥**文件只能靠 `close()` 删——孤儿就意味着它永久
+     * 留在临时目录。槽把「检查 + 创建 + 赋值」与「标记断开 + 取走」放在同一监视器里。
      */
-    @Volatile
-    var messageClients: RocketMqMessageClients? = null
+    val messageClients = HandleSlot<RocketMqMessageClients>("${connectionId} 消息句柄")
 
     /** 最近一次失败的原因（连接或后续操作），UI 可以展示；成功连接时清空。 */
     @Volatile
@@ -94,8 +98,8 @@ class RocketMqConnectionContext(
     fun cleanup() {
         adminClient = null
         // messageClients 的 shutdown 是 suspend + 要删临时 PEM，必须在 IO 上做，
-        // 不能进这个同步清理；由 RocketMqConnectionManager.closeQuietly 负责关闭并置空。
-        messageClients = null
+        // 不能进这个同步清理；由 RocketMqConnectionManager.closeQuietly 通过 take()
+        // 取走并在监视器外关闭。
         cache?.clear()
         cache = null
         resetScanFailures()

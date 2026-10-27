@@ -28,6 +28,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.dp
+import com.mqclient.ai.adapter.AiHttp
 import com.mqclient.aiservice.AiChatPersistence
 import com.mqclient.aiservice.AiConnectionRepository
 import com.mqclient.aiui.AiChainTarget
@@ -44,6 +45,7 @@ import com.mqclient.core.ThemeMode
 import com.mqclient.core.database.DatabaseManager
 import com.mqclient.core.database.DriverFactory
 import com.mqclient.core.event.EventNames
+import com.mqclient.core.concurrent.BlockingCalls
 import com.mqclient.core.log.Log
 import com.mqclient.message.interpreter.MessageInterpreters
 import com.mqclient.uicommon.i18n.LanguageResources
@@ -466,8 +468,8 @@ private fun bootstrapEvents() {
 }
 
 /**
- * 关窗收尾三步，顺序有讲究（和 DatabaseManager.close 的注释一致）：先停模块资源，
- * 再停调度器 / 订阅，最后关库。
+ * 关窗收尾五步，顺序有讲究（和 DatabaseManager.close 的注释一致）：先停模块资源，
+ * 再关 AI 的 HTTP 引擎，然后停调度器 / 订阅，再丢弃阻塞调用线程池，最后关库。
  *
  * 每一步单独兜住异常：任一步失败都不能把后面的收尾带走 —— 漏掉 [CoreModule.shutdown]
  * 会让调度器与全部订阅泄漏，漏掉 [DatabaseManager.close] 会把 JDBC 连接留在半关闭
@@ -479,10 +481,19 @@ private fun shutdownApp() {
     //    模块收尾时发的事件、上报的失败才有人收。
     runCatching { ModuleRegistry.disposeServices() }
         .onFailure { error -> Log.warn(LOG_TAG, "disposeServices 失败：$error") }
-    // 2. 调度器与全部事件订阅（应用 scope 由 CoreModule 持有，随之级联取消）。
+    // 2. AI 的 Ktor 引擎：排在模块之后（此刻适配器不会再发请求）、CoreModule 之前
+    //    （不依赖总线）。不关的话 CIO / Java 引擎的 selector / dispatcher 线程会
+    //    留到 JVM 退出 —— 对桌面应用是「任务管理器里多几个线程」的可见泄漏。
+    runCatching { AiHttp.close() }
+        .onFailure { error -> Log.warn(LOG_TAG, "AiHttp.close 失败：$error") }
+    // 3. 调度器与全部事件订阅（应用 scope 由 CoreModule 持有，随之级联取消）。
     runCatching { CoreModule.shutdown() }
         .onFailure { error -> Log.warn(LOG_TAG, "CoreModule.shutdown 失败：$error") }
-    // 3. 最后关库：调度器与订阅都停了之后再关，否则关闭途中还在跑的查询会打在
+    // 4. 阻塞调用线程池：模块已经收完，不会再提交新的阻塞调用。
+    //    shutdownNow 丢弃在跑的调用（它们不响应中断，优雅等等于等十几分钟）。
+    runCatching { BlockingCalls.shutdown() }
+        .onFailure { error -> Log.warn(LOG_TAG, "BlockingCalls.shutdown 失败：$error") }
+    // 5. 最后关库：调度器与订阅都停了之后再关，否则关闭途中还在跑的查询会打在
     //    已关的连接上（见 DatabaseManager.close 的注释）。
     runCatching { DatabaseManager.close() }
         .onFailure { error -> Log.warn(LOG_TAG, "DatabaseManager.close 失败：$error") }

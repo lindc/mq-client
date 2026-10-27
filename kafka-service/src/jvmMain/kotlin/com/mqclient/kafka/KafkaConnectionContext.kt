@@ -2,6 +2,7 @@ package com.mqclient.kafka
 
 import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.cache.CacheManager
+import com.mqclient.core.concurrent.HandleSlot
 import org.apache.kafka.clients.admin.AdminClient
 
 /**
@@ -63,11 +64,17 @@ class KafkaConnectionContext(
      *
      * 为什要挂在上下而而不是每次新建：见 [KafkaMessageClients] 的 KDoc ——
      * consumer 构造要拉元数据、producer 构造要起 sender 线程，逐次新建是“越用越慢”
-     * 的直接原因。生命周期：首次读 / 发时创建，`disconnect` / 删除 / 模块关闭时由
-     * [KafkaConnectionManager.closeQuietly] 关闭并置 null。
+     * 的直接原因。
+     *
+     * 用 [HandleSlot] 而不是裸的 `@Volatile var`：创建发生在读 / 发路径，关闭发生在
+     * 断开路径，两者曾用**不同的锁**。交错下会出现「建好了却挂在一个已断开的连接上」
+     * 的孤儿句柄 —— 只有应用退出时才会被兜底关掉。槽把「检查 + 创建 + 赋值」与
+     * 「标记断开 + 取走」放在同一监视器里，孤儿不可能产生。
+     *
+     * 关闭的**执行**仍在 [KafkaConnectionManager.closeQuietly]：那一步是 suspend +
+     * 阻塞 IO（wakeup 后 close），不能进监视器。
      */
-    @Volatile
-    var messageClients: KafkaMessageClients? = null
+    val messageClients = HandleSlot<KafkaMessageClients>("${connectionId} 消息句柄")
 
     /** 最近一次失败的原因（连接或后续操作），UI 可以展示；成功连接时清空。 */
     @Volatile
@@ -102,8 +109,8 @@ class KafkaConnectionContext(
     fun cleanup() {
         adminClient = null
         // messageClients 的关闭是 suspend + 带超时的（还要先 wakeup 打断 poll），
-        // 必须在 IO 上做，不能进这个同步清理；由 KafkaConnectionManager.closeQuietly 负责关闭并置空。
-        messageClients = null
+        // 必须在 IO 上做，不能进这个同步清理；由 KafkaConnectionManager.closeQuietly
+        // 通过 take() 取走并在监视器外关闭。
         cache?.clear()
         cache = null
         resetScanFailures()

@@ -2,8 +2,10 @@ package com.mqclient.core.concurrent
 
 import java.util.concurrent.Callable
 import java.util.concurrent.ExecutionException
-import java.util.concurrent.Executors
 import java.util.concurrent.Future
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import kotlin.coroutines.coroutineContext
@@ -56,20 +58,70 @@ object BlockingCalls {
     /** 等待切片：让取消最迟在这么久之后被察觉（单次 `future.get` 本身不响应取消）。 */
     private const val POLL_SLICE_MS = 100L
 
-    /** 执行阻塞调用的线程池。每调用一条线程，跑完即回收。 */
-    private val workers = Executors.newCachedThreadPool { runnable ->
+    /**
+     * 阻塞调用线程池上限。
+     *
+     * 原先用 `newCachedThreadPool`（理论上无上限）：每条线程都在等一个阻塞 socket
+     * 调用，若 UI 侧反复触发（重试循环 / 多个对话框同时拉取），线程数会随「卡住的
+     * 调用数」线性上涨。桌面应用里这个数字涨到几十就该被人注意到了，涨到几百则 GC
+     * 与调度一起崩。32 已经足够（每个连接同时最多一两个阻塞调用）。
+     */
+    private const val MAX_WORKERS = 32
+
+    /** 排队上限：超过就直接拒绝，而不是无界队列把内存吃满。 */
+    private const val MAX_PENDING = 256
+
+    /**
+     * 收尾线程上限。收尾任务只做一件阻塞的事：等被放弃的调用结束。
+     * 它比 workers 小得多 —— 一次「超时放弃」才产生一个收尾任务。
+     */
+    private const val MAX_REAPERS = 8
+
+    /**
+     * 收尾等待上限。
+     *
+     * 原先是裸的 `future.get()`（无超时）：一条收尾线程会被一条永远不返回的阻塞调用
+     * 永久占着。8 个这样的死调用就能把收尾池彻底堵死，之后所有被放弃的产出都无人
+     * 释放 —— 那本身就是泄漏。120s 远大于任何合理的 MQ 调用，超时说明那条调用已经烂在
+     * socket 里，只能靠连接层兜底。
+     */
+    private const val REAP_TIMEOUT_MS = 120_000L
+
+    /** 线程保活时间：空闲线程 60s 后回收（有界池 + 保活 = 不用时真正缩回）。 */
+    private const val KEEP_ALIVE_SECONDS = 60L
+
+    private val threadFactory: (Runnable) -> Thread = { runnable ->
         Thread(runnable, "blocking-call").apply { isDaemon = true }
     }
 
     /**
-     * 收尾线程池：等被放弃的调用真正结束，再把它的产出交给 [onAbandoned]。
+     * 执行阻塞调用的有界线程池。
      *
-     * 单独一个池而不是复用 [workers]：收尾任务本身是阻塞等待，混进同一个池会让缓存池
-     * 无谓地多开线程（虽然也会回收，但会让「正在跑的阻塞调用」这个观测量失真）。
+     * 核心 4 / 上限 32 + 有界队列 256：正常使用（连一两条 MQ、偶尔扫描）永远碰不到
+     * 上限；真的撞上了，那说明有调用在集体卡死，此时**快速失败比默默堆线程更诚实**。
      */
-    private val reapers = Executors.newCachedThreadPool { runnable ->
-        Thread(runnable, "blocking-call-reaper").apply { isDaemon = true }
-    }
+    private val workers = ThreadPoolExecutor(
+        4,
+        MAX_WORKERS,
+        KEEP_ALIVE_SECONDS,
+        TimeUnit.SECONDS,
+        LinkedBlockingQueue(MAX_PENDING),
+        threadFactory,
+    )
+
+    /**
+     * 收尾线程池：等被放弃的调用真正结束，再把它的产出交给 `onAbandoned`。
+     *
+     * 单独一个池而不是复用 [workers]：收尾任务本身是阻塞等待，混进同一个池会让
+     * 「正在跑的阻塞调用」这个观测量失真（也会无谓占用 worker 名额）。
+     */
+    private val reapers = ThreadPoolExecutor(
+        1,
+        MAX_REAPERS,
+        KEEP_ALIVE_SECONDS,
+        TimeUnit.SECONDS,
+        LinkedBlockingQueue(MAX_PENDING),
+    ) { runnable -> Thread(runnable, "blocking-call-reaper").apply { isDaemon = true } }
 
     /**
      * 在 [timeoutMs] 内等待 [block] 的结果。
@@ -89,7 +141,16 @@ object BlockingCalls {
         block: () -> T,
     ): T {
         require(timeoutMs > 0) { "timeoutMs 必须为正数：$timeoutMs" }
-        val future = workers.submit(Callable { block() })
+        val future = try {
+            workers.submit(Callable { block() })
+        } catch (rejected: RejectedExecutionException) {
+            // 有界池饱和是**可预期的**上限，不是 bug：转成同一套超时异常，调用方的
+            // 既有 catch（扫描 / 连接路径都在 catch BlockingCallTimeoutException）无需改。
+            throw BlockingCallTimeoutException(
+                "$label 未执行：阻塞调用线程池已满（并发上限 $MAX_WORKERS，排队上限 $MAX_PENDING）",
+                rejected,
+            )
+        }
         try {
             return awaitWithin(future, timeoutMs, label)
         } catch (timeout: BlockingCallTimeoutException) {
@@ -134,13 +195,39 @@ object BlockingCalls {
             throw IllegalStateException("unreachable")
         }
 
-    /** 等被放弃的调用结束并释放产出；本身失败不影响调用方。 */
+    /**
+     * 等被放弃的调用结束并释放产出；本身失败不影响调用方。
+     *
+     * 必须是**有上限**的等待：一条永远不返回的阻塞调用会永久占住一条收尾线程，
+     * 把 [reapers] 池堵死。超时就放弃 —— 拿不到产出，也就无从释放，只能靠连接层
+     * 在断开时兜底（这也是为什么各模块的 closeQuietly 都要自己关句柄）。
+     */
     private fun <T> reap(future: Future<T>, onAbandoned: (T) -> Unit) {
-        reapers.execute {
-            runCatching {
-                val late = future.get()
-                onAbandoned(late)
+        runCatching {
+            reapers.execute {
+                try {
+                    val late = future.get(REAP_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                    onAbandoned(late)
+                } catch (_: TimeoutException) {
+                    // 调用已经烂在 socket 里：不再等、不调 onAbandoned（没有产出）。
+                } catch (_: Throwable) {
+                    // block 自己失败 / 被取消：没有产出可释放。
+                }
             }
+        }.onFailure {
+            // 收尾池也饱和：只能放弃。不能因为清理失败而打断调用方。
         }
+    }
+
+    /**
+     * 丢弃线程池。由应用退出链（`shutdownApp`）调用。
+     *
+     * `shutdownNow()` 而不是 `shutdown()`：池里跑的是**不响应中断**的阻塞调用，
+     * 优雅等待等于等它们自己超时（可能十几分钟）。线程都是 daemon，直接丢弃不会
+     * 阻止 JVM 退出；未执行的排队任务也就一并丢弃了 —— 退出路径上没人要它们的结果。
+     */
+    fun shutdown() {
+        workers.shutdownNow()
+        reapers.shutdownNow()
     }
 }

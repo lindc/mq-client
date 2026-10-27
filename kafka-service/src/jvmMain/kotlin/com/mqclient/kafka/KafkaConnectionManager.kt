@@ -4,6 +4,7 @@ import com.mqclient.core.ConnectionInfo
 import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.cache.CacheManager
+import com.mqclient.core.concurrent.KeyedMutex
 import com.mqclient.core.scheduler.ScheduledJob
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.emit
@@ -47,7 +48,7 @@ class KafkaConnectionManager(
 ) {
 
     private val contexts = ConcurrentHashMap<String, KafkaConnectionContext>()
-    private val locks = ConcurrentHashMap<String, Mutex>()
+    private val locks = KeyedMutex()
 
     /* ------------------------------ 查询 ------------------------------ */
 
@@ -108,14 +109,14 @@ class KafkaConnectionManager(
      * 显式建立连接。DISCONNECTED / FAILED 才真正发起；CONNECTED 直接复用；
      * CONNECTING 忽略重复触发。连接成功后报 CONNECTED。
      */
-    suspend fun connect(connectionId: String): Result<Unit> = lockFor(connectionId).withLock {
+    suspend fun connect(connectionId: String): Result<Unit> = locks.withLock(connectionId) {
         val ctx = contexts[connectionId]
-            ?: return Result.failure(IllegalStateException("连接 $connectionId 未登记"))
+            ?: return@withLock Result.failure(IllegalStateException("连接 $connectionId 未登记"))
         when (ctx.status) {
-            ConnectionStatus.Connected -> return Result.success(Unit)
+            ConnectionStatus.Connected -> return@withLock Result.success(Unit)
             ConnectionStatus.Connecting -> {
                 kafkaLog.info("connect ignored (already connecting): connection=$connectionId")
-                return Result.failure(IllegalStateException("连接正在进行中"))
+                return@withLock Result.failure(IllegalStateException("连接正在进行中"))
             }
             else -> Unit
         }
@@ -134,6 +135,10 @@ class KafkaConnectionManager(
             ctx.adminClient = createVerifiedAdmin(ctx.config)
             // 缓存与扫描任务只属于活连接（与 ibm-mq 同一生命周期）。
             ctx.cache = CacheManager()
+            // 复位句柄槽 — 必须在上报 Connected **之前**：否则读路径可能先看到
+            // Connected，再撞上仍为断开的槽，拿到一个误导性的「已断开」拒绝。
+            // （上面 closeQuietly 已经把槽置为断开，这一步是重连时的必要解锁。）
+            ctx.messageClients.reopen()
             setStatus(ctx, ConnectionStatus.Connected)
             registerScanJobs(ctx)
             context.emit(KafkaEvents.CONNECTED, mapOf("connectionId" to connectionId))
@@ -186,7 +191,7 @@ class KafkaConnectionManager(
      * 已经是 DISCONNECTED 时是空操作（重复点「断开」无副作用）。
      */
     suspend fun disconnectNow(connectionId: String, reason: String? = null) =
-        lockFor(connectionId).withLock {
+        locks.withLock(connectionId) {
             val ctx = contexts[connectionId] ?: return@withLock
             if (ctx.status == ConnectionStatus.Disconnected) return@withLock
 
@@ -332,14 +337,14 @@ class KafkaConnectionManager(
         }
     }
 
-    private fun lockFor(connectionId: String): Mutex =
-        locks.computeIfAbsent(connectionId) { Mutex() }
+    private fun lockFor(connectionId: String): KeyedMutex = locks
 
     private suspend fun closeQuietly(ctx: KafkaConnectionContext) {
         val admin = ctx.adminClient
-        val clients = ctx.messageClients
         ctx.adminClient = null
-        ctx.messageClients = null
+        // 「mark disposed + 取走引用」在同一监视器里完成，然后才在锁外关。
+        // 这一步之后任何 acquire 都会立刻被拒 —— 不会再产生孤儿句柄。
+        val clients = ctx.messageClients.take()
         if (admin != null) {
             try {
                 withContext(Dispatchers.IO) { admin.close(Duration.ZERO) }

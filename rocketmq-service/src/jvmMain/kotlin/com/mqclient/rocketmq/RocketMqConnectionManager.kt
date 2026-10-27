@@ -4,6 +4,7 @@ import com.mqclient.core.ConnectionInfo
 import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.cache.CacheManager
+import com.mqclient.core.concurrent.KeyedMutex
 import com.mqclient.core.scheduler.ScheduledJob
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.emit
@@ -41,7 +42,7 @@ class RocketMqConnectionManager(
 ) {
 
     private val contexts = ConcurrentHashMap<String, RocketMqConnectionContext>()
-    private val locks = ConcurrentHashMap<String, Mutex>()
+    private val locks = KeyedMutex()
 
     /* ------------------------------ 查询 ------------------------------ */
 
@@ -85,14 +86,14 @@ class RocketMqConnectionManager(
     /* ------------------------------ 连接 / 断开 ------------------------------ */
 
     /** 显式建立连接。DISCONNECTED / FAILED 才真正发起；CONNECTED 复用；CONNECTING 忽略。 */
-    suspend fun connect(connectionId: String): Result<Unit> = lockFor(connectionId).withLock {
+    suspend fun connect(connectionId: String): Result<Unit> = locks.withLock(connectionId) {
         val ctx = contexts[connectionId]
-            ?: return Result.failure(IllegalStateException("连接 $connectionId 未登记"))
+            ?: return@withLock Result.failure(IllegalStateException("连接 $connectionId 未登记"))
         when (ctx.status) {
-            ConnectionStatus.Connected -> return Result.success(Unit)
+            ConnectionStatus.Connected -> return@withLock Result.success(Unit)
             ConnectionStatus.Connecting -> {
                 rocketMqLog.info("connect ignored (already connecting): connection=$connectionId")
-                return Result.failure(IllegalStateException("连接正在进行中"))
+                return@withLock Result.failure(IllegalStateException("连接正在进行中"))
             }
             else -> Unit
         }
@@ -106,6 +107,8 @@ class RocketMqConnectionManager(
             ctx.adminClient = createVerifiedAdmin(ctx.config)
             // 缓存与扫描任务只属于活连接（与 kafka / ibm-mq 同一生命周期）。
             ctx.cache = CacheManager()
+            // 复位句柄槽 — 必须在 setStatus(Connected) **之前**（见 Kafka 同处注释）。
+            ctx.messageClients.reopen()
             setStatus(ctx, ConnectionStatus.Connected)
             registerScanJobs(ctx)
             context.emit(RocketMqEvents.CONNECTED, mapOf("connectionId" to connectionId))
@@ -149,7 +152,7 @@ class RocketMqConnectionManager(
 
     /** 断开：取消扫描任务 → 关 AdminExt → 清缓存 → 状态回 DISCONNECTED。 */
     suspend fun disconnectNow(connectionId: String, reason: String? = null) =
-        lockFor(connectionId).withLock {
+        locks.withLock(connectionId) {
             val ctx = contexts[connectionId] ?: return@withLock
             if (ctx.status == ConnectionStatus.Disconnected) return@withLock
 
@@ -279,15 +282,15 @@ class RocketMqConnectionManager(
         }
     }
 
-    private fun lockFor(connectionId: String): Mutex =
-        locks.computeIfAbsent(connectionId) { Mutex() }
+    private fun lockFor(connectionId: String): KeyedMutex = locks
 
     /** 关 AdminExt（切到 IO 线程）；失败只记日志 —— 断开路径不能被一个关不掉的句柄中断。 */
     private suspend fun closeQuietly(ctx: RocketMqConnectionContext) {
         val admin = ctx.adminClient
-        val clients = ctx.messageClients
         ctx.adminClient = null
-        ctx.messageClients = null
+        // 「mark disposed + 取走引用」在同一监视器里完成，然后才在锁外 shutdown。
+        // 孤儿一旦消失，句柄持有的 TLS 临时 PEM（含未加密私钥）才一定会被 close() 删。
+        val clients = ctx.messageClients.take()
         if (admin != null) {
             try {
                 withContext(Dispatchers.IO) { admin.close() }
