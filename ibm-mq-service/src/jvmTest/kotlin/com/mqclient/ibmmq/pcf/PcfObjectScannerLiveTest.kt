@@ -8,6 +8,7 @@ import com.ibm.mq.pcf.PCFMessageAgent
 import com.mqclient.core.ConnectionStore
 import com.mqclient.ibmmq.IbmMQConfig
 import com.mqclient.ibmmq.ibmMQConfigFromOptions
+import com.mqclient.ibmmq.IbmMqTls
 import com.mqclient.ibmmq.mqProperties
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -41,7 +42,11 @@ class PcfObjectScannerLiveTest {
             // 连接阶段同样套 connectionTimeout 超时（与生产 connect 一致），
             // QMGR 掉线时不至于把测试挂十几分钟。
             kotlinx.coroutines.withTimeout(config.connectionTimeout * 1_000L) {
-                MQQueueManager(config.queueManager, mqProperties(config))
+                // 走**正式连接路径**（证书窗口 + mqProperties），与
+                // IbmMQConnectionManager.open 同一组合。此前这里直接构造 MQQueueManager，
+                // 于是配了 TLS 的 QM 永远连不上 —— 而失败被当成「QMGR 不在线」记 SKIP，
+                // 看起来像环境问题，实际是测试自己漏了证书那一半。
+                IbmMqTls.withTls(config) { MQQueueManager(config.queueManager, mqProperties(config)) }
             }
         } catch (t: Throwable) {
             assumeLive("LIVE SKIP: 连接失败（QMGR 不在线？）：${t.message}", false)
@@ -143,7 +148,11 @@ class PcfObjectScannerLiveTest {
         val config: IbmMQConfig = ibmMQConfigFromOptions(info.options)
         val manager = try {
             kotlinx.coroutines.withTimeout(config.connectionTimeout * 1_000L) {
-                MQQueueManager(config.queueManager, mqProperties(config))
+                // 走**正式连接路径**（证书窗口 + mqProperties），与
+                // IbmMQConnectionManager.open 同一组合。此前这里直接构造 MQQueueManager，
+                // 于是配了 TLS 的 QM 永远连不上 —— 而失败被当成「QMGR 不在线」记 SKIP，
+                // 看起来像环境问题，实际是测试自己漏了证书那一半。
+                IbmMqTls.withTls(config) { MQQueueManager(config.queueManager, mqProperties(config)) }
             }
         } catch (t: Throwable) {
             assumeLive("LIVE SKIP: 连接失败（QMGR 不在线？）：${t.message}", false)
@@ -195,7 +204,9 @@ class PcfObjectScannerLiveTest {
         val config = ibmMQConfigFromOptions(info.options)
 
         val manager = try {
-            withTimeout(config.connectionTimeout * 1_000L) { MQQueueManager(config.queueManager, mqProperties(config)) }
+            withTimeout(config.connectionTimeout * 1_000L) {
+                IbmMqTls.withTls(config) { MQQueueManager(config.queueManager, mqProperties(config)) }
+            }
         } catch (t: Throwable) {
             assumeLive("LIVE SKIP: 连接失败（QMGR 不在线？）：${t.message}", false)
             @Suppress("UNREACHABLE_CODE")

@@ -73,6 +73,13 @@
   并配四条反向对照 —— 去掉 truststore（2397）、换成无关 CA（2397，证明服务端证书
   确实按我们的信任库校验）、去掉 keystore（2393）、错密码（2035）；另有一条
   「测试连接之后再连，不许继承上一条的证书」。
+- **`PcfObjectScannerLiveTest` 三处连接绕过了 TLS 窗口，配了证书的 QM 永远「连不上」**
+  并被记成 `LIVE SKIP: 连接失败（QMGR 不在线？）`：它直接
+  `MQQueueManager(qmgr, mqProperties(config))`，而证书那一半在 `IbmMqTls.withTls` 里。
+  这类假 SKIP 比红灯更危险 —— 报告是绿的，实际一条真机用例都没跑。改成与
+  `IbmMQConnectionManager.open` 同一组合（证书窗口 + 属性）。本机登记
+  `ibm-mq-qm2-tls` 之后，`aliasQueuesExposeExtendedAttrs` 与 `liveScanAllObjectTypes`
+  真跑并通过（74 队列 / 17 通道 / 8 主题 / 3 订阅 / 2 监听器 / 5 认证信息…，failed 为空）。
 - **`IbmMqPropertiesTest`（8 例，离线）**：留空套件落成默认值、显式值优先、去空白、
   SSL 关闭 / BINDING 模式不写 TLS 属性、peerName 仅在填了时下发。
 - **`IbmMqTlsTest`（10 例，离线，keytool 现场生成证书）**：窗口内属性正确 / 窗口外还原 /

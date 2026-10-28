@@ -35,3 +35,15 @@ KMP 桌面端中间件管理工具（IBM MQ / Kafka / RabbitMQ / RocketMQ），C
 ## 测试环境
 
 chillbear 服务器（`ssh app@www.chillbear.top`）有 IBM MQ / Kafka / RabbitMQ / RocketMQ 容器可做实连冒烟；RabbitMQ 4.3.6 三节点集群管理端口 11207-11209（HTTP），mq-client 冒烟账号 `mqclient`。RocketMQ 5.3.2 三节点（`/opt/server/rocketmq`，说明文件 `connect.txt`）：NameServer 公网端口 **15672**（≠ broker 的 11207-11209），TLS enforcing 单向认证（客户端只需 PEM `ca.crt`，本机在 `~/Documents/mq/rocketmq/`），diag 冒烟账号 `reader-app`；`connect.txt` 含明文 ACL 密钥，禁止入 git。本机无容器运行时，容器操作走 ssh。
+
+**IBM MQ 三节点（`podman ps` 可见，均为 `ibmcom/mq`）**：11207 = QM1（明文）、
+**11208 = QM2（双向 TLS + 密码双因素）**、11209 = QM3。QM2 的通道
+`DEV.ADMIN.SVRCONN` 要求客户端证书（`SSLCAUTH(REQUIRED)`，`SSLPEER('CN=mqclient,O=Dev')`）
++ 密码，套件 `ECDHE_RSA_AES_128_GCM_SHA256`；证书在服务器
+`/opt/server/ibmmq/tls/`（`client.p12` / `trust.p12` / `ca.crt`），本机副本在
+`~/Documents/mq/ibmmq/`（600，**不入库**）。`~/.mqclient/config.toml` 里已登记连接
+`ibm-mq-qm2-tls`（口令密文落盘），所以 `PcfObjectScannerLiveTest` /
+`PcfScanBudgetLiveTest` 在本机是**真跑**而不是 SKIP。
+
+真机 TLS 用例：`IbmMqTlsLiveTest`（走正式连接路径 + 四条反向对照），参数一律
+`-Dmqdiag.*` 传入，源码里没有任何凭据。
