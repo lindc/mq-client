@@ -33,9 +33,26 @@ const val ENCRYPTED_VALUE_PREFIX = "enc:v1:"
  */
 expect fun sensitiveEncryptionKey(): ByteArray
 
-/** Encrypts [plaintext] into a `enc:v1:…` stored value. */
+/**
+ * Encrypts [plaintext] into a `enc:v1:…` stored value — **幂等**：值已经是密文时原样返回。
+ *
+ * 为什么必须幂等：解密失败时 [decryptStoredValue] 会**保留密文**（宁可留原文也不
+ * 破坏字段），于是内存里可能拿着一个 `enc:v1:…` 字符串。下一次保存若再套一层，
+ * 磁盘上就变成「密文的密文」—— 用户之后即使把正确的 `secret.key` 放回去也永远解
+ * 不开（解出来仍是 `enc:v1:…` 字面量），每保存一次多嵌一层。
+ *
+ * 触发场景都很日常：换了机器没带 `secret.key`、配置从别处拷贝、密钥文件被误删后
+ * 重新生成 —— 而「解密失败 + 用户随后改了任意一个设置」两者一叠加就会踩中。
+ *
+ * 代价：明文口令恰好以 `enc:v1:` 开头时不会被加密。该前缀是应用自己的密文标记，
+ * 这种取值只可能是手改配置造成的，且这类字段本来就无法区分「明文」与「坏密文」。
+ */
 internal fun encryptStoredValue(plaintext: String): String =
-    ENCRYPTED_VALUE_PREFIX + EncryptionService.encrypt(plaintext.encodeToByteArray(), sensitiveEncryptionKey())
+    if (plaintext.startsWith(ENCRYPTED_VALUE_PREFIX)) {
+        plaintext
+    } else {
+        ENCRYPTED_VALUE_PREFIX + EncryptionService.encrypt(plaintext.encodeToByteArray(), sensitiveEncryptionKey())
+    }
 
 /**
  * Decrypts a `enc:v1:…` stored value. Plaintext (hand-edited files) passes
