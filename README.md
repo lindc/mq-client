@@ -356,6 +356,9 @@ python scripts/check_i18n_refs.py     # 只跑 i18n（新增文案键必须中�
 
 📐 **UI 组件契约**：属性表与按钮的视觉 / 语义规范见 [doc/ui-conventions.md](doc/ui-conventions.md)。
 
+⚡ **Compose 帧派发**：「等下一帧」在本应用里可能是等几十秒（nucleus/Tao 的三层闩锁），
+以及为什么不能写「以状态为 key 的第二个 effect」—— 见 [doc/compose-frame-latches.md](doc/compose-frame-latches.md)。
+
 ---
 
 ## 📄 License

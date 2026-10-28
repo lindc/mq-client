@@ -358,6 +358,10 @@ python scripts/check_i18n_refs.py     # i18n only (new keys need both zh-CN and 
 
 📐 **UI component contracts**: visual and semantic rules for property tables and buttons live in [doc/ui-conventions.md](doc/ui-conventions.md).
 
+⚡ **Compose frame dispatch**: in this app "wait for the next frame" can mean waiting tens of
+seconds (three latches in nucleus/Tao) — and why you should never write a second effect keyed
+on state produced by the first. See [doc/compose-frame-latches.md](doc/compose-frame-latches.md).
+
 ---
 
 ## 📄 License
