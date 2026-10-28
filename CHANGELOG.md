@@ -6,6 +6,47 @@
 
 ### Fixed
 
+- **RabbitMQ 消息会话：一次超时之后整个会话被自己锁死**（现场症状：「第一次读取消息
+  详细信息就超时，之后彻底不动」）。根因是 `abort()` 被同步调在 `channelOps` 临界区里。
+  `ChannelN.abort(int,String)` 并不「发一帧就返回」：它走
+  `quiescingRpc(Channel.Close)` → `quiescingTransmit` → `Frame.writeTo` →
+  `SocketFrameHandler.writeFrame`，那里拿的是**每连接一把**的 `_outputStreamLock`，直接写
+  裸 socket。Java 的 `SO_TIMEOUT` 只作用于读，socket 写没有超时 —— 对端不读（broker
+  flow control / 端口转发失效 / 发送缓冲区满）时它**永久阻塞**。于是：
+
+  ```
+  basicGet 等不到回复 → 5s 超时（用户看到「超时」）
+    → discardChannel() → abort() 卡在 socket 写上
+    → channelOps（Mutex）永不释放 → 之后每次拉取 / ack / 发布都挤在同一把锁上
+  ```
+
+  现在 abort 统一走 `abortInBackground`：有界 daemon 池（2 线程 / 队列 8 / 满了丢任务，
+  绝不用 `CallerRunsPolicy` 把阻塞搬回调用方），会话 `close()` 另给一个有界等待
+  `ABORT_WAIT_ON_CLOSE_MS = 500ms`，保住「close 返回时 channel 已关」这个正常路径性质。
+  覆盖全部五处 abort 点：`discardChannel`、`ensureChannel` 的两条失败分支、
+  `close()`、`RabbitMqModule.openMessageSession` 的失败路径。
+- **RabbitMQ 消息会话没有任何日志**。真机出事时日志里只有管理 API 扫描与最后的
+  shutdown，会话层是黑盒。现在 `RabbitMqMessageSession` 会记：`fetched`（条数 / limit /
+  耗时）、`fetch timed out`（WARN）、`channel discarded`（WARN，带原因与 channel 号）、
+  `channel aborted`（DEBUG，带耗时；超过 RPC 超时抬到 WARN 并注明「socket 写无超时」）、
+  `session closed`。
+- **消息详情框的「5s 硬超时」是假的**（`MessageDetailDialog`）。`withTimeout` 只能取消
+  可取消的等待：实测 `withTimeout(200)` 套一个阻塞 1.2s 的块，实际耗时 1245ms —— 要等块体
+  自己返回才抛。而 `ContentTab` 在两个 `null` 分支里只有一个永不停歇的转圈，于是解释器
+  一旦卡住就是「无声地转圈」。现在：KDoc 改成实话，另加一条**独立**看门狗
+  （`STALL_HINT_MS = 8s`，在另一个协程里计时，不受被阻塞的渲染协程影响）到点把转圈换成
+  可读提示；基线已就绪时直接显示原文，用户至少有内容可看。
+
+### Tests
+
+- **`RabbitMqSessionAbortTest`（离线）**：用动态代理造一个 `abort()` 永久阻塞、`basicGet()`
+  抛 `ChannelContinuationTimeoutException` 的假 channel，断言「第一次超时后第二次 fetch
+  仍能返回」且 abort 跑在 `rabbitmq-channel-abort` 后台线程上、与 RPC 线程无交集。
+  变异验证：把 `discardChannel` 改回同步 `abort()` → `fetchNext` 5s 内不返回，测试红。
+- **`RabbitMqSessionLeakLiveTest` 跟着语义调整**：close-during-open 那条改成**有界等待**
+  channel 真关（abort 现在是后台的），channel 记账那条靠 `close()` 的有界等待继续守住
+  「每轮复用同一个 channel 号」（实测仍恒为 2）。
+
 - **RabbitMQ 消息会话：`close()` 落在开 channel 期间会在共享连接上留下一条死 channel**
   （`RabbitMqMessageSession.ensureChannel`）。`createChannel()` / `queueDeclarePassive()`
   都是 RPC，这期间 `close()` 可能已经跑完 —— 它当时读到 `channel == null`（上一次

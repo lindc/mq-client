@@ -1,6 +1,12 @@
 package com.mqclient.rabbitmq
 
+import com.rabbitmq.client.AMQP
+import com.rabbitmq.client.Channel
 import com.rabbitmq.client.ConnectionFactory
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.ThreadFactory
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 
 /**
  * AMQP 客户端的三个超时（毫秒）。**这是本次重构的承重墙**，不能省。
@@ -93,6 +99,124 @@ internal fun rabbitMqConnectionFactory(config: RabbitMqConfig): ConnectionFactor
                 ?: run { useSslProtocol() }
         }
     }
+
+/**
+ * 报废 / 关闭一条 channel 的后台工人池：**有界**，满就丢，绝不调回调用方线程。
+ *
+ * 为什么需要它（一次真机故障的根因）：
+ *
+ * `ChannelN.abort(int, String)` 并不是「发一帧就返回」那么无害 —— 它走
+ * `close(...)` → `startProcessShutdownSignal(...)` → `quiescingRpc(Channel.Close, null)`
+ * → `quiescingTransmit` → `Frame.writeTo(DataOutputStream)`，最后落到
+ * `SocketFrameHandler.writeFrame`，那里拿的是**每连接一把**的 `_outputStreamLock`，
+ * 直接写裸 socket。Java 的 `SO_TIMEOUT` 只作用于**读**，socket 写没有超时：
+ * 对端不读（broker 进入 flow control / 端口转发不再转发 / 发送缓冲区满）时，
+ * 这次 `writeTo` 会**永久阻塞**。
+ *
+ * 于是旧写法（在 `channelOps.withLock { ... }` 里调 abort）会造成：
+ *
+ * ```
+ * basicGet 等不到回复 → 5s 超时（用户看到「超时」）
+ *   → discardChannel() → abort() 阻塞在 socket 写上
+ *   → channelOps（Mutex）永不释放
+ *   → 此后每次拉取 / ack / 发布都挤在同一把锁上 → 「超时一次，之后彻底不动」
+ * ```
+ *
+ * 而 `_outputStreamLock` 是连接级的，一条卡死的 abort 还会把**整条共享连接**毒掉。
+ *
+ * 所以 abort 只能作为**尽力而为的善后**扔到后台：调用方立刻拿到锁与线程。真卡住时
+ * 损失的只是后台工人的一条线程（池上限 2）与这条连接上的一个 channel 号 —— 由心跳 /
+ * 重连回收，而不再是整个会话的死锁。
+ *
+ * 有界 + 丢任务（而不是 `CallerRunsPolicy`）：后者会把阻塞重新搬回调用方线程，正是
+ * 要治的那个病。
+ *
+ * ## 什么时候「等一会儿」而不是直接丢后台
+ *
+ * 默认是纯后台（`waitMs = 0`）。但会话 `close()` 不同：它跑在模块 scope / daemon 线程 / 
+ * `runBlocking` 里，**不在 UI 线程**，而「close 返回时 channel 真的关掉了」是个有用的
+ * 性质 —— 共享连接不会因为快速开关对话框而瞬时堆一串 channel 号（合并门禁也在测它）。
+ * 所以那里给一个**有界**等待（[ABORT_WAIT_ON_CLOSE_MS]）：健康的 abort 是微秒级，
+ * 立刻返回；卡住时超时就走人，任务继续在后台跑，与阻塞无关。
+ */
+private const val ABORT_POOL_THREADS = 2
+private const val ABORT_POOL_QUEUE = 8
+private const val ABORT_POOL_KEEPALIVE_S = 30L
+
+/**
+ * `close()` 等 abort 的上限（毫秒）：只为了让正常路径下「关了就是关了」。
+ * 超过它不管了 —— 后台线程继续跑，调用方拿走。
+ */
+internal const val ABORT_WAIT_ON_CLOSE_MS = 500L
+
+private val abortPool: ThreadPoolExecutor =
+    ThreadPoolExecutor(
+        ABORT_POOL_THREADS,
+        ABORT_POOL_THREADS,
+        ABORT_POOL_KEEPALIVE_S,
+        TimeUnit.SECONDS,
+        LinkedBlockingQueue(ABORT_POOL_QUEUE),
+        ThreadFactory { runnable ->
+            Thread(runnable, "rabbitmq-channel-abort").apply { isDaemon = true }
+        },
+        // 队列也满 → 丢。丢掉的只是一次 best-effort 的善后，连接断开时 broker 会自己
+        // 回收 channel 与其中的 unacked 消息；而把它跑在调用方线程上会直接死锁。
+        { _, _ -> rabbitMqLog.warn("channel abort dropped: 后台工人池已满（socket 写可能已卡死）") },
+    ).apply { allowCoreThreadTimeOut(true) }
+
+/**
+ * 在**后台**报废一条 channel（尽力而为，不阻塞调用方）。
+ *
+ * 用于所有「已经证明不可用 / 不再需要」的 channel：RPC 超时后的 [discardChannel]、
+ * `queueDeclarePassive` 失败、会话已关时迟到的 channel、会话 close 本身。
+ * **绝不得**在任何 `channelOps` 临界区内同步调用它 —— 那正是它存在的原因。
+ *
+ * @param waitMs 最多等多久确认 abort 完成（0 = 纯丢后台）。只有 `close()` 用非 0 值：
+ *   它跑在非 UI 线程上，稍等一会儿能换来「关闭返回时 channel 已真关」这个性质。
+ *   超时不会取消后台任务，只是调用方不等了。
+ *
+ * 每次调用会记一行日志（含耗时）：耗时远超 `channelRpcTimeout` 说明 socket 写真的
+ * 卡住了，这是下次排查「越用越慢 / 卡死」的第一手证据。
+ */
+internal fun abortInBackground(channel: Channel?, reason: String, waitMs: Long = 0) {
+    if (channel == null) return
+    val number = runCatching { channel.channelNumber }.getOrDefault(-1)
+    val future = runCatching {
+        abortPool.submit {
+            val startedAt = System.currentTimeMillis()
+            val failure = runCatching { channel.abort(AMQP.REPLY_SUCCESS, reason) }.exceptionOrNull()
+            val elapsed = System.currentTimeMillis() - startedAt
+            when {
+                failure != null -> rabbitMqLog.warn(
+                    "channel abort failed: channel=$number reason=$reason elapsed=${elapsed}ms " +
+                        "error=${failure.message ?: failure::class.simpleName}",
+                )
+                // 超过 RPC 超时说明卡在 socket 写上 —— 值得单独抬高到 WARN。
+                elapsed > AMQP_CHANNEL_RPC_TIMEOUT_MS -> rabbitMqLog.warn(
+                    "channel abort blocked on write: channel=$number reason=$reason elapsed=${elapsed}ms " +
+                        "（socket 写无超时，对端可能已停止读取）",
+                )
+                else -> rabbitMqLog.debug(
+                    "channel aborted: channel=$number reason=$reason elapsed=${elapsed}ms",
+                )
+            }
+        }
+    }.getOrNull()
+    if (future == null) {
+        rabbitMqLog.warn("channel abort rejected: channel=$number reason=$reason（后台工人池已停止）")
+        return
+    }
+    if (waitMs <= 0) return
+    try {
+        future.get(waitMs, TimeUnit.MILLISECONDS)
+    } catch (e: java.util.concurrent.TimeoutException) {
+        // 正常情况不会到这里（健康 abort 是微秒级）。到了就说明这次写帧卡住了，
+        // 调用方不再等 —— 后台线程会继续尝试，失败由它自己的日志交代。
+        rabbitMqLog.debug("channel abort still running after ${waitMs}ms: channel=$number reason=$reason")
+    } catch (e: Exception) {
+        // 执行器已关 / 任务被取消：都是收尾阶段的正常噪声。
+    }
+}
 
 /**
  * AMQP 建连 / 队列校验类错误 → 人类可读文案（与 [RabbitMqAdminClient] 的错误口径一致）。

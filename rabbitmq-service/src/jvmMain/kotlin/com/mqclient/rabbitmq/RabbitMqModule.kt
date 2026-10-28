@@ -8,7 +8,6 @@ import com.mqclient.core.spi.MODULE_ID_KEY
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.emit
 import com.mqclient.core.spi.onEvent
-import com.rabbitmq.client.AMQP
 import com.rabbitmq.client.Channel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -273,8 +272,9 @@ object RabbitMqModule {
         } catch (error: Throwable) {
             if (error is CancellationException) throw error
             // 半成品 channel 不能留在共享连接上（会白占一个 channel 号）。
-            // abort 不等 close-ok，失败路径不会再卡一次。
-            channel?.let { leaked -> runCatching { leaked.abort(AMQP.REPLY_SUCCESS, "open failed") } }
+            // 交后台 abort：这一步在失败路径上，而写帧无超时 —— 对端不读 socket 时
+            // 同步 abort 会把「打开失败」变成一个永不返回的调用（对话框一直转圈）。
+            abortInBackground(channel, "open failed")
             throw error
         }
     }

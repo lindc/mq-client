@@ -428,9 +428,17 @@ class RabbitMqSessionLeakLiveTest {
 
             val leakedChannel = created
             assertTrue(leakedChannel != null, "代理应当造出过一条 channel（否则竞态窗口没被命中）。")
+            // abort 现在是**后台**的（它绝不能在 channelOps 临界区里同步写 socket），
+            // 所以这里不能立即断言 isOpen == false —— 要**有界等它真的关掉**。
+            // 等不到 = 泄漏（那条 channel 再没人关），等到了 = 机制成立。
+            val abortDeadline = System.currentTimeMillis() + 5_000
+            while (leakedChannel.isOpen && System.currentTimeMillis() < abortDeadline) {
+                delay(50)
+            }
+            println("  竞态中新建的 channel 关闭后 -> isOpen=${leakedChannel.isOpen}")
             assertTrue(
                 !leakedChannel.isOpen,
-                "close() 落在开 channel 期间时，那条迟到的新 channel 必须被 abort：" +
+                "close() 落在开 channel 期间时，那条迟到的新 channel 必须被 abort（等了 5s 仍 isOpen）：" +
                     "它还活着就说明它永远不会被关 —— 共享连接上多一条死 channel，" +
                     "拉到的消息永久 unacked（对其他消费者不可见）。",
             )

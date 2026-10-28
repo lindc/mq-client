@@ -1,5 +1,6 @@
 package com.mqclient.rabbitmq
 
+import com.mqclient.core.log.Log
 import com.mqclient.message.interpreter.isProbablyBinary
 import com.rabbitmq.client.AMQP
 import com.rabbitmq.client.Channel
@@ -12,6 +13,16 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+
+/**
+ * 本文件的日志句柄，与模块同 tag（`rabbitmq`）。
+ *
+ * 为什么要加：这个类以前**一行日志都没有**。真机出问题时（拉取卡住 / 超时 / 连接
+ * 无声地不再应答），日志里只能看到管理 API 的扫描与最后的 shutdown，会话层是黑盒 ——
+ * 排查只能靠猜。现在最少能回答四个问题：会话何时开的、拉取拉到了几条 / 卡了多久、
+ * 哪条 channel 被报废与原因、close 走了哪些步。
+ */
+private val sessionLog = Log.withTag(MODULE_ID)
 
 /**
  * 队列消息会话的**能力契约**（UI 只依赖这一层）。
@@ -194,10 +205,23 @@ class RabbitMqMessageSession private constructor(
         if (!fetchInFlight.compareAndSet(false, true)) {
             throw IllegalStateException("上一次拉取尚未完成，请稍候")
         }
+        val startedAt = System.currentTimeMillis()
         return try {
             withContext(Dispatchers.IO) {
                 channelOps.withLock { drain(limit) }
+            }.also { batch ->
+                sessionLog.debug(
+                    "fetched: queue=$queueName count=${batch.size} limit=$limit " +
+                        "elapsed=${System.currentTimeMillis() - startedAt}ms",
+                )
             }
+        } catch (e: RabbitMqOperationTimeoutException) {
+            // 超时是「会话可能已坏」的第一信号，必须留下记录。
+            sessionLog.warn(
+                "fetch timed out: queue=$queueName limit=$limit elapsed=${System.currentTimeMillis() - startedAt}ms " +
+                    "detail=${e.message}",
+            )
+            throw e
         } finally {
             fetchInFlight.set(false)
         }
@@ -241,7 +265,7 @@ class RabbitMqMessageSession private constructor(
             }
             return out
         } catch (e: Exception) {
-            discardChannel(ch)
+            discardChannel(ch, e)
             throw e
         }
     }
@@ -271,7 +295,7 @@ class RabbitMqMessageSession private constructor(
                     // 显式 Unit：heldTags.remove 返回 Boolean，不写的话 lambda 会推出它。
                     Unit
                 } catch (e: Exception) {
-                    discardChannel(ch)
+                    discardChannel(ch, e)
                     throw e
                 }
             }
@@ -286,7 +310,7 @@ class RabbitMqMessageSession private constructor(
                 try {
                     requeueHeldOn(ch)
                 } catch (e: Exception) {
-                    discardChannel(ch)
+                    discardChannel(ch, e)
                     throw e
                 }
             }
@@ -314,7 +338,7 @@ class RabbitMqMessageSession private constructor(
                         )
                     }
                 } catch (e: Exception) {
-                    discardChannel(ch)
+                    discardChannel(ch, e)
                     throw e
                 }
             }
@@ -356,10 +380,16 @@ class RabbitMqMessageSession private constructor(
      *  1. [AtomicBoolean] 抢占做幂等，不碰任何 suspended 锁；
      *  2. requeue 只在 `tryLock` **立刻拿到**锁时做（best-effort）；拿不到就跳过 ——
      *     关闭的语义优先于 requeue，而且 broker 在连接断开时本来也会重入队；
-     *  3. channel 用 `abort()`（不等 close-ok，签名里连 `TimeoutException` 都没有），
-     *     即使对端完全不应答也立即返回；
+     *  3. channel 交给 [abortInBackground] **后台** 关闭（不等 close-ok；而且它的写帧
+     *     没有超时，绝不能占着调用方线程或 `channelOps`）。这里给一个有界等待
+     *     [ABORT_WAIT_ON_CLOSE_MS]：正常路径下「关闭返回 = channel 已关」，共享连接
+     *     不会瞬时堆一串 channel 号；卡住时超时就返回，后台线程继续。
      *  4. 独占连接才关，且用 `close(AMQP_SHUTDOWN_TIMEOUT_MS)` 给握手上限；
      *     共享连接的所有权在 ConnectionManager，这里不能动它。
+     *
+     * 最坏情况：abort 卡在 socket 写上时，`close()` 最多停 [ABORT_WAIT_ON_CLOSE_MS] 就返回。
+     * 未 ack 的消息不受影响 —— [requeueHeldOn] 已经显式 nack 回去，何况 broker 在 channel
+     * 真正关闭时自己也会重入队。
      *
      * ## 为什么整段跑在 [NonCancellable] 上
      *
@@ -378,6 +408,8 @@ class RabbitMqMessageSession private constructor(
             closed = true
 
             val ch = synchronized(stateLock) { channel.also { channel = null } }
+            // 先取计数再 requeue —— 不然日志里永远是 0，等于没记。
+            val heldBefore = withState { heldTags.size }
             if (ch != null && channelOps.tryLock()) {
                 try {
                     runCatching { requeueHeldOn(ch) }
@@ -385,10 +417,14 @@ class RabbitMqMessageSession private constructor(
                     channelOps.unlock()
                 }
             }
-            ch?.let { runCatching { it.abort(AMQP.REPLY_SUCCESS, "session closed") } }
+            ch?.let { abortInBackground(it, "session closed", waitMs = ABORT_WAIT_ON_CLOSE_MS) }
             if (ownsConnection) {
                 runCatching { connection.close(AMQP_SHUTDOWN_TIMEOUT_MS) }
             }
+            sessionLog.debug(
+                "session closed: queue=$queueName channel=${ch?.let { runCatching { it.channelNumber }.getOrNull() } ?: "-"} " +
+                    "ownedConnection=$ownsConnection heldBefore=$heldBefore",
+            )
         }
 
     /* ------------------------------ 内部 ------------------------------ */
@@ -402,6 +438,10 @@ class RabbitMqMessageSession private constructor(
      *
      * 翻译而不是直接抛出：`amqp-client` 是 service 模块的 `implementation` 依赖，
      * UI 看不到它的类型。领域异常让 UI 只 catch 一个类型就能给出「操作超时」文案。
+     *
+     * **它只覆盖「等回复」**：写帧（`Frame.writeTo` → `SocketFrameHandler.writeFrame`）
+     * 走的是裸 socket 写，没有任何超时 —— 所以任何 abort / 关闭都不能在持锁路径上同步
+     * 做，见 [abortInBackground]。
      */
     private inline fun <T> channelCall(label: String, block: () -> T): T =
         try {
@@ -430,8 +470,9 @@ class RabbitMqMessageSession private constructor(
             // passive 声明：队列不存在立刻 404，而不是等第一次 basicGet 才发现。
             channelCall("校验队列") { fresh.queueDeclarePassive(queueName) }
         } catch (e: Exception) {
-            // 半成品 channel 不能留在连接上（会占 channel 号），就地 abort。
-            runCatching { fresh.abort(AMQP.REPLY_SUCCESS, "declare failed") }
+            // 半成品 channel 不能留在连接上（会占 channel 号）。**后台** abort：
+            // 这里持着 channelOps，同步写 socket 会把整把锁一起卡死（见 abortInBackground）。
+            abortInBackground(fresh, "declare failed")
             throw e
         }
         // **双检 + 就地回收**：`createChannel` 与 `queueDeclarePassive` 都是 RPC，
@@ -449,21 +490,34 @@ class RabbitMqMessageSession private constructor(
             }
         }
         if (!published) {
-            runCatching { fresh.abort(AMQP.REPLY_SUCCESS, "session closed while opening channel") }
+            // 同样必须在后台 abort：本方法只在 channelOps 临界区里被调用。
+            abortInBackground(fresh, "session closed while opening channel")
             throw IllegalStateException("消息会话已关闭")
         }
+        sessionLog.debug("channel ready: queue=$queueName channel=${fresh.channelNumber}")
         return fresh
     }
 
     /**
-     * 报废一条坏 channel：先摘引用（后续调用立刻拿不到它），再 `abort()`。
+     * 报废一条坏 channel：先摘引用（后续调用立刻拿不到它），再**后台** `abort()`。
      *
      * 为什么是 abort 而不是 close：`close()` 要等 close-ok，而这条 channel 刚刚
-     * 证明它的 RPC 通道不会应答。abort 只发一帧就返回，是唯一能保证不阻塞的关闭方式。
+     * 证明它的 RPC 通道不会应答。abort 只发一帧，是唯一有机会不阻塞的关闭方式。
+     *
+     * 为什么必须异步：本方法的所有调用点都在 `channelOps` 临界区里（drain / ack /
+     * requeueAll / publish 的 catch），而 abort 的写帧没有超时 —— 对端不读 socket 时
+     * 它永久阻塞，同步调用就会把 `channelOps` 永久钉住，于是「超时一次、之后彻底不动」。
+     * 挪到后台后，最坏只损失后台一条工人线程与一个 channel 号（心跳 / 重连会回收）。
      */
-    private fun discardChannel(dead: Channel) {
+    private fun discardChannel(dead: Channel, cause: Throwable? = null) {
         synchronized(stateLock) { if (channel === dead) channel = null }
-        runCatching { dead.abort(AMQP.REPLY_SUCCESS, "discarded after failure") }
+        val number = runCatching { dead.channelNumber }.getOrDefault(-1)
+        sessionLog.warn(
+            "channel discarded: queue=$queueName channel=$number " +
+                "cause=${cause?.let { it::class.simpleName } ?: "unknown"} " +
+                "detail=${cause?.message ?: "-"}",
+        )
+        abortInBackground(dead, "discarded after failure")
     }
 
     /** 已持 [channelOps] 调用。先把 tag 摘出来再 nack，避免 nack 期间占着状态监视器。 */
@@ -505,8 +559,9 @@ class RabbitMqMessageSession private constructor(
                     channel.queueDeclarePassive(queueName)
                     RabbitMqMessageSession(queueName, connection, ownsConnection = true, channel)
                 } catch (e: Throwable) {
-                    // 半成品句柄就地回收：abort 不等握手，避免失败路径再卡一次。
-                    runCatching { channel?.abort(AMQP.REPLY_SUCCESS, "open failed") }
+                    // 半成品句柄就地回收。channel 交后台 abort（这里的写帧同样没超时）；
+                    // 独占连接才关，且带握手上限。
+                    abortInBackground(channel, "open failed")
                     runCatching { connection?.close(AMQP_SHUTDOWN_TIMEOUT_MS) }
                     throw mapAmqpOpenError(e, config)
                 }

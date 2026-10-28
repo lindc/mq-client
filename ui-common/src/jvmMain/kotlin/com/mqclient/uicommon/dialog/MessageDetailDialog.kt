@@ -69,6 +69,7 @@ import com.mqclient.uicommon.i18n.withArg
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -92,13 +93,30 @@ private val LargeBodyWarning = Color(0xFFED6C02)
 private const val HEX_INTERPRETER_ID = "hex"
 
 /**
- * 正文解码 / 解释器渲染的硬超时。
+ * 正文解码 / 解释器渲染的**協程层**超时。
  *
- * 这一段全在本地跑（字节 → 文本 → 解释器格式化），不碰网络；但它是本对话框**唯一**
- * 能让界面停在「加载中」的异步环节——解释器是 SPI，第三方实现在大消息上退化完全
- * 可能。5s 到点就按失败处理并回退到原文，界面不会无限期挂着。
+ * 重要：它只能让**可取消**的等待提前结束，**管不住阻塞调用**。实测（
+ * `withTimeout(200)` 套一个阻塞 1.2s 的块，实际耗时 1245ms）：`withTimeout` 要等块体
+ * 自己跑完才抛 `TimeoutCancellationException`。解码 `String(bytes, charset)` 是纯 CPU
+ * 工作，没问题；但解释器是 SPI，第三方实现里完全可以出现 DOM 解析 / 正则灾难 / IO ——
+ * 那些都会让 5s 变成「5s 之后才开始算」。
+ *
+ * 所以这里只是第一道闂，真正保证「界面不会无声地转圈」的是 [STALL_HINT_MS] 那条
+ * 独立的看门狗：它在另一个協程里计时，不受被阻塞的渲染協程影响。
  */
 private const val RENDER_TIMEOUT_MS = 5_000L
+
+/**
+ * 看门狗的报警点（毫秒）：到点仍没出结果，就在界面上把「正在加载」换成可读的异常提示。
+ *
+ * 为什么需要它：上面那个 `withTimeout` 对阻塞块无效，而 `ContentTab` 原先在两个
+ * `null` 分支里只有一个永不停歇的 `CircularProgressIndicator` —— 一旦解释器卡住，
+ * 用户看到的就是「永远转圈」，既无原因也无出口。
+ *
+ * 取比 [RENDER_TIMEOUT_MS] 大的值：正常超时路径（可取消的那种）先走文字回退，
+ * 只有真卡住才轮到它。
+ */
+private const val STALL_HINT_MS = 8_000L
 
 /** 解释器渲染结果：展示文本 + 解析失败原因（失败时展示原始内容 + 提示）。 */
 private data class RenderedText(val text: String, val parseError: String? = null)
@@ -188,6 +206,21 @@ fun MessageDetailDialog(
     var preview by remember(effectiveBody) { mutableStateOf<ContentPreview?>(null) }
     var rendered by remember(effectiveBody) { mutableStateOf<RenderedText?>(null) }
     var rendering by remember(effectiveBody) { mutableStateOf(false) }
+
+    // 看门狗：到点还没出结果就把「转圈」换成提示。
+    //
+    // 必须是**独立**的 LaunchedEffect：它观测 result，而不是干活的那个協程 —— 后者一旦
+    // 卡在阻塞调用上，既不会写状态也不会被 withTimeout 打断（见 RENDER_TIMEOUT_MS）。
+    var stalled by remember(effectiveBody, selectedId, params) { mutableStateOf(false) }
+    LaunchedEffect(effectiveBody, selectedId, params, preview, rendered) {
+        if (preview != null && rendered != null) {
+            stalled = false
+            return@LaunchedEffect
+        }
+        stalled = false
+        delay(STALL_HINT_MS)
+        stalled = true
+    }
 
     // 超时 / 解码失败文案先在这里取好：LaunchedEffect 与异常分支都不是 @Composable
     // 上下文，里面拿不到 stringResource。
@@ -356,6 +389,7 @@ fun MessageDetailDialog(
                     preview = preview,
                     rendered = rendered,
                     rendering = rendering,
+                    stalled = stalled,
                     onSelect = { selectedId = it },
                     onParamsChange = { params = it },
                     headerContent = headerContent,
@@ -387,6 +421,7 @@ private fun DetailReadyPane(
     preview: ContentPreview?,
     rendered: RenderedText?,
     rendering: Boolean,
+    stalled: Boolean,
     onSelect: (String) -> Unit,
     onParamsChange: (Map<String, String>) -> Unit,
     headerContent: (@Composable () -> Unit)?,
@@ -422,6 +457,7 @@ private fun DetailReadyPane(
                     preview = preview,
                     rendered = rendered,
                     rendering = rendering,
+                    stalled = stalled,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -453,6 +489,7 @@ private fun ContentTab(
     preview: ContentPreview?,
     rendered: RenderedText?,
     rendering: Boolean,
+    stalled: Boolean,
     modifier: Modifier = Modifier,
 ) {
     if (rawBody.isEmpty()) {
@@ -494,9 +531,18 @@ private fun ContentTab(
                 Spacer(Modifier.height(8.dp))
             }
             when {
-                // 首帧：基线还没算完。
-                base == null -> CircularProgressIndicator(
+                // 首帧：基线还没算完。卡住时不能只转圈 —— 看门狗到点就给原因。
+                base == null && !stalled -> CircularProgressIndicator(
                     modifier = Modifier.align(Alignment.CenterHorizontally).padding(24.dp),
+                )
+                base == null -> Text(
+                    text = stringResource("msg_detail_stall_decoding").withArg(STALL_HINT_MS / 1_000),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f))
+                        .padding(8.dp),
                 )
                 // 解码超时 / 抛异常：既拿不到文本也没有 hex，直接给原因，**不转圈**。
                 base.decodeError != null -> Text(
@@ -528,13 +574,29 @@ private fun ContentTab(
                 }
                 else -> {
                     val renderedValue = rendered
-                    if (renderedValue == null) {
+                    if (renderedValue == null && !stalled) {
                         CircularProgressIndicator(
                             modifier = Modifier.align(Alignment.CenterHorizontally).padding(24.dp),
                         )
                     } else {
+                        // 卡住时**仍然给出内容**：基线（原文解码）早就好了，没必要陪着转圈。
+                        // 这是用户真正能用的出口 —— 看得到字，才能判断要不要换解释器。
+                        if (renderedValue == null) {
+                            Text(
+                                text = stringResource("msg_detail_stall_rendering").withArg(STALL_HINT_MS / 1_000),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f))
+                                    .padding(8.dp),
+                            )
+                            Spacer(Modifier.height(8.dp))
+                        }
+                        val text = renderedValue?.text ?: base.rawText
+                        val parseError = renderedValue?.parseError
                         // 解析失败：保留原始内容 + 错误提示条。
-                        renderedValue.parseError?.let { err ->
+                        parseError?.let { err ->
                             Text(
                                 text = stringResource("msg_detail_parse_failed").withArg(err),
                                 style = MaterialTheme.typography.bodySmall,
@@ -547,17 +609,17 @@ private fun ContentTab(
                             Spacer(Modifier.height(8.dp))
                         }
                         // 大内容预览截断：超出只显示前段。
-                        val display = if (expanded || renderedValue.text.length <= MAX_PREVIEW_CHARS) {
-                            renderedValue.text
+                        val display = if (expanded || text.length <= MAX_PREVIEW_CHARS) {
+                            text
                         } else {
-                            renderedValue.text.take(MAX_PREVIEW_CHARS) + "\n…"
+                            text.take(MAX_PREVIEW_CHARS) + "\n…"
                         }
                         Text(
                             text = display,
                             style = MaterialTheme.typography.bodySmall,
                             fontFamily = FontFamily.Monospace,
                         )
-                        if (renderedValue.text.length > MAX_PREVIEW_CHARS) {
+                        if (text.length > MAX_PREVIEW_CHARS) {
                             Spacer(Modifier.height(8.dp))
                             Text(
                                 text = if (expanded) stringResource("msg_detail_collapse") else stringResource("msg_detail_expand"),
