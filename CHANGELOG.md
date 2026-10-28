@@ -6,6 +6,38 @@
 
 ### Fixed
 
+- **RabbitMQ 消息会话：`close()` 落在开 channel 期间会在共享连接上留下一条死 channel**
+  （`RabbitMqMessageSession.ensureChannel`）。`createChannel()` / `queueDeclarePassive()`
+  都是 RPC，这期间 `close()` 可能已经跑完 —— 它当时读到 `channel == null`（上一次
+  `basicGet` 失败刚被 `discardChannel`），没有任何东西可 abort；随后 `ensureChannel`
+  把迟到的 channel 照旧发布，这条 channel 再没人关，之后拉到的消息永久 unacked
+  （对其他消费者不可见）。现在发布前在 `stateLock` 内复查 `closed`，已关闭则就地
+  `abort` 并抛 `IllegalStateException("消息会话已关闭")`。
+  另外 `close()` 整段改为跑在 `NonCancellable` 上：清理不能被取消，否则调用协程一旦被
+  取消，`withContext` 在入口就抛，requeue 与 abort 一步都不执行（与 kafka / ibm-mq 的
+  `closeResources` 同口径）。
+- **会话账本只增不减**（`RabbitMqModule.openSessions`）。`QueueSessionSlot` 有两条直接
+  调 `close()` 的路径（换队列关旧会话、槽已销毁时关迟到的会话），它们不经过
+  `closeMessageSessionAsync`，于是每换一次队列 / 每「建连中 → 关闭」一次，账本就多留
+  一条已关闭的会话，强引用着共享 `Connection` 直到应用退出。现在入账的是
+  `TrackedSession` 包装：`close()` 的 `finally` 里销账，任意关闭路径都成立。
+
+### Tests
+
+- **`RabbitMqSessionLeakLiveTest` 补两条真机证据**（需要 `config.toml` 里的 RabbitMQ
+  连接，无环境时 SKIP）：
+  - 共享连接上的 channel 记账：一台连接上跑 11 轮「开 channel → 拉 5 条 → close」，
+    `Channel.channelNumber` 必须被复用（实测恒为 2，一次都没涨），且每轮都能重新拉满
+    同一批、全部轮次结束后队列里仍能取回全部消息。amqp-client 5.22 的
+    `ChannelManager` 用 `IntAllocator` 发号，`abort()` 会经
+    `AMQPConnection.disconnectChannel` → `releaseChannelNumber` 归还 —— 号涨即泄漏。
+    这条**证伪**了「正常开关对话框会把 channel 漏在共享连接上」的猜测。
+  - 竞态复现：用 `Connection` 代理把 `createChannel()` 放慢 600ms，在睡眠里调
+    `close()`。修复前那条迟到的新 channel `isOpen == true` 且拉走的 1 条消息卡在
+    unacked；修复后 `isOpen == false`、fetch 抛 `IllegalStateException`、队列可取回
+    全部消息。
+- **`RabbitMqSessionLedgerTest`（4 例，离线）**：`TrackedSession` 关闭即销账（含
+  `delegate.close()` 抛异常、重复关闭、委派成员透传），不依赖 broker。
 - **Live 测试不再把「环境不可用」报成「代码回归」**（`KafkaGroupLagBatchLiveTest`）。
   排查现场：`verify.sh` 全量跑红，唯一失败是这条；`config.toml` 里 Kafka 指向
   `11207-11209` 且是 `SASL_SSL`，而该端口当时跑的是 RabbitMQ 管理 API（`curl` 回

@@ -207,9 +207,32 @@ object RabbitMqModule {
      * 光靠对话框的 `onDispose` 不够：应用退出时 `ModuleRegistry.disposeServices()` 先跑
      * （把 `moduleContext` 置空），对话框的 onDispose 随后才到，那时
      * [closeMessageSessionAsync] 已经没有 scope 可用 —— 会话就漏在那里了。
+     * 账上只收 [TrackedSession] 包装：**关闭即摘牌**。`QueueSessionSlot` 有两条直接调
+     * `close()` 的路径（换队列关旧会话、`disposed` 后关迟到的会话），它们不经过
+     * [closeMessageSessionAsync] —— 若摘牌只在那里做，每换一次队列就留一条已关闭会话。
      */
     private val openSessions: MutableSet<RabbitMqQueueSession> =
         java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+    /**
+     * 会话账本条目：**关掉就销账**，不靠调用方记得回来 remove。
+     *
+     * [java.util.concurrent.ConcurrentHashMap.newKeySet] 的 add/remove 线程安全，`remove`
+     * 幂等 —— 重复关闭（对话框 close + 模块 shutdown）无副作用。摘牌放在 `finally`：即便
+     * `delegate.close()` 抛了，也不能让账本留一个已经不再被任何人使用的句柄。
+     */
+    internal class TrackedSession(
+        private val delegate: RabbitMqQueueSession,
+        private val onClosed: (RabbitMqQueueSession) -> Unit,
+    ) : RabbitMqQueueSession by delegate {
+        override suspend fun close() {
+            try {
+                delegate.close()
+            } finally {
+                onClosed(this)
+            }
+        }
+    }
 
     /**
      * 队列消息会话入口（队列消息对话框）：AMQP 直连当前队列（autoAck = false）。
@@ -242,8 +265,11 @@ object RabbitMqModule {
             // passive 声明：队列不存在立刻 404，而不是等第一次 basicGet。
             // 与 createChannel 一样受 channelRpcTimeout（5s）约束。
             withContext(Dispatchers.IO) { channel.queueDeclarePassive(queueName) }
-            return RabbitMqMessageSession.onSharedConnection(queueName, connection, channel)
-                .also { openSessions.add(it) }
+            val session = RabbitMqMessageSession.onSharedConnection(queueName, connection, channel)
+            // 入账的是包装：任意一条关闭路径（对话框 / 模块异步 / shutdown）都会销账。
+            val tracked = TrackedSession(session) { closed -> openSessions.remove(closed) }
+            openSessions.add(tracked)
+            return tracked
         } catch (error: Throwable) {
             if (error is CancellationException) throw error
             // 半成品 channel 不能留在共享连接上（会白占一个 channel 号）。
@@ -257,9 +283,9 @@ object RabbitMqModule {
      * 会话关闭的异步兜底（对话框 onDispose 是同步回调，挂起 close 另起协程跑）。
      *
      * 两条路径都不能丢会话：
-     *  - **scope 可用**：launch 去关，而且**关完才从账上摘牌**。原先反过来（先 remove
-     *    再 launch），若 launch 因 scope 取消而静默失效，这条会话就既不在账上、也没
-     *    关，彻底丢失。
+     *  - **scope 可用**：launch 去关。摘牌不在这里做 —— [TrackedSession.close] 自己销账，
+     *    所以「launch 因 scope 取消而静默失效」也不再意味着账实不符（那种情况下会话
+     *    仍留在账上，[shutdown] 会补上）。
      *  - **scope 已不可用**（模块已 shutdown / 已取消）：`launch` 什么都不做，所以
      *    起一条守护线程同步关 —— 关闭一条 AMQP 连接只是几次 socket 写，代价可接受，
      *    而漏一条连接会累积成「越开越卡」。
@@ -269,18 +295,12 @@ object RabbitMqModule {
         val scope = moduleContext?.coroutineScope
         if (scope == null || !scope.isActive) {
             Thread(
-                {
-                    runCatching { runBlocking { session.close() } }
-                    openSessions.remove(session)
-                },
+                { runCatching { runBlocking { session.close() } } },
                 "rabbitmq-session-close",
             ).apply { isDaemon = true }.start()
             return
         }
-        scope.launch {
-            runCatching { session.close() }
-            openSessions.remove(session)
-        }
+        scope.launch { runCatching { session.close() } }
     }
 
     /**

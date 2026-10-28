@@ -8,6 +8,7 @@ import com.rabbitmq.client.Connection
 import java.util.Date
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -359,9 +360,20 @@ class RabbitMqMessageSession private constructor(
      *     即使对端完全不应答也立即返回；
      *  4. 独占连接才关，且用 `close(AMQP_SHUTDOWN_TIMEOUT_MS)` 给握手上限；
      *     共享连接的所有权在 ConnectionManager，这里不能动它。
+     *
+     * ## 为什么整段跑在 [NonCancellable] 上
+     *
+     * **清理不能被取消。** 调用方（对话框的 `onDispose`、模块的异步兜底、daemon 线程）
+     * 都可能处在一个正在被取消的协程里 —— 普通 `withContext` 会在**入口**就抛
+     * `CancellationException`，下面四步一步都不会执行：channel 不 abort、未 ack 的消息
+     * 不回队。取消是「调用方不要等结果了」，不是「别关了」。
+     *
+     * 与 kafka / ibm-mq 的 `closeResources` 同一口径（那两个也把关闭包在
+     * `NonCancellable` 里）。代价可控：本方法只做 best-effort requeue + abort，
+     * 没有任何 `await` 式的无限等待，底层 RPC 一律受 `channelRpcTimeout`（5s）约束。
      */
     override suspend fun close(): Unit =
-        withContext(Dispatchers.IO) {
+        withContext(NonCancellable + Dispatchers.IO) {
             if (!closeStarted.compareAndSet(false, true)) return@withContext
             closed = true
 
@@ -422,7 +434,24 @@ class RabbitMqMessageSession private constructor(
             runCatching { fresh.abort(AMQP.REPLY_SUCCESS, "declare failed") }
             throw e
         }
-        synchronized(stateLock) { channel = fresh }
+        // **双检 + 就地回收**：`createChannel` 与 `queueDeclarePassive` 都是 RPC，
+        // 这期间 `close()` 完全可能已经跑完 —— 它当时看到 `channel == null`，什么都没
+        // abort。若这条迟到的 channel 照旧发布上去，就再没有人关它：共享连接上多一条
+        // 死 channel，之后拉到的消息永久 unacked（对其他消费者不可见）。
+        // 发布与 `closed` 读在同一个 stateLock 里，与 close() 的摘引用互斥：
+        // 要么 close 看见它并 abort，要么这里看见 closed 并自己 abort。
+        val published = withState {
+            if (closed) {
+                false
+            } else {
+                channel = fresh
+                true
+            }
+        }
+        if (!published) {
+            runCatching { fresh.abort(AMQP.REPLY_SUCCESS, "session closed while opening channel") }
+            throw IllegalStateException("消息会话已关闭")
+        }
         return fresh
     }
 
