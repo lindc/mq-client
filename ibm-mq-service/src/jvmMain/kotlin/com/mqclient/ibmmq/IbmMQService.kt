@@ -27,16 +27,10 @@ import com.mqclient.ibmmq.pcf.channelStatusName
 import com.mqclient.ibmmq.pcf.isSystemObject
 import com.mqclient.ibmmq.pcf.isSystemOrTempQueue
 import com.mqclient.ibmmq.pcf.listenerStatusName
-import java.io.FileInputStream
-import java.security.KeyStore
 import java.util.concurrent.ConcurrentHashMap
-import javax.net.ssl.KeyManagerFactory
-import javax.net.ssl.SSLContext
-import javax.net.ssl.TrustManagerFactory
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
@@ -44,9 +38,39 @@ import kotlinx.coroutines.withContext
 internal const val USE_IBM_CIPHER_MAPPINGS = "com.ibm.mq.cfg.useIBMCipherMappings"
 
 /**
+ * 「未填加密套件」时实际使用的套件（**Java 名**，不是 IBM 名）。
+ *
+ * 为什么需要这个默认值：留空**不是**「自动协商」。真机实测（`IbmMqTlsLiveTest` +
+ * MQ 客户端 10.0.0.5 / QM2 的 `ECDHE_RSA_AES_128_GCM_SHA256` 服务端通道）：
+ *
+ * | 客户端 cipher 取值 | 结果 |
+ * | :--- | :--- |
+ * | 留空 | `MQRC_JSSE_ERROR (2397)` —— JSSE 层直接失败 |
+ * | `ANY_TLS12_OR_HIGHER` | `MQRC_UNSUPPORTED_CIPHER_SUITE (2400)` |
+ * | 逗号分隔的套件列表 | `2400`（属性只接受**单个**套件名） |
+ * | IBM 名 `ECDHE_RSA_AES_128_GCM_SHA256` | `2400`（映射关掉后它不是 Java 套件名） |
+ * | Java 名 `TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256` | **连接成功** |
+ *
+ * 也就是说：这个客户端版本上「留空」必然失败，UI 里那一项标注的「自动协商」是
+ * 假的。默认给一个最通用的 TLS 1.2 ECDHE-RSA 套件，用户仍可在下拉里换成服务端
+ * 实际要求的那个（例如只支持 RSA 的旧 Queue Manager 要选
+ * `TLS_RSA_WITH_AES_128_CBC_SHA256`）。
+ *
+ * TLS 1.3 套件（`TLS_AES_128_GCM_SHA256`）在这个客户端 + TLS1.2 通道上同样报 2397，
+ * 所以默认值刻意是 TLS 1.2 套件。
+ */
+internal const val DEFAULT_SSL_CIPHER_SUITE = "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256"
+
+/**
  * 组装 MQ 连接属性：CLIENT 网络参数 + 认证 + SSL（cipher / peerName）。
- * [IbmMQConnectionManager.connect] 与 [IbmMQService.testConnection] 共用同一份组装，
- * 保证「测试」和「正式连接」的行为永远一致。
+ * [IbmMQConnectionManager.open] 与 [IbmMQService.testConnection] 共用同一份组装。
+ *
+ * ⚠️ 这里**只有**能放进连接 `Hashtable` 的项（host / port / channel / 认证 / cipher /
+ * peerName）。证书（truststore / keystore）放不进来 —— MQ 基础 Java 客户端不提供
+ * 连接级的证书属性，它们只能经进程级 JSSE 属性注入，见 [IbmMqTls]。
+ *
+ * 「测试与正式连接同源」指的是：属性用本函数，证书用 [IbmMqTls.withTls]，
+ * 两条路径调的是同两个入口。
  */
 internal fun mqProperties(config: IbmMQConfig): java.util.Hashtable<String, Any> {
     val properties = java.util.Hashtable<String, Any>()
@@ -60,12 +84,55 @@ internal fun mqProperties(config: IbmMQConfig): java.util.Hashtable<String, Any>
     properties[MQConstants.CCSID_PROPERTY] = config.ccsid
     // SSL 只对 CLIENT 模式有意义（BINDING 是同机 JNI，没有 TLS 通道）。
     if (config.mode == ConnectionMode.CLIENT && config.sslEnabled) {
-        config.cipherSuite.takeIf { it.isNotBlank() }
-            ?.let { properties[MQConstants.SSL_CIPHER_SUITE_PROPERTY] = it }
+        // 留空**不是**「自动协商」（实测必报 2397，见 [DEFAULT_SSL_CIPHER_SUITE]），
+        // 所以这里总要写一个具体套件名；用户填了就以用户为准。
+        properties[MQConstants.SSL_CIPHER_SUITE_PROPERTY] =
+            config.cipherSuite.trim().ifEmpty { DEFAULT_SSL_CIPHER_SUITE }
         config.peerName.takeIf { it.isNotBlank() }
             ?.let { properties[MQConstants.SSL_PEER_NAME_PROPERTY] = it }
     }
     return properties
+}
+
+/**
+ * 用给定配置连一次再断开 —— 「测试连接」的全部行为，**不依赖 [IbmMQService] 实例**。
+ *
+ * 抽成顶层函数是为了让「测试连接」与「正式连接」的等价关系可以被真机测试直接验证：
+ * 正式连接是 [IbmMqTls.withTls] + [mqProperties] + `MQQueueManager`（见
+ * [IbmMQConnectionManager.open]），这里调的是同两个入口。测试用例因此不需要造一个
+ * ServiceContext 就能走完全一致的那条路。
+ *
+ * 失败以异常抛出（含 MQ 原因码的消息），成功静默返回。
+ */
+internal suspend fun probeMqConnection(config: IbmMQConfig): Unit = withContext(Dispatchers.IO) {
+    val properties = mqProperties(config)
+    IbmMqTls.withTls(config) {
+        ibmMqLog.info(
+            "test connection: host=${config.host}:${config.port}, channel=${config.channel}, " +
+                "cipher=${config.cipherSuite.ifBlank { "(auto)" }}, ssl=${config.sslEnabled}, " +
+                "mappings=${System.getProperty(USE_IBM_CIPHER_MAPPINGS)}",
+        )
+
+        // 构造即发起连接；失败在这里直接抛 MQException。
+        val start = System.currentTimeMillis()
+        val manager = try {
+            MQQueueManager(config.queueManager.trim(), properties)
+        } catch (error: Throwable) {
+            ibmMqLog.warn(
+                "test connection failed: qmgr=${config.queueManager} " +
+                    "error=${error.message ?: error::class.simpleName ?: "unknown"} " +
+                    "duration=${System.currentTimeMillis() - start}ms",
+            )
+            throw error
+        }
+        try {
+            // 连上即视为可达；不做更深的访问（列表 / 收发归正式连接的扫描链路）。
+            ibmMqLog.info("test connection ok: qmgr=${config.queueManager} duration=${System.currentTimeMillis() - start}ms")
+        } finally {
+            // 用完即关：测试连接绝不留在任何资源的账上 —— 它不属于任何 connectionId。
+            manager.disconnect()
+        }
+    }
 }
 
 /**
@@ -859,136 +926,12 @@ class IbmMQService(private val context: ServiceContext) {
      * 是阻塞 IO，协程取消不能中断它：超时后本次调用立即返回失败，但底层 IO 线程
      * 会滞留到 TCP 超时为止。本地桌面工具场景下可接受，不做额外处理。
      *
-     * SSL（OpenJDK 下的两个硬坑，见 [configureSslContext] 与 [USE_IBM_CIPHER_MAPPINGS]）：
-     * cipher 映射必须关掉（IBM 风格 `SSL_*` 名在 OpenJDK 上不存在，报 2397）；
-     * 证书走**显式构建的 SSLContext**（JSSE 系统属性在默认上下文被缓存后设置无效，
-     * 会报 2393）。基准测试见 `jvmTest` 的 `IbmMQSslDiagTest`。
+     * TLS：连接属性与证书注入和正式连接**同源** —— 属性走 [mqProperties]，证书走
+     * [IbmMqTls.withTls]（[IbmMQConnectionManager.open] 用的是同一个函数）。所以
+     * 「测试连接通过」才真的代表「正式连接会通过」；此前的实现只在测试路径上写证书，
+     * 正式连接拿不到 —— 那个不对称正是这条注释原先掩盖的坑。
      */
-    /** 串行化 SSL 测试连接：JSSE 属性是 JVM 全局的，并发测试会互相覆盖（见下）。 */
-    private val sslTestMutex = Mutex()
-
-    /**
-     * JSSE 系统属性快照：进入 SSL 测试前保存旧值，finally 里恢复——否则测试连接的
-     * keystore / 密码会滞留全局属性（后续任何 TLS 代码都能读到），两个不同 SSL 连接
-     * 先后测试还会互相覆盖。属性列表与 [sslSystemProperties] 一一对应。
-     */
-    private val sslSystemProperties = listOf(
-        "javax.net.ssl.trustStore",
-        "javax.net.ssl.trustStorePassword",
-        "javax.net.ssl.trustStoreType",
-        "javax.net.ssl.keyStore",
-        "javax.net.ssl.keyStorePassword",
-        "javax.net.ssl.keyStoreType",
-    )
-
-    suspend fun testConnection(config: IbmMQConfig): Unit = withContext(Dispatchers.IO) {
-        // SSL 属性（keystore / truststore / cipher 映射）见下方 sslEnabled 分支；
-        // 连接属性统一走 [mqProperties]，与正式连接共用同一份组装。
-        val properties = mqProperties(config)
-
-        // SSL 只对 CLIENT 模式有意义（BINDING 是同机 JNI，没有 TLS 通道）。
-        if (config.mode == ConnectionMode.CLIENT && config.sslEnabled) {
-            // 系统属性是 JVM 全局的：串行 + finally 恢复，测试完不留痕。
-            sslTestMutex.withLock {
-                val previous = sslSystemProperties.associateWith { System.getProperty(it) }
-                try {
-                    applySslSystemProperties(config)
-                    doTestConnection(config, properties)
-                } finally {
-                    previous.forEach { (key, value) ->
-                        if (value == null) System.clearProperty(key) else System.setProperty(key, value)
-                    }
-                }
-            }
-        } else {
-            doTestConnection(config, properties)
-        }
-    }
-
-    /** 按 [IbmMQConfig] 写入 JSSE 系统属性（原 testConnection 的 SSL 属性段，逻辑不变）。 */
-    private fun applySslSystemProperties(config: IbmMQConfig) {
-        System.setProperty(USE_IBM_CIPHER_MAPPINGS, "false")
-        // MQ 基础 Java 客户端**自己从 JSSE 系统属性构建 SSLContext**（不用 JVM
-        // 默认上下文 —— setDefault 对它无效），所以属性必须设全，包括 Type。
-        // 基准测试 combo3（仅系统属性、属性先于首次 SSL 使用）验证这是生效路径。
-        config.trustStorePath.takeIf { it.isNotBlank() }
-            ?.let { System.setProperty("javax.net.ssl.trustStore", it) }
-        config.trustStorePassword.takeIf { it.isNotBlank() }
-            ?.let { System.setProperty("javax.net.ssl.trustStorePassword", it) }
-        config.trustStorePath.takeIf { it.isNotBlank() }
-            ?.let { System.setProperty("javax.net.ssl.trustStoreType", "PKCS12") }
-        config.keyStorePath.takeIf { it.isNotBlank() }
-            ?.let { System.setProperty("javax.net.ssl.keyStore", it) }
-        config.keyStorePassword.takeIf { it.isNotBlank() }
-            ?.let { System.setProperty("javax.net.ssl.keyStorePassword", it) }
-        config.keyStorePath.takeIf { it.isNotBlank() }
-            ?.let { System.setProperty("javax.net.ssl.keyStoreType", "PKCS12") }
-        configureSslContext(config)
-    }
-
-    private suspend fun doTestConnection(
-        config: IbmMQConfig,
-        properties: java.util.Hashtable<String, Any>,
-    ) = withContext(Dispatchers.IO) {
-            ibmMqLog.info(
-                "test connection: host=${config.host}:${config.port}, channel=${config.channel}, " +
-                    "cipher=${config.cipherSuite.ifBlank { "(auto)" }}, ssl=${config.sslEnabled}, " +
-                    "mappings=${System.getProperty(USE_IBM_CIPHER_MAPPINGS)}",
-            )
-
-            // 构造即发起连接；失败在这里直接抛 MQException。
-            val start = System.currentTimeMillis()
-            val manager = try {
-                MQQueueManager(config.queueManager.trim(), properties)
-            } catch (error: Throwable) {
-                ibmMqLog.warn(
-                    "test connection failed: qmgr=${config.queueManager} " +
-                        "error=${error.message ?: error::class.simpleName ?: "unknown"} " +
-                        "duration=${System.currentTimeMillis() - start}ms",
-                )
-                throw error
-            }
-            try {
-                // 连上即视为可达；不做更深的访问（列表 / 收发归正式连接的扫描链路）。
-                ibmMqLog.info("test connection ok: qmgr=${config.queueManager} duration=${System.currentTimeMillis() - start}ms")
-            } finally {
-                // 用完即关：测试连接绝不留在 [resources] 里 —— 它不属于任何 connectionId。
-                manager.disconnect()
-            }
-        }
-
-    /**
-     * 用配置里的 p12 显式构建 SSLContext 并替换 JVM 默认上下文（双保险）。
-     *
-     * 注意：**主路径是上面的 JSSE 系统属性** —— MQ 基础 Java 客户端自己从
-     * `javax.net.ssl.*` 属性构建 SSL 上下文，`SSLContext.setDefault` 对它无效。
-     * 这里显式构建是给「其它走 JVM 默认上下文的 TLS 代码」兜底，也顺带提前
-     * 验证两个 p12 能否加载（口令错 / 文件坏在这里就炸，错误更直白）。
-     *
-     * 密钥库 / 信任库都按 PKCS12 读；某一边留空就退回 JVM 默认对应侧。
-     */
-    private fun configureSslContext(config: IbmMQConfig) {
-        val keyManagers = config.keyStorePath.takeIf { it.isNotBlank() }?.let { path ->
-            val store = KeyStore.getInstance("PKCS12").apply {
-                FileInputStream(path).use { load(it, config.keyStorePassword.toCharArray()) }
-            }
-            KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm()).apply {
-                init(store, config.keyStorePassword.toCharArray())
-            }.keyManagers
-        }
-        val trustManagers = config.trustStorePath.takeIf { it.isNotBlank() }?.let { path ->
-            val store = KeyStore.getInstance("PKCS12").apply {
-                FileInputStream(path).use { load(it, config.trustStorePassword.toCharArray()) }
-            }
-            TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm()).apply {
-                init(store)
-            }.trustManagers
-        }
-        if (keyManagers == null && trustManagers == null) return
-        val context = SSLContext.getInstance("TLS")
-        context.init(keyManagers, trustManagers, null)
-        SSLContext.setDefault(context)
-    }
+    suspend fun testConnection(config: IbmMQConfig): Unit = probeMqConnection(config)
 
     /**
      * 查询一条**已连接**连接的队列管理器**全属性快照**（PCF：`MQCMD_INQUIRE_Q_MGR`

@@ -29,12 +29,14 @@ kotlin {
     }
 }
 
-// SSL 诊断基准测试（IbmMQSslDiagTest）的参数透传：`-Dmqdiag.xxx=...` 从 gradle
-// 命令行传进测试 JVM。
+// SSL 诊断基准测试（IbmMQSslDiagTest / IbmMqTlsLiveTest）的参数透传：
+// `-Dmqdiag.xxx=...` 与 `-Djavax.net.debug=...` 从 gradle 命令行传进测试 JVM。
+// `javax.net.debug` 必须在 **JVM 启动时**给出（JSSE 在类初始化时读它），测试里
+// 再 System.setProperty 已经晚了 —— 所以它只能走这条转发，不能靠 mqdiag.debug。
 tasks.withType<Test>().configureEach {
     systemProperties(
         System.getProperties().stringPropertyNames()
-            .filter { it.startsWith("mqdiag.") }
+            .filter { it.startsWith("mqdiag.") || it == "javax.net.debug" }
             .associateWith { System.getProperty(it) },
     )
 }

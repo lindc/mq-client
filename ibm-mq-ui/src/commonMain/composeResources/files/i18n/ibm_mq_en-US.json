@@ -978,7 +978,7 @@
   "ibm_mq_field_connection_timeout": "Connection timeout (s)",
   "ibm_mq_field_message_scan_interval": "Message scan interval (s)",
   "ibm_mq_field_object_scan_interval": "Object scan interval (min)",
-  "ibm_mq_cipher_auto": "Auto-negotiate (default)",
+  "ibm_mq_cipher_auto": "Default: TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
   "ibm_mq_file_dialog_title": "Select certificate file",
   "ibm_mq_test_running": "Testing connection...",
   "ibm_mq_test_timeout": "Connection timed out (15 s)",

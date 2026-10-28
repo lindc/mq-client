@@ -1120,7 +1120,7 @@
   "ibm_mq_field_connection_timeout": "连接超时（秒）",
   "ibm_mq_field_message_scan_interval": "消息扫描间隔（秒）",
   "ibm_mq_field_object_scan_interval": "对象扫描间隔（分钟）",
-  "ibm_mq_cipher_auto": "自动协商（默认）",
+  "ibm_mq_cipher_auto": "默认：TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
   "ibm_mq_file_dialog_title": "选择证书文件",
   "ibm_mq_test_running": "正在测试连接...",
   "ibm_mq_test_timeout": "连接超时（15 秒）",

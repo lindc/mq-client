@@ -55,19 +55,25 @@ class IbmMQConnectionManager(
      *
      * 超时后那条构造不会被打断（它仍会跑完）。迟到的句柄交给 `onAbandoned` 关掉 ——
      * 比「delay(2×timeout) 后再去读变量」靠谱：不靠猜它什么时候回来。
+     *
+     * TLS（[IbmMqTls.withTls]）：证书只能经进程级 JSSE 属性注入，所以整个构造过程要在
+     * 「写本连接证书 → 建连 → 还原」的窗口里完成，且与其他连接互斥。**测试连接走同一个
+     * 窗口**（见 IbmMQService.testConnection），两条路径的 TLS 行为因此完全一致。
      */
     override suspend fun open(ctx: IbmMQConnectionContext) {
-        ctx.mqConnection = BlockingCalls.withDeadline(
-            timeoutMs = ctx.config.connectionTimeout * 1_000L,
-            label = "连接 ${ctx.config.queueManager}",
-            onAbandoned = { late ->
-                runCatching { late.disconnect() }
-                    .onFailure { error ->
-                        log.warn("late connect handle close failed: connection=${ctx.connectionId} error=$error")
-                    }
-            },
-        ) {
-            MQQueueManager(ctx.config.queueManager.trim(), mqProperties(ctx.config))
+        ctx.mqConnection = IbmMqTls.withTls(ctx.config) {
+            BlockingCalls.withDeadline(
+                timeoutMs = ctx.config.connectionTimeout * 1_000L,
+                label = "连接 ${ctx.config.queueManager}",
+                onAbandoned = { late ->
+                    runCatching { late.disconnect() }
+                        .onFailure { error ->
+                            log.warn("late connect handle close failed: connection=${ctx.connectionId} error=$error")
+                        }
+                },
+            ) {
+                MQQueueManager(ctx.config.queueManager.trim(), mqProperties(ctx.config))
+            }
         }
     }
 
