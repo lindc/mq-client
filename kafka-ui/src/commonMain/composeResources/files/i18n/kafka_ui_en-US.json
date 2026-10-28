@@ -250,6 +250,7 @@
   "kafka_ui_send_files_col_status": "Status",
   "kafka_ui_send_files_col_actions": "Actions",
   "kafka_ui_send_read_failed": "Failed to read file: %1$s",
+  "kafka_ui_send_file_too_large": "File too large (limit %2$s MB): %1$s",
   "kafka_ui_send_empty_body": "Message body is empty — send anyway?",
   "kafka_ui_send_preview_truncated": "Content too large, showing first 10000 chars; the full content is sent unless edited",
   "kafka_ui_send_btn_send": "Send",

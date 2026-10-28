@@ -60,6 +60,7 @@
   "ibm_mq_msg_send_clear": "清空",
   "ibm_mq_msg_send_empty": "请选择文件",
   "ibm_mq_msg_send_read_failed": "文件读取失败：%s",
+  "ibm_mq_msg_send_file_too_large": "文件过大（上限 %2$s MB）：%1$s",
   "ibm_mq_msg_send_preview_truncated": "内容过长，已截断显示，发送时仍发送完整内容",
   "ibm_mq_msg_send_advanced": "高级属性",
   "ibm_mq_msg_send_correlation_id": "CorrelationId",

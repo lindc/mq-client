@@ -231,6 +231,7 @@
   "rocketmq_ui_send_files_col_status": "Status",
   "rocketmq_ui_send_files_col_actions": "Actions",
   "rocketmq_ui_send_read_failed": "Failed to read file: %1$s",
+  "rocketmq_ui_send_file_too_large": "File too large (limit %2$s MB): %1$s",
   "rocketmq_ui_send_empty_body": "Message body is empty; send anyway?",
   "rocketmq_ui_send_preview_truncated": "Content too large; only the first 10000 characters are previewed. The full content is sent unless edited",
   "rocketmq_ui_send_btn_send": "Send",

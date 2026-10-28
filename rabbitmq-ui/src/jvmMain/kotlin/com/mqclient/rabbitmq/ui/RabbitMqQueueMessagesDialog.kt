@@ -51,6 +51,9 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.mqclient.mqui.file.MAX_MESSAGE_FILE_MB
+import com.mqclient.mqui.file.MessageFileFailure
+import com.mqclient.mqui.file.readMessageBytes
 import com.mqclient.mqui.objectlist.ObjectListEmptyState
 import com.mqclient.mqui.state.LoadState
 import com.mqclient.rabbitmq.RabbitMqFetchedMessage
@@ -374,13 +377,33 @@ fun RabbitMqQueueMessagesDialog(
         scope.launch {
             val paths = pickFiles(stringResource("rabbitmq_ui_msg_pick_title"))
             if (paths.isEmpty()) return@launch
+            val failed = mutableListOf<MessageFileFailure>()
             batchTasks = withContext(Dispatchers.IO) {
                 paths.mapNotNull { path ->
                     val file = java.io.File(path)
-                    runCatching { file.readBytes() }.getOrNull()?.let {
-                        BatchTask(id = UUID.randomUUID().toString(), fileName = file.name, fileSize = it.size.toLong(), content = it)
-                    }
+                    // 先看尺寸再读（readMessageBytes）：超大文件不读进内存，按「太大」上报。
+                    runCatching { file.readMessageBytes() }
+                        .onFailure { failed += MessageFileFailure.of(file.name, it) }
+                        .getOrNull()
+                        ?.let {
+                            BatchTask(
+                                id = UUID.randomUUID().toString(),
+                                fileName = file.name,
+                                fileSize = it.size.toLong(),
+                                content = it,
+                            )
+                        }
                 }
+            }
+            failed.forEach { failure ->
+                val text =
+                    if (failure.tooLarge) {
+                        stringResource("rabbitmq_ui_send_file_too_large")
+                            .withArg(failure.fileName, MAX_MESSAGE_FILE_MB)
+                    } else {
+                        stringResource("rabbitmq_ui_send_file_read_failed").withArg(failure.fileName)
+                    }
+                snackbar.showSnackbar(text)
             }
         }
     }

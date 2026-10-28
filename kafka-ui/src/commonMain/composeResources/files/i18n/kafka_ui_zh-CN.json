@@ -250,6 +250,7 @@
   "kafka_ui_send_files_col_status": "Status",
   "kafka_ui_send_files_col_actions": "Actions",
   "kafka_ui_send_read_failed": "文件读取失败：%1$s",
+  "kafka_ui_send_file_too_large": "文件过大（上限 %2$s MB）：%1$s",
   "kafka_ui_send_empty_body": "消息体为空，确认发送？",
   "kafka_ui_send_preview_truncated": "内容过大，仅预览前 10000 字符；发送仍发完整内容，编辑后以编辑内容为准",
   "kafka_ui_send_btn_send": "发送",

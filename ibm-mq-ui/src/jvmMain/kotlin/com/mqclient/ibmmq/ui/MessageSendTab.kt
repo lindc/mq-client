@@ -52,6 +52,9 @@ import androidx.compose.ui.unit.dp
 import com.mqclient.ibmmq.IbmMQModule
 import com.mqclient.ibmmq.messaging.SendDefaults
 import com.mqclient.ibmmq.messaging.SendResult
+import com.mqclient.mqui.file.MAX_MESSAGE_FILE_MB
+import com.mqclient.mqui.file.MessageFileFailure
+import com.mqclient.mqui.file.readMessageBytes
 import com.mqclient.mqui.objectlist.ObjectListEmptyState
 import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.AppTooltip
@@ -155,15 +158,18 @@ internal class SendMessagesState(
     val singleTask: SendTask? get() = tasks.singleOrNull()
 
     /**
-     * 选完文件后装配任务列表（**替换**语义），IO 线程读文件；读失败的文件跳过，
-     * 名字返回给调用方弹提示。空文件（0 字节）允许进列表——发送前给出「消息体为空」提示。
+     * 选完文件后装配任务列表（**替换**语义），IO 线程读文件；读不出来的文件跳过，
+     * 失败清单返回给调用方弹提示。空文件（0 字节）允许进列表——发送前给出「消息体为空」提示。
+     *
+     * 单个文件的大小由 [readMessageBytes] 先行把住（超过 [com.mqclient.mqui.file.MAX_MESSAGE_FILE_BYTES]
+     * 不读进内存）：消息体文件没有任何流控，误选一个几十 GB 的文件就是一次 OOM。
      */
-    suspend fun loadFiles(paths: List<String>): List<String> = withContext(Dispatchers.IO) {
+    suspend fun loadFiles(paths: List<String>): List<MessageFileFailure> = withContext(Dispatchers.IO) {
         val loaded = mutableListOf<SendTask>()
-        val failed = mutableListOf<String>()
+        val failed = mutableListOf<MessageFileFailure>()
         for (path in paths) {
             val file = java.io.File(path)
-            runCatching { file.readBytes() }
+            runCatching { file.readMessageBytes() }
                 .onSuccess { bytes ->
                     loaded += SendTask(
                         id = UUID.randomUUID().toString(),
@@ -172,7 +178,7 @@ internal class SendMessagesState(
                         content = bytes,
                     )
                 }
-                .onFailure { failed += file.name }
+                .onFailure { failed += MessageFileFailure.of(file.name, it) }
         }
         tasks = loaded
         editingContent = null
@@ -306,8 +312,15 @@ internal fun MessageSendTab(
             val paths = pickFiles(stringResource("ibm_mq_msg_send_pick_title"))
             if (paths.isEmpty()) return@launch
             val failed = state.loadFiles(paths)
-            failed.forEach { name ->
-                snackbarHostState.showSnackbar(stringResource("ibm_mq_msg_send_read_failed").withArg(name))
+            failed.forEach { failure ->
+                val text =
+                    if (failure.tooLarge) {
+                        stringResource("ibm_mq_msg_send_file_too_large")
+                            .withArg(failure.fileName, MAX_MESSAGE_FILE_MB)
+                    } else {
+                        stringResource("ibm_mq_msg_send_read_failed").withArg(failure.fileName)
+                    }
+                snackbarHostState.showSnackbar(text)
             }
         }
     }

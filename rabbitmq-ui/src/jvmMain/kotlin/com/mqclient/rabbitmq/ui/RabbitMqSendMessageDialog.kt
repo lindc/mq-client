@@ -47,6 +47,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.mqclient.mqui.file.MAX_MESSAGE_FILE_MB
+import com.mqclient.mqui.file.MessageFileFailure
+import com.mqclient.mqui.file.readMessageBytes
 import com.mqclient.mqui.objectlist.ObjectListEmptyState
 import com.mqclient.rabbitmq.RabbitMqModule
 import com.mqclient.uicommon.PrimaryButton
@@ -130,15 +133,18 @@ private class RabbitMqSendState(
     /* ------------------------------ 批量任务管理 ------------------------------ */
 
     /**
-     * 选完文件后装配任务列表（**替换**语义），IO 线程读文件；读失败的文件跳过，
-     * 名字返回给调用方弹提示。空文件（0 字节）允许进列表。
+     * 选完文件后装配任务列表（**替换**语义），IO 线程读文件；读不出来的文件跳过，
+     * 失败清单返回给调用方弹提示。空文件（0 字节）允许进列表。
+     *
+     * 单个文件的大小由 [readMessageBytes] 先行把住（超过 [com.mqclient.mqui.file.MAX_MESSAGE_FILE_BYTES]
+     * 不读进内存）：消息体文件没有任何流控，误选一个几十 GB 的文件就是一次 OOM。
      */
-    suspend fun loadFiles(paths: List<String>): List<String> = withContext(Dispatchers.IO) {
+    suspend fun loadFiles(paths: List<String>): List<MessageFileFailure> = withContext(Dispatchers.IO) {
         val loaded = mutableListOf<SendTask>()
-        val failed = mutableListOf<String>()
+        val failed = mutableListOf<MessageFileFailure>()
         for (path in paths) {
             val file = java.io.File(path)
-            runCatching { file.readBytes() }
+            runCatching { file.readMessageBytes() }
                 .onSuccess { bytes ->
                     loaded += SendTask(
                         id = UUID.randomUUID().toString(),
@@ -147,7 +153,7 @@ private class RabbitMqSendState(
                         content = bytes,
                     )
                 }
-                .onFailure { failed += file.name }
+                .onFailure { failed += MessageFileFailure.of(file.name, it) }
         }
         tasks = loaded
         batchSummary = null
@@ -291,8 +297,15 @@ fun RabbitMqSendMessageDialog(
             val paths = pickFiles(stringResource("rabbitmq_ui_send_pick_title"))
             if (paths.isEmpty()) return@launch
             val failed = state.loadFiles(paths)
-            failed.forEach { name ->
-                snackbar.showSnackbar(stringResource("rabbitmq_ui_send_file_read_failed").withArg(name))
+            failed.forEach { failure ->
+                val text =
+                    if (failure.tooLarge) {
+                        stringResource("rabbitmq_ui_send_file_too_large")
+                            .withArg(failure.fileName, MAX_MESSAGE_FILE_MB)
+                    } else {
+                        stringResource("rabbitmq_ui_send_file_read_failed").withArg(failure.fileName)
+                    }
+                snackbar.showSnackbar(text)
             }
         }
     }

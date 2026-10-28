@@ -131,6 +131,7 @@
   "rabbitmq_ui_send_header_name": "名称",
   "rabbitmq_ui_send_header_value": "值",
   "rabbitmq_ui_send_file_read_failed": "文件读取失败：%1$s",
+  "rabbitmq_ui_send_file_too_large": "文件过大（上限 %2$s MB）：%1$s",
   "rabbitmq_ui_send_sending": "发送中…",
   "rabbitmq_ui_send_unrouted": "消息已提交，但未路由到任何队列",
   "rabbitmq_ui_send_retry": "重试",

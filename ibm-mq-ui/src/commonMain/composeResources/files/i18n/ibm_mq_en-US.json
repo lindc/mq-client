@@ -60,6 +60,7 @@
   "ibm_mq_msg_send_clear": "Clear",
   "ibm_mq_msg_send_empty": "No files selected",
   "ibm_mq_msg_send_read_failed": "Failed to read file: %s",
+  "ibm_mq_msg_send_file_too_large": "File too large (limit %2$s MB): %1$s",
   "ibm_mq_msg_send_preview_truncated": "Content is too long; preview truncated — the full content will be sent",
   "ibm_mq_msg_send_advanced": "Advanced properties",
   "ibm_mq_msg_send_correlation_id": "CorrelationId",

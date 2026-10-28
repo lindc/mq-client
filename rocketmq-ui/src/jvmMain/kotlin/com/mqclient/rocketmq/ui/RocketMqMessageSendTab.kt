@@ -47,6 +47,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.mqclient.mqui.file.MAX_MESSAGE_FILE_MB
+import com.mqclient.mqui.file.MessageFileFailure
+import com.mqclient.mqui.file.readMessageBytes
 import com.mqclient.mqui.objectlist.ObjectListEmptyState
 import com.mqclient.rocketmq.RocketMqModule
 import com.mqclient.rocketmq.RocketMqSendResult
@@ -165,15 +168,18 @@ internal class RocketMqSendMessagesState(
     }
 
     /**
-     * 选完文件后装配任务列表（**替换**语义），IO 线程读文件；读失败的文件跳过，
-     * 名字返回给调用方弹提示。空文件（0 字节）允许进列表——发送前给出「消息体为空」提示。
+     * 选完文件后装配任务列表（**替换**语义），IO 线程读文件；读不出来的文件跳过，
+     * 失败清单返回给调用方弹提示。空文件（0 字节）允许进列表——发送前给出「消息体为空」提示。
+     *
+     * 单个文件的大小由 [readMessageBytes] 先行把住（超过 [com.mqclient.mqui.file.MAX_MESSAGE_FILE_BYTES]
+     * 不读进内存）：消息体文件没有任何流控，误选一个几十 GB 的文件就是一次 OOM。
      */
-    suspend fun loadFiles(paths: List<String>): List<String> = withContext(Dispatchers.IO) {
+    suspend fun loadFiles(paths: List<String>): List<MessageFileFailure> = withContext(Dispatchers.IO) {
         val loaded = mutableListOf<RocketMqSendTask>()
-        val failed = mutableListOf<String>()
+        val failed = mutableListOf<MessageFileFailure>()
         for (path in paths) {
             val file = java.io.File(path)
-            runCatching { file.readBytes() }
+            runCatching { file.readMessageBytes() }
                 .onSuccess { bytes ->
                     loaded += RocketMqSendTask(
                         id = UUID.randomUUID().toString(),
@@ -182,7 +188,7 @@ internal class RocketMqSendMessagesState(
                         content = bytes,
                     )
                 }
-                .onFailure { failed += file.name }
+                .onFailure { failed += MessageFileFailure.of(file.name, it) }
         }
         tasks = loaded
         editingContent = null
@@ -313,10 +319,15 @@ internal fun RocketMqMessageSendTab(
             val paths = pickFiles(stringResource("rocketmq_ui_send_files_pick"))
             if (paths.isEmpty()) return@launch
             val failed = state.loadFiles(paths)
-            failed.forEach { name ->
-                snackbarHostState.showSnackbar(
-                    stringResource("rocketmq_ui_send_read_failed").withArg(name),
-                )
+            failed.forEach { failure ->
+                val text =
+                    if (failure.tooLarge) {
+                        stringResource("rocketmq_ui_send_file_too_large")
+                            .withArg(failure.fileName, MAX_MESSAGE_FILE_MB)
+                    } else {
+                        stringResource("rocketmq_ui_send_read_failed").withArg(failure.fileName)
+                    }
+                snackbarHostState.showSnackbar(text)
             }
         }
     }
@@ -352,7 +363,21 @@ internal fun RocketMqMessageSendTab(
             when {
                 state.tasks.isEmpty() ->
                     ObjectListEmptyState(message = stringResource("rocketmq_ui_send_files_empty"))
-                state.tasks.size == 1 -> SingleSendPane(state)
+                state.tasks.size == 1 -> SingleSendPane(
+                    state = state,
+                    onLoadFailed = { failure ->
+                        pickScope.launch {
+                            snackbarHostState.showSnackbar(
+                                if (failure.tooLarge) {
+                                    stringResource("rocketmq_ui_send_file_too_large")
+                                        .withArg(failure.fileName, MAX_MESSAGE_FILE_MB)
+                                } else {
+                                    stringResource("rocketmq_ui_send_read_failed").withArg(failure.fileName)
+                                },
+                            )
+                        }
+                    },
+                )
                 else -> MultiSendPane(state)
             }
             ThemedSnackbarHost(snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter))
@@ -429,7 +454,11 @@ private fun TargetRow(state: RocketMqSendMessagesState) {
 /* --------------------------- 单文件模式 --------------------------- */
 
 @Composable
-private fun SingleSendPane(state: RocketMqSendMessagesState) {
+private fun SingleSendPane(
+    state: RocketMqSendMessagesState,
+    /** 「从文件加载」读不进来时的上报口（父层统一弹 snackbar；本窗格没有自己的 host）。 */
+    onLoadFailed: (MessageFileFailure) -> Unit,
+) {
     val task = state.singleTask ?: return
     val scope = rememberCoroutineScope()
     val rawText = remember(task.id) { task.content.toString(Charsets.UTF_8) }
@@ -456,10 +485,14 @@ private fun SingleSendPane(state: RocketMqSendMessagesState) {
                     scope.launch {
                         val path = pickFile(stringResource("rocketmq_ui_send_load_file"), emptyList())
                             ?: return@launch
-                        val bytes = withContext(Dispatchers.IO) {
-                            runCatching { java.io.File(path).readBytes() }.getOrNull()
+                        val file = java.io.File(path)
+                        val loaded = withContext(Dispatchers.IO) {
+                            // 先看尺寸再读：单条窗格的「从文件加载」同样不能把超大文件进堆。
+                            runCatching { file.readMessageBytes() }
                         }
-                        if (bytes != null) state.editingContent = String(bytes, Charsets.UTF_8)
+                        loaded
+                            .onSuccess { state.editingContent = String(it, Charsets.UTF_8) }
+                            .onFailure { onLoadFailed(MessageFileFailure.of(file.name, it)) }
                     }
                 },
                 standardMinWidth = false,

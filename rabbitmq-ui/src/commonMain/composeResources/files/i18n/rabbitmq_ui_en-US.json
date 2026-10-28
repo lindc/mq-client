@@ -131,6 +131,7 @@
   "rabbitmq_ui_send_header_name": "Name",
   "rabbitmq_ui_send_header_value": "Value",
   "rabbitmq_ui_send_file_read_failed": "Failed to read file: %1$s",
+  "rabbitmq_ui_send_file_too_large": "File too large (limit %2$s MB): %1$s",
   "rabbitmq_ui_send_sending": "Sending…",
   "rabbitmq_ui_send_unrouted": "Message submitted but not routed to any queue",
   "rabbitmq_ui_send_retry": "Retry",
