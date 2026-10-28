@@ -457,7 +457,13 @@ fun RabbitMqQueueMessagesDialog(
                                     held = held,
                                     onFetch = ::fetchMore,
                                     onRefresh = ::refreshQueue,
-                                    onDetail = { detail = it },
+                                    onDetail = { msg ->
+                    detailUiLog.info(
+                        "detail clicked: deliveryTag=${msg.deliveryTag} bodyBytes=${msg.body.size} " +
+                            "windows=${awtWindowCount()}",
+                    )
+                    detail = msg
+                },
                                     onDelete = ::deleteOne,
                                     onForward = { forwarding = listOf(it) },
                                     onForwardAll = { forwarding = messages.toList() },

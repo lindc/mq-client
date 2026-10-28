@@ -53,6 +53,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.mqclient.core.log.Log
 import com.mqclient.message.interpreter.InterpreterResult
 import com.mqclient.message.interpreter.MessageCharsets
 import com.mqclient.message.interpreter.MessageInterpreter
@@ -119,7 +120,7 @@ private const val RENDER_TIMEOUT_MS = 5_000L
 private const val STALL_HINT_MS = 8_000L
 
 /** 解释器渲染结果：展示文本 + 解析失败原因（失败时展示原始内容 + 提示）。 */
-private data class RenderedText(val text: String, val parseError: String? = null)
+internal data class RenderedText(val text: String, val parseError: String? = null)
 
 /**
  * 正文基线：二进制判定结果 + 原始文本（非二进制）或 hex 预览（二进制）。
@@ -127,12 +128,107 @@ private data class RenderedText(val text: String, val parseError: String? = null
  * [decodeError] 非 null 表示解码本身超时 / 抛异常：这时连“原文”都拿不到，正文区
  * 必须直接给原因而不是继续转圈。
  */
-private data class ContentPreview(
+internal data class ContentPreview(
     val isBinary: Boolean,
     val rawText: String,
     val hex: String,
     val decodeError: String? = null,
 )
+
+/** [buildDetailContent] 的一次跑完结果：基线 + 可选的解释器渲染。 */
+internal data class DetailContent(
+    val preview: ContentPreview,
+    /** null = 无需渲染（二进制且未选 hex / 解码失败 / 无解释器）。 */
+    val rendered: RenderedText?,
+)
+
+/**
+ * **一次跑完「解码 → 渲染」**，不经过 Compose。
+ *
+ * 抽出来是为了两件事：
+ *  1. 让 UI 只有一个 `LaunchedEffect` 调它 —— 不会多等一帧（原因见调用点 KDoc）；
+ *  2. 让这条管线可以在无头测试里直接跑（`MessageDetailPipelineTest`），
+ *     不必去造 nucleus 窗口 —— `ObjectDetailDialog` 在测试里建不出来。
+ *
+ * 纯本地：不解网络，不碰 broker。两个超时都是協程层的，只能拦住可取消的等待
+ * （管不住阻塞调用，见 RENDER_TIMEOUT_MS）。
+ */
+internal suspend fun buildDetailContent(
+    body: ByteArray,
+    codedCharSetId: Int,
+    encoding: Int,
+    binary: Boolean,
+    interpreter: MessageInterpreter?,
+    params: Map<String, String>,
+    decodeFailedMessage: String,
+    renderTimeoutReason: String,
+): DetailContent {
+    val preview =
+        try {
+            withTimeout(RENDER_TIMEOUT_MS) {
+                withContext(Dispatchers.Default) {
+                    ContentPreview(
+                        isBinary = binary,
+                        rawText = if (binary) "" else MessageCharsets.decode(body, codedCharSetId),
+                        hex = if (binary) hexPreview(body) else "",
+                    )
+                }
+            }
+        } catch (e: TimeoutCancellationException) {
+            // 超时不是取消：状态必须落地，否则正文区永远停在转圈。
+            ContentPreview(isBinary = binary, rawText = "", hex = "", decodeError = decodeFailedMessage)
+        } catch (e: CancellationException) {
+            // 真正的取消（对话框已关）原样抛出，不写任何状态。
+            throw e
+        } catch (e: Exception) {
+            ContentPreview(isBinary = binary, rawText = "", hex = "", decodeError = decodeFailedMessage)
+        }
+
+    // 二进制只支持 Hex 解释器（对字节流跑文本解释器无意义）。
+    val needsRender = interpreter != null &&
+        !(preview.isBinary && interpreter.id != HEX_INTERPRETER_ID) &&
+        preview.decodeError == null
+    val target = interpreter?.takeIf { needsRender } ?: return DetailContent(preview, null)
+
+    val rendered =
+        try {
+            withTimeout(RENDER_TIMEOUT_MS) {
+                withContext(Dispatchers.Default) {
+                    when (val result = target.interpret(body, encoding, codedCharSetId, params)) {
+                        is InterpreterResult.Success -> RenderedText(result.formatted)
+                        is InterpreterResult.Failure -> RenderedText(preview.rawText, result.message)
+                    }
+                }
+            }
+        } catch (e: TimeoutCancellationException) {
+            // 超时只影响“格式化”：原文照样展示，原因走解析失败条。
+            RenderedText(preview.rawText, renderTimeoutReason)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // 解释器抛异常 = 渲染失败：回退原文。
+            // 关键：异常绝不能穿出协程 —— Compose 会因此取消整个组合的作用域，之后再也
+            // 不重组，按钮照旧收到点击但界面不再响应（“关闭没反应”就是这么来的）。
+            RenderedText(preview.rawText, e.message ?: e::class.simpleName ?: "")
+        }
+    return DetailContent(preview, rendered)
+}
+
+/**
+ * 详情渲染链路的日志句柄（tag `ui.detail`）。
+ *
+ * 真机实测靠它定位过一次真问题：「打开详情要 40s、第二个 60s」而拉取很快。
+ * 日志里的五段时间戳一下就把 40 秒钉到了「协程未被调度」而不是「渲染很慢」：
+ *
+ * ```
+ * detail composed:      sinceCompose=16ms
+ * detail preview ready: elapsed=3ms
+ * detail rendered:      render=1ms  total=51021ms   ← 1ms 的活等了 51 秒
+ * ```
+ *
+ * 保留它是为了下次再出现「慢」时，不必从猜开始。
+ */
+private val detailLog = Log.withTag("ui.detail")
 
 /**
  * 消息详情对话框（公用，IBM MQ / Kafka / RabbitMQ 三家共用，外观 100% 一致）：
@@ -209,17 +305,20 @@ fun MessageDetailDialog(
 
     // 看门狗：到点还没出结果就把「转圈」换成提示。
     //
-    // 必须是**独立**的 LaunchedEffect：它观测 result，而不是干活的那个協程 —— 后者一旦
-    // 卡在阻塞调用上，既不会写状态也不会被 withTimeout 打断（见 RENDER_TIMEOUT_MS）。
+    // 它只能处理「渲染真的很慢」；处理不了「协程根本没被调度」（那种情况下这一条
+    // 也一起被停住）。但对于解释器卡在大消息上这一类，它是唯一能给出交代的出口。
     var stalled by remember(effectiveBody, selectedId, params) { mutableStateOf(false) }
-    LaunchedEffect(effectiveBody, selectedId, params, preview, rendered) {
-        if (preview != null && rendered != null) {
-            stalled = false
-            return@LaunchedEffect
-        }
+    LaunchedEffect(effectiveBody, selectedId, params) {
         stalled = false
         delay(STALL_HINT_MS)
-        stalled = true
+        // 到点复查一次真实状态，而不是无条件报警：正常完成的场景不能闪错误条。
+        val base = preview
+        stalled = when {
+            base == null -> true // 基线还没出来 = 解码卡住
+            base.decodeError != null -> false // 已经有明确原因，不是卡住
+            base.isBinary -> false // 二进制不需要解释器渲染，hex 已在基线里
+            else -> rendered == null // 文本解释器还没返回 = 卡住
+        }
     }
 
     // 超时 / 解码失败文案先在这里取好：LaunchedEffect 与异常分支都不是 @Composable
@@ -227,63 +326,53 @@ fun MessageDetailDialog(
     val decodeFailedMessage = stringResource("msg_detail_decode_failed")
     val renderTimeoutReason = stringResource("msg_detail_render_timeout").withArg(RENDER_TIMEOUT_MS / 1_000)
 
-    LaunchedEffect(effectiveBody, binary, codedCharSetId) {
-        preview =
+    /**
+     * **解码与渲染合在一个协程里完成。**
+     *
+     * 这不是为了少写代码，是因为分开会多等一帧 —— 而在这个应用里「等一帧」可能
+     * 等于等几十秒。现场日志（`[ui.detail]`）测得的事实：
+     *
+     * ```
+     * detail composed:      sinceCompose=16ms
+     * detail preview ready: elapsed=3ms
+     * detail rendered:      render=1ms  total=51021ms   ← 1ms 的活等了 51 秒
+     * ```
+     *
+     * 渲染本身 1ms，却晚启动了 51 秒。旧实现拆成两个 LaunchedEffect：第一个把基线写进
+     * `preview`，第二个以 `preview` 为 key 重启。key 一变，第二个 effect 的启动就**必须等
+     * 下一帧**（Recomposer 的 `withFrameNanos`），而 Tao 主循环只在收到原生事件时推进
+     * —— 用户不动鼠标就没有帧，于是 1ms 的活等了 51 秒。
+     *
+     * 合成一个协程后：点击本身带来一帧，这一帧里既算完基线也算完渲染，不再依赖第二帧。
+     * 用户换解释器 / 改参数时重跑整段也只是一次十毫秒级的解码，不欠债。
+     */
+    LaunchedEffect(effectiveBody, binary, codedCharSetId, interpreter, params) {
+        // 埋点：解码 + 渲染在同一协程内完成（见上方「为什么合并」）。
+        val startedAt = System.currentTimeMillis()
+        val target = interpreter
+        rendering = target != null
+        val content =
             try {
-                withTimeout(RENDER_TIMEOUT_MS) {
-                    withContext(Dispatchers.Default) {
-                        ContentPreview(
-                            isBinary = binary,
-                            rawText = if (binary) "" else MessageCharsets.decode(effectiveBody, codedCharSetId),
-                            hex = if (binary) hexPreview(effectiveBody) else "",
-                        )
-                    }
-                }
-            } catch (e: TimeoutCancellationException) {
-                // 超时不是取消：状态必须落地，否则正文区永远停在转圈。
-                ContentPreview(isBinary = binary, rawText = "", hex = "", decodeError = decodeFailedMessage)
-            } catch (e: CancellationException) {
-                // 真正的取消（对话框已关）原样抛出，不写任何状态。
-                throw e
-            } catch (e: Exception) {
-                ContentPreview(isBinary = binary, rawText = "", hex = "", decodeError = decodeFailedMessage)
+                buildDetailContent(
+                    body = effectiveBody,
+                    codedCharSetId = codedCharSetId,
+                    encoding = encoding,
+                    binary = binary,
+                    interpreter = target,
+                    params = params,
+                    decodeFailedMessage = decodeFailedMessage,
+                    renderTimeoutReason = renderTimeoutReason,
+                )
+            } finally {
+                rendering = false
             }
-    }
-    LaunchedEffect(effectiveBody, interpreter, params, preview) {
-        val base = preview ?: return@LaunchedEffect
-        // 二进制只支持 Hex 解释器（对字节流跑文本解释器无意义）。
-        if (base.isBinary && interpreter?.id != HEX_INTERPRETER_ID) return@LaunchedEffect
-        // 解码本身没成功：没有可渲染的文本，详情页直接展示解码失败原因。
-        if (base.decodeError != null) return@LaunchedEffect
-        val target = interpreter ?: return@LaunchedEffect
-        rendering = true
-        try {
-            rendered =
-                withTimeout(RENDER_TIMEOUT_MS) {
-                    withContext(Dispatchers.Default) {
-                        when (val result = target.interpret(effectiveBody, encoding, codedCharSetId, params)) {
-                            is InterpreterResult.Success -> RenderedText(result.formatted)
-                            is InterpreterResult.Failure -> RenderedText(base.rawText, result.message)
-                        }
-                    }
-                }
-        } catch (e: TimeoutCancellationException) {
-            // 超时只影响“格式化”：原文照样展示，原因走解析失败条。
-            rendered = RenderedText(base.rawText, renderTimeoutReason)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            // 解释器抛异常 = 渲染失败：回退原文。
-            // 关键：异常绝不能穿出 LaunchedEffect —— Compose 会因此取消整个组合的
-            // 作用域，之后再也不重组，按钮照旧收到点击但界面不再响应（
-            // “关闭没反应”就是这么来的）。
-            rendered = RenderedText(base.rawText, e.message ?: e::class.simpleName ?: "")
-        } finally {
-            // ← 本次 bug 的根：这个标志是右上角“渲染中”小转圈的开关，之前只置
-            // true、从未置 false，于是“正文已渲染 + 小转圈永不停”同时成立。
-            // 成功 / 失败 / 超时 / 取消一律清掉，状态不可能停在加载中。
-            rendering = false
-        }
+        preview = content.preview
+        content.rendered?.let { rendered = it }
+        detailLog.info(
+            "detail loaded: interpreter=${target?.id ?: "-"} bytes=${effectiveBody.size} " +
+                "binary=$binary rendered=${content.rendered != null} " +
+                "total=${System.currentTimeMillis() - startedAt}ms",
+        )
     }
 
     fun showCopied() {

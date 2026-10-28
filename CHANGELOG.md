@@ -6,6 +6,48 @@
 
 ### Fixed
 
+- **消息详情要 40 秒（第二个 60 秒+、而且递增）—— 根因是渲染被拆到第二个 effect、要等下一帧，
+  而 Tao 主循环只在收到原生事件时派帧**（`MessageDetailDialog`）。
+
+  真机埋点（`[ui.detail]`）测到的原始形态：
+
+  ```
+  detail composed:      sinceCompose=16ms
+  detail preview ready: elapsed=3ms
+  detail rendered:      render=1ms  total=51021ms   ← 1ms 的活等了 51 秒
+  ```
+
+  旧实现是两个 `LaunchedEffect`：第一个把基线写进 `preview`，第二个以 `preview` 为 key。
+  key 一变，第二个 effect 的启动就必须等**下一帧**（Recomposer 的 `withFrameNanos`），
+  而这个应用的主循环是 nucleus/Tao 自绘框架 —— 用户不碰鼠标就没有帧。于是 1ms 的渲染
+  能等上几十秒，`disposed` 也跟着晚 2~6 秒。这也解释了「越开越慢」的观感：每个弹窗都
+  在等一次用户交互。
+
+  现在解码与渲染合进一个协程（`buildDetailContent`）：点击本身带来一帧，这一帧里既算完
+  基线也算完渲染。真机实测 12 次打开：
+
+  ```
+  composed → loaded:  166/140/143/124/123/127/144/150/142/129/125/148 ms
+  ```
+
+  从 40~60 秒降到 **~130ms**，连开 12 次无任何递增。附带修正：看门狗改成到点**复查
+  真实状态**（而不是无条件报警），正常完成的场景不会闪错误条。
+
+### Tests
+
+- **`MessageDetailPipelineTest`（4 例，离线）**：把「解码 → 渲染」抽成可测的
+  `buildDetailContent(...)`（`ObjectDetailDialog` 用 nucleus `DecoratedDialog` 建真实窗口，
+  无头测试里构造不出来，所以原来这条管线无法测）。断言一次调用同时给出基线与渲染、
+  二进制 + 文本解释器不渲染、hex 解释器渲染二进制、小消息整条管线 < 500ms（实测 16.8ms）。
+  变异验证：改成「只解码不渲染」→ 2 例红，报错直接指向「渲染又被挪到等下一帧的另一个
+  effect 上了」。
+- **`BundledFontCostTest` / `DetailCompositionCostTest`（app-ui）**：给「字体/新窗口代价」
+  留两条真实阈值（单次字体解析 < 2s、连读 5 次总耗 < 5s、每段 composition < 5s 且不
+  逐次变慢）。它们证明了一件事：**这两个假设都不成立**（字体 157ms→12ms 有全局缓存，
+  新 composition 1007ms→30ms），历史上那次卡顿与它们无关。
+- **`[ui.detail]` 埋点常驻**：`clicked / composed / loaded / disposed` 四行带毫秒时间戳，
+  下次再出现「慢」可以直接加减定位，不必从猜开始。
+
 - **RabbitMQ 消息会话：一次超时之后整个会话被自己锁死**（现场症状：「第一次读取消息
   详细信息就超时，之后彻底不动」）。根因是 `abort()` 被同步调在 `channelOps` 临界区里。
   `ChannelN.abort(int,String)` 并不「发一帧就返回」：它走

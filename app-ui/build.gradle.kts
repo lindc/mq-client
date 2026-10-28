@@ -66,6 +66,8 @@ kotlin {
             // ModuleI18nMergeTest 要解析各模块 i18n 表的原始 JSON 来算键交集
             // （模块表是全局合并的，重名会静默互相覆盖）。
             implementation(libs.kotlinx.serialization.json)
+            // 「新窗口 = 新 Composition」的代价实测（见 DetailCompositionCostTest）。
+            implementation(libs.compose.ui.test)
         }
     }
 }
