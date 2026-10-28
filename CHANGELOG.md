@@ -2,6 +2,87 @@
 
 本文件记录 MQClient 的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [Unreleased] — 2026-10-29 (10)
+
+### Fixed
+
+- **IBM MQ 的 TLS 证书只对「测试连接」生效，正式连接一个字节都没拿到**（`IbmMQService` /
+  `IbmMQConnectionManager`）。
+
+  `applySslSystemProperties` 只在 `testConnection` 里被调用；`open()` 用的
+  `mqProperties` 只带 host / channel / cipher / peerName —— 证书放不进 MQ 的连接
+  `Hashtable`（客户端不提供连接级的证书属性），于是「测试通过、正式连接握手失败」，
+  而且行为取决于 MQ 客户端有没有恰好缓存上一次测试的上下文。`mqProperties` 的 KDoc
+  原写着「测试与正式连接共用同一份组装，保证行为永远一致」，正是这句把它盖住了。
+
+  现在证书注入统一到 `IbmMqTls.withTls`：快照 6 个 JSSE 属性 → 写入本连接的值 →
+  建连 → 还原，**窗口互斥**（属性是进程级的，两条不同证书的连接并发建连会互相覆盖）；
+  留空字段写成空串而不是「跳过」，修掉「先测 A 的自签 CA、再测 B 的默认链，B 用上 A
+  的信任库」这条假测试结论。`open()` 与 `testConnection()` 调的是同一个函数。
+  证书在建连前预校验（文件缺失 / 口令错 / 无私钥条目），错误文案直接可读。
+
+- **测一次 IBM MQ 的 SSL 连接，会把整个进程的默认 SSLContext 换掉**（同上）。
+  `configureSslContext` 末尾的 `SSLContext.setDefault(...)` 从不还原：MQ 客户端根本
+  不读默认上下文（`RemoteTCPConnection.getNonFipsSocketFactory` 自己
+  `SSLContext.getInstance(...)`），对 MQ 毫无作用，却让 AI 面板的 Ktor 客户端改用
+  MQ 那个 truststore。该函数已删除。
+
+- **PKCS12 keystore 在 IBM MQ 上永远拿不到客户端证书**：客户端读
+  `javax.net.ssl.keyStore` 时写死 `KeyStore.getInstance("JKS")`，而表单收的是 `.p12`。
+  现在 PKCS12 会转成同口令的临时 JKS（POSIX 600、窗口结束即删），JKS 原样使用。
+
+- **测试源码里提交了明文口令**（`IbmMQSslDiagTest`）：`mqdiag.pass` 与两个证书口令
+  曾是带真实值的默认参数，从 `e9a3e0c` 起就在仓库里。现在默认值全部留空，参数一律
+  由 `-Dmqdiag.*` 传入；`enabled=true` 但缺参数时明确报出缺哪一项。
+  **这些凭据应视为已泄露，需要轮换**（历史提交仍在）。
+
+- **解不开的密文会被再加密一层，造成不可逆的配置损坏**（`Sensitive.kt`）。
+  密钥换了（换机器 / 拷贝配置 / 误删 `secret.key`）时 `decryptStoredValue` 保留密文
+  （设计如此），而保存时 `encryptStoredValue` 把「密文当明文」再加密 —— 之后即使把
+  正确密钥放回去，解出来也只是 `enc:v1:…` 字面量，且每保存一次多嵌一层。
+  `encryptStoredValue` 现在对已是密文的值原样返回（幂等）；字符串字段与
+  `SensitiveOptionsSerializer` 走的同一个入口。
+
+- **命令控制台的 10MB 上限拦不住大文件**（`FileReader.jvm.kt`）：先 `readBytes()` 再判
+  尺寸，选错一个几百 MB 的日志文件会先吃满堆再报错。现在先 `size()` 再读（读完再判一次
+  兜 TOCTOU）。
+- **四个消息发送页完全没有大小上限**：同样先读后判都没有 —— 裸 `File.readBytes()`。
+  抽出 `mqui/file/MessageFileBytes.kt`（`readMessageBytes`，100MB 上限 + 上限前置判断），
+  四个协议的单发 / 批量 / 「从文件加载」全部改走它；失败按「文件过大」与「读不出来」
+  分开提示（新增 `*_send_file_too_large` 文案，中英各一份）。
+
+- **IBM MQ 的「自动协商」加密套件其实永远连不上**（`mqProperties` / 连接表单）。
+  真机实测（MQ 客户端 10.0.0.5 对 QM2 的 `ECDHE_RSA_AES_128_GCM_SHA256` 通道）：
+
+  | 客户端 `SSL_CIPHER_SUITE` | 结果 |
+  | :--- | :--- |
+  | 留空（UI 的默认项，标着「自动协商」） | `MQRC_JSSE_ERROR (2397)` |
+  | `ANY_TLS12_OR_HIGHER` | `MQRC_UNSUPPORTED_CIPHER_SUITE (2400)` |
+  | 逗号分隔的套件列表 | `2400`（只接受单个套件名） |
+  | IBM 名 `ECDHE_RSA_AES_128_GCM_SHA256` | `2400`（映射已关掉，它不是 Java 套件名） |
+  | Java 名 `TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256` | **连接成功** |
+
+  也就是说默认配置下**任何** IBM MQ TLS 连接都会失败，而失败信息是 2397 这种不指向
+  根因的码。现在留空落成 `TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256`（可被用户覆盖），
+  下拉首项文案也从「自动协商（默认）」改成实际使用的套件名。
+
+### Tests
+
+- **`IbmMqTlsLiveTest`（7 例，真机，默认 SKIP）**：走**正式连接路径**
+  （`IbmMqTls.withTls` + `mqProperties` + `MQQueueManager`）连 QM2 的双向 TLS 通道，
+  并配四条反向对照 —— 去掉 truststore（2397）、换成无关 CA（2397，证明服务端证书
+  确实按我们的信任库校验）、去掉 keystore（2393）、错密码（2035）；另有一条
+  「测试连接之后再连，不许继承上一条的证书」。
+- **`IbmMqPropertiesTest`（8 例，离线）**：留空套件落成默认值、显式值优先、去空白、
+  SSL 关闭 / BINDING 模式不写 TLS 属性、peerName 仅在填了时下发。
+- **`IbmMqTlsTest`（10 例，离线，keytool 现场生成证书）**：窗口内属性正确 / 窗口外还原 /
+  后一条连接不继承前一条 / 文件缺失、口令错、无私钥条目三种预校验 / PKCS12 转临时 JKS
+  且带私钥、窗口结束即删 / JKS 原样透传 / 关闭 SSL 与 BINDING 模式不碰全局属性。
+- **`SensitiveValueIdempotenceTest`（6 例，离线）**：加解密往返、二次加密不变、异钥密文
+  在「读-改-写」一轮后字节不变、明文仍被加密、options map 序列化同一条语义。
+- **`MessageFileBytesTest`（7 例，离线）**：稀疏文件按 `length()` 拒绝（不读进内存）、
+  边界值放行、自定义上限、缺失文件归类为「读不出来」、两个上限常量的大小关系。
+
 ## [Unreleased] — 2026-10-27 (9)
 
 ### Fixed
