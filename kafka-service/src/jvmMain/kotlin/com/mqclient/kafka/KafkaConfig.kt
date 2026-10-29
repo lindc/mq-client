@@ -44,9 +44,40 @@ data class KafkaConfig(
         const val DEFAULT_LAG_SCAN_INTERVAL_SECONDS = 30
         const val DEFAULT_LAG_WARNING_THRESHOLD = 10_000L
 
+        /**
+         * Admin API 请求上限的**下限**（毫秒）：`connectionTimeout` 配得再小，
+         * AdminClient 的 `request.timeout.ms` 也不会低于它。
+         *
+         * 为什么需要这个下限：用户把「连接超时」理解为「能不能连上」，会习惯性
+         * 填 3~5 秒；但同一个值同时兼任了 AdminClient 的**请求上限** —— 集群组多 /
+         * 网络略有抖动时，`describeConsumerGroups` 一批 200 个组很容易超过 5 秒，
+         * 于是发出去就注定失败。连接验证用的超时（`createVerifiedAdmin` 显式传的
+         * `connectionTimeout`）不受这里影响，仍然是用户配的那个值。
+         */
+        const val MIN_ADMIN_REQUEST_TIMEOUT_MS = 30_000
+
+        /** 消费组列表（`listConsumerGroups` + 批量 `describeConsumerGroups`）的目标超时。 */
+        const val GROUP_LIST_TIMEOUT_MS = 20_000L
+
+        /** 消费组 Lag 批量计算（`listConsumerGroupOffsets` + `listOffsets`）的目标超时。 */
+        const val GROUP_LAG_TIMEOUT_MS = 30_000L
+
         /** securityProtocol 的合法值（Kafka 原生枚举名）；fromOptions 校验用。 */
         val SECURITY_PROTOCOLS = setOf("PLAINTEXT", "SSL", "SASL_PLAINTEXT", "SASL_SSL")
     }
+
+    /**
+     * 消费组列表的有效超时：用户配置与 [GROUP_LIST_TIMEOUT_MS] 取大。
+     *
+     * 取大而不是直接覆盖：有人真的把连接超时调到 60 秒（跨公网集群），那 60 秒就是他
+     * 的意图；这里只负责「配得太小时不至于注定失败」。
+     */
+    fun groupListTimeoutMs(): Long =
+        maxOf(connectionTimeout * 1_000L, GROUP_LIST_TIMEOUT_MS)
+
+    /** 消费组 Lag 的有效超时（独立于列表：它多一次 `listOffsets` 往返）。 */
+    fun groupLagTimeoutMs(): Long =
+        maxOf(connectionTimeout * 1_000L, GROUP_LAG_TIMEOUT_MS)
 }
 
 /** options 的键名常量：toOptions / fromOptions 两边共用，避免手写两遍字面量。 */
@@ -158,12 +189,18 @@ internal fun KafkaConfig.jaasConfig(): String {
 
 /**
  * 组装 [AdminClient] 的连接属性：连接四块见 [toConnectionProperties]，另加 AdminClient
- * 专属的两个超时（与 [KafkaConfig.connectionTimeout] 同源）。
+ * 专属的两个超时。
+ *
+ * 两个超时都以 [KafkaConfig.connectionTimeout] 为基准，但套一个
+ * [KafkaConfig.MIN_ADMIN_REQUEST_TIMEOUT_MS] 的**下限**：这个值同时是连接验证
+ * （`createVerifiedAdmin`，那里显式传参）与全部 Admin 请求的共同上限，配成 3 秒
+ * 会让大集群的正常请求注定超时。连接验证的语义不变（它直接传 `connectionTimeout`）。
  */
 fun KafkaConfig.toAdminProperties(): Properties = Properties().apply {
     putAll(toConnectionProperties())
-    put(AdminClientConfig.REQUEST_TIMEOUT_MS_CONFIG, connectionTimeout * 1_000)
-    put(AdminClientConfig.DEFAULT_API_TIMEOUT_MS_CONFIG, connectionTimeout * 1_000)
+    val adminTimeoutMs = maxOf(connectionTimeout * 1_000, KafkaConfig.MIN_ADMIN_REQUEST_TIMEOUT_MS)
+    put(AdminClientConfig.REQUEST_TIMEOUT_MS_CONFIG, adminTimeoutMs)
+    put(AdminClientConfig.DEFAULT_API_TIMEOUT_MS_CONFIG, adminTimeoutMs)
 }
 
 /** JAAS 配置串的最小转义：反斜杠与双引号。 */

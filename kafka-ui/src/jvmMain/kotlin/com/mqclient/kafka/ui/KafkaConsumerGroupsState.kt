@@ -3,10 +3,12 @@ package com.mqclient.kafka.ui
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withTimeoutOrNull
 import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ConnectionStore
+import com.mqclient.kafka.KafkaConfig
 import com.mqclient.kafka.KafkaModule
 import com.mqclient.mqui.state.LoadState
 import com.mqclient.uicommon.i18n.stringResource
@@ -28,10 +30,28 @@ data class KafkaGroupInfo(
 )
 
 /**
- * Consumer Group 列表页的状态：**缓存优先、事件驱动**，与 [KafkaTopicsState] 完全
- * 同构 —— 进页只读扫描缓存（cachedGroups），列表内容由 `kafka.scan.objects.completed`
- * 事件驱动重建；「刷新」按钮调 [KafkaModule.scanNow] 触发一轮手动慢扫。连接状态分支
- * 与 [KafkaTopicsState] 一致（未连接自动隐式连接、失败显示原因 + 重试）。
+ * 首屏「等一轮扫描」的上限。
+ *
+ * 20 秒的依据：服务层的消费组列表超时是 20 秒档（[KafkaConfig.GROUP_LIST_TIMEOUT_MS]），
+ * 这里必须**不小于**它 —— 否则 UI 会比底层先放弃，出现「明明还在查，界面已经报超时」。
+ * 旧值 5 秒正是这个错配：等的是「整轮对象慢扫」（brokers + topics + groups 三类并发），
+ * 大集群上 topics 一批就超过 5 秒。
+ *
+ * 注意：这条只是**兜底**。正常路径走 [KafkaConsumerGroupsState.fetchGroupsDirectly]
+ * （定向查询消费组），压根不等整轮扫描。
+ */
+private const val SCAN_WAIT_TIMEOUT_MS = 20_000L
+
+/**
+ * Consumer Group 列表页的状态：**定向查询优先 + 事件驱动刷新**。
+ *
+ * 与 [KafkaTopicsState] 的差别只有一处，但很关键：进页不再干等整轮对象慢扫，而是
+ * 直接用 `refreshGroups` 查一次组（listConsumerGroups + 批量 describeConsumerGroups），
+ * 1~2 秒就能出卡片。Lag 不在这条路径上 —— 它由独立的心跳快扫产出，卡片先显示
+ * 「计算中」。`kafka.scan.objects.completed` 事件仍会驱动整表刷新（与 topic 页同构）。
+ *
+ * 「刷新」按钮仍调 [KafkaModule.scanNow] 触发一轮手动慢扫（用户要的是全量最新）；
+ * 「重试」（失败态）走同一套首屏路径。
  */
 class KafkaConsumerGroupsState(
     private val connectionId: String,
@@ -73,13 +93,43 @@ class KafkaConsumerGroupsState(
             }
             ConnectionStatus.Connected -> Unit
         }
+        loadAfterConnected()
+    }
+
+    /**
+     * 连接就绪后的取数路径（首屏与「连接刚建立」共用，保证两条入口行为一致）：
+     * 缓存 → 定向查询 → 等扫描事件 → 柔和提示。
+     */
+    private suspend fun loadAfterConnected() {
         refreshFromCache()
         if (loadState is LoadState.Success) return
-        // 缓存还没有组且首扫未完成：最多等 5 秒；超时不再无限转圈，转可重试错误态。
+
+        // ① 定向查询：只拉组（listConsumerGroups + 批量 describeConsumerGroups），
+        //    不等整轮慢扫。绝大多数集群 1~2 秒出卡片，这是首屏的主路径。
+        if (fetchGroupsDirectly()) return
+
+        // ② 定向查询没成（连接正忙 / Admin 尚未就绪）：退回等慢扫事件。
+        if (scannedOnce) {
+            refreshFromCache()
+            return
+        }
+        awaitScan(SCAN_WAIT_TIMEOUT_MS)
+    }
+
+    /**
+     * 等一轮扫描完成并读缓存；超时不再判死，改成「耗时较长」的柔和提示。
+     *
+     * 为什么不再用 5 秒：原来的 `withTimeoutOrNull(5000)` 等的是**整轮对象慢扫**
+     * （brokers + topics + groups 三类并发），大集群上 topics 一批就轻松超过 5 秒 ——
+     * 于是组查询明明会成功，界面却先报「加载超时」。现在 20 秒档，且超时文案说明
+     * 这是「慢」而不是「失败」，并保留重试。
+     */
+    private suspend fun awaitScan(timeoutMs: Long) {
         loadAwaiter = CompletableDeferred()
-        if (scannedOnce) { refreshFromCache(); return }
-        val got = withTimeoutOrNull(5000) { loadAwaiter.await() } != null
+        val got = withTimeoutOrNull(timeoutMs) { loadAwaiter.await() } != null
         if (!got) {
+            // 不判死：把状态置成可重试的提示；若慢扫稍后真完成了，onObjectsScanned
+            // 仍会 refreshFromCache 把提示换成真实列表（自愈）。
             loadState = LoadState.Error(stringResource("kafka_ui_group_load_timeout"))
             return
         }
@@ -87,14 +137,49 @@ class KafkaConsumerGroupsState(
     }
 
     /**
+     * 定向查询消费组列表（只查组，不查 topic / broker，不算 Lag）。
+     *
+     * @return true = 已拿到结果（含「确实一个组都没有」），调用方无需再等扫描事件。
+     */
+    private suspend fun fetchGroupsDirectly(): Boolean {
+        val service = KafkaModule.serviceOrNull() ?: return false
+        val groups = try {
+            service.refreshGroups(connectionId)
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (error: Exception) {
+            // 连接正忙 / Admin 未就绪 / 权限不足：交给慢扫事件兜底，不在这里判死。
+            return false
+        }
+        scannedOnce = true
+        loadState = LoadState.Success(groups.map { it.toInfo() })
+        return true
+    }
+
+    /** 快照 → 卡片模型（Lag 取当前心跳缓存；没有就是 null = 卡片显示「计算中」）。 */
+    private fun com.mqclient.kafka.KafkaGroupSnapshot.toInfo(): KafkaGroupInfo =
+        KafkaGroupInfo(
+            name = groupId,
+            state = state,
+            members = members,
+            simple = simple,
+            totalLag = KafkaModule.serviceOrNull()
+                ?.cachedGroupLags(connectionId)
+                ?.get(groupId)
+                ?.totalLag,
+        )
+
+    /**
      * 连接状态变化的响应（**不发起连接**）：Connected → 读缓存；Disconnected →
      * 「已断开」态；Failed → 错误态；Connecting → 保持加载。
      */
-    fun onStatusChanged(status: ConnectionStatus) {
+    suspend fun onStatusChanged(status: ConnectionStatus) {
         when (status) {
+            // 隐式连接的落点：load() 在 Disconnected 时只发起连接就返回了，真正取数
+            // 必须在这里接上 —— 否则首屏会永远停在 Loading（旧行为靠 5 秒超时兜底）。
             ConnectionStatus.Connected -> {
                 if (loadState !is LoadState.Success) loadState = LoadState.Loading
-                refreshFromCache()
+                loadAfterConnected()
             }
             ConnectionStatus.Disconnected ->
                 loadState = LoadState.Error(stringResource("kafka_ui_connect_disconnected"))
@@ -151,14 +236,20 @@ class KafkaConsumerGroupsState(
         }
     }
 
-    /** 「重试」：失败态重新发起连接。 */
-    fun retry() {
+    /** 「重试」：重新走一遍首屏路径（定向查询 → 等扫描）；连接不在时重新发起连接。 */
+    suspend fun retry() {
         val status = ConnectionStore.connections.value
             .firstOrNull { it.id == connectionId }?.status ?: ConnectionStatus.Disconnected
         when (status) {
-            // 连接仍在：超时通常是首扫慢，直接重新触发一轮慢扫并回到加载态。
-            ConnectionStatus.Connected -> { loadState = LoadState.Loading; requestScan() }
-            else -> ensureKafkaConnecting(connectionId, status)
+            // 连接仍在：先回加载态，再走与首屏完全相同的路径（定向查询为主）。
+            ConnectionStatus.Connected -> load()
+            else -> {
+                ensureKafkaConnecting(connectionId, status)
+                // 连接建立后由 onStatusChanged → load 的路径并不存在（它只读缓存），
+                // 所以这里把「连接中」留在 Loading，等状态翻转后由面板的
+                // LaunchedEffect 再触发一次 load —— 与首屏的隐式连接同一时序。
+                loadState = LoadState.Loading
+            }
         }
     }
 }

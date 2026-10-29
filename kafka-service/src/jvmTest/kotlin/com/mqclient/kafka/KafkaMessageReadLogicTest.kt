@@ -159,10 +159,13 @@ class KafkaMessageReadLogicTest {
         // AdminClient 专属键不得漏进 consumer/producer
         assertTrue(!props.containsKey("request.timeout.ms"))
         assertTrue(!props.containsKey("default.api.timeout.ms"))
-        // Admin 属性 = 连接四块 + 两个超时（put 的是 Int，getProperty 读不到字符串形式）
+        // Admin 属性 = 连接四块 + 两个超时（put 的是 Int，getProperty 读不到字符串形式）。
+        // 15 秒配得比 MIN_ADMIN_REQUEST_TIMEOUT_MS（30 秒）小，按**下限**取值：
+        // 这个值同时是全部 Admin 请求的上限，配成 15 秒会让大集群的正常请求注定超时
+        // （消费组列表就是被它坑过的一个）。连接验证本身仍按 connectionTimeout 传参。
         val admin = config.toAdminProperties()
-        assertEquals(15000, admin.get("request.timeout.ms"))
-        assertEquals(15000, admin.get("default.api.timeout.ms"))
+        assertEquals(KafkaConfig.MIN_ADMIN_REQUEST_TIMEOUT_MS, admin.get("request.timeout.ms"))
+        assertEquals(KafkaConfig.MIN_ADMIN_REQUEST_TIMEOUT_MS, admin.get("default.api.timeout.ms"))
     }
 
     @Test

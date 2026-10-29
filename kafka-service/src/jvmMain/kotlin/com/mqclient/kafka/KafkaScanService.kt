@@ -11,19 +11,12 @@ import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
-import kotlinx.coroutines.TimeoutCancellationException
 import org.apache.kafka.clients.admin.AdminClient
 import org.apache.kafka.common.config.ConfigResource
 import org.apache.kafka.clients.admin.ListConsumerGroupsOptions
-import org.apache.kafka.clients.admin.ListConsumerGroupOffsetsOptions
-import org.apache.kafka.clients.admin.ListConsumerGroupOffsetsSpec
 import org.apache.kafka.clients.admin.NewTopic
 import org.apache.kafka.clients.admin.ListTopicsOptions
 import org.apache.kafka.clients.admin.OffsetSpec
@@ -130,13 +123,16 @@ class KafkaScanService(
     override suspend fun scanObjects(connectionId: String) = withScanLock(connectionId) {
         val (ctx, admin) = scanTargetOrNull(connectionId) ?: return@withScanLock
         val timeoutMs = ctx.config.connectionTimeout * 1_000L
+        // 消费组列表用**独立且更长**的一档（见 KafkaConfig.GROUP_LIST_TIMEOUT_MS）：
+        // 大集群上 listConsumerGroups + 批量 describe 比单个 topic 查询慢得多。
+        val groupTimeoutMs = ctx.config.groupListTimeoutMs()
         runObjectScan(
             connectionId = connectionId,
             cache = ctx.cache,
             objectsTtl = objectsTtlMs(ctx),
             scanBrokers = { scanKafkaBrokers(admin, timeoutMs) },
             scanTopics = { scanKafkaTopics(admin, timeoutMs) },
-            scanGroups = { scanKafkaGroups(admin, timeoutMs) },
+            scanGroups = { scanKafkaGroups(admin, groupTimeoutMs) },
         )
     }
 
@@ -251,7 +247,13 @@ class KafkaScanService(
         val (ctx, admin) = scanTargetOrNull(connectionId) ?: return@withLock
         try {
             val timeoutMs = ctx.config.connectionTimeout * 1_000L
-            val lags = withContext(Dispatchers.IO) { scanAllGroupLags(admin, timeoutMs) }
+            val lags = withContext(Dispatchers.IO) {
+                scanAllGroupLags(
+                    admin = admin,
+                    listTimeoutMs = ctx.config.groupListTimeoutMs(),
+                    lagTimeoutMs = ctx.config.groupLagTimeoutMs(),
+                )
+            }
             val topicsTouched = withContext(Dispatchers.IO) {
                 syncTopicChanges(admin, timeoutMs, ctx.cache, objectsTtlMs(ctx))
             }
@@ -285,6 +287,31 @@ class KafkaScanService(
             )
             markFailed(connectionId, message)
         }
+    }
+
+    /**
+     * **消费组定向刷新**（消费组页首屏 / 「重试」用）：只查组，不等整轮对象慢扫。
+     *
+     * 为什么单独开一条路：`scanObjects` 是 brokers / topics / groups 三类并发的一整轮，
+     * 在 topic 多、分区多的集群上，**组早就查完了，UI 还在等 topics**。消费组页要的只是
+     * 一张卡片列表（state / members），没必要为它付整轮的代价。
+     *
+     * 只调两次：`listConsumerGroups` + 批量 `describeConsumerGroups`（见 [scanKafkaGroups]）。
+     * **不计算 Lag** —— Lag 由独立的心跳快扫产出（`scanGroupLags`，30 秒档），首屏先用
+     * 缓存里的旧值，没有就显示「计算中」。这正是「先出卡片，Lag 后到」的口径。
+     *
+     * 刻意**不进扫描锁**：它只读，且必须不被正在跑的那一轮慢扫挡住 —— 那正是这个入口
+     * 存在的理由。与慢扫的并发覆盖（都写 `groups` 缓存）是良性的：两边写的是同一份
+     * 真实快照，后到者胜。
+     *
+     * @throws IllegalStateException 连接未就绪（无 AdminClient）时抛出，由调用方兜底。
+     */
+    suspend fun refreshGroups(connectionId: String): List<KafkaGroupSnapshot> {
+        val (ctx, admin) = scanTargetOrNull(connectionId)
+            ?: throw IllegalStateException("连接未就绪，无法查询消费组")
+        val groups = scanKafkaGroups(admin, ctx.config.groupListTimeoutMs())
+        ctx.cache?.put(KEY_GROUPS, groups, ttlMs = objectsTtlMs(ctx))
+        return groups
     }
 
     // ---------------------------------------------------------------- 只读口
@@ -671,69 +698,24 @@ class KafkaScanService(
 
     // ---------------------------------------------------------------- 内部：查询
 
+    /**
+     * 全组 Lag：`listConsumerGroups` 一次 + 批量 offsets 两次往返（见
+     * [scanKafkaGroupLags]），**不再**逐组串行 / 限流等待。
+     *
+     * 超时用 [KafkaConfig.groupLagTimeoutMs]（30 秒档，比列表的 20 秒宽一档）：
+     * 它比列表多一次 `listOffsets`，且大集群上分区总数可能上千。
+     */
     private suspend fun scanAllGroupLags(
         admin: AdminClient,
-        timeoutMs: Long,
+        listTimeoutMs: Long,
+        lagTimeoutMs: Long,
     ): Map<String, KafkaGroupLagSnapshot> {
-        val groupIds = admin.listConsumerGroups(ListConsumerGroupsOptions().timeoutMs(timeoutMs.toInt()))
+        val groupIds = admin.listConsumerGroups(ListConsumerGroupsOptions().timeoutMs(listTimeoutMs.toInt()))
             .all()
-            .get(timeoutMs, TimeUnit.MILLISECONDS)
+            .awaitKafka(listTimeoutMs)
             .map { it.groupId() }
-        if (groupIds.isEmpty()) return emptyMap()
-
-        // Per-group concurrent Lag: Semaphore(5), hard withTimeout(3000) per group.
-        val log = kafkaLog
-        val semaphore = Semaphore(5)
-        val snapshots = coroutineScope {
-            groupIds.map { groupId ->
-                async {
-                    try {
-                        semaphore.withPermit {
-                            withTimeout(3000) { computeOneGroupLag(admin, groupId, timeoutMs) }
-                        }
-                    } catch (timeout: TimeoutCancellationException) {
-                        log.warn("group lag skipped (timeout): group=$groupId")
-                        null
-                    } catch (cancellation: CancellationException) {
-                        throw cancellation
-                    } catch (error: Throwable) {
-                        log.warn("group lag skipped: group=$groupId error=${kafkaErrorOf(error)}")
-                        null
-                    }
-                }
-            }.awaitAll()
-        }
-        return snapshots.filterNotNull().associateBy { it.groupId }
-    }
-
-    // Single group lag: committed offsets + latest offset per partition -> group lag.
-    private suspend fun computeOneGroupLag(
-        admin: AdminClient,
-        groupId: String,
-        timeoutMs: Long,
-    ): KafkaGroupLagSnapshot {
-        val committed = admin.listConsumerGroupOffsets(
-            mapOf(groupId to ListConsumerGroupOffsetsSpec()),
-            ListConsumerGroupOffsetsOptions().timeoutMs(timeoutMs.toInt()),
-        ).partitionsToOffsetAndMetadata(groupId)
-            .get(timeoutMs, TimeUnit.MILLISECONDS)
-            .mapValues { (_, m) -> m.offset() }
-        if (committed.isEmpty()) return KafkaGroupLagSnapshot(groupId, 0L, emptyList())
-        val latest = admin.listOffsets(committed.keys.associateWith { OffsetSpec.latest() })
-            .all()
-            .get(timeoutMs, TimeUnit.MILLISECONDS)
-            .mapValues { (_, info) -> info.offset() }
-        val details = committed.map { (tp, current) ->
-            val end = latest[tp] ?: 0L
-            KafkaPartitionLag(
-                topic = tp.topic(),
-                partition = tp.partition(),
-                currentOffset = current,
-                latestOffset = end,
-                lag = (end - current).coerceAtLeast(0L),
-            )
-        }.sortedWith(compareBy({ it.topic }, { it.partition }))
-        return KafkaGroupLagSnapshot(groupId = groupId, totalLag = details.sumOf { it.lag }, partitions = details)
+            .sorted()
+        return scanKafkaGroupLags(admin, groupIds, lagTimeoutMs)
     }
 
     /**

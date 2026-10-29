@@ -2,6 +2,63 @@
 
 本文件记录 MQClient 的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [Unreleased] — 2026-10-29 (16)
+
+### Fixed
+
+- **Kafka 消费组页「消费组加载超时」**（`kafka-service` + `kafka-ui`）。
+
+  现场：进消费组页几秒后报 `消费组加载超时，请点击刷新重试`，集群明明正常。
+
+  根因有两层，都不是「网络慢」：
+
+  1. **UI 只等 5 秒，而且等的是整轮对象慢扫**（`KafkaConsumerGroupsState`
+     的 `withTimeoutOrNull(5000)`）。那一轮是 brokers + topics + groups 三类并发，
+     topic 多的集群上 topics 一批就超过 5 秒 —— 组早就查完了，界面已经先报超时。
+  2. **Lag 是逐组串行的两次往返**（旧 `computeOneGroupLag`：每组一次
+     `listConsumerGroupOffsets` + 一次 `listOffsets`），200 个组 = 400 次往返；外层
+     `withTimeout(3000)` 还是**假守卫** —— `future.get` 不可被协程取消，超时抛了异常、
+     线程照样卡住。
+
+  修法：
+  - **超时分级**（`KafkaConfig`）：消费组列表 20 秒档（`GROUP_LIST_TIMEOUT_MS`）、
+    Lag 30 秒档（`GROUP_LAG_TIMEOUT_MS`），都取「用户配置 vs 下限」的较大值；
+    AdminClient 的 `request.timeout.ms` 增加 30 秒下限（`MIN_ADMIN_REQUEST_TIMEOUT_MS`）
+    —— 它同时是全部 Admin 请求的上限，用户把「连接超时」填成 3 秒曾让正常请求注定失败
+    （连接验证本身仍按用户值传参）。
+  - **批量而非串行**：`scanKafkaGroupLags` 用**一次** `listConsumerGroupOffsets(全部组)`
+    \+ **一次** `listOffsets(全部分区)` 覆盖所有组，`partitionsToOffsetAndMetadata(groupId)`
+    只是同一次响应的本地按组切分 —— 2 次往返取代 2N 次。
+  - **真异步**：新增 `KafkaFutures.awaitKafka`（`toCompletionStage` + 挂起），
+    不再用阻塞的 `future.get`；`withTimeout` 现在真能打断，`Semaphore(8)` 随之删除
+    （没有需要节流的阻塞点了）。
+  - **定向查询代替等整轮**：新增 `KafkaScanService.refreshGroups`（只调
+    `listConsumerGroups` + 批量 `describeConsumerGroups`，写缓存即返回，不进扫描锁），
+    消费组页首屏与「重试」直接走它 —— 不再被 topics 慢扫拖住。
+  - **逐组 / 逐分区异常隔离**：单组 describe / offsets 失败（无权限、组刚消失、
+    协调器无响应）只跳过该组并记日志，不再拖垮整张列表；单分区查不到末端位移按 lag=0。
+  - **UI 兜底**：等待上限 5s → 20s（不小于服务层的列表档，避免 UI 比底层先放弃）；
+    文案改柔和为「加载消费组耗时较长，请稍候或点击重试」；超时不判死 —— 慢扫若稍后真的
+    完成，事件仍会把提示换成真实列表；「重试」重走首屏路径而不是干等下一轮。
+    另修一条真实缺陷：`onStatusChanged(Connected)` 以前只读缓存，隐式连接完成后首屏会
+    永远停在 Loading（旧行为正是靠那个 5 秒超时"兜底"看起来才没卡死）。
+  - **Lag 占位**：卡片没有 lag 时显示「Lag: 计算中」，不再整块留空（空着读起来像
+    零积压）。
+
+  i18n 中英同步：`kafka_ui_group_load_timeout` 改文案，新增 `kafka_ui_group_lag_pending`。
+
+  测试：`KafkaFuturesTest`（6 条，真实 `KafkaFutureImpl`：正常完成 / 超时可打断 /
+  超时不杀协程 / 解 `ExecutionException` 露出根因 / 外层 withTimeout 生效 /
+  并发等待互不阻塞）、`KafkaGroupTimeoutPolicyTest`（4 条，分级与下限）、
+  `GroupCardAdapterTest`（4 条，「计算中」与真实 0 值要区分）。
+  顺带把 `KafkaErrorTextTest` 改成断言纯函数 `kafkaErrorKey` —— 它原先是靠「语言表未
+  加载」这个进程级隐式前提跑的，新增的卡片测试一旦先加载语言表就按执行顺序变红
+  （实测踩到），现在与语言表状态无关。
+
+  **未验证**：真机大集群（几百组 / 上千分区）的实际耗时。本地到编译 + 单测 + i18n +
+  分层检查；`verify.sh` 的 `:rabbitmq-service:jvmTest` 仍因本机配了 rabbitmq 连接但
+  broker 未运行而失败。
+
 ## [Unreleased] — 2026-10-29 (15)
 
 ### Fixed

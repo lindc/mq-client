@@ -15,11 +15,12 @@ import org.apache.kafka.common.errors.UnknownTopicOrPartitionException
 /**
  * Kafka 错误文案的统一出口。
  *
- * 测试跑在没加载语言表的环境里（`stringResource` 缺键返回 key 本身），所以断言
- * 分两类：
- *  - **分类正确**：异常类型 → 对应的 i18n key（这是本函数的职责，与语言无关）；
- *  - **绝不泄漏原始类名**：无分类回退时走 `failureText`，也不能出现
- *    `org.apache.kafka` 前缀。
+ * 断言分两层，**都与语言表是否加载无关**：
+ *  - **分类正确**：`kafkaErrorKey` 是纯函数（异常 → i18n key），不碰语言表。
+ *    以前直接对 `kafkaErrorText` 的返回值断言 key 子串，隐含了「本测试跑在语言表
+ *    未加载的环境里」这个前提 —— `LanguageResources` 是进程级单例，任何一个先
+ *    `load()` 的测试类都会让后面的断言按执行顺序变红（实测踩到）。
+ *  - **绝不泄漏原始类名**：无分类回退时走 `failureText`，不能出现 `org.apache.kafka`。
  *
  * 「原文片段要附上」这条单独断言，因为它是可操作性的来源（哪个 topic / 哪个 broker）。
  */
@@ -27,41 +28,38 @@ class KafkaErrorTextTest {
 
     @Test
     fun `timeout maps to the timeout key and keeps the detail`() {
-        val text = kafkaErrorText(
-            TimeoutException("Topic orders not present in metadata after 60000 ms."),
-        )
+        val error = TimeoutException("Topic orders not present in metadata after 60000 ms.")
+        val text = kafkaErrorText(error)
 
-        assertTrue(text.contains("kafka_error_timeout"), "应命中超时分类，实际：$text")
+        assertEquals("kafka_error_timeout", kafkaErrorKey(error))
         assertTrue(text.contains("orders"), "原文片段要保留（哪个对象超时），实际：$text")
         assertFalse(text.contains("org.apache.kafka"), "不能泄漏原始类名：$text")
     }
 
     @Test
     fun `execution wrapper is unwrapped before classification`() {
-        val text = kafkaErrorText(ExecutionException(UnknownTopicOrPartitionException("orders")))
-
-        assertTrue(text.contains("kafka_error_unknown_topic"), "应解包后命中分类，实际：$text")
+        assertEquals(
+            "kafka_error_unknown_topic",
+            kafkaErrorKey(ExecutionException(UnknownTopicOrPartitionException("orders"))),
+        )
     }
 
     @Test
     fun `completion wrapper is unwrapped too`() {
-        val text = kafkaErrorText(CompletionException(RecordTooLargeException("too big")))
-
-        assertTrue(text.contains("kafka_error_record_too_large"), "实际：$text")
+        assertEquals(
+            "kafka_error_record_too_large",
+            kafkaErrorKey(CompletionException(RecordTooLargeException("too big"))),
+        )
     }
 
     @Test
     fun `topic authorization wins over the generic authorization branch`() {
-        val text = kafkaErrorText(TopicAuthorizationException(setOf("orders")))
-
-        assertTrue(text.contains("kafka_error_authorization"), "实际：$text")
+        assertEquals("kafka_error_authorization", kafkaErrorKey(TopicAuthorizationException(setOf("orders"))))
     }
 
     @Test
     fun `group authorization also maps`() {
-        val text = kafkaErrorText(GroupAuthorizationException("cg-1"))
-
-        assertTrue(text.contains("kafka_error_authorization"), "实际：$text")
+        assertEquals("kafka_error_authorization", kafkaErrorKey(GroupAuthorizationException("cg-1")))
     }
 
     @Test
@@ -77,8 +75,16 @@ class KafkaErrorTextTest {
 
     @Test
     fun `ssl failures are classified`() {
-        val text = kafkaErrorText(javax.net.ssl.SSLHandshakeException("certificate verify failed"))
+        assertEquals(
+            "kafka_error_ssl",
+            kafkaErrorKey(javax.net.ssl.SSLHandshakeException("certificate verify failed")),
+        )
+    }
 
-        assertTrue(text.contains("kafka_error_ssl"), "实际：$text")
+    @Test
+    fun `unclassified errors have no key and fall back to their own message`() {
+        // 无 key 是「交给 failureText」的信号；这里同时钉住回退不吞消息。
+        assertEquals(null, kafkaErrorKey(IllegalStateException("消费组不存在")))
+        assertEquals("消费组不存在", kafkaErrorText(IllegalStateException("消费组不存在")))
     }
 }

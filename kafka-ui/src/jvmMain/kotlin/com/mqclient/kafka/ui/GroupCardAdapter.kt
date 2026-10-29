@@ -88,7 +88,7 @@ internal fun KafkaGroupInfo.toCardData(
     val style = groupStateStyle(state)
     val dotColor = style.color
     val stateText = style.cardText
-    // Lag 着色：无心跳产物不显示；0 用次要色（默认）；超阈值（阈值 > 0 才启用）警示橙。
+    // Lag 着色：0 用次要色（默认）；超阈值（阈值 > 0 才启用）警示橙。
     val lagColor = when {
         totalLag == null || totalLag == 0L -> null
         lagWarningThreshold > 0 && totalLag > lagWarningThreshold -> GroupStatusStyle.REBALANCE
@@ -99,7 +99,10 @@ internal fun KafkaGroupInfo.toCardData(
         title = name,
         typeIcon = Icons.Default.Group,
         typeLabel = stringResource("kafka_ui_nav_groups"),
-        metricValue = totalLag?.let { "Lag: ${formatLag(it)}" },
+        // Lag 由**独立的**心跳快扫产出（默认 30s 一轮），首屏卡片先出来时还没有它 ——
+        // 这时显示「计算中」而不是整块留空：空着看起来像「没有积压」，是误导。
+        metricValue = totalLag?.let { "Lag: ${formatLag(it)}" }
+            ?: "Lag: ${stringResource("kafka_ui_group_lag_pending")}",
         metricColor = lagColor,
         statusIcon = Icons.Default.Circle,
         statusIconTint = dotColor,

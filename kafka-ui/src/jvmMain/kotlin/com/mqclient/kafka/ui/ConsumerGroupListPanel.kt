@@ -15,6 +15,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -29,6 +30,7 @@ import com.mqclient.mqui.objectlist.ObjectCardData
 import com.mqclient.mqui.objectlist.ObjectListPanel
 import com.mqclient.mqui.state.LoadStateContent
 import com.mqclient.uicommon.i18n.stringResource
+import kotlinx.coroutines.launch
 
 /**
  * Consumer Group 列表页（导航项 `groups` 的 Tab 内容）：与 [TopicListPanel] 同一套
@@ -46,6 +48,7 @@ fun ConsumerGroupListPanel(
     modifier: Modifier = Modifier,
 ) {
     val state = remember(connectionId) { KafkaConsumerGroupsState(connectionId) }
+    val scope = rememberCoroutineScope()
     // 当前打开详情的消费组 id；null = 关闭。
     var detailGroupId by remember(connectionId) { mutableStateOf<String?>(null) }
     // 进入 Tab 首次加载（组合期一次，含隐式连接兜底）；之后的状态变化走
@@ -85,7 +88,8 @@ fun ConsumerGroupListPanel(
 
         LoadStateContent(
             state = state.loadState,
-            onRetry = { state.retry() },
+            // 重试 = 重走首屏路径（定向查询只拉组），不是干等下一轮慢扫。
+            onRetry = { scope.launch { state.retry() } },
             loadingMessage =
                 if (connectionStatus == ConnectionStatus.Connecting) {
                     stringResource("kafka_ui_connecting")

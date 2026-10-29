@@ -42,12 +42,34 @@ import org.apache.kafka.common.errors.UnsupportedVersionException
  * `AuthenticationException` —— 判断父类比子类晚，否则会被父类吃掉。
  */
 fun kafkaErrorText(error: Throwable): String {
-    val unwrapped = when (error) {
-        is ExecutionException -> error.cause ?: error
-        is CompletionException -> error.cause ?: error
-        else -> error
-    }
-    val mapped = when (unwrapped) {
+    val root = unwrapCompletion(error)
+    val mapped = kafkaErrorKeyFor(root) ?: return failureText(root)
+
+    val base = stringResource(mapped)
+    // 命中分类后仍附上原文片段：分类说明「哪一类问题」，原文说明「哪个对象」。
+    val detail = root.message?.trim()?.takeIf { it.isNotEmpty() }?.take(200)
+    return if (detail != null) "$base — $detail" else base
+}
+
+/**
+ * 分类本身：异常 → i18n key；未命中返回 null（调用方回退 [failureText]）。
+ *
+ * 拆出来是**为了可测**：`kafkaErrorText` 的返回值依赖语言表是否加载（缺键时返回
+ * key 本身，加载后返回中文），而 `LanguageResources` 是进程级单例 —— 一旦有别的
+ * 测试类先加载了表，断言 key 的用例就会因为执行顺序而红。分类与文案拼装分开之后，
+ * 断言落在分类上，与语言表状态无关。
+ */
+internal fun kafkaErrorKey(error: Throwable): String? = kafkaErrorKeyFor(unwrapCompletion(error))
+
+/** 解掉 KafkaFuture 的两层包装（`ExecutionException` / `CompletionException`）。 */
+internal fun unwrapCompletion(error: Throwable): Throwable = when (error) {
+    is ExecutionException -> error.cause ?: error
+    is CompletionException -> error.cause ?: error
+    else -> error
+}
+
+private fun kafkaErrorKeyFor(unwrapped: Throwable): String? =
+    when (unwrapped) {
         // 子类优先：这三个都是 AuthorizationException 的子类。
         is TopicAuthorizationException -> "kafka_error_authorization"
         is GroupAuthorizationException -> "kafka_error_authorization"
@@ -64,13 +86,7 @@ fun kafkaErrorText(error: Throwable): String {
         is InvalidPartitionsException -> "kafka_error_invalid_topic_config"
         is UnsupportedVersionException -> "kafka_error_unsupported_version"
         else -> if (unwrapped.isSslFailure()) "kafka_error_ssl" else null
-    } ?: return failureText(unwrapped)
-
-    val base = stringResource(mapped)
-    // 命中分类后仍附上原文片段：分类说明「哪一类问题」，原文说明「哪个对象」。
-    val detail = unwrapped.message?.trim()?.takeIf { it.isNotEmpty() }?.take(200)
-    return if (detail != null) "$base — $detail" else base
-}
+    }
 
 /** SSL 握手类失败（`javax.net.ssl` 的异常在 Kafka 里不包装成自有类型）。 */
 private fun Throwable.isSslFailure(): Boolean =
