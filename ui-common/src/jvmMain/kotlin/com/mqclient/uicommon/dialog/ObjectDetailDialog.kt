@@ -21,6 +21,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
@@ -82,6 +83,12 @@ fun ObjectDetailDialog(
     // 关闭出口统一走 requestClose：调用方要拦截（如发送中确认）时传 onCloseRequest，
     // 由它自行决定何时真正调 onDismiss；不传则 ✕ / ESC 直接关。
     val requestClose = onCloseRequest ?: onDismiss
+    // 真正「让窗口消失」的那一下。必须走 hide()（原生系统调用，不经过 Compose 帧管线），
+    // 否则会卡在等帧上：现场「点 ✕ 没反应，拖一下窗口才关上」就是这条闩锁
+    // （见 dismissWithWindow 的 KDoc 与 doc/compose-frame-latches.md）。
+    //
+    // 只用于**放行**动作（✕ / ESC / 默认关闭）；onCloseRequest 这种「可能拦截」的入口
+    // 保持原样 —— 拦截意味着这次点击不该关窗，提前 hide 会关错。
     // 初始尺寸与 min/max 求交集：调用方配置失配时不至于开局越界。
     val twoThirdsScreen = rememberTwoThirdsScreenSize()
     val startWidth = (initialWidth ?: twoThirdsScreen.width).coerceIn(minWidth, maxWidth)
@@ -106,6 +113,25 @@ fun ObjectDetailDialog(
         LaunchedEffect(nucleusWindow) {
             nucleusWindow.setMinimumSize(DpSize(minWidth, minHeight))
         }
+        // 兜底：内容换了（标题变 = 打开的是另一个对象）就把窗口显示回来。
+        //
+        // 为什么需要：closeNow 只是 hide，真正的销毁等父组合重组（要一帧）。若那一帧
+        // 迟迟不来而用户又打开了另一个对象，`detailMessage?.let{}` 会**原地更新**这个
+        // 节点而不是销毁重建 —— 窗口就停在隐藏态，用户会觉得「打不开了」。
+        // 这一行保证任何一种「新内容出现」都把窗口亮回来。
+        LaunchedEffect(title) {
+            runCatching { nucleusWindow.show() }
+        }
+        // 关闭动作：先同步 hide 掉原生窗口，再通知宿主（理由见 dismissWithWindow）。
+        val closeNow = remember(nucleusWindow, requestClose) {
+            {
+                if (onCloseRequest == null) {
+                    dismissWithWindow(hide = { nucleusWindow.hide() }, onDismiss = requestClose)
+                } else {
+                    requestClose()
+                }
+            }
+        }
 
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
             Column(modifier = Modifier.fillMaxSize()) {
@@ -123,7 +149,7 @@ fun ObjectDetailDialog(
                         modifier = Modifier.weight(1f),
                     )
                     SecondaryButton(
-                        onClick = onDismiss,
+                        onClick = closeNow,
                         standardMinWidth = false, // ✕ 是图标按钮，不套「4 字宽」标准。
                     ) {
                         Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -154,7 +180,7 @@ fun ObjectDetailDialog(
                         footerActions()
                     } else {
                         SecondaryButton(
-                            onClick = onDismiss,
+                            onClick = closeNow,
                         ) { Text(stringResource("common_close")) }
                     }
                 }

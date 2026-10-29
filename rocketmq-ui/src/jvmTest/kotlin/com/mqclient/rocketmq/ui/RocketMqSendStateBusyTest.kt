@@ -60,7 +60,14 @@ class RocketMqSendStateBusyTest {
         s.loadFiles(paths)
     }
 
-    /** 逐帧推进到条件成立（Compose snapshot 状态在同一线程可见，直接轮询即可）。 */
+    /**
+     * 轮询到条件成立。
+     *
+     * ⚠️ 等待条件必须是**终态**（如「任务已落成 FAILED」），不能是「busy 已复位」：
+     * `busy = true` 是在 `scope.launch` **内部**才写的，`launch` 返回后协程可能还没被
+     * 调度 —— 此时 `busy` 仍是 false，「等它变 false」会立刻通过，随后断言的仍是初始
+     * 状态。这正是本测试第一版偶发失败（`expected:<FAILED> but was:<WAITING>`）的原因。
+     */
     private suspend fun awaitUntil(what: String, timeoutMs: Long = 3_000, condition: () -> Boolean) {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline) {
@@ -77,11 +84,10 @@ class RocketMqSendStateBusyTest {
         seed(s, 1)
 
         s.sendAll()
-        awaitUntil("busy 复位") { !s.busy }
+        // 等终态，不等 busy（见 awaitUntil 的说明）。
+        awaitUntil("任务落成失败态") { s.tasks.single().status == SendStatus.FAILED }
 
         assertFalse(s.busy, "发送抛异常后 busy 必须复位，否则 ✕ / ESC 永久失效")
-        val status = s.tasks.single().status
-        assertEquals(SendStatus.FAILED, status, "抛异常的那条要落成失败态，不能停在 SENDING")
         assertTrue(
             s.tasks.single().errorMessage?.contains("连接已断开") == true,
             "真实原因要带给用户，实测：${s.tasks.single().errorMessage}",
@@ -96,10 +102,9 @@ class RocketMqSendStateBusyTest {
         seed(s, 1)
 
         s.sendSingle(onEmptyBodyWarning = {})
-        awaitUntil("busy 复位") { !s.busy }
+        awaitUntil("任务落成失败态") { s.tasks.single().status == SendStatus.FAILED }
 
-        assertFalse(s.busy)
-        assertEquals(SendStatus.FAILED, s.tasks.single().status)
+        assertFalse(s.busy, "发送抛异常后 busy 必须复位")
         scope.cancel()
     }
 
@@ -116,7 +121,7 @@ class RocketMqSendStateBusyTest {
         seed(s, 1)
 
         s.sendAll()
-        awaitUntil("busy 复位") { !s.busy }
+        awaitUntil("任务落成失败态") { s.tasks.single().status == SendStatus.FAILED }
         yield()
 
         assertTrue(parent.isActive, "发送失败不能让对话框所在的协程作用域被取消（否则整窗卡死）")
@@ -134,7 +139,7 @@ class RocketMqSendStateBusyTest {
         s.sendAll()
         awaitUntil("进入发送") { s.busy }
         scope.cancel()
-        awaitUntil("busy 复位") { !s.busy }
+        awaitUntil("发送结束") { !s.busy }
 
         assertFalse(s.busy)
         assertTrue(

@@ -549,8 +549,12 @@ fun RowScope.MessageDetailFooterActions(
         enabled = state.rawBody.isNotEmpty(),
     ) { Text(stringResource("msg_detail_copy_body")) }
     Spacer(Modifier.weight(1f))
+    // 关闭走 dismissWithWindow：先同步 hide 原生窗口，再通知宿主。
+    // 直接调 onClose 只会写一个状态，而「移除这个原生窗口」要等父组合重组 →
+    // 重组要一帧 → 帧可能永远不来（现场：点关闭没反应，拖一下窗口才关）。
+    val closeNow = rememberWindowDismiss(onClose)
     SecondaryButton(
-        onClick = onClose,
+        onClick = closeNow,
     ) { Text(stringResource("common_close")) }
 }
 

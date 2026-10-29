@@ -2,6 +2,54 @@
 
 本文件记录 MQClient 的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [Unreleased] — 2026-10-29 (24)
+
+### Fixed
+
+- **对话框「点关闭没反应，拖一下窗口才关上」**（`ui-common`
+  新增 `DialogDismiss.kt`，接入 `ObjectDetailDialog` 与 `MessageDetailFooterActions`）。
+
+  这是 `doc/compose-frame-latches.md` 记录的那条闩锁在同一处的另一副面孔：不是数据慢，
+  是**关窗口欠了一帧**。
+
+  ```
+  点 ✕ → onDismiss() 只写了一个 MutableState（detailMessage = null）
+       → 移除这个原生窗口要等父组合重组
+       → 重组要一帧（Recomposer.withFrameNanos）
+       → 帧由 native 派发 RedrawRequested 才来
+       → TaoWindow.requestRedraw() 的 redrawPending 闩锁只放行一次，复位只依赖那个事件
+  ```
+  拖窗口产生真实 native 事件 → 帧才派下来 → 窗口才消失。所以「拖一下立刻就关了」。
+
+  修法：关闭动作改为**先同步隐藏原生窗口，再走状态回调**。`NucleusWindow.hide()` 走
+  `NativeTaoBridge.nativeSetVisible(handle, false)` —— 直接的系统调用，**不经过 Compose
+  帧管线**，用户立刻看到窗口消失；父组合的重组（真正销毁窗口）什么时候完成都无所谓。
+
+  - 新增 `dismissWithWindow(hide, onDismiss)`（纯函数，可测）与
+    `rememberWindowDismiss(onDismiss)`（组合期封装）；
+  - 接入 `ObjectDetailDialog` 的 ✕ 与默认「关闭」、`MessageDetailFooterActions` 的
+    「关闭」—— 四个 MQ 模块的消息详情一起受益；
+  - `onCloseRequest`（「发送中确认」这类**拦截**入口）保持原样：拦截意味着这次点击
+    不该关窗，提前 hide 会关错；
+  - ESC 仍走原路径（按键本身就是 native 事件，帧会跟着来）。
+
+  兜底：`ObjectDetailDialog` 新增 `LaunchedEffect(title) { nucleusWindow.show() }`。
+  因为 hide 只是隐藏、销毁仍等帧，若那一帧不来而用户又打开了另一个对象，
+  `detailMessage?.let{}` 会**原地更新**节点而不是销毁重建 —— 窗口会停在隐藏态。
+  这一行保证任何「新内容出现」都把窗口亮回来。
+
+  测试：`DialogDismissTest`（3 条）—— 先 hide 再回调的顺序、hide 抛异常时仍然关闭
+  （窗口已销毁时必须关得掉）、只回调一次。
+
+  顺带修掉上一轮自己写的一处**测试竞态**：`RocketMqSendStateBusyTest` 原来用
+  「等 `busy` 变 false」作为等待条件，而 `busy = true` 是在 `scope.launch` **内部**
+  才写的 —— 协程尚未被调度时该条件立刻成立，随后断言的是初始状态
+  （偶发 `expected:<FAILED> but was:<WAITING>`）。改为等**终态**（任务落成 FAILED）。
+  该缺陷是 `--rerun-tasks` 连跑时暴露的，之前增量执行一直「绿」是假象。
+
+  **未验证**：真机。这条修法直接对应已记录的闩锁机制，但「帧为什么不来」本身
+  （native 侧，仓库无源码）仍未确认，见文档第八节。
+
 ## [Unreleased] — 2026-10-29 (23)
 
 ### Fixed
