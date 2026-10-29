@@ -24,20 +24,31 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import com.mqclient.core.topology.TopologyFocusHolder
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -45,6 +56,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
 import com.mqclient.aiui.AiContext
 import com.mqclient.aiui.AiPanel
 import com.mqclient.aiui.AiPanelState
@@ -83,6 +96,12 @@ private val StatusBarHeight = 28.dp
 private val TabStripHeight = 40.dp
 private val TabHeight = 28.dp
 private val TabMaxWidth = 180.dp
+
+/** Tab 条右侧左右翻页按钮的直径（只在 Tab 溢出时出现，尽量不挤占 Tab 区）。 */
+private val TabScrollButtonSize = 24.dp
+
+/** 自动定位时 Tab 与视口边缘留的余量（贴边看不清）。 */
+private val TabScrollMargin = 8.dp
 
 @Composable
 fun MainWindow(
@@ -389,6 +408,14 @@ fun MainWindow(
  * Tab strip above the content area: one closable tab per opened object type.
  * Tabs are a plain scrolling row rather than M3's `TabRow`, which has no
  * affordance for a close button.
+ *
+ * 溢出处理（原来是普通 `Row` + `horizontalScroll`，能滑但没有横向滚动条，桌面鼠标滚轮
+ * 只滚纵向 —— 实际等于“看不到”）：
+ *  - 激活 Tab 变化（点击 / 新建 / 关闭后落位）时自动滚进视口，新 Tab 总在视野里；
+ *  - 右侧给两个极简翻页按钮（一页 = 视口 80%），鼠标用户不用找滚动条；
+ *  - 右侧按钮只在溢出时出现，不溢出时不占位。
+ *
+ * 关闭入口仍只有 Tab 内的 ×，选中 / 关闭回调原样透传，未改交互语义。
  */
 @Composable
 private fun ObjectTabStrip(
@@ -398,26 +425,168 @@ private fun ObjectTabStrip(
     onSelect: (NavSelection) -> Unit,
     onClose: (NavSelection) -> Unit,
 ) {
+    val scrollState = rememberScrollState()
+    val scope = rememberCoroutineScope()
+    // 每个 Tab 在「内容坐标」里的横向范围（px）。onGloballyPositioned 给的是窗口坐标，
+    // 减视口左缘、补当前滚动量 → 与滚动位置无关的内容坐标，滚动后依然成立。
+    val tabBounds = remember { mutableStateMapOf<NavSelection, IntRange>() }
+    var viewportLeft by remember { mutableStateOf(0f) }
+    var viewportWidth by remember { mutableStateOf(0) }
+    val scrollMarginPx = with(LocalDensity.current) { TabScrollMargin.roundToPx() }
+
+    // 关掉 Tab / 连接被收走后清掉陈旧测量，map 不随开关 Tab 无界增长。
+    LaunchedEffect(tabs) {
+        tabBounds.keys.retainAll(tabs.toSet())
+    }
+
+    // 激活 Tab 变了就把它滚进视口。`activeBounds` 本身作为 key：新 Tab 的测量发生在
+    // 布局阶段，写进 map 会触发重组，效应随之重跑 —— 新建 Tab 也不会漏掉。
+    val activeBounds = active?.let { tabBounds[it] }
+    LaunchedEffect(active, activeBounds, viewportWidth, scrollMarginPx) {
+        val bounds = activeBounds ?: return@LaunchedEffect
+        val target =
+            tabScrollTarget(
+                tabRange = bounds,
+                scroll = scrollState.value,
+                viewportWidth = viewportWidth,
+                marginPx = scrollMarginPx,
+            ) ?: return@LaunchedEffect
+        scrollState.animateScrollTo(target.coerceIn(0, scrollState.maxValue))
+    }
+
+    // 一页 = 视口的 80%：翻过去还留一点上下文，不至于失去位置感。
+    val pageStep = (viewportWidth * 0.8f).roundToInt().coerceAtLeast(1)
+    // viewportWidth > 0 挡掉首帧（此时 maxValue 还是未知的 Int.MAX_VALUE）。
+    val overflow = viewportWidth > 0 && scrollState.maxValue > 0
+
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .height(TabStripHeight)
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 8.dp),
+            modifier = Modifier.fillMaxWidth().height(TabStripHeight),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            tabs.forEach { tab ->
-                ObjectTab(
-                    title = tabTitle(tab),
-                    active = tab == active,
-                    onClick = { onSelect(tab) },
-                    onClose = { onClose(tab) },
+            // 视口：裁掉溢出部分，别让 Tab 画到翻页按钮底下。
+            Box(
+                modifier =
+                    Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clipToBounds()
+                        .onSizeChanged { viewportWidth = it.width }
+                        .onGloballyPositioned { viewportLeft = it.positionInWindow().x },
+            ) {
+                Row(
+                    modifier =
+                        Modifier
+                            .fillMaxSize()
+                            .horizontalScroll(scrollState)
+                            .padding(horizontal = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    tabs.forEach { tab ->
+                        ObjectTab(
+                            title = tabTitle(tab),
+                            active = tab == active,
+                            onClick = { onSelect(tab) },
+                            onClose = { onClose(tab) },
+                            modifier =
+                                Modifier.onGloballyPositioned { coordinates ->
+                                    val left =
+                                        (coordinates.positionInWindow().x - viewportLeft + scrollState.value)
+                                            .roundToInt()
+                                    // 只在真的变了才写：滚动时 onGloballyPositioned 每帧都会回调，
+                                    // 无条件写 map 会把「未变的测量」当成新状态，白重组一次。
+                                    val bounds = left..(left + coordinates.size.width)
+                                    if (tabBounds[tab] != bounds) tabBounds[tab] = bounds
+                                },
+                        )
+                    }
+                }
+            }
+            if (overflow) {
+                TabScrollButton(
+                    icon = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                    contentDescription = stringResource("common_tab_scroll_left"),
+                    enabled = scrollState.value > 0,
+                    onClick = {
+                        scope.launch {
+                            scrollState.animateScrollTo((scrollState.value - pageStep).coerceAtLeast(0))
+                        }
+                    },
                 )
+                TabScrollButton(
+                    icon = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = stringResource("common_tab_scroll_right"),
+                    enabled = scrollState.value < scrollState.maxValue,
+                    onClick = {
+                        scope.launch {
+                            scrollState.animateScrollTo(
+                                (scrollState.value + pageStep).coerceAtMost(scrollState.maxValue),
+                            )
+                        }
+                    },
+                )
+                Spacer(Modifier.width(4.dp))
             }
         }
         HorizontalDivider()
+    }
+}
+
+/**
+ * 把 [tabRange]（内容坐标，px；`first` = 左缘，`last` = 右缘）滚进视口所需的目标
+ * 滚动位置；已完整可见时返回 null。
+ *
+ * 只做几何计算，滚动 / 动画 / 边界收敛归调用方 —— 抽成纯函数是为了能脱离 Compose
+ * 单测（见 `TabScrollTargetTest`）。两侧都被裁时优先露出左缘。
+ */
+internal fun tabScrollTarget(
+    tabRange: IntRange,
+    scroll: Int,
+    viewportWidth: Int,
+    marginPx: Int = 0,
+): Int? {
+    if (viewportWidth <= 0 || tabRange.isEmpty()) return null
+    return when {
+        tabRange.first - marginPx < scroll -> tabRange.first - marginPx
+        tabRange.last + marginPx > scroll + viewportWidth -> tabRange.last + marginPx - viewportWidth
+        else -> null
+    }
+}
+
+/** 极简翻页按钮：24dp 圆形 hover 底，禁用态用 outline 色，与 Tab 的 × 同一套视觉。 */
+@Composable
+private fun TabScrollButton(
+    icon: ImageVector,
+    contentDescription: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val hovered by interactionSource.collectIsHoveredAsState()
+    Box(
+        modifier =
+            Modifier
+                .size(TabScrollButtonSize)
+                .clip(CircleShape)
+                .background(
+                    if (enabled && hovered) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent,
+                )
+                .clickable(
+                    enabled = enabled,
+                    interactionSource = interactionSource,
+                    indication = null,
+                    onClick = onClick,
+                ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            modifier = Modifier.size(16.dp),
+            tint =
+                if (enabled) MaterialTheme.colorScheme.onSurfaceVariant
+                else MaterialTheme.colorScheme.outlineVariant,
+        )
     }
 }
 
@@ -427,6 +596,7 @@ private fun ObjectTab(
     active: Boolean,
     onClick: () -> Unit,
     onClose: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val hovered by interactionSource.collectIsHoveredAsState()
@@ -439,7 +609,7 @@ private fun ObjectTab(
 
     Row(
         modifier =
-            Modifier
+            modifier
                 .height(TabHeight)
                 .widthIn(max = TabMaxWidth)
                 .clip(RoundedCornerShape(6.dp))

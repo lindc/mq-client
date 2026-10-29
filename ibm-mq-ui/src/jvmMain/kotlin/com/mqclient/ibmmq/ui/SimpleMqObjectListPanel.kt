@@ -41,20 +41,28 @@ data class SimpleMqObjectSpec(
     val typeIcon: ImageVector,
     /** 卡片动作 id 前缀（如 "authInfo.properties" 的 authInfo）。 */
     val actionIdPrefix: String,
-    /** i18n key 前缀（`{prefix}_load_failed` / `_loading` / `_action_properties` …）。 */
+    /**
+     * i18n key 前缀，**含模块前缀**（`ibm_mq_`）：派生键为 `{prefix}_load_failed` /
+     * `_loading` / `_refresh` / `_search_placeholder` / `_action_properties` …。
+     *
+     * 必须是完整前缀而不是裸对象名 —— 模块私有表的键统一带 `ibm_mq_`（见
+     * `AdapterUI.i18nTables` 的键名约定），漏掉它 `stringResource` 查不到、界面直接把
+     * key 显示出来。这类「运行期拼出来的键」静态扫描抓不到，由
+     * `SimpleMqObjectI18nKeysTest` 兜底。
+     */
     val i18nPrefix: String,
     /** 是否在属性按钮前追加「在拓扑图中查看」（订阅 / 主题是拓扑节点来源）。 */
     val showTopologyAction: Boolean = false,
 )
 
 /** 七类简单对象的配置实例（IbmMqUI 按 Tab 选择）。 */
-val AuthInfoSpec = SimpleMqObjectSpec(MqObjectType.AUTH_INFO, Icons.Default.Lock, "authInfo", "auth_info")
-val CommInfoSpec = SimpleMqObjectSpec(MqObjectType.COMM_INFO, Icons.Default.SettingsInputAntenna, "commInfo", "comm_info")
-val NamelistSpec = SimpleMqObjectSpec(MqObjectType.NAMELIST, Icons.Default.List, "namelist", "namelist")
-val ProcessSpec = SimpleMqObjectSpec(MqObjectType.PROCESS, Icons.Default.AccountTree, "process", "process_definition")
-val ServiceSpec = SimpleMqObjectSpec(MqObjectType.SERVICE, Icons.Default.Settings, "service", "service")
-val SubscriptionSpec = SimpleMqObjectSpec(MqObjectType.SUBSCRIPTION, Icons.Default.Bookmark, "subscription", "subscription", showTopologyAction = true)
-val TopicSpec = SimpleMqObjectSpec(MqObjectType.TOPIC, Icons.Default.Forum, "topic", "topic", showTopologyAction = true)
+val AuthInfoSpec = SimpleMqObjectSpec(MqObjectType.AUTH_INFO, Icons.Default.Lock, "authInfo", "ibm_mq_auth_info")
+val CommInfoSpec = SimpleMqObjectSpec(MqObjectType.COMM_INFO, Icons.Default.SettingsInputAntenna, "commInfo", "ibm_mq_comm_info")
+val NamelistSpec = SimpleMqObjectSpec(MqObjectType.NAMELIST, Icons.Default.List, "namelist", "ibm_mq_namelist")
+val ProcessSpec = SimpleMqObjectSpec(MqObjectType.PROCESS, Icons.Default.AccountTree, "process", "ibm_mq_process_definition")
+val ServiceSpec = SimpleMqObjectSpec(MqObjectType.SERVICE, Icons.Default.Settings, "service", "ibm_mq_service")
+val SubscriptionSpec = SimpleMqObjectSpec(MqObjectType.SUBSCRIPTION, Icons.Default.Bookmark, "subscription", "ibm_mq_subscription", showTopologyAction = true)
+val TopicSpec = SimpleMqObjectSpec(MqObjectType.TOPIC, Icons.Default.Forum, "topic", "ibm_mq_topic", showTopologyAction = true)
 
 /**
  * 快照 → [ObjectCardData] 的通用适配（合并原 7 份 `toXxxCardData`）：简单对象无

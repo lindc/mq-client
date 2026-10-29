@@ -151,6 +151,8 @@
   "qmgr_load_failed": "Query failed: %1$s",
   "common_coming_soon": "Coming soon...",
   "common_select_connection": "Select a connection from the sidebar",
+  "common_tab_scroll_left": "Scroll tabs left",
+  "common_tab_scroll_right": "Scroll tabs right",
   "module_ui_missing": "Module UI not available (%1$s) — check whether this module is enabled",
   "console_execute": "Execute",
   "console_cancel": "Cancel",

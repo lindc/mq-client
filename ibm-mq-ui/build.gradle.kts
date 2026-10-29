@@ -38,6 +38,8 @@ kotlin {
         }
         jvmTest.dependencies {
             implementation(kotlin("test"))
+            // SimpleMqObjectI18nKeysTest 直接解析模块表的原始 JSON 来核对派生键。
+            implementation(libs.kotlinx.serialization.json)
             // Compose UI 测试工具（画布手势 / 语义定位，ui-test-kit）；桌面 actual 还需
             // Skia 原生运行时（ui-test-kit 不透传，声明 currentOs 带上）。
             implementation(projects.uiTestKit)
