@@ -34,8 +34,6 @@ class RabbitMqExchangesState(
     var loadState by mutableStateOf<LoadState<List<RabbitMqExchangeCardInfo>>>(LoadState.Idle); private set
     var search by mutableStateOf("")
 
-    /** 「显示系统对象」开关：默认交换机（name=""）与 amq.* 的显隐总闸。 */
-    var showSystemObjects by mutableStateOf(false)
 
     /** 至少完成过一轮对象扫描。 */
     var scannedOnce by mutableStateOf(false); private set
@@ -44,8 +42,8 @@ class RabbitMqExchangesState(
     private fun isSystem(name: String): Boolean = name.isEmpty() || name.startsWith("amq.")
 
     /** 搜索过滤后的列表（按显示名包含匹配，忽略大小写；叠加系统对象开关）。 */
-    val filtered: List<RabbitMqExchangeCardInfo>
-        get() = when (val s = loadState) {
+    fun filtered(showSystemObjects: Boolean): List<RabbitMqExchangeCardInfo> =
+        when (val s = loadState) {
             is LoadState.Success -> s.data
                 .filter { showSystemObjects || !isSystem(it.name) }
                 .filter { search.isBlank() || displayName(it).contains(search.trim(), ignoreCase = true) }

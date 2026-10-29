@@ -8,6 +8,7 @@ import com.mqclient.core.ConnectionStore
 import com.mqclient.mqui.state.LoadState
 import com.mqclient.rocketmq.RocketMqModule
 import com.mqclient.rocketmq.RocketMqTopicSnapshot
+import com.mqclient.rocketmq.isSystemTopic
 import com.mqclient.uicommon.i18n.stringResource
 
 /**
@@ -25,9 +26,10 @@ class RocketMqTopicsState(
     var search by mutableStateOf("")
 
     /** 搜索过滤后的列表（按名称包含匹配，忽略大小写）。 */
-    val filtered: List<RocketMqTopicSnapshot>
-        get() = when (val s = loadState) {
+    fun filtered(showSystem: Boolean): List<RocketMqTopicSnapshot> =
+        when (val s = loadState) {
             is LoadState.Success -> s.data
+                .filter { showSystem || !isSystemTopic(it.name) }
                 .filter { search.isBlank() || it.name.contains(search.trim(), ignoreCase = true) }
             else -> emptyList()
         }

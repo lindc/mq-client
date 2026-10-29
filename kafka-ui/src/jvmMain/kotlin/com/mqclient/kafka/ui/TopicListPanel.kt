@@ -15,6 +15,8 @@ import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.SnackbarHostState
@@ -22,6 +24,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -78,6 +81,7 @@ fun TopicListPanel(
     val scope = rememberCoroutineScope()
     // 「询问 AI」宿主回调：宿主没 Provide（独立预览等）时为 null —— AI 按钮不显示。
     val aiAsk = LocalAiAsk.current
+    val showSystem by KafkaModule.showSystemObjectsFlow(connectionId).collectAsState(false)
     // 进入 Tab 首次加载（组合期一次，含隐式连接兜底）；之后的状态变化走
     // onStatusChanged —— 断开不再被面板静默重连（宿主会收掉断开连接的 Tab）。
     val connectionStatus = rememberKafkaConnectionStatus(connectionId)
@@ -105,6 +109,11 @@ fun TopicListPanel(
                 onValueChange = { state.search = it },
                 placeholder = stringResource("kafka_ui_search_placeholder"),
                 modifier = Modifier.weight(1f),
+            )
+            ToolbarButton(
+                icon = if (showSystem) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                text = stringResource("kafka_ui_topic_toggle_system"),
+                onClick = { KafkaModule.setShowSystemObjects(connectionId, !showSystem) },
             )
             ToolbarButton(
                 icon = Icons.Default.Add,
@@ -145,7 +154,7 @@ fun TopicListPanel(
                     }
                 },
                 items =
-                    state.filtered.map { info ->
+                    state.filtered(showSystem).map { info ->
                         info.toCardData(
                             actions = buildList {
                                 if (aiAsk != null) {
@@ -225,7 +234,7 @@ fun TopicListPanel(
         KafkaMessagesDialog(
             connectionId = connectionId,
             topicName = topicName,
-            partitionCount = state.filtered.firstOrNull { it.name == topicName }?.partitions,
+            partitionCount = state.filtered(showSystem).firstOrNull { it.name == topicName }?.partitions,
             onDismiss = { messagesTopic = null },
         )
     }

@@ -16,12 +16,15 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,6 +43,7 @@ import com.mqclient.mqui.objectlist.ObjectListEmptyState
 import com.mqclient.mqui.objectlist.ObjectListPanel
 import com.mqclient.mqui.state.LoadStateContent
 import com.mqclient.rocketmq.RocketMqEvents
+import com.mqclient.rocketmq.RocketMqModule
 import com.mqclient.rocketmq.RocketMqTopicSnapshot
 import com.mqclient.rocketmq.ui.RocketMqTopicPropertiesDialog
 import com.mqclient.rocketmq.ui.ai.RocketMqAiChainBuilder
@@ -69,6 +73,7 @@ fun RocketMqTopicsPanel(
     var showCreate by remember { mutableStateOf(false) }
     // 「询问 AI」宿主回调：宿主没 Provide（独立预览等）时为 null —— AI 按钮不显示。
     val aiAsk = LocalAiAsk.current
+    val showSystem by RocketMqModule.showSystemObjectsFlow(connectionId).collectAsState(false)
     LaunchedEffect(connectionId) { state.load() }
     LaunchedEffect(connectionId, connectionStatus) { state.onStatusChanged(connectionStatus) }
     LaunchedEffect(connectionId) {
@@ -90,6 +95,11 @@ fun RocketMqTopicsPanel(
                     onValueChange = { state.search = it },
                     placeholder = stringResource("rocketmq_ui_topic_search"),
                     modifier = Modifier.weight(1f),
+                )
+                ToolbarButton(
+                    icon = if (showSystem) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                    text = stringResource("rocketmq_ui_topic_toggle_system"),
+                    onClick = { RocketMqModule.setShowSystemObjects(connectionId, !showSystem) },
                 )
                 ToolbarButton(
                     icon = Icons.Default.Add,
@@ -120,7 +130,7 @@ fun RocketMqTopicsPanel(
                         ObjectListEmptyState(stringResource("rocketmq_ui_topic_empty"))
                     },
                     items =
-                        state.filtered.map { topic ->
+                        state.filtered(showSystem).map { topic ->
                             // 精简卡片：只留图标 + 名称（队列/权限详情在属性对话框）；
                             // 右下 ✉️ = 消息处理入口（浏览/发送双 Tab 对话框）。
                             ObjectCardData(

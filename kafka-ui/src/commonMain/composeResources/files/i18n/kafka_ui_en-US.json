@@ -35,6 +35,7 @@
   "kafka_ui_search_placeholder": "Search topics",
   "kafka_ui_refresh": "Refresh",
   "kafka_ui_topic_loading": "Loading topics…",
+  "kafka_ui_topic_toggle_system": "Show system objects",
   "kafka_ui_topic_partitions": "%1$d partitions",
   "kafka_ui_topic_replicas": "%1$d replicas",
   "kafka_ui_topic_internal": "internal",

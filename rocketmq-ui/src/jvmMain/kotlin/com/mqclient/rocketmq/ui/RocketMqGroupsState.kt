@@ -9,6 +9,7 @@ import com.mqclient.mqui.state.LoadState
 import com.mqclient.rocketmq.RocketMqGroupLagSnapshot
 import com.mqclient.rocketmq.RocketMqGroupSnapshot
 import com.mqclient.rocketmq.RocketMqModule
+import com.mqclient.rocketmq.isSystemGroup
 import com.mqclient.uicommon.i18n.stringResource
 
 /** 一条消费组的展示信息：慢扫成员数 + 快扫 Lag 合并（未扫到字段显示 "-"）。 */
@@ -31,9 +32,10 @@ class RocketMqGroupsState(
     var loadState by mutableStateOf<LoadState<List<RocketMqGroupCardInfo>>>(LoadState.Idle); private set
     var search by mutableStateOf("")
 
-    val filtered: List<RocketMqGroupCardInfo>
-        get() = when (val s = loadState) {
+    fun filtered(showSystem: Boolean): List<RocketMqGroupCardInfo> =
+        when (val s = loadState) {
             is LoadState.Success -> s.data
+                .filter { showSystem || !isSystemGroup(it.name) }
                 .filter { search.isBlank() || it.name.contains(search.trim(), ignoreCase = true) }
             else -> emptyList()
         }

@@ -41,9 +41,10 @@ class KafkaTopicsState(
     var scannedOnce by mutableStateOf(false); private set
 
     /** 搜索过滤后的列表（按名称包含匹配，忽略大小写）。 */
-    val filtered: List<KafkaTopicInfo>
-        get() = when (val s = loadState) {
+    fun filtered(showSystem: Boolean): List<KafkaTopicInfo> =
+        when (val s = loadState) {
             is LoadState.Success -> s.data
+                .filter { showSystem || (!it.internal && !it.name.startsWith("__")) }
                 .filter { search.isBlank() || it.name.contains(search.trim(), ignoreCase = true) }
             else -> emptyList()
         }

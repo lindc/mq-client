@@ -4,6 +4,9 @@ import com.mqclient.core.ConnectionInfo
 import com.mqclient.core.NavigationItem
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.mq.base.MQServiceAdapter
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 
 class RocketMqServiceAdapter : MQServiceAdapter() {
     override val id = MODULE_ID // 模块名唯一定义处：RocketMqModule.kt 顶层 const
@@ -33,6 +36,24 @@ class RocketMqServiceAdapter : MQServiceAdapter() {
     override fun initialize(context: ServiceContext) {
         RocketMqModule.initialize(context)
     }
+
+    /**
+     * 二级菜单数量徽章：从扫描缓存（cachedTopics / cachedGroups）派生，叠加显示系统
+     * 对象开关的口径，使徽章数量与列表默认视图一致（系统主题 / 系统消费组默认隐藏）。
+     * 扫描完成经 objectScanVersionFlow 翻版本、开关翻转经 showSystemFlow 翻版本，两条
+     * 流 combine 后重算，徽章实时跟随列表。
+     */
+    override fun badgeCounts(connectionId: String): Flow<Map<String, Int>> =
+        combine(RocketMqModule.objectScanVersionFlow, RocketMqModule.showSystemFlow) { _, showSystem ->
+            val service = RocketMqModule.serviceOrNull() ?: return@combine emptyMap<String, Int>()
+            val show = connectionId in showSystem
+            val topics = service.cachedTopics(connectionId)
+            val groups = service.cachedGroups(connectionId)
+            mapOf(
+                "topics" to topics.count { show || !isSystemTopic(it.name) },
+                "groups" to groups.count { show || !isSystemGroup(it.name) },
+            )
+        }
 
     /**
      * SPI 模块销毁：应用退出时由 ModuleRegistry 调用，转给 [RocketMqModule.shutdown]

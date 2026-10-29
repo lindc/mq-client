@@ -4,6 +4,9 @@ import com.mqclient.core.ConnectionInfo
 import com.mqclient.core.NavigationItem
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.mq.base.MQServiceAdapter
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 
 class RabbitMqServiceAdapter : MQServiceAdapter() {
     override val id = MODULE_ID // 模块名唯一定处：RabbitMqModule.kt 顶层 const
@@ -35,6 +38,24 @@ class RabbitMqServiceAdapter : MQServiceAdapter() {
     override fun initialize(context: ServiceContext) {
         RabbitMqModule.initialize(context)
     }
+
+    /**
+     * 二级菜单数量徽章：从扫描缓存（cachedQueues / cachedExchanges）派生，叠加显示系统
+     * 对象开关的口径，使徽章数量与列表默认视图一致（默认交换机 name 为空 与 amq 点星 默认
+     * 隐藏）。扫描完成经 objectScanVersionFlow 翻版本、开关翻转经 showSystemFlow 翻版本，
+     * 两条流 combine 后重算，徽章实时跟随列表。队列无系统概念，徽章恒为全量。
+     */
+    override fun badgeCounts(connectionId: String): Flow<Map<String, Int>> =
+        combine(RabbitMqModule.objectScanVersionFlow, RabbitMqModule.showSystemFlow) { _, showSystem ->
+            val service = RabbitMqModule.serviceOrNull() ?: return@combine emptyMap<String, Int>()
+            val show = connectionId in showSystem
+            val queues = service.cachedQueues(connectionId)
+            val exchanges = service.cachedExchanges(connectionId)
+            mapOf(
+                "queues" to queues.size,
+                "exchanges" to exchanges.count { show || !(it.name.isEmpty() || it.name.startsWith("amq.")) },
+            )
+        }
 
     /**
      * SPI 模块销毁：应用退出时由 ModuleRegistry 在 CoreModule 停机之前调用，

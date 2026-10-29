@@ -14,6 +14,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
@@ -85,6 +88,27 @@ object RocketMqModule {
         scanFailures.update { current -> current - connectionId }
     }
 
+    /**
+     * 每条连接是否显示系统对象（默认关 = 系统对象不进列表 / 徽章）。放在模块层而非 UI，
+     * 是因为导航徽章和列表面板都要读它：单一来源，开关一掰两边同时生效。集合里含该
+     * connectionId 即表示打开（RocketMQ 系统主题 与 系统消费组 默认隐藏）。
+     */
+    private val showSystemObjects = MutableStateFlow<Set<String>>(emptySet())
+    val showSystemFlow: StateFlow<Set<String>> = showSystemObjects
+    fun showSystemObjectsFlow(connectionId: String): Flow<Boolean> =
+        showSystemFlow.map { connectionId in it }
+    fun setShowSystemObjects(connectionId: String, show: Boolean) {
+        showSystemObjects.update { set -> if (show) set + connectionId else set - connectionId }
+    }
+
+    /**
+     * 每条连接最近一轮对象慢扫的版本号（每发一次 OBJECTS_SCANNED 自增）。让导航徽章能
+     * 响应扫描完成而刷新：徽章是冷流，不能直连事件总线，所以用这个 StateFlow 把扫完了
+     * 翻译成流变；值与缓存事实同寿命（和 scanFailuresFlow 同思路）。
+     */
+    private val objectScanVersion = MutableStateFlow<Map<String, Long>>(emptyMap())
+    val objectScanVersionFlow: StateFlow<Map<String, Long>> = objectScanVersion
+
     /** 幂等：重复调用直接返回，不会重复注册订阅。 */
     @Synchronized
     fun initialize(context: ServiceContext) {
@@ -134,6 +158,12 @@ object RocketMqModule {
             context.onEvent(RocketMqEvents.DISCONNECT_REQUESTED) { event ->
                 val connectionId = event.getString("connectionId") ?: return@onEvent
                 created.disconnectNow(connectionId, reason = "menu request")
+            },
+            context.onEvent(RocketMqEvents.OBJECTS_SCANNED) { event ->
+                val connectionId = event.getString("connectionId") ?: return@onEvent
+                objectScanVersion.update { current ->
+                    current + (connectionId to (current[connectionId] ?: 0L) + 1L)
+                }
             },
             context.onEvent(RocketMqEvents.TEST_REQUESTED) { event ->
                 handleTestRequested(event, created)

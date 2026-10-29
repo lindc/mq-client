@@ -22,6 +22,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -63,6 +64,7 @@ fun RabbitMqExchangesPanel(
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val connectionStatus = rememberRabbitMqConnectionStatus(connectionId)
+    val showSystem by RabbitMqModule.showSystemObjectsFlow(connectionId).collectAsState(false)
     LaunchedEffect(connectionId) { state.load() }
     LaunchedEffect(connectionId, connectionStatus) { state.onStatusChanged(connectionStatus) }
     LaunchedEffect(connectionId) {
@@ -97,9 +99,9 @@ fun RabbitMqExchangesPanel(
                 // 「显示系统对象」开关：默认交换机与 amq.* 的显隐总闸（默认关），
                 // 眼睛图标随状态切换（与添加 / 刷新同为扁平工具栏按钮）。
                 ToolbarButton(
-                    icon = if (state.showSystemObjects) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                    icon = if (showSystem) Icons.Default.Visibility else Icons.Default.VisibilityOff,
                     text = stringResource("rabbitmq_ui_exchange_toggle_system"),
-                    onClick = { state.showSystemObjects = !state.showSystemObjects },
+                    onClick = { RabbitMqModule.setShowSystemObjects(connectionId, !showSystem) },
                 )
                 ToolbarButton(
                     icon = Icons.Default.Add,
@@ -130,7 +132,7 @@ fun RabbitMqExchangesPanel(
                         ObjectListEmptyState(stringResource("rabbitmq_ui_exchange_empty"))
                     },
                     items =
-                        state.filtered.map { info ->
+                        state.filtered(showSystem).map { info ->
                             ObjectCardData(
                                 id = info.name,
                                 title = state.displayName(info),

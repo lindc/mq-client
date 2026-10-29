@@ -2,6 +2,9 @@ package com.mqclient.kafka
 
 import com.mqclient.core.ConnectionInfo
 import com.mqclient.core.NavigationItem
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.mq.base.MQServiceAdapter
 
@@ -35,6 +38,24 @@ class KafkaServiceAdapter : MQServiceAdapter() {
     override fun initialize(context: ServiceContext) {
         KafkaModule.initialize(context)
     }
+
+    /**
+     * 二级菜单数量徽章：从扫描缓存（cachedTopics / cachedGroups）派生，叠加显示系统对象
+     * 开关的口径，使徽章数量与列表默认视图一致（Kafka 内部主题默认隐藏）。扫描完成经
+     * objectScanVersionFlow 翻版本、开关翻转经 showSystemFlow 翻版本，两条流 combine
+     * 后重算，徽章实时跟随列表。
+     */
+    override fun badgeCounts(connectionId: String): Flow<Map<String, Int>> =
+        combine(KafkaModule.objectScanVersionFlow, KafkaModule.showSystemFlow) { _, showSystem ->
+            val service = KafkaModule.serviceOrNull() ?: return@combine emptyMap<String, Int>()
+            val show = connectionId in showSystem
+            val topics = service.cachedTopics(connectionId)
+            val groups = service.cachedGroups(connectionId)
+            mapOf(
+                "topics" to topics.count { show || (!it.internal && !it.name.startsWith("__")) },
+                "groups" to groups.size,
+            )
+        }
 
     /**
      * SPI 模块销毁：应用退出时由 ModuleRegistry 在 CoreModule 停机之前调用，

@@ -12,12 +12,15 @@ import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -70,6 +73,7 @@ fun RocketMqGroupsPanel(
     var showCreate by remember { mutableStateOf(false) }
     // 「询问 AI」宿主回调：宿主没 Provide（独立预览等）时为 null —— AI 按钮不显示。
     val aiAsk = LocalAiAsk.current
+    val showSystem by RocketMqModule.showSystemObjectsFlow(connectionId).collectAsState(false)
     LaunchedEffect(connectionId) { state.load() }
     LaunchedEffect(connectionId, connectionStatus) { state.onStatusChanged(connectionStatus) }
     LaunchedEffect(connectionId) {
@@ -95,10 +99,15 @@ fun RocketMqGroupsPanel(
                 value = state.search,
                 onValueChange = { state.search = it },
                 placeholder = stringResource("rocketmq_ui_group_search"),
-                modifier = Modifier.weight(1f),
-            )
-            ToolbarButton(
-                icon = Icons.Default.Add,
+                    modifier = Modifier.weight(1f),
+                )
+                ToolbarButton(
+                    icon = if (showSystem) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                    text = stringResource("rocketmq_ui_group_toggle_system"),
+                    onClick = { RocketMqModule.setShowSystemObjects(connectionId, !showSystem) },
+                )
+                ToolbarButton(
+                    icon = Icons.Default.Add,
                 text = stringResource("rocketmq_ui_group_add"),
                 onClick = { showCreate = true },
             )
@@ -126,7 +135,7 @@ fun RocketMqGroupsPanel(
                     ObjectListEmptyState(stringResource("rocketmq_ui_group_empty"))
                 },
                 items =
-                    state.filtered.map { info ->
+                    state.filtered(showSystem).map { info ->
                         // 四角布局：左上组名 / 右上 Lag（>0 橙）/ 左下状态点 + 成员数 /
                         // 右下属性 ⓘ。Lag 与成员数在 service 层已兜底为 0，不再有 null。
                         val lag = info.totalLag ?: 0
