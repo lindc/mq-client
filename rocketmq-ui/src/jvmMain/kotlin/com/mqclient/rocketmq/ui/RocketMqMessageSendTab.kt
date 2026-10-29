@@ -72,6 +72,7 @@ import java.time.format.DateTimeFormatter
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.mqclient.mqui.send.SendTaskRow as MqSendTaskRow
@@ -120,6 +121,13 @@ internal class RocketMqSendMessagesState(
     private val connectionId: String,
     val topicName: String,
     private val scope: CoroutineScope,
+    /**
+     * 发送动作的测试替身（null = 走 [doSend] 的生产路径）。
+     *
+     * 存在的理由：`doSend` 依赖模块注册表（测试里拿不到），而「发送抛异常时
+     * busy 必须复位、对话框仍能关」正是本轮要钉住的不变量。
+     */
+    private val sendOverride: (suspend (RocketMqSendTask) -> RocketMqSendResult)? = null,
 ) {
 
     var tasks by mutableStateOf<List<RocketMqSendTask>>(emptyList())
@@ -217,11 +225,18 @@ internal class RocketMqSendMessagesState(
         scope.launch {
             busy = true
             singleOutcome = null
-            tasks = listOf(task.copy(status = SendStatus.SENDING))
-            val result = doSend(task)
-            tasks = listOf(task.withResult(result))
-            singleOutcome = result
-            busy = false
+            try {
+                tasks = listOf(task.copy(status = SendStatus.SENDING))
+                val result = safeSend(task)
+                tasks = listOf(task.withResult(result))
+                singleOutcome = result
+            } finally {
+                // **必须 finally**：doSend 会抛（连接半路断掉时 connectedContext 直接
+                // 抛 IllegalStateException）。旧写法把 busy = false 放在正常路径末尾，
+                // 一次抛出就让它永远为 true —— 而对话框的 ✕ / ESC 正是按 busy 决定
+                // 要不要先弹「发送中确认」，于是关闭按钮从此彻底失效。
+                busy = false
+            }
         }
     }
 
@@ -237,15 +252,24 @@ internal class RocketMqSendMessagesState(
             processedCount = 0
             var ok = 0
             var fail = 0
-            for (target in targets) {
-                updateTask(target.id) { it.copy(status = SendStatus.SENDING, errorMessage = null) }
-                val result = doSend(target)
-                updateTask(target.id) { it.withResult(result) }
-                if (result.success) ok++ else fail++
-                processedCount++
+            // try/finally 理由同 sendSingle：busy 卡在 true 会让 ✕ / ESC 永远只弹
+            // 「发送中确认」，用户看到的就是「关闭没反应」。
+            try {
+                for (target in targets) {
+                    updateTask(target.id) { it.copy(status = SendStatus.SENDING, errorMessage = null) }
+                    val result = safeSend(target)
+                    updateTask(target.id) { it.withResult(result) }
+                    if (result.success) ok++ else fail++
+                    processedCount++
+                }
+                batchSummary = SendBatchSummary(total = targets.size, success = ok, failed = fail)
+            } finally {
+                // 取消（关对话框）后未处理完的 SENDING 项回落到 WAITING：还能继续发。
+                tasks = tasks.map {
+                    if (it.status == SendStatus.SENDING) it.copy(status = SendStatus.WAITING) else it
+                }
+                busy = false
             }
-            batchSummary = SendBatchSummary(total = targets.size, success = ok, failed = fail)
-            busy = false
         }
     }
 
@@ -281,6 +305,23 @@ internal class RocketMqSendMessagesState(
             editingContent!!.toByteArray(Charsets.UTF_8)
         } else {
             task.content
+        }
+
+    /**
+     * [doSend] 的**异常安全外壳**：任何非取消异常都转成失败结果，绝不穿出协程。
+     *
+     * 为什么这条是硬要求：本状态挂在对话框的 `rememberCoroutineScope()` 上，协程
+     * 同样是组合 Job 的子节点。未捕获异常会**取消父 Job** —— 整个对话框停止重组，
+     * 之后 ✕ 收到点击也不再重绘，表现就是「整个对话框卡死，点关闭毫无反应」。
+     * 与 ui-common 详情渲染里那条「异常绝不能穿出协程」是同一个坑。
+     */
+    private suspend fun safeSend(task: RocketMqSendTask): RocketMqSendResult =
+        try {
+            sendOverride?.invoke(task) ?: doSend(task)
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (error: Throwable) {
+            RocketMqSendResult.failure(error.message ?: error::class.simpleName ?: "unknown")
         }
 
     private suspend fun doSend(task: RocketMqSendTask): RocketMqSendResult =

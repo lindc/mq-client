@@ -2,6 +2,55 @@
 
 本文件记录 MQClient 的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [Unreleased] — 2026-10-29 (23)
+
+### Fixed
+
+- **RocketMQ 消息对话框「点关闭没反应 / 整窗卡死」**（`rocketmq-ui`
+  `RocketMqMessageSendTab`，`rocketmq-service` `RocketMqMessageService`）。
+
+  现场：消息详情/消息处理对话框打开几次之后卡死，✕ 与 ESC 点击无反应。
+  排查后确认**不是**客户端实例泄漏，也不是主线程阻塞（见下方「排除的假设」）；
+  真正的根因在发送状态机：
+
+  ```kotlin
+  scope.launch {
+      busy = true
+      val result = doSend(task)   // ← 连接半路断掉时 connectedContext 直接抛
+      busy = false                // ← 永远走不到
+  }
+  ```
+
+  两处叠加放大：
+  1. `RocketMqMessagesDialog.onCloseRequest` 按 `sendState.busy` 决定是否先弹「发送中
+     确认」—— `busy` 卡在 true，关闭就只会反复弹确认框；
+  2. 该状态挂在对话框的 `rememberCoroutineScope()` 上，未捕获异常会**取消组合的 Job**
+     —— 整个对话框停止重组，之后收到点击也不再重绘（`ui-common` 详情渲染里那条
+     「异常绝不能穿出协程」是同一个坑）。
+
+  修法：
+  - `sendSingle` / `sendAll` 的 `busy = false` 移进 `finally`；`sendAll` 另外在
+    `finally` 里把未处理的 `SENDING` 项回落成 `WAITING`（取消后可继续发）；
+  - 新增 `safeSend`：非取消异常一律转成失败结果，**绝不穿出协程**；
+  - `pull` 从 4 参改 5 参，显式传 `READ_TIMEOUT_MS = 5000`。反编译确认 4 参重载用
+    `getConsumerPullTimeoutMillis()`（默认 10 秒）且内部会重试，而这条调用**全程
+    持有共享 consumer 的锁** —— broker 慢一次，之后每次读取都要排在它后面。
+
+  **排除的假设**（都写进了代码注释，免得下次重走）：
+  - 「每次 new 一个 PullConsumer/AdminExt」—— 客户端早已是连接级共享单例
+    (`RocketMqMessageClients` + `HandleSlot`)，断开时 `shutdown()`；
+  - 「取消留下僵尸调用、与下一次请求重叠」—— 曾按此假设改成
+    `withLock { withContext(NonCancellable) { … } }`，但对照组测试证明裸 `withLock`
+    下**也不会**重叠（阻塞调用不 suspend，`finally` 要等它返回才放锁），故已撤回。
+
+  测试：`RocketMqSendStateBusyTest`（4 条，新）—— 发送抛异常后 busy 复位且任务落成
+  FAILED、`sendSingle` 同理、**发送失败不取消拥有它的协程作用域**（用普通 `Job` 模拟
+  组合作用域）、取消后无任务卡在 SENDING。负向对照：把 `RocketMqMessageSendTab` 退回
+  旧实现，4 条全部失败（`等待超时：busy 复位`）。
+
+  **未验证**：真机。「每次打开比上一次慢」这一半无法在无 GUI 环境复现；本轮只找到
+  「10 秒 pull 阻塞共享 consumer」这一个可疑机制，属于缓解而非确诊。
+
 ## [Unreleased] — 2026-10-29 (22)
 
 ### Fixed

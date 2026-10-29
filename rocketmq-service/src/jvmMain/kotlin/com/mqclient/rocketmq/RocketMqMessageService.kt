@@ -41,6 +41,17 @@ class RocketMqMessageService {
         /** 单次读取的条数上限（UI 侧同样约束）。 */
         const val MAX_READ_COUNT = 500
 
+        /**
+         * 单次 `pull` / `maxOffset` 的**协议层**超时（毫秒）。
+         *
+         * 必须传给客户端本身，而不是只在外层包 `withTimeout`：`pull` 是阻塞的
+         * socket 调用，协程取消打断不了它。默认的 4 参重载用
+         * `getConsumerPullTimeoutMillis()`（10 秒）并可能重试，而这条调用**期间
+         * 一直持着共享 consumer 的锁**（见 readMessages）—— 卡一次，后续每次读取
+         * 都要排队，表现就是「越开越慢」。
+         */
+        const val READ_TIMEOUT_MS = 5_000L
+
         /** 临时浏览实例的 group 前缀（broker 侧可见，标识本工具的只读浏览）。 */
         const val BROWSE_GROUP_PREFIX = "CID_mqclient_browse_"
 
@@ -131,7 +142,10 @@ class RocketMqMessageService {
                 val mq = consumer.fetchSubscribeMessageQueues(topic)
                     .firstOrNull { it.queueId == queueId }
                     ?: throw IllegalStateException("队列 $queueId 不存在（topic 路由可能已变化，请重新「读取」）")
-                val pullResult = consumer.pull(mq, "*", offset, capped)
+                // 显式超时：4 参重载用 getConsumerPullTimeoutMillis()（默认 10 秒）
+                // 且内部会重试，而这条调用**全程持着共享 consumer 的锁** ——
+                // broker 慢一次，之后的每次读取都要排在它后面（「越开越慢」）。
+                val pullResult = consumer.pull(mq, "*", offset, capped, READ_TIMEOUT_MS)
                 val messages = if (pullResult.pullStatus == PullStatus.FOUND) {
                     pullResult.msgFoundList.orEmpty().map { it.toMessage() }
                 } else {
