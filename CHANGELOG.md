@@ -2,6 +2,38 @@
 
 本文件记录 MQClient 的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [Unreleased] — 2026-10-29 (17)
+
+### Changed
+
+- **RabbitMQ 交换机属性对话框：绑定表视觉对齐上半部分的 `PropertyTable`**
+  （`rabbitmq-ui` `RabbitMqExchangePropertiesDialog` 的 `BindingsTable`）。
+
+  同一个对话框里两块表格差了一整档：上面是 `PropertyTable`（bodyMedium / 40dp 行高 /
+  斑马纹 / 4dp 圆角），下面是手写的 bodySmall + 6dp 上下内边距 + 0.5dp 分割线
+  （无操作列的行约 28dp，带 24dp 垃圾桶按钮的行 36dp —— 渲染测试实测）。
+
+  - **字体**：数据 `bodySmall` → `bodyMedium` + `onSurface`（= PropertyTable 的 Value 列）；
+    表头 `labelMedium` → `bodyMedium` + `onSurfaceVariant`（= 同一张表的 Key 列），
+    即「表头用键样式、数据用值样式」这对既有配对，两块表格的字号/字重/颜色现在同源；
+  - **行高**：`heightIn(min = 40.dp)` + `padding(horizontal = 10.dp, vertical = 8.dp)`，
+    与 PropertyTable 行同一组参数；水平 10dp 也让它与上面的文字左边缘对齐（外层
+    Column 已有 20dp，叠加后都是 30dp）；
+  - **斑马纹**：奇数行 `surfaceVariant@30%` + 4dp 圆角，偶数行透明；行距 8dp
+    （`spacedBy`），去掉行间 0.5dp 分割线 —— PropertyTable 靠斑马纹分行，留着分割线
+    会变成双层分隔；
+  - **不动**：列宽（Destination 1.4f / Routing Key 1.2f / Arguments 1f / 操作 56dp）、
+    删除垃圾桶按钮、`[E]` 前缀、无权限时隐藏操作列。
+  - 取舍：数据格不再用等宽字体（`PropertyTable` 不暴露字体，两块必须一致）。
+
+  测试：`RabbitMqBindingsTableTest`（4 条，新）—— 表头/数据渲染、行高 ≥ 40dp、
+  斑马纹像素断言（斑马行 alpha > 0 / 普通行 alpha == 0）、无权限时无操作列。
+  负向对照已验证：把 `heightIn` 与斑马纹临时摘掉，测试分别在 36dp 与 alpha=0 处失败。
+  另给 `rabbitmq-ui` 的 `jvmTest` 补 `compose.desktop.currentOs`（无头渲染需要
+  Skia 原生运行时，与 kafka-ui / rocketmq-ui 同一写法）。
+
+  **未验证**：真机 GUI 观感（斑马纹对比度、长 Arguments 文本的省略表现）。
+
 ## [Unreleased] — 2026-10-29 (16)
 
 ### Fixed

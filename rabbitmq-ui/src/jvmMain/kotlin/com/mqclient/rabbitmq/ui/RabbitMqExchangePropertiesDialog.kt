@@ -1,5 +1,7 @@
 package com.mqclient.rabbitmq.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -7,10 +9,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -24,7 +28,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -33,9 +36,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mqclient.core.ConnectionStatus
@@ -298,7 +302,7 @@ fun RabbitMqExchangePropertiesDialog(
         // Dialog 的窗口归属随声明组合走，声明在外层会挂到主窗口、被本对话框压住
         // （实测坑，见外壳 KDoc）。----
         if (exchangeDeleteConfirm) {
-            androidx.compose.material3.AlertDialog(
+            AlertDialog(
                 onDismissRequest = { exchangeDeleteConfirm = false },
                 title = { Text(stringResource("rabbitmq_ui_exchange_delete_confirm_title")) },
                 text = {
@@ -333,7 +337,7 @@ fun RabbitMqExchangePropertiesDialog(
 
         // ---- 删除绑定二次确认（行内垃圾桶触发）----
         deleteConfirm?.let { binding ->
-            androidx.compose.material3.AlertDialog(
+            AlertDialog(
                 onDismissRequest = { deleteConfirm = null },
                 title = { Text(stringResource("rabbitmq_ui_binding_delete_confirm_title")) },
                 text = {
@@ -374,36 +378,79 @@ fun RabbitMqExchangePropertiesDialog(
     }
 }
 
-/** Bindings 表：Destination / Routing Key / Arguments / 操作 四列；onDelete 为空时无操作列。 */
+/**
+ * Bindings 表：Destination / Routing Key / Arguments / 操作 四列；onDelete 为空时无操作列。
+ *
+ * 视觉**逐参数对齐上半部分的 [PropertyTable]**（同一个对话框里两块表格必须像一套东西）：
+ *  - 行高 `heightIn(min = 40.dp)` + `padding(horizontal = 10.dp, vertical = 8.dp)`
+ *    —— 与 PropertyTable 行完全同一组数。原来只有 6dp 上下内边距：无操作列的行约
+ *    28dp、带 24dp 垃圾桶按钮的行 36dp（已用渲染测试实测），两块表格一眼能看出差档；
+ *  - 斑马纹：奇数行 `surfaceVariant@30%` + 4dp 圆角，偶数行透明；
+ *  - 行距 8dp（`spacedBy`），**去掉行间 0.5dp 分割线** —— PropertyTable 就是靠斑马纹
+ *    分行的，留着分割线会变成「斑马纹 + 横线」双层分隔；
+ *  - 数据 `bodySmall` → `bodyMedium` + `onSurface`（= PropertyTable 的 Value 列）；
+ *    表头 `labelMedium` → `bodyMedium` + `onSurfaceVariant`（= 同一张表的 Key 列），
+ *    即「表头用键样式、数据用值样式」这对既有配对；
+ *  - 水平内边距 10dp 与 PropertyTable 一致，两块的文字左边缘才对得齐（外层 Column
+ *    已有 20dp，叠加后都是 30dp）。
+ *
+ * 列宽逻辑**不动**：Destination 1.4f / Routing Key 1.2f / Arguments 1f / 操作 56dp。
+ * 等宽字体不再用于数据格（PropertyTable 不暴露字体，两块必须取舍一致）。
+ */
 @Composable
-private fun BindingsTable(
+internal fun BindingsTable(
     bindings: List<RabbitMqBindingSnapshot>,
     onDelete: ((RabbitMqBindingSnapshot) -> Unit)?,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
-        Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-            TableHeader(stringResource("rabbitmq_ui_exchange_props_col_destination"), Modifier.weight(1.4f))
-            TableHeader(stringResource("rabbitmq_ui_exchange_props_col_routing_key"), Modifier.weight(1.2f))
-            TableHeader(stringResource("rabbitmq_ui_exchange_props_col_arguments"), Modifier.weight(1f))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = BINDING_ROW_HPADDING, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            BindingHeaderCell(stringResource("rabbitmq_ui_exchange_props_col_destination"), Modifier.weight(1.4f))
+            BindingHeaderCell(stringResource("rabbitmq_ui_exchange_props_col_routing_key"), Modifier.weight(1.2f))
+            BindingHeaderCell(stringResource("rabbitmq_ui_exchange_props_col_arguments"), Modifier.weight(1f))
             if (onDelete != null) {
-                TableHeader(stringResource("rabbitmq_ui_exchange_props_col_actions"), Modifier.width(56.dp))
+                BindingHeaderCell(stringResource("rabbitmq_ui_exchange_props_col_actions"), Modifier.width(56.dp))
             }
         }
-        HorizontalDivider()
+        Spacer(Modifier.height(8.dp))
         // 行区自己滚：绑定数量没有上限（实测集群里 59 条），固定高度的 Column 会
         // 溢出内容区 —— 外壳现在已经 clipToBounds，不滚就等于把后面的行直接藏了。
-        Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-            bindings.forEach { binding ->
+        // 行距 8dp 与 PropertyTable 的 spacedBy(8.dp) 一致。
+        Column(
+            modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            bindings.forEachIndexed { index, binding ->
+                val zebra = index % 2 == 1
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        // 测试钩子在 heightIn / padding **之前**：语义节点的 bounds 是
+                        // 「此处之后全部修饰符占据的区域」，放在 padding 之后只会报出
+                        // 内容区高度，行高断言就看不到真实行高。
+                        .testTag(if (zebra) BINDING_ZEBRA_ROW_TAG else BINDING_PLAIN_ROW_TAG)
+                        .heightIn(min = BINDING_ROW_MIN_HEIGHT)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(
+                            if (zebra) {
+                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                            } else {
+                                Color.Transparent
+                            },
+                        )
+                        .padding(horizontal = BINDING_ROW_HPADDING, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    TableCell(
+                    BindingDataCell(
                         if (binding.destinationType == "exchange") "[E] ${binding.destination}" else binding.destination,
                         Modifier.weight(1.4f),
                     )
-                    TableCell(binding.routingKey.ifEmpty { "-" }, Modifier.weight(1.2f))
-                    TableCell(binding.argumentsText, Modifier.weight(1f))
+                    BindingDataCell(binding.routingKey.ifEmpty { "-" }, Modifier.weight(1.2f))
+                    BindingDataCell(binding.argumentsText, Modifier.weight(1f))
                     if (onDelete != null) {
                         Box(modifier = Modifier.width(56.dp), contentAlignment = Alignment.CenterStart) {
                             IconButton(onClick = { onDelete(binding) }, modifier = Modifier.size(24.dp)) {
@@ -417,33 +464,43 @@ private fun BindingsTable(
                         }
                     }
                 }
-                HorizontalDivider(thickness = 0.5.dp)
             }
         }
     }
 }
 
-/** 单元格文本（等宽字体，长内容省略）。 */
+/** 绑定表行高与 PropertyTable 一致（40dp）。 */
+internal val BINDING_ROW_MIN_HEIGHT = 40.dp
+
+/** 绑定表行内水平内边距：与 PropertyTable 的行内 10dp 同值，两块文字左边缘才对得齐。 */
+internal val BINDING_ROW_HPADDING = 10.dp
+
+/** 斑马纹行 / 普通行的测试标签（渲染测试用来定位行并断言行高与背景差异）。 */
+internal const val BINDING_ZEBRA_ROW_TAG = "binding_zebra_row"
+internal const val BINDING_PLAIN_ROW_TAG = "binding_plain_row"
+
+/** 表头单元格：bodyMedium + 次要色 —— 与 PropertyTable 的 Key 列同一档。 */
 @Composable
-private fun TableCell(text: String, modifier: Modifier = Modifier) {
+private fun BindingHeaderCell(text: String, modifier: Modifier = Modifier) {
     Text(
         text = text,
-        style = MaterialTheme.typography.bodySmall,
-        fontFamily = FontFamily.Monospace,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
         modifier = modifier,
     )
 }
 
-/** 表头文本。 */
+/** 数据单元格：bodyMedium + 主色 —— 与 PropertyTable 的 Value 列同一档。 */
 @Composable
-private fun TableHeader(text: String, modifier: Modifier = Modifier) {
+private fun BindingDataCell(text: String, modifier: Modifier = Modifier) {
     Text(
         text = text,
-        style = MaterialTheme.typography.labelMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurface,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
         modifier = modifier,
     )
 }
-
