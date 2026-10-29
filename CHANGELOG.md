@@ -2,6 +2,49 @@
 
 本文件记录 MQClient 的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [Unreleased] — 2026-10-29 (21)
+
+### Fixed
+
+- **消费进度提示分不清「组不存在 / 没人消费过 / 没权限」**（`rocketmq-ui` 新增
+  `RocketMqProgressHint.kt`，`rocketmq-service` `fetchGroupConfigOrNull`）。
+
+  用户反馈提示只说「无法获取该消费组的详细位点信息」，看不出到底哪种情况。查下来是
+  两个问题叠在一起：
+
+  1. **一个把 Kotlin 内部断言当中文提示的 bug**：`examineSubscriptionGroupConfig`
+     对**不存在的组返回 null**（不是抛异常），而 `ioCall<T>` 的泛型上界非空，于是
+     那句 null 被 Kotlin 的 `checkNotNull` 变成
+     `ioCall(...) must not be null` —— 既不是中文也没说清发生了什么。
+     真实集群实测：`NO_SUCH_GROUP_XYZ → ioCall(...) must not be null`。
+     现在 `fetchGroupConfigOrNull` 把 null 当作**有意义的业务结果**（组不存在），
+     与「查询失败」严格区分，新增 `RocketMqGroupDetailSnapshot.groupMissing`。
+  2. **诊断信息没用上**：详情查询本来就同时拿到了「订阅组配置在不在」「有多少在线
+     成员」「进度失败的归因」，但只用了最后一项。现在由纯函数 `progressHint`
+     组合成六档：组不存在 / 无权限 / 从未有消费者上线 / CODE 17 / CODE 206 / 未知，
+     每档一句自己的话。
+
+  典型差异（同为 CODE 17）：组不存在 → 「该消费组不存在，名称可能拼错或已被删除」；
+  组在但没有在线消费者 → 「该消费组还没有消费进度，消费者启动并完成一次拉取后就会有
+  数据」；组内有成员 → 「重试队列在 NameServer 无路由」。概览 Tab 在组不存在时也会
+  加一行红字说明，避免把「未知」误读成查询失败。
+
+  i18n 中英同步（+5），其中 `rocketmq_ui_group_props_progress_denied` 是上一轮
+  遗留的**未定义键**（界面上会显示裸 key）：`progressHintTitleKey` 这类「函数返回
+  key」的写法绕过了 i18n 静态引用检查（脚本只认 `stringResource("字面量")`）。
+  已补键，并新增一条渲染测试断言每一档都能取到真实文案。
+
+  测试：`RocketMqProgressHintTest`（6 条：组不存在优先、权限、零成员、同一 CODE 17
+  三种上下文必须给出不同结论、206/未知各归各档、每档文案真的存在），
+  `RocketMqGroupProgressTabTest` 调整为 11 条（17 有成员 / 17 零成员 / 组不存在
+  三种情形分开断言）。
+
+  **真实集群验证**：`CG_PROGRESS_PROBE → config=CG_PROGRESS_PROBE`，
+  `NO_SUCH_GROUP_XYZ → config=null（组不存在）`（修复前是 Kotlin 断言文本）。
+
+  **未验证**：真机 GUI；ACL 分支仍无法在本地复现（该集群对宿主公网 IP 做了 ACL
+  白名单，且 NameServer 路由查询先于 broker 的 ACL 检查）。
+
 ## [Unreleased] — 2026-10-29 (20)
 
 ### Added

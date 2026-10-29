@@ -141,6 +141,13 @@ data class RocketMqGroupDetailSnapshot(
     val name: String,
     /** broker 订阅组配置是否查到（不依赖 %RETRY% 路由）。 */
     val configFound: Boolean,
+    /**
+     * 该组在 broker 上**确实不存在**（查询成功、但没有这条订阅组配置）。
+     *
+     * 与「查询失败」严格区分：[configFound] = false 且本字段 = true 才说明「名字
+     * 可能拼错 / 组已被删除」；查询失败时不能让用户误以为组没了。
+     */
+    val groupMissing: Boolean = false,
     /** 消费开关（订阅组配置）；null = 查询失败。 */
     val consumeEnable: Boolean?,
     /** 顺序消费（订阅组配置）；null = 查询失败。 */

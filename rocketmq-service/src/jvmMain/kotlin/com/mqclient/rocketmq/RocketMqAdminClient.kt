@@ -169,13 +169,30 @@ class RocketMqAdminClient(private val config: RocketMqConfig) : AutoCloseable {
     /**
      * 订阅组配置查询：**不依赖 %RETRY% 路由**（直接读 broker 本地配置），组从未
      * 消费也能拿到 —— 属性对话框局部降级的基础数据源。
+     *
+     * **返回 null = 该组在 broker 上确实不存在**（订阅组配置没有这条记录）。
+     * 这一点必须与「查询失败」分开：broker 的 `examineSubscriptionGroupConfig` 对
+     * 不存在的组返回 null（不是抛异常），而 `ioCall` 的泛型上界非空，会把它变成一句
+     * `ioCall(...) must not be null` 的 Kotlin 内部断言 —— 那句话既不是中文也没说
+     * 清楚发生了什么，最后原样显示在详情页上。见 [fetchGroupConfigOrNull] 的注释。
+     *
+     * 真正的查询失败（连接 / ACL / 超时）仍然抛异常，由调用方区分。
      */
-    suspend fun fetchGroupConfig(groupName: String): SubscriptionGroupConfig {
+    suspend fun fetchGroupConfigOrNull(groupName: String): SubscriptionGroupConfig? {
         val addr = ioCall { admin.examineBrokerClusterInfo() }.brokerAddrTable.values
             .flatMap { it.brokerAddrs.values }
             .firstOrNull()
             ?: throw IllegalStateException("集群中没有可用 Broker，无法查询订阅组配置")
-        return ioCall { admin.examineSubscriptionGroupConfig(addr, groupName) }
+        // 不走 ioCall：它要求非空返回；这里 null 是**有意义的业务结果**（组不存在）。
+        return withContext(Dispatchers.IO) {
+            try {
+                admin.examineSubscriptionGroupConfig(addr, groupName)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                throw mapError(e)
+            }
+        }
     }
 
     /**

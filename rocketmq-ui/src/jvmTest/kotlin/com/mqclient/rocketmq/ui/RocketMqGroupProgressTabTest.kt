@@ -43,15 +43,49 @@ class RocketMqGroupProgressTabTest {
         totalLag = 0,
     )
 
+    /**
+     * CODE 17 + 组内**有成员** → 说明是重试队列路由缺失（组本身存在且跑过）。
+     *
+     * 零成员的情形归 `RocketMqProgressHintTest`：那时更准确的解释是「还没有消费进度」，
+     * 而不是「重试队列无路由」—— 后者对用户没有行动指引。
+     */
     @Test
-    fun `code 17 explains the missing retry topic route`() = runComposeUiTest {
+    fun `code 17 with members explains the missing retry topic route`() = runComposeUiTest {
+        loadTables()
+        setContent {
+            MaterialTheme {
+                ProgressTab(detail(RocketMqProgressState.RETRY_TOPIC_NO_ROUTE).copy(memberCount = 3)) {}
+            }
+        }
+        waitForIdle()
+        onNodeWithText("无法获取该消费组的详细位点信息。").assertExists()
+        onNodeWithText("该消费组在 NameServer 中缺少重试 Topic 的路由信息", substring = true).assertExists()
+    }
+
+    /** CODE 17 + 零成员 → 更准确的说法是「还没有消费进度」。 */
+    @Test
+    fun `code 17 without members says there is no progress yet`() = runComposeUiTest {
         loadTables()
         setContent {
             MaterialTheme { ProgressTab(detail(RocketMqProgressState.RETRY_TOPIC_NO_ROUTE)) {} }
         }
         waitForIdle()
-        onNodeWithText("无法获取该消费组的详细位点信息。").assertExists()
-        onNodeWithText("该消费组在 NameServer 中缺少重试 Topic 的路由信息", substring = true).assertExists()
+        onNodeWithText("该消费组还没有消费进度。").assertExists()
+        onNodeWithText("组配置存在，但没有任何在线消费者", substring = true).assertExists()
+    }
+
+    /** 组在 broker 上不存在 → 直接说名字/删除，不再绕「重试队列」。 */
+    @Test
+    fun `missing group is named explicitly`() = runComposeUiTest {
+        loadTables()
+        setContent {
+            MaterialTheme {
+                ProgressTab(detail(RocketMqProgressState.RETRY_TOPIC_NO_ROUTE).copy(groupMissing = true)) {}
+            }
+        }
+        waitForIdle()
+        onNodeWithText("该消费组不存在。").assertExists()
+        onNodeWithText("名称可能拼错，或该组已被删除", substring = true).assertExists()
     }
 
     @Test

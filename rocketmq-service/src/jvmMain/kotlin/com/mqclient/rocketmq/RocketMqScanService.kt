@@ -20,6 +20,7 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.TimeoutCancellationException
 import org.apache.rocketmq.remoting.protocol.admin.ConsumeStats
 import org.apache.rocketmq.remoting.protocol.body.ConsumeStatsList
+import org.apache.rocketmq.remoting.protocol.subscription.SubscriptionGroupConfig
 import com.mqclient.mq.base.AbstractScanService
 
 /**
@@ -394,7 +395,17 @@ class RocketMqScanService(
     suspend fun fetchGroupDetail(connectionId: String, group: String): RocketMqGroupDetailSnapshot {
         val (ctx, admin) = targetOrThrow(connectionId)
         return withContext(Dispatchers.IO) {
-            val config = bestEffort("group config", group) { admin.fetchGroupConfig(group) }
+            // 订阅组配置：null + 没抛异常 = 该组在 broker 上确实不存在（与「查询失败」区分）。
+            var configLookupFailed = false
+            val config: SubscriptionGroupConfig? = try {
+                admin.fetchGroupConfigOrNull(group)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Throwable) {
+                configLookupFailed = true
+                rocketMqLog.warn("group config failed: group=$group error=${error.message}")
+                null
+            }
             val conn = bestEffort("group connection", group) { admin.fetchConsumerConnection(group) }
 
             val progress = resolveGroupProgress(
@@ -406,6 +417,8 @@ class RocketMqScanService(
             RocketMqGroupDetailSnapshot(
                 name = group,
                 configFound = config != null,
+                // 查询成功但没这条配置 = 组不存在；查询失败时**不**下这个结论（可能只是连不上）。
+                groupMissing = config == null && !configLookupFailed,
                 consumeEnable = config?.isConsumeEnable,
                 orderly = config?.isConsumeMessageOrderly,
                 consumeMode = conn?.messageModel?.name ?: "",

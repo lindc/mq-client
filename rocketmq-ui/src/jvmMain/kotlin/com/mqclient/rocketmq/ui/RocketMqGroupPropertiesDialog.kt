@@ -238,6 +238,16 @@ private fun OverviewTab(detail: RocketMqGroupDetailSnapshot) {
             .verticalScroll(rememberScrollState())
             .padding(vertical = 8.dp),
     ) {
+        if (detail.groupMissing) {
+            // 概览页也要说清楚：组在 broker 上根本没有订阅配置，下面的「未知」
+            // 不是查询失败，而是它确实不存在。
+            Text(
+                text = stringResource("rocketmq_ui_group_props_group_missing_sub"),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
+        }
         PropertyTableSection(
             title = stringResource("rocketmq_ui_group_props_section_basic"),
             items = listOf(
@@ -358,36 +368,33 @@ internal fun ProgressTab(
         // CODE 17 / 其他失败：浅黄警告卡片（局部降级），原始错误码不进 UI。
         else -> {
             Box(modifier = Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
-                ProgressWarningBanner(
-                    state = detail.progressState,
-                    error = detail.progressError,
-                    onRetry = onRetry,
-                )
+                ProgressWarningBanner(detail = detail, onRetry = onRetry)
             }
         }
     }
 }
 
 /**
- * 进度不可用的警告卡片：**每种原因一句自己的解释**，外加统一的「重试」。
+ * 进度不可用的警告卡片：**按「哪个环节缺东西」分档**，外加统一的「重试」。
  *
- * 之前只有两档（无路由 / 其他），而「其他」的副文案是「消费进度查询失败，可点击
- * 重试，或检查服务端连接与权限」—— 对用户没有任何行动指引，也看不出到底是没消费
- * 过、还是权限、还是超时。现在按 [RocketMqProgressState] 分档，未知失败直接把原始
- * 错误摘要放进卡片（[RocketMqGroupDetailSnapshot.progressError]）。
+ * 分档规则见 [progressHint]（纯函数、有单测）：组不存在 / 无权限 / 从未有消费者
+ * 上线 / CODE 17 / CODE 206 / 未知失败各一句自己的话。之前只有两档，而「其他」
+ * 的副文案是「查询失败，可点击重试，或检查服务端连接与权限」—— 对用户没有任何
+ * 判断价值。
  *
- * 配色：可自行恢复的「还没数据」两档（17 / 206）用浅黄提示色；权限与未知失败用
- * 中性灰（不是红色 —— 详情对话框本体是好的，只有这一个 Tab 缺数据）。
+ * 配色：能自行恢复的「还没数据」几档用浅黄提示色；权限与未知失败用中性灰
+ * （不是红色 —— 详情对话框本体是好的，只有这一 Tab 缺数据）。
  */
 @Composable
 private fun ProgressWarningBanner(
-    state: RocketMqProgressState,
-    error: String?,
+    detail: RocketMqGroupDetailSnapshot,
     onRetry: () -> Unit,
 ) {
-    val noRoute = state == RocketMqProgressState.RETRY_TOPIC_NO_ROUTE
-    val noStats = state == RocketMqProgressState.NO_CONSUME_STATS
-    val accent = noRoute || noStats
+    val hint = progressHint(detail)
+    val accent = hint == ProgressHint.GROUP_MISSING ||
+        hint == ProgressHint.NO_MEMBERS ||
+        hint == ProgressHint.RETRY_TOPIC_NO_ROUTE ||
+        hint == ProgressHint.NO_CONSUME_STATS
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -415,7 +422,7 @@ private fun ProgressWarningBanner(
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = stringResource(progressTitleKey(state)),
+                    text = stringResource(progressHintTitleKey(hint)),
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Medium,
                     color = if (accent) {
@@ -426,7 +433,7 @@ private fun ProgressWarningBanner(
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    text = progressSubtitle(state, error),
+                    text = progressHintBody(hint, detail.progressError),
                     style = MaterialTheme.typography.bodySmall,
                     color = if (accent) {
                         MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.8f)
@@ -434,6 +441,17 @@ private fun ProgressWarningBanner(
                         MaterialTheme.colorScheme.onSurfaceVariant
                     },
                 )
+                // 未知失败把原始摘要单独列出来（标题里已经说了「失败」，这里只补事实）。
+                if (hint == ProgressHint.FAILED) {
+                    detail.progressError?.takeIf { it.isNotBlank() }?.let { raw ->
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = raw,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
                 Spacer(Modifier.height(6.dp))
                 SecondaryButton(onClick = onRetry) {
                     Text(stringResource("common_retry"))
@@ -443,28 +461,26 @@ private fun ProgressWarningBanner(
     }
 }
 
-/** 各态的标题（17 沿用原「无法获取详细位点」的措辞，用户已经熟悉）。 */
-private fun progressTitleKey(state: RocketMqProgressState): String = when (state) {
-    RocketMqProgressState.RETRY_TOPIC_NO_ROUTE -> "rocketmq_ui_group_props_progress_unavailable"
-    RocketMqProgressState.NO_CONSUME_STATS -> "rocketmq_ui_group_props_progress_unavailable"
-    RocketMqProgressState.NO_PERMISSION -> "rocketmq_ui_group_props_progress_denied"
-    RocketMqProgressState.FAILED -> "rocketmq_ui_group_props_progress_unavailable"
-    RocketMqProgressState.OK -> "rocketmq_ui_group_props_progress_unavailable"
+/** 各档的标题。 */
+private fun progressHintTitleKey(hint: ProgressHint): String = when (hint) {
+    ProgressHint.GROUP_MISSING -> "rocketmq_ui_group_props_progress_group_missing"
+    ProgressHint.NO_PERMISSION -> "rocketmq_ui_group_props_progress_denied"
+    ProgressHint.NO_MEMBERS -> "rocketmq_ui_group_props_progress_no_members"
+    ProgressHint.RETRY_TOPIC_NO_ROUTE,
+    ProgressHint.NO_CONSUME_STATS,
+    ProgressHint.FAILED,
+    -> "rocketmq_ui_group_props_progress_unavailable"
 }
 
-/** 各态的副文案；FAILED 拼上原始错误摘要（没有摘要就退回通用文案）。 */
+/** 各档的副文案。 */
 @Composable
-private fun progressSubtitle(state: RocketMqProgressState, error: String?): String = when (state) {
-    RocketMqProgressState.RETRY_TOPIC_NO_ROUTE ->
-        stringResource("rocketmq_ui_group_props_no_route_sub")
-
-    RocketMqProgressState.NO_CONSUME_STATS ->
-        stringResource("rocketmq_ui_group_props_no_stats_sub")
-
-    RocketMqProgressState.NO_PERMISSION ->
-        stringResource("rocketmq_ui_group_props_permission_sub")
-
-    RocketMqProgressState.FAILED -> {
+private fun progressHintBody(hint: ProgressHint, error: String?): String = when (hint) {
+    ProgressHint.GROUP_MISSING -> stringResource("rocketmq_ui_group_props_group_missing_sub")
+    ProgressHint.NO_PERMISSION -> stringResource("rocketmq_ui_group_props_permission_sub")
+    ProgressHint.NO_MEMBERS -> stringResource("rocketmq_ui_group_props_no_members_sub")
+    ProgressHint.RETRY_TOPIC_NO_ROUTE -> stringResource("rocketmq_ui_group_props_no_route_sub")
+    ProgressHint.NO_CONSUME_STATS -> stringResource("rocketmq_ui_group_props_no_stats_sub")
+    ProgressHint.FAILED -> {
         val detail = error?.trim()?.takeIf(String::isNotEmpty)
         if (detail != null) {
             stringResource("rocketmq_ui_group_props_failed_detail").withArg(detail)
@@ -472,8 +488,6 @@ private fun progressSubtitle(state: RocketMqProgressState, error: String?): Stri
             stringResource("rocketmq_ui_group_props_failed_sub")
         }
     }
-
-    RocketMqProgressState.OK -> ""
 }
 
 /** 进度行：斑马纹 + lag>0 橙色醒目；数字 monospace。 */
