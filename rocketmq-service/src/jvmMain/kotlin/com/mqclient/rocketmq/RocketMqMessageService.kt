@@ -1,6 +1,7 @@
 package com.mqclient.rocketmq
 
 import com.mqclient.message.interpreter.isProbablyBinary
+import com.mqclient.message.interpreter.previewTextOf
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.withLock
@@ -250,7 +251,7 @@ class RocketMqMessageService {
             bornTimestamp = bornTimestamp,
             storeTimestamp = storeTimestamp,
             bornHost = bornHostString,
-            valuePreview = previewOf(bodyBytes),
+            valuePreview = previewTextOf(bodyBytes, MESSAGE_PREVIEW_BYTES),
             valueHex = hexOf(bodyBytes),
             valueProbablyBinary = isProbablyBinary(bodyBytes, codedCharSetId = 1208),
             valueSize = storeSize,
@@ -260,12 +261,6 @@ class RocketMqMessageService {
                 ?.toSortedMap()
                 ?: emptyMap(),
         )
-    }
-
-    /** UTF-8 容错解码（非法字节出替换符）+ 截断到 [MESSAGE_PREVIEW_BYTES] 字节。 */
-    private fun previewOf(bytes: ByteArray): String {
-        val end = minOf(bytes.size, MESSAGE_PREVIEW_BYTES)
-        return String(bytes, 0, end, Charsets.UTF_8)
     }
 
     /** hex 串，截断到 2×[MESSAGE_PREVIEW_BYTES]（与预览字节对齐）。 */

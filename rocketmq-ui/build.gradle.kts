@@ -37,6 +37,9 @@ kotlin {
             implementation(kotlin("test"))
             // 「落盘不在 UI 线程」的测试替身（RecordingConnectionPersistence / UiThreadHarness）。
             implementation(projects.uiTestKit)
+            // Compose UI 测试的无头渲染需要 Skia 原生运行时（ui-test-kit 不透传，
+            // 与 kafka-ui 的 jvmTest 同一写法）：消息列表 Value 单元格的像素断言靠它。
+            implementation(compose.desktop.currentOs)
         }
     }
 }

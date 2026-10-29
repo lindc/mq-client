@@ -503,22 +503,8 @@ private fun MessageRow(
             modifier = Modifier.width(RMSG_COL_KEYS),
             onCopy = onCopy,
         )
-        // Value 单元格：utf8 预览；疑似二进制显示 hex 前段。
-        if (message.valueProbablyBinary) {
-            CopyablePreviewCell(
-                text = null,
-                hex = message.valueHex,
-                modifier = Modifier.weight(1f),
-                onCopy = onCopy,
-            )
-        } else {
-            CopyablePreviewCell(
-                text = message.valuePreview,
-                hex = null,
-                modifier = Modifier.weight(1f),
-                onCopy = onCopy,
-            )
-        }
+        // Value 单元格：四档兜底，**任何情况下都不留白**（与 Kafka 的 ValueCell 同构）。
+        ValueCell(message, Modifier.weight(1f), onCopy)
         Text(
             text = formatTimestamp(message.storeTimestamp),
             style = MaterialTheme.typography.bodySmall,
@@ -560,6 +546,45 @@ private fun CopyableTextCell(
                 .clickable { onCopy(text) }
                 .padding(vertical = 2.dp),
         )
+    }
+}
+
+/**
+ * Value 单元格：utf8 单行预览；**任何情况下都不留白**。
+ *
+ * 四档优先级与 Kafka 的 `ValueCell` 完全一致（同一个空白盲区，两处必须同构）：
+ *  1) 0 字节 → 「[空消息]」；2) 疑似二进制 → hex；3) 预览全不可见（纯空白 / 全零宽
+ * 字符）→ 「[不可见内容] + hex」；4) 否则原文。
+ *
+ * 单元格是 `maxLines = 1`：首行无字形就一个像素都不画。服务层已用
+ * message-interpreter-api 的 `previewTextOf` 把预览压成单行，这三档兜的是
+ * 「规范化之后仍然没有可见内容」的剩余情形。
+ */
+@Composable
+internal fun ValueCell(
+    message: RocketMqMessage,
+    modifier: Modifier = Modifier,
+    onCopy: (String) -> Unit,
+) {
+    val emptyLabel = stringResource("rocketmq_ui_msg_browse_empty_value")
+    val invisibleLabel = stringResource("rocketmq_ui_msg_browse_invisible_value")
+    when {
+        message.valueSize == 0 ->
+            CopyablePreviewCell(text = emptyLabel, hex = null, modifier = modifier, onCopy = onCopy)
+
+        message.valueProbablyBinary ->
+            CopyablePreviewCell(text = null, hex = message.valueHex, modifier = modifier, onCopy = onCopy)
+
+        message.valuePreview.isBlank() ->
+            CopyablePreviewCell(
+                text = "$invisibleLabel ${message.valueHex}",
+                hex = null,
+                modifier = modifier,
+                onCopy = onCopy,
+            )
+
+        else ->
+            CopyablePreviewCell(text = message.valuePreview, hex = null, modifier = modifier, onCopy = onCopy)
     }
 }
 

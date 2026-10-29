@@ -223,6 +223,8 @@
   "kafka_ui_msg_browse_timestamp_empty": "No data at or after this timestamp",
   "kafka_ui_msg_browse_filtered_empty": "No matching messages",
   "kafka_ui_msg_browse_search": "Search key / value / timestamp",
+  "kafka_ui_msg_browse_empty_value": "[Empty message]",
+  "kafka_ui_msg_browse_invisible_value": "[Invisible content]",
   "kafka_ui_msg_detail_title": "Message detail: Partition %1$d · Offset %2$d",
   "kafka_ui_msg_detail_download": "Download",
   "kafka_ui_msg_detail_h_topic": "Topic",

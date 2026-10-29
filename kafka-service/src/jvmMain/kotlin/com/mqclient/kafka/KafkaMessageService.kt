@@ -1,6 +1,7 @@
 package com.mqclient.kafka
 
 import com.mqclient.message.interpreter.isProbablyBinary
+import com.mqclient.message.interpreter.previewTextOf
 import java.time.Duration
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
@@ -392,7 +393,9 @@ class KafkaMessageService {
         }
 
     private fun ConsumerRecord<ByteArray, ByteArray>.toSummary(topic: String): KafkaMessageSummary {
-        val value = value()
+        // tombstone（value = null，合法的「删除标记」）当空消息处理：原来直接喂给
+        // previewOf / isProbablyBinary 会 NPE，整页读取都会挂。
+        val value = value() ?: ByteArray(0)
         val key = key()
         return KafkaMessageSummary(
             topic = topic,
@@ -400,12 +403,14 @@ class KafkaMessageService {
             offset = offset(),
             timestamp = timestamp(),
             timestampType = timestampType().name,
-            keyPreview = key?.let { previewOf(it) },
+            keyPreview = key?.let { previewTextOf(it) },
             keyHex = key?.let { hexOf(it) },
-            valuePreview = previewOf(value),
+            valuePreview = previewTextOf(value),
             valueHex = hexOf(value),
             valueProbablyBinary = isProbablyBinary(value, codedCharSetId = 1208),
-            valueSize = serializedValueSize(),
+            // null value 的 serializedValueSize() 是 -1；统一成 0，UI 才能靠
+            // `valueSize == 0` 判定「空消息」（见 KafkaMessageBrowseTab 的 ValueCell）。
+            valueSize = serializedValueSize().coerceAtLeast(0),
         )
     }
 
@@ -421,12 +426,6 @@ class KafkaMessageService {
         keySize = key()?.size,
         valueSize = serializedValueSize(),
     )
-
-    /** UTF-8 容错解码（非法字节出替换符）+ 截断到 [PREVIEW_BYTES] 字节。 */
-    private fun previewOf(bytes: ByteArray): String {
-        val end = minOf(bytes.size, PREVIEW_BYTES)
-        return String(bytes, 0, end, Charsets.UTF_8)
-    }
 
     /** hex 串，截断到 2×[PREVIEW_BYTES]（与预览字节对齐）。 */
     private fun hexOf(bytes: ByteArray): String {

@@ -660,17 +660,44 @@ private fun CopyablePreviewCell(
     }
 }
 
-/** Value 单元格：utf8 预览；疑似二进制显示 hex 前段 + 「HEX」标记。 */
+/**
+ * Value 单元格：utf8 单行预览；**任何情况下都不留白**。
+ *
+ * 四档优先级（从「有真实文本」到「只能给事实」）：
+ *  1. 普通文本 → 预览（service 侧已把前导换行 / BOM / 控制字符压成单行）；
+ *  2. 疑似二进制 → hex 前段（原逻辑）；
+ *  3. 字节不空但预览全不可见（纯空白 / 全零宽字符）→ 「[不可见内容]」+ hex；
+ *  4. 0 字节（含 tombstone）→ 「[空消息]」。
+ *
+ * 第 3、4 档是本轮修的显示盲区：单元格是 `maxLines = 1`，首行无字形就一个像素
+ * 都不画（实测 ink=0），看起来像没读到数据。占位文案放 UI 而不是 service ——
+ * 要翻译，且属于展示决策。
+ */
 @Composable
-private fun ValueCell(
+internal fun ValueCell(
     message: KafkaMessageSummary,
     modifier: Modifier = Modifier,
     onCopy: (String) -> Unit,
 ) {
-    if (message.valueProbablyBinary) {
-        CopyablePreviewCell(text = null, hex = message.valueHex, modifier = modifier, onCopy = onCopy)
-    } else {
-        CopyablePreviewCell(text = message.valuePreview, hex = null, modifier = modifier, onCopy = onCopy)
+    val emptyLabel = stringResource("kafka_ui_msg_browse_empty_value")
+    val invisibleLabel = stringResource("kafka_ui_msg_browse_invisible_value")
+    when {
+        message.valueSize == 0 ->
+            CopyablePreviewCell(text = emptyLabel, hex = null, modifier = modifier, onCopy = onCopy)
+
+        message.valueProbablyBinary ->
+            CopyablePreviewCell(text = null, hex = message.valueHex, modifier = modifier, onCopy = onCopy)
+
+        message.valuePreview.isBlank() ->
+            CopyablePreviewCell(
+                text = "$invisibleLabel ${message.valueHex}",
+                hex = null,
+                modifier = modifier,
+                onCopy = onCopy,
+            )
+
+        else ->
+            CopyablePreviewCell(text = message.valuePreview, hex = null, modifier = modifier, onCopy = onCopy)
     }
 }
 

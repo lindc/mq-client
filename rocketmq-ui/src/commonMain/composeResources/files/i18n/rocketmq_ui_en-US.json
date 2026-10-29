@@ -200,6 +200,8 @@
   "rocketmq_ui_msg_browse_empty": "No matching messages",
   "rocketmq_ui_msg_browse_filtered_empty": "No messages match the filter",
   "rocketmq_ui_msg_browse_search": "Search MsgId / Tag / Key / Value",
+  "rocketmq_ui_msg_browse_empty_value": "[Empty message]",
+  "rocketmq_ui_msg_browse_invisible_value": "[Invisible content]",
   "rocketmq_ui_msg_browse_queue_failed": "Failed to fetch queue list: %1$s",
   "rocketmq_ui_msg_copied": "Copied",
   "rocketmq_ui_msg_detail_title": "Message details: Queue %1$d · Offset %2$d",

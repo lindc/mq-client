@@ -2,6 +2,52 @@
 
 本文件记录 MQClient 的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [Unreleased] — 2026-10-29 (15)
+
+### Fixed
+
+- **消息列表 Value 列整格空白 —— 首行无可见字形**（Kafka + RocketMQ，公共函数下沉到
+  `message-interpreter-api`）。
+
+  现场（Kafka）：同一批 XML 消息里 `Offset 6` 正常显示 `<wpf:ResourceDictionary…`，
+  `Offset 5` 整格空白，像没读到数据。
+
+  根因不是编码失败，也不是二进制判定，而是**单元格只画第一行**：列表用
+  `Text(maxLines = 1, overflow = Ellipsis)`，而原预览就是
+  `String(bytes, 0, 256, UTF_8)` 原样返回 —— 正文以 `\n` / `\r\n` / 空格 / UTF-8 BOM
+  开头时，第一行是空的，单元格一个像素都不画（实测 `"\n\n<wpf:…"` 渲染 ink=0，
+  去掉前导换行后 ink=1119）。排查方向里的另两条都不成立：二进制命中时走 hex
+  分支（非空）；非 UTF-8 容错解码产出的是 `\uFFFD` 替换符（有字形，显示成 `���`）。
+
+  修法：
+  - `message-interpreter-api` 新增 `MessagePreviewText.kt`：`previewTextOf(bytes)` /
+    `singleLinePreview(raw)` —— 去 BOM 与零宽字符、空白与控制字符**折叠**成一个空格
+    （不是删，否则 `</a>\n<b>` 会拼成 `</a><b>`）、首尾去空，预览永远以可见字符开头。
+    放这里而不是某个 `*-service`：Kafka 与 RocketMQ 的 `previewOf` 曾是逐字相同的
+    两份副本，同一个盲区要修两遍；`isProbablyBinary` / `hexPreview` 已在此处；
+  - Kafka / RocketMQ 两个 `ValueCell` 四档兜底，绝不剩白格：0 字节（含 Kafka 的
+    tombstone）→ `[空消息]`；疑似二进制 → hex；预览全不可见（纯空白 / 全零宽）→
+    `[不可见内容] + hex`；否则原文；
+  - 顺带修 Kafka `toSummary` 两个同路径隐患：`value()` 为 null 的 tombstone 原来会在
+    `previewOf` 里 NPE（整页读取挂掉），现在按空消息处理；`serializedValueSize()`
+    对 null 返回 -1，统一 `coerceAtLeast(0)`，UI 才能靠 `valueSize == 0` 判定。
+
+  i18n 中英同步（+2 ×2 模块）：`kafka_ui_msg_browse_empty_value` /
+  `kafka_ui_msg_browse_invisible_value`、`rocketmq_ui_msg_browse_empty_value` /
+  `rocketmq_ui_msg_browse_invisible_value`。
+
+  测试：`MessagePreviewTextTest`（9 条，`message-interpreter-api`）—— 前导换行 / BOM /
+  零宽、折叠而非删除、全不可见→空串、非法字节出替换符、字节预算截断、普通文本不动；
+  `KafkaMessageValueCellTest` / `RocketMqMessageValueCellTest`（各 6 条）—— 对单元格
+  截图数非背景像素：普通文本、前导换行 XML、BOM XML、全不可见、零字节、二进制六种
+  输入都必须有墨迹（修复前前导换行那档实测 ink=0，已作为负向对照验证）。
+
+  `rocketmq-ui` 的 `jvmTest` 补了 `compose.desktop.currentOs`（无头渲染需要 Skia 原生
+  运行时，与 `kafka-ui` 同一写法）。
+
+  **未验证**：真机 GUI 观感。本地到编译 + 单测 + i18n + 分层检查；`verify.sh` 的
+  `:rabbitmq-service:jvmTest` 仍因本机配了 rabbitmq 连接但 broker 未运行而失败。
+
 ## [Unreleased] — 2026-10-29 (14)
 
 ### Changed

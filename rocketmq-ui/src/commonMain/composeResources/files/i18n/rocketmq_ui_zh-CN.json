@@ -200,6 +200,8 @@
   "rocketmq_ui_msg_browse_empty": "没有符合条件的数据",
   "rocketmq_ui_msg_browse_filtered_empty": "没有匹配的消息",
   "rocketmq_ui_msg_browse_search": "搜索 MsgId / Tag / Key / Value",
+  "rocketmq_ui_msg_browse_empty_value": "[空消息]",
+  "rocketmq_ui_msg_browse_invisible_value": "[不可见内容]",
   "rocketmq_ui_msg_browse_queue_failed": "队列列表获取失败：%1$s",
   "rocketmq_ui_msg_copied": "已复制",
   "rocketmq_ui_msg_detail_title": "消息详情：Queue %1$d · Offset %2$d",
