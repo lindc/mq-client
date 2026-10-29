@@ -6,6 +6,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.runComposeUiTest
 import com.mqclient.rocketmq.RocketMqGroupDetailSnapshot
+import com.mqclient.rocketmq.RocketMqProgressSource
 import com.mqclient.rocketmq.RocketMqProgressState
 import com.mqclient.uicommon.i18n.LanguageResources
 import kotlinx.coroutines.runBlocking
@@ -136,5 +137,57 @@ class RocketMqGroupProgressTabTest {
         waitForIdle()
         onNodeWithText("broker-a").assertExists()
         onNodeWithText("100").assertExists()
+    }
+
+    /**
+     * 兜底取到的数据必须**标注来源**。
+     *
+     * 同一张表，之前说「查不到」、现在又列出位点 —— 不说清楚，用户会以为组级查询
+     * 其实成功了，或者怀疑数据是假的。
+     */
+    @Test
+    fun `broker fallback data is annotated with its source`() = runComposeUiTest {
+        loadTables()
+        val fallback = detail(RocketMqProgressState.OK).copy(
+            progressSource = RocketMqProgressSource.BROKER_FALLBACK,
+            rows = listOf(
+                com.mqclient.rocketmq.RocketMqOffsetRowSnapshot(
+                    topic = "ChillbearNormal",
+                    broker = "broker-b",
+                    queueId = 0,
+                    maxOffset = 1,
+                    consumerOffset = 1,
+                    lag = 0,
+                ),
+            ),
+        )
+        setContent { MaterialTheme { ProgressTab(fallback) {} } }
+        waitForIdle()
+
+        onNodeWithText("位点由 Broker 直读取得", substring = true).assertExists()
+        onNodeWithText("broker-b").assertExists()
+    }
+
+    @Test
+    fun `group level data has no fallback annotation`() = runComposeUiTest {
+        loadTables()
+        val normal = detail(RocketMqProgressState.OK).copy(
+            progressSource = RocketMqProgressSource.GROUP,
+            rows = listOf(
+                com.mqclient.rocketmq.RocketMqOffsetRowSnapshot(
+                    topic = "ChillbearNormal",
+                    broker = "broker-a",
+                    queueId = 0,
+                    maxOffset = 2,
+                    consumerOffset = 1,
+                    lag = 1,
+                ),
+            ),
+        )
+        setContent { MaterialTheme { ProgressTab(normal) {} } }
+        waitForIdle()
+
+        onNodeWithText("位点由 Broker 直读取得", substring = true).assertDoesNotExist()
+        onNodeWithText("broker-a").assertExists()
     }
 }

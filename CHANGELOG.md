@@ -2,6 +2,53 @@
 
 本文件记录 MQClient 的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [Unreleased] — 2026-10-29 (20)
+
+### Added
+
+- **消费进度：组级查询被 `%RETRY%` 路由挡住时，逐 broker 直读兜底**
+  （`rocketmq-service` `resolveGroupProgress` / `RocketMqAdminClient.fetchConsumeStatsInBroker`）。
+
+  上一轮把「为什么查不到」说清楚了（CODE 17 / 206），但还有一种真实场景会丢数据：
+  **位点确实存在，组级查询却不可用**（重试队列被删、POP 模式、broker 还没建重试队列）。
+  此时 `examineConsumeStats(group)` 先查 `%RETRY%<group>` 的路由就失败，而 broker 的
+  ConsumerOffsetManager 里那些位点还在。
+
+  做法：组级失败且分类为 `RETRY_TOPIC_NO_ROUTE` / `NO_CONSUME_STATS` 时，逐 broker 调
+  `fetchConsumeStatsInBroker`（**完全不查路由**），按组过滤、去重、排序后作为结果返回，
+  新增 `RocketMqProgressSource.BROKER_FALLBACK` 标注来源，UI 在表格上方加一行说明
+  「位点由 Broker 直读取得」—— 否则用户会疑惑「刚说查不到，怎么现在又有数了」。
+
+  边界（都写进代码注释与测试）：
+  - **只在 17 / 206 兜底**。权限 / 超时 / 未知失败再查一遍没有意义，反而会把一次超时
+    放大成 N 次 broker 请求；
+  - 兜底查到的行**为空就保持原降级态** —— 「跑过兜底」不等于「有数据」；
+  - **不按 topic 猜**：`examineConsumeStats(group, topic)` 对从未订阅该 topic 的组也
+    返回整张队列表（实测把一个组的 12 个全 0 队列当成它的进度），那是在编数据；
+  - 并发逐 broker、单个 5 秒上限，单 broker 失败只少它自己那份。
+
+  结构上把策略抽成 `resolveGroupProgress(...)`（依赖全部注入）+ 纯函数
+  `brokerStatsToRows`，因此 `fetchGroupDetail` 之外也能单测 —— 它本来要连模块注册表
+  才能跑。
+
+  测试：`RocketMqGroupProgressResolveTest`（10 条：组级成功不碰 broker、17 有数据即恢复、
+  17 无数据保持降级、206 同样兜底、权限不兜底、超时不兜底且文案独立、未知失败带摘要、
+  单 broker 失败只少自己、地址查询失败降级、取消原样上抛）、
+  `RocketMqBrokerStatsRowsTest`（5 条：只留本组、去重、lag 非负、排序、空响应）、
+  `RocketMqGroupProgressTabTest` +2（兜底数据带来源标注 / 常规路径不带）。
+  负向对照：去掉兜底后 3 条用例失败。
+
+  **真实集群验证**（chillbear，用 `resetOffsetByTime` 造出「有 offset 但无 retry 路由」
+  的 `CG_PROGRESS_PROBE`，未删除任何 topic）：
+  ```
+  RESOLVE CG_PROGRESS_PROBE -> state=OK  source=BROKER_FALLBACK rows=12
+  RESOLVE CG_Normal         -> state=RETRY_TOPIC_NO_ROUTE rows=0
+  RESOLVE CID_RMQ_SYS_TRANS -> state=OK  source=GROUP rows=2
+  ```
+
+  **未验证**：真机 GUI；`CG_PROGRESS_PROBE` 与它的 12 条测试位点留在集群上（未清理），
+  方便你在客户端里直接复现，清理命令见交付说明。
+
 ## [Unreleased] — 2026-10-29 (19)
 
 ### Fixed

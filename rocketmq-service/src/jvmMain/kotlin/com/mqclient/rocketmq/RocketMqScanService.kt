@@ -19,6 +19,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.TimeoutCancellationException
 import org.apache.rocketmq.remoting.protocol.admin.ConsumeStats
+import org.apache.rocketmq.remoting.protocol.body.ConsumeStatsList
 import com.mqclient.mq.base.AbstractScanService
 
 /**
@@ -396,45 +397,12 @@ class RocketMqScanService(
             val config = bestEffort("group config", group) { admin.fetchGroupConfig(group) }
             val conn = bestEffort("group connection", group) { admin.fetchConsumerConnection(group) }
 
-            var progressState = RocketMqProgressState.OK
-            var progressError: String? = null
-            val stats: ConsumeStats? = try {
-                withTimeout(PROGRESS_TIMEOUT_MS) { admin.fetchConsumerProgress(group) }
-            } catch (timeout: TimeoutCancellationException) {
-                // 超时是**我们**给的界，不是协议错误：单独说清楚，别混进「查询失败」。
-                progressState = RocketMqProgressState.FAILED
-                progressError = "查询超时（${PROGRESS_TIMEOUT_MS / 1000}s 内 Broker 未返回）"
-                rocketMqLog.warn(
-                    "group progress timed out after ${PROGRESS_TIMEOUT_MS}ms: group=$group " +
-                        "(底层阻塞调用不会被协程取消打断，线程会在 AdminClient 自身超时后释放)",
-                )
-                null
-            } catch (cancellation: CancellationException) {
-                throw cancellation
-            } catch (error: Throwable) {
-                val failure = classifyProgressFailure(error)
-                progressState = failure.state
-                progressError = failure.detail
-                // 完整栈进日志（console + 文件）：只有 message 时，CODE 与调用链都丢了，
-                // 现场问题只能靠猜。分类已在首行，栈在后面。
-                rocketMqLog.warn(
-                    "group progress failed: group=$group state=${failure.state} " +
-                        "code=${failure.code ?: "-"} error=${error.message}\n" +
-                        error.stackTraceToString(),
-                )
-                null
-            }
-
-            val rows = stats?.offsetTable?.entries?.map { (mq, wrapper) ->
-                RocketMqOffsetRowSnapshot(
-                    topic = mq.topic,
-                    broker = mq.brokerName,
-                    queueId = mq.queueId,
-                    maxOffset = wrapper.brokerOffset,
-                    consumerOffset = wrapper.consumerOffset,
-                    lag = (wrapper.brokerOffset - wrapper.consumerOffset).coerceAtLeast(0),
-                )
-            }?.sortedWith(compareBy({ it.topic }, { it.broker }, { it.queueId })) ?: emptyList()
+            val progress = resolveGroupProgress(
+                group = group,
+                fetchGroupLevel = { admin.fetchConsumerProgress(group) },
+                fetchBrokerLevel = { addr -> admin.fetchConsumeStatsInBroker(addr, PROGRESS_TIMEOUT_MS) },
+                brokerAddrs = { brokerAddresses(connectionId, admin) },
+            )
             RocketMqGroupDetailSnapshot(
                 name = group,
                 configFound = config != null,
@@ -443,10 +411,11 @@ class RocketMqScanService(
                 consumeMode = conn?.messageModel?.name ?: "",
                 subscriptions = conn?.subscriptionTable?.keys?.sorted().orEmpty(),
                 memberCount = conn?.connectionSet?.size,
-                progressState = progressState,
-                progressError = progressError,
-                rows = rows,
-                totalLag = rows.sumOf { it.lag },
+                progressState = progress.state,
+                progressError = progress.error,
+                progressSource = progress.source,
+                rows = progress.rows,
+                totalLag = progress.rows.sumOf { it.lag },
             )
         }
     }
@@ -466,6 +435,29 @@ class RocketMqScanService(
             rocketMqLog.warn("$label failed: group=$group error=${error.message}\n" + error.stackTraceToString())
             null
         }
+
+    /**
+     * 全部 broker 地址：优先取慢扫缓存，未扫过时现查一次。
+     *
+     * 直读兜底要按地址逐个问，所以这里失败不该炸掉整个详情页 —— 拿不到就返回空，
+     * 兜底自然失效并保持原来的降级提示。
+     */
+    private suspend fun brokerAddresses(connectionId: String, admin: RocketMqAdminClient): List<String> {
+        val cached = cachedClusterInfo(connectionId)?.brokers?.map { it.address }?.filter { it.isNotBlank() }
+            .orEmpty()
+        if (cached.isNotEmpty()) return cached
+        return try {
+            admin.fetchClusterInfo().brokerAddrTable.values
+                .flatMap { it.brokerAddrs.values }
+                .filter { it.isNotBlank() }
+                .distinct()
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (error: Throwable) {
+            rocketMqLog.warn("broker address lookup failed: connection=$connectionId error=${error.message}")
+            emptyList()
+        }
+    }
 
     // ---------------------------------------------------------------- 主题创建
 
@@ -717,4 +709,158 @@ fun isSystemGroup(name: String): Boolean =
 enum class RocketMqScanKind(val label: String) {
     TOPICS("topics"),
     GROUPS("groups"),
+}
+
+/**
+ * broker 级统计 → UI 行（纯函数，可单测）。
+ *
+ * 三件事：只取**本组**的条目、按 (topic, broker, queueId) 去重、排序。
+ * 去重不是洁癖：多 broker 的 ConsumerOffsetManager 可能都记录同一队列
+ * （主从切换残留），不去重会在表里出现两条一模一样的行、lag 也会算两遍。
+ */
+internal fun brokerStatsToRows(group: String, list: ConsumeStatsList?): List<RocketMqOffsetRowSnapshot> =
+    list?.consumeStatsList
+        .orEmpty()
+        .mapNotNull { it[group] }
+        .flatten()
+        .flatMap { stats -> stats.offsetTable.orEmpty().entries }
+        .map { (mq, wrapper) ->
+            RocketMqOffsetRowSnapshot(
+                topic = mq.topic,
+                broker = mq.brokerName,
+                queueId = mq.queueId,
+                maxOffset = wrapper.brokerOffset,
+                consumerOffset = wrapper.consumerOffset,
+                lag = (wrapper.brokerOffset - wrapper.consumerOffset).coerceAtLeast(0),
+            )
+        }
+        .distinctBy { Triple(it.topic, it.broker, it.queueId) }
+        .sortedWith(compareBy({ it.topic }, { it.broker }, { it.queueId }))
+
+/** 一次「取消费进度」的结果（状态 + 文案 + 来源 + 行）。 */
+internal data class GroupProgressOutcome(
+    val state: RocketMqProgressState,
+    val error: String?,
+    val source: RocketMqProgressSource,
+    val rows: List<RocketMqOffsetRowSnapshot>,
+)
+
+/**
+ * 消费进度的**完整取数策略**：组级优先，被 `%RETRY%` 路由挡住时逐 broker 直读兜底。
+ *
+ * 抽成独立函数（依赖全部由参数注入）有两个理由：一是 `fetchGroupDetail` 要连
+ * 模块注册表才能跑，这个策略却只跟「两次调用 + 一个进度界」有关，注入即可单测；
+ * 二是兜底的**触发条件**是最容易写错的一处 —— 放宽到「任何失败都兜底」会把一次
+ * 超时放大成 N 次 broker 请求，收紧到「只 17」又会漏掉 206。
+ *
+ * 兜底只在 [RocketMqProgressState.RETRY_TOPIC_NO_ROUTE] 与
+ * [RocketMqProgressState.NO_CONSUME_STATS] 两态触发：它们说的是「这个组还没有
+ * 该有的元数据」，而位点可能仍然真实存在于 broker 上。权限 / 超时 / 未知失败再查
+ * 一遍没有意义。
+ */
+internal suspend fun resolveGroupProgress(
+    group: String,
+    fetchGroupLevel: suspend () -> ConsumeStats,
+    fetchBrokerLevel: suspend (String) -> ConsumeStatsList?,
+    brokerAddrs: suspend () -> List<String>,
+): GroupProgressOutcome {
+    val stats = try {
+        withTimeout(PROGRESS_TIMEOUT_MS) { fetchGroupLevel() }
+    } catch (timeout: TimeoutCancellationException) {
+        // 超时是**我们**给的界，不是协议错误：单独说清楚，别混进「查询失败」。
+        rocketMqLog.warn(
+            "group progress timed out after ${PROGRESS_TIMEOUT_MS}ms: group=$group " +
+                "(底层阻塞调用不会被协程取消打断，线程会在 AdminClient 自身超时后释放)",
+        )
+        return GroupProgressOutcome(
+            state = RocketMqProgressState.FAILED,
+            error = "查询超时（${PROGRESS_TIMEOUT_MS / 1000}s 内 Broker 未返回）",
+            source = RocketMqProgressSource.GROUP,
+            rows = emptyList(),
+        )
+    } catch (cancellation: CancellationException) {
+        throw cancellation
+    } catch (error: Throwable) {
+        val failure = classifyProgressFailure(error)
+        // 完整栈进日志（console + 文件）：只有 message 时，CODE 与调用链都丢了。
+        rocketMqLog.warn(
+            "group progress failed: group=$group state=${failure.state} " +
+                "code=${failure.code ?: "-"} error=${error.message}\n" +
+                error.stackTraceToString(),
+        )
+        val degraded = GroupProgressOutcome(
+            state = failure.state,
+            error = failure.detail,
+            source = RocketMqProgressSource.GROUP,
+            rows = emptyList(),
+        )
+        if (failure.state != RocketMqProgressState.RETRY_TOPIC_NO_ROUTE &&
+            failure.state != RocketMqProgressState.NO_CONSUME_STATS
+        ) {
+            return degraded
+        }
+        // broker 直读兜底：位点真实存在但组级元数据缺失时，这里能把数据捞回来。
+        val recovered = readFromBrokers(group, fetchBrokerLevel, brokerAddrs)
+        if (recovered.isEmpty()) return degraded
+        rocketMqLog.info("group progress recovered from broker-direct read: group=$group rows=${recovered.size}")
+        return GroupProgressOutcome(
+            state = RocketMqProgressState.OK,
+            error = null,
+            source = RocketMqProgressSource.BROKER_FALLBACK,
+            rows = recovered,
+        )
+    }
+
+    val rows = stats.offsetTable.orEmpty().entries
+        .map { (mq, wrapper) ->
+            RocketMqOffsetRowSnapshot(
+                topic = mq.topic,
+                broker = mq.brokerName,
+                queueId = mq.queueId,
+                maxOffset = wrapper.brokerOffset,
+                consumerOffset = wrapper.consumerOffset,
+                lag = (wrapper.brokerOffset - wrapper.consumerOffset).coerceAtLeast(0),
+            )
+        }
+        .sortedWith(compareBy({ it.topic }, { it.broker }, { it.queueId }))
+    return GroupProgressOutcome(
+        state = RocketMqProgressState.OK,
+        error = null,
+        source = RocketMqProgressSource.GROUP,
+        rows = rows,
+    )
+}
+
+/** 逐 broker 直读（并发、单 broker 5 秒上限、失败只少那一份）。 */
+private suspend fun readFromBrokers(
+    group: String,
+    fetchBrokerLevel: suspend (String) -> ConsumeStatsList?,
+    brokerAddrs: suspend () -> List<String>,
+): List<RocketMqOffsetRowSnapshot> {
+    val addrs = try {
+        brokerAddrs()
+    } catch (cancellation: CancellationException) {
+        throw cancellation
+    } catch (error: Throwable) {
+        rocketMqLog.warn("broker address lookup failed: group=$group error=${error.message}")
+        return emptyList()
+    }
+    if (addrs.isEmpty()) return emptyList()
+    return coroutineScope {
+        addrs.map { addr ->
+            async {
+                try {
+                    brokerStatsToRows(group, withTimeout(PROGRESS_TIMEOUT_MS) { fetchBrokerLevel(addr) })
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (error: Throwable) {
+                    rocketMqLog.warn("broker-direct progress failed: broker=$addr group=$group error=${error.message}")
+                    emptyList()
+                }
+            }
+        }.awaitAll()
+    }
+        .flatten()
+        .distinctBy { Triple(it.topic, it.broker, it.queueId) }
+        .sortedWith(compareBy({ it.topic }, { it.broker }, { it.queueId }))
 }

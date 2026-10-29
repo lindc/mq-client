@@ -9,6 +9,7 @@ import org.apache.rocketmq.client.exception.MQClientException
 import org.apache.rocketmq.remoting.protocol.admin.ConsumeStats
 import org.apache.rocketmq.common.TopicConfig
 import org.apache.rocketmq.remoting.protocol.body.ClusterInfo
+import org.apache.rocketmq.remoting.protocol.body.ConsumeStatsList
 import org.apache.rocketmq.remoting.protocol.subscription.SubscriptionGroupConfig
 import org.apache.rocketmq.remoting.protocol.body.ConsumerConnection
 import org.apache.rocketmq.remoting.exception.RemotingConnectException
@@ -99,8 +100,26 @@ class RocketMqAdminClient(private val config: RocketMqConfig) : AutoCloseable {
             (fromBrokers + fromRetryTopics).distinct()
         }
 
-    /** 消费组消费统计：每个 MessageQueue 的 broker / consumer offset（diff = Lag）。 */
+    /**
+     * 消费组消费统计：每个 MessageQueue 的 broker / consumer offset（diff = Lag）。
+     *
+     * **注意它依赖 `%RETRY%<group>` 的路由**：`examineConsumeStats(group)` 是
+     * `examineConsumeStats(null, group, null)` 的简写，内部先按
+     * `[%RETRY%group]` 查 NameServer 路由，查不到直接 CODE 17。组从未消费过、
+     * 重试队列被删、或 POP 模式都会命中。绕不过去的路径见
+     * [fetchConsumeStatsInBroker]。
+     */
     suspend fun fetchConsumerProgress(group: String): ConsumeStats = ioCall { admin.examineConsumeStats(group) }
+
+    /**
+     * **broker 级**的消费统计：直接读该 broker 的 ConsumerOffsetManager，返回它上面
+     * **所有组**的已提交位点 —— 完全不经过 NameServer 路由查询，因此不会被 CODE 17 挡住。
+     *
+     * 代价是报文大（一台 broker 的所有组），所以只能当兜底用：组级查询成功时绝不调用。
+     * 返回结构是 `List<Map<groupId, List<ConsumeStats>>>`，按组取用即可。
+     */
+    suspend fun fetchConsumeStatsInBroker(brokerAddr: String, timeoutMs: Long): ConsumeStatsList? =
+        ioCall { admin.fetchConsumeStatsInBroker(brokerAddr, false, timeoutMs) }
 
     /** 消费组在线成员（best-effort）：组不在线 / 不存在返回 null（MQClientException）。 */
     suspend fun fetchConsumerConnection(group: String): ConsumerConnection? =

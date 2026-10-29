@@ -120,6 +120,19 @@ enum class RocketMqProgressState {
 }
 
 /**
+ * 消费进度数据**从哪来的**。
+ *
+ * [GROUP]：常规路径（`examineConsumeStats(group)`，走 `%RETRY%` 路由）。
+ * [BROKER_FALLBACK]：组级被路由挡住（CODE 17 / 206）后，逐 broker 直读
+ * ConsumerOffsetManager 拿到的位点。数据同样真实，但**来源不同**，UI 据此加一句
+ * 说明 —— 否则用户会疑惑「刚才说查不到，怎么现在又有数了」。
+ */
+enum class RocketMqProgressSource {
+    GROUP,
+    BROKER_FALLBACK,
+}
+
+/**
  * 消费组详情快照（属性对话框现查投影，数据已在 service 层拍平）。设计为**局部
  * 可得**：基础配置（订阅组配置，不依赖 %RETRY% 路由）与成员/订阅 best-effort 恒
  * 尽力填充；进度查询失败不阻塞整个详情（[progressState] 驱动 UI 局部降级）。
@@ -147,6 +160,8 @@ data class RocketMqGroupDetailSnapshot(
      * 否则「查询失败」是句空话 —— 这正是本次要修的问题。
      */
     val progressError: String? = null,
+    /** 位点数据的来源（见 [RocketMqProgressSource]）；仅 [RocketMqProgressState.OK] 有意义。 */
+    val progressSource: RocketMqProgressSource = RocketMqProgressSource.GROUP,
     /** 消费进度行（按 topic / broker / queueId 排序）；仅 [RocketMqProgressState.OK] 有值。 */
     val rows: List<RocketMqOffsetRowSnapshot>,
     /** 组级总积压（rows 求和）。 */

@@ -150,6 +150,7 @@
   "rocketmq_ui_group_props_no_route_sub": "该消费组在 NameServer 中缺少重试 Topic 的路由信息——通常因为组从未消费（Broker 尚未上报）、服务端未开启自动创建，或使用 POP 消费模式。",
   "rocketmq_ui_group_props_failed_sub": "消费进度查询失败，可点击重试，或检查服务端连接与权限。",
   "rocketmq_ui_group_props_no_stats_sub": "该消费组没有可显示的消费进度（服务端返回的位点表为空，通常是还没有消费者上线消费过）。",
+  "rocketmq_ui_group_props_broker_fallback_note": "位点由 Broker 直读取得（该消费组的重试队列在 NameServer 无路由，组级查询不可用）。",
   "rocketmq_ui_group_props_permission_sub": "当前账号可能没有访问该消费组的权限，请检查 ACL 配置。",
   "rocketmq_ui_group_props_failed_detail": "获取消费进度失败：%1$s",
   "rocketmq_ui_group_props_metrics_unavailable": "进度数据不可用（重试 Topic 无路由或查询失败）",

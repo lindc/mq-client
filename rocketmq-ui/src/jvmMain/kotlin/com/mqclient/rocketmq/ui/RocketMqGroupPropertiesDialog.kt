@@ -45,6 +45,7 @@ import com.mqclient.mqui.state.LoadStateContent
 import com.mqclient.rocketmq.RocketMqGroupDetailSnapshot
 import com.mqclient.rocketmq.RocketMqModule
 import com.mqclient.rocketmq.RocketMqOffsetRowSnapshot
+import com.mqclient.rocketmq.RocketMqProgressSource
 import com.mqclient.rocketmq.RocketMqProgressState
 import com.mqclient.uicommon.DangerButton
 import com.mqclient.uicommon.PropertyItem
@@ -326,6 +327,16 @@ internal fun ProgressTab(
                 }
             } else {
                 Column(modifier = Modifier.fillMaxSize().padding(vertical = 8.dp)) {
+                    if (detail.progressSource == RocketMqProgressSource.BROKER_FALLBACK) {
+                        // 组级查询被 %RETRY% 路由挡住、位点改由 broker 直读取得。
+                        // 必须说出来：否则用户会疑惑「刚才说查不到，现在怎么有数了」。
+                        Text(
+                            text = stringResource("rocketmq_ui_group_props_broker_fallback_note"),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                        )
+                    }
                     Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
                         Text(stringResource("rocketmq_ui_group_props_col_broker"), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(2.5f))
                         Text(stringResource("rocketmq_ui_group_props_col_topic"), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(2.5f))
