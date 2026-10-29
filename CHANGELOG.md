@@ -2,6 +2,70 @@
 
 本文件记录 MQClient 的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [Unreleased] — 2026-10-29 (19)
+
+### Fixed
+
+- **RocketMQ 消费组「消费进度」Tab 查不到数据，且界面给不出原因**（`rocketmq-service`
+  新增 `RocketMqProgressFailure.kt`，`RocketMqScanService.fetchGroupDetail`、`rocketmq-ui`
+  `RocketMqGroupPropertiesDialog` 的 `ProgressTab`）。
+
+  **具体的异常是 CODE 17**（在真实集群上抓到的）：
+
+  ```
+  $ mqadmin consumerProgress -n rmq-node1:9876 -g CG_Normal
+  Caused by: MQClientException: CODE: 17  DESC: No topic route info in name server
+             for the topic: %RETRY%CG_Normal
+  ```
+
+  即 `%RETRY%<group>` 在 NameServer 没有路由 —— 组从未消费过（Broker 还没建/上报
+  重试队列）。同一集群上还有第二种形态：`chillbear-test-group` 返回 **CODE 206**
+  （offset 表为空，没有消费者上线过）。
+
+  **根因不是没捕获异常，而是捕获后把异常类型弄丢了**：`RocketMqAdminClient.ioCall`
+  为让 UI 直接显示中文，把协议异常统一包成 `IllegalStateException`（实测三层：
+  `IllegalStateException → IllegalStateException → MQClientException`）。于是
+  `fetchGroupDetail` 里那句 `e is MQClientException && e.responseCode == 17` **永远为
+  false** —— CODE 17 的专属文案是死代码，所有失败一律落进 `FAILED`，界面上只剩一句
+  「消费进度查询失败，可点击重试，或检查服务端连接与权限」。
+
+  - 新增 `rocketMqResponseCode(error)`：**沿 cause 链**找 `MQClientException` /
+    `MQBrokerException` 的 responseCode（带深度上限，防 cause 成环挂死）；
+  - 新增 `classifyProgressFailure(error)`：17 → `RETRY_TOPIC_NO_ROUTE`、206 →
+    新增的 `NO_CONSUME_STATS`、ACL 措辞 → 新增的 `NO_PERMISSION`、其余 → `FAILED`
+    并带上原始摘要；
+  - 超时：进度查询包 `withTimeout(5000L)`。**诚实的边界**写在常量注释里 ——
+    `examineConsumeStats` 是阻塞调用，`withTimeout` 只让协程不再等，线程仍会卡到
+    AdminClient 的 socket 超时；它保证的是「UI 不永久卡死」。带 timeout 的重载要求
+    指定 broker+topic，做不了「按组查全部」；
+  - 日志：进度失败打 `state` + `code` + **完整异常栈**（原来只有 `message`，CODE 与
+    调用链都丢了）；`config` / `conn` 两个子查询从 `runCatching` 改成显式 try ——
+    `runCatching` 会连 `CancellationException` 一起吞掉，对话框关掉后查询还会继续跑；
+  - UI：`ProgressWarningBanner` 按状态分档给文案（17 / 206 / ACL / 未知各一句），
+    未知失败把 `progressError` 直接显示成「获取消费进度失败：<原始摘要>」；
+    「重试」按钮四种状态都有（重试路径本身原本就是好的，未改动）。
+
+  i18n 中英同步（+3）：`rocketmq_ui_group_props_no_stats_sub` /
+  `_permission_sub` / `_failed_detail`。
+
+  测试：`RocketMqProgressFailureTest`（9 条，报文逐字取自真实集群：17 / 206 /
+  MQBrokerException(17) / ACL 措辞 / 未知失败保留摘要 / 深层 cause 链 / cause 成环）、
+  `RocketMqGroupProgressTabTest`（7 条，各状态的界面文案 + 未知失败显示原始错误 +
+  每态都有重试 + OK 态渲染表格）。负向对照已验证：把 `rocketMqResponseCode` 退回
+  「只看最外层类型」，4 条分类用例失败。
+
+  同一处缺陷还有第三个受害者：`audited { }` 的审计日志里 `reasonCode` 也是直接
+  `e as? MQClientException` 取码 —— 同样永远 null，所有写操作（建/删主题、建/删组、
+  重置位点）失败时审计记录的 errorCode 一直是空的。一并改成 `rocketMqResponseCode(e)`。
+
+  **已用真实集群验证**（一次性探针，跑完已删）：`CG_Normal` / `CG_Broadcast` →
+  `RETRY_TOPIC_NO_ROUTE (code=17)`，`chillbear-test-group` → `NO_CONSUME_STATS (code=206)`，
+  `CID_RMQ_SYS_TRANS` → `OK rows=2`。
+
+  **未验证**：真机 GUI（对话框里的实际观感）；ACL 拒绝分支没有在真实集群上复现
+  （NameServer 的路由查询先于 broker 的 ACL 检查，denied-app 也先拿到 CODE 17）——
+  该分支只由单元测试覆盖。
+
 ## [Unreleased] — 2026-10-29 (18)
 
 ### Changed

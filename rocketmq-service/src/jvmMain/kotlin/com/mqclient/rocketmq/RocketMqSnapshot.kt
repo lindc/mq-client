@@ -89,14 +89,33 @@ data class RocketMqOffsetRowSnapshot(
     val lag: Long,
 )
 
-/** 消费进度查询状态：OK = rows 有值；其余两态 UI 走局部降级（警告卡片）。 */
+/**
+ * 消费进度查询状态：只有 [OK] 有 rows；其余各态 UI 走局部降级（警告卡片），
+ * 每态一句**各自的**解释 —— 「查询失败」四个字对用户没有任何行动指引。
+ */
 enum class RocketMqProgressState {
     OK,
 
-    /** CODE 17：重试 Topic（%RETRY%<group>）在 NameServer 无路由（组从未消费等）。 */
+    /**
+     * CODE 17：重试 Topic（`%RETRY%<group>`）在 NameServer 无路由。
+     *
+     * 实测最常见的成因：组从未消费过（Broker 还没建/上报重试队列）、服务端关了
+     * 自动建 Topic，或用了 5.x 的 POP 消费模式。
+     */
     RETRY_TOPIC_NO_ROUTE,
 
-    /** 其他失败（权限 / 超时等），原始错误只进日志。 */
+    /**
+     * CODE 206：offset 表为空 —— 组存在但**从未提交过位点**（没有消费者上线消费过）。
+     *
+     * 与 17 的区别：17 是「重试队列的路由查不到」，206 是「路由有了，但没有进度数据」。
+     * 两者对用户的含义相同（这个组还没跑起来），但报文不同，日志里必须能分开。
+     */
+    NO_CONSUME_STATS,
+
+    /** ACL 拒绝：当前账号对该 group 没有权限。 */
+    NO_PERMISSION,
+
+    /** 其他失败（超时 / 未知），[RocketMqGroupDetailSnapshot.progressError] 里带原始摘要。 */
     FAILED,
 }
 
@@ -121,6 +140,13 @@ data class RocketMqGroupDetailSnapshot(
     val memberCount: Int?,
     /** 消费进度查询状态（见 [RocketMqProgressState]）。 */
     val progressState: RocketMqProgressState,
+    /**
+     * 进度查询失败的原始摘要（只对 [RocketMqProgressState.FAILED] 有意义）。
+     *
+     * 17 / 206 / 权限各有专属解释，不需要它；**未知**失败必须让用户看见到底报了什么，
+     * 否则「查询失败」是句空话 —— 这正是本次要修的问题。
+     */
+    val progressError: String? = null,
     /** 消费进度行（按 topic / broker / queueId 排序）；仅 [RocketMqProgressState.OK] 有值。 */
     val rows: List<RocketMqOffsetRowSnapshot>,
     /** 组级总积压（rows 求和）。 */

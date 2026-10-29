@@ -5,8 +5,6 @@ import com.mqclient.core.cache.CacheManager
 import com.mqclient.core.cache.putIfScanned
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.emit
-import org.apache.rocketmq.client.exception.MQBrokerException
-import org.apache.rocketmq.client.exception.MQClientException
 import org.apache.rocketmq.remoting.protocol.body.ClusterInfo
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutionException
@@ -18,7 +16,25 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.TimeoutCancellationException
+import org.apache.rocketmq.remoting.protocol.admin.ConsumeStats
 import com.mqclient.mq.base.AbstractScanService
+
+/**
+ * 消费进度查询的**界面等待上限**（毫秒）。
+ *
+ * 为什么是 5 秒：这是一个「打开对话框」的同步查询，用户对它的耐心远小于扫描。
+ * Broker 正常时 `examineConsumeStats` 在几十毫秒内返回；5 秒还没回来说明链路上
+ * 某个环节卡住了，让用户继续盯着转圈毫无意义。
+ *
+ * **诚实的边界**：`examineConsumeStats` 是阻塞的 Java 调用，`withTimeout` 只能
+ * 让**协程**不再等它 —— 线程仍会卡到 AdminClient 自己的 socket 超时
+ * （`connectionTimeout`，默认 30s）。所以它保证的是「UI 不会永久卡死」，
+ * 而不是「底层请求被取消」。想真正取消得用带 timeout 的 API，而
+ * `examineConsumeStats` 的带超时重载要求指定 broker + topic，做不了「按组查全部」。
+ */
+private const val PROGRESS_TIMEOUT_MS = 5_000L
 
 /**
  * RocketMQ 扫描服务：定时快扫 / 慢扫 + 缓存写入 + 事件通知，与 kafka 的
@@ -71,8 +87,8 @@ class RocketMqScanService(
     /**
      * 写操作审计包裹（照 RabbitMQ 的 audited 模板 + RocketMQ 特有的数字原因码）：
      * 计时 → 执行 → 成功 / 失败各发一条 core.mq.command.executed（CommandAudit
-     * 内部 runCatching，审计失败不影响本操作）。失败提取 MQClientException /
-     * MQBrokerException 的 responseCode 进 reasonCode 列（17 / 29 等），错误详情进
+     * 内部 runCatching，审计失败不影响本操作）。失败时沿 cause 链取协议响应码进
+     * reasonCode 列（17 / 29 等；直接判最外层拿不到 —— ioCall 已包成 IllegalStateException），错误详情进
      * response，随后重抛让 UI 层弹错误框。读操作 / 现查不经此包裹；用户取消确认框
      * 时根本不会走到这里。
      */
@@ -96,8 +112,9 @@ class RocketMqScanService(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            val code = (e as? MQClientException)?.responseCode
-                ?: (e as? MQBrokerException)?.responseCode
+            // 沿 cause 链取响应码：`ioCall` 把协议异常包成 IllegalStateException，
+            // 只判最外层会让审计日志的 reasonCode 恒为 null（与进度查询同一个坑）。
+            val code = rocketMqResponseCode(e)
             CommandAudit.emit(
                 connectionId = connectionId,
                 command = command,
@@ -364,48 +381,50 @@ class RocketMqScanService(
      *    %RETRY% 路由**，组从未消费也可得）；
      *  - 成员 / 订阅 / 消费模式：examineConsumerConnectionInfo，best-effort（离线 /
      *    17 / 失败 → 空，UI 显示未知）；
-     *  - 进度：examineConsumeStats，CODE 17（MQClientException **或 MQBrokerException**
-     *    —— broker 侧 TOPIC_NOT_EXIST 也会以此形态返回）→ RETRY_TOPIC_NO_ROUTE；
-     *    其他失败 → FAILED。原始错误只进 warn 日志，不进 UI；进度失败不阻塞
-     *    基础信息展示。
+     *  - 进度：examineConsumeStats，**带 5 秒硬超时**，失败按 [classifyProgressFailure]
+     *    归因（CODE 17 / CODE 206 / ACL / 其他），原始摘要进 [RocketMqGroupDetailSnapshot.progressError]
+     *    且完整异常栈进日志。进度失败不阻塞基础信息展示。
      * 整体只有「未连接 / clusterInfo 失败 / 无可用 Broker」才抛（对话框整页 Error）。
+     *
+     * 三个子查询各自独立 try —— **刻意不用 `runCatching`**：它会连同
+     * `CancellationException` 一起吞掉，于是关掉对话框后这次查询还会继续跑完
+     * （本项目在扫链路里已经踩过一次，见 AbstractScanService.scanKindOr 的注释）。
      */
     suspend fun fetchGroupDetail(connectionId: String, group: String): RocketMqGroupDetailSnapshot {
         val (ctx, admin) = targetOrThrow(connectionId)
         return withContext(Dispatchers.IO) {
-            val config = runCatching { admin.fetchGroupConfig(group) }
-                .onFailure {
-                    rocketMqLog.warn(
-                        "group config failed: group=" + group + " error=" + it.message,
-                    )
-                }
-                .getOrNull()
-            val conn = runCatching { admin.fetchConsumerConnection(group) }
-                .onFailure {
-                    rocketMqLog.warn(
-                        "group detail connection failed: group=" + group + " error=" + it.message,
-                    )
-                }
-                .getOrNull()
+            val config = bestEffort("group config", group) { admin.fetchGroupConfig(group) }
+            val conn = bestEffort("group connection", group) { admin.fetchConsumerConnection(group) }
+
             var progressState = RocketMqProgressState.OK
-            val stats = runCatching { admin.fetchConsumerProgress(group) }
-                .getOrElse { e ->
-                    val noRoute = (e is MQClientException && e.responseCode == 17) ||
-                        (e is MQBrokerException && e.responseCode == 17)
-                    if (noRoute) {
-                        progressState = RocketMqProgressState.RETRY_TOPIC_NO_ROUTE
-                        rocketMqLog.warn(
-                            "group progress unavailable (retry topic no route): group=" + group +
-                                " error=" + e.message,
-                        )
-                    } else {
-                        progressState = RocketMqProgressState.FAILED
-                        rocketMqLog.warn(
-                            "group progress failed: group=" + group + " error=" + e.message,
-                        )
-                    }
-                    null
-                }
+            var progressError: String? = null
+            val stats: ConsumeStats? = try {
+                withTimeout(PROGRESS_TIMEOUT_MS) { admin.fetchConsumerProgress(group) }
+            } catch (timeout: TimeoutCancellationException) {
+                // 超时是**我们**给的界，不是协议错误：单独说清楚，别混进「查询失败」。
+                progressState = RocketMqProgressState.FAILED
+                progressError = "查询超时（${PROGRESS_TIMEOUT_MS / 1000}s 内 Broker 未返回）"
+                rocketMqLog.warn(
+                    "group progress timed out after ${PROGRESS_TIMEOUT_MS}ms: group=$group " +
+                        "(底层阻塞调用不会被协程取消打断，线程会在 AdminClient 自身超时后释放)",
+                )
+                null
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Throwable) {
+                val failure = classifyProgressFailure(error)
+                progressState = failure.state
+                progressError = failure.detail
+                // 完整栈进日志（console + 文件）：只有 message 时，CODE 与调用链都丢了，
+                // 现场问题只能靠猜。分类已在首行，栈在后面。
+                rocketMqLog.warn(
+                    "group progress failed: group=$group state=${failure.state} " +
+                        "code=${failure.code ?: "-"} error=${error.message}\n" +
+                        error.stackTraceToString(),
+                )
+                null
+            }
+
             val rows = stats?.offsetTable?.entries?.map { (mq, wrapper) ->
                 RocketMqOffsetRowSnapshot(
                     topic = mq.topic,
@@ -425,11 +444,28 @@ class RocketMqScanService(
                 subscriptions = conn?.subscriptionTable?.keys?.sorted().orEmpty(),
                 memberCount = conn?.connectionSet?.size,
                 progressState = progressState,
+                progressError = progressError,
                 rows = rows,
                 totalLag = rows.sumOf { it.lag },
             )
         }
     }
+
+    /**
+     * best-effort 子查询：失败记日志返回 null，但**取消必须原样上抛**。
+     *
+     * 等价于 `runCatching { }.getOrNull()`，唯一区别是不吞 `CancellationException`
+     * —— 对话框关掉后这几个查询不该继续跑完。
+     */
+    private suspend fun <T : Any> bestEffort(label: String, group: String, block: suspend () -> T?): T? =
+        try {
+            block()
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (error: Throwable) {
+            rocketMqLog.warn("$label failed: group=$group error=${error.message}\n" + error.stackTraceToString())
+            null
+        }
 
     // ---------------------------------------------------------------- 主题创建
 
