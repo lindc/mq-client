@@ -65,64 +65,83 @@ fun TopologyPanel(
     connectionId: String,
     modifier: Modifier = Modifier,
 ) {
+    // connectionId 可能为空白：残留 Tab、「在拓扑图中查看」请求未带连接、或路由时序错位都会
+    // 让面板拿到空 id。空白时从全局 ConnectionStore 取当前 IBM MQ 连接兜底，避免面板直接空状态 /
+    // 无限转圈。这是「打开拓扑图却显示『请选择连接』」的根因：空 id 下 buildKuiverFromCache
+    // 查不到任何缓存，data 永远为 null，既不报错也不加载。
+    val effectiveId = remember(connectionId) {
+        if (connectionId.isNotBlank()) {
+            connectionId
+        } else {
+            ConnectionStore.connections.value
+                .firstOrNull { it.serviceId == "ibm-mq" && it.status == ConnectionStatus.Connected }
+                ?.id
+                ?: ConnectionStore.connections.value
+                    .firstOrNull { it.serviceId == "ibm-mq" }
+                    ?.id
+                ?: ""
+        }
+    }
+    val hasConnection = effectiveId.isNotBlank()
+
     // 队列深度告警阈值（%）：与队列列表页同源（连接配置 queueDepthWarningThreshold，默认 85）。
     // 响应式读取：组合期直接读 StateFlow.value，编辑连接阈值后面板自动刷新。
     val warningThreshold = ConnectionStore.connections.value
-        .firstOrNull { it.id == connectionId }
+        .firstOrNull { it.id == effectiveId }
         ?.let { ibmMQConfigFromOptions(it.options).queueDepthWarningThreshold }
         ?: IbmMQConfig.DEFAULT_QUEUE_DEPTH_WARNING_THRESHOLD
 
-    var data by remember(connectionId) { mutableStateOf<TopologyData?>(null) }
+    var data by remember(effectiveId) { mutableStateOf<TopologyData?>(null) }
     // 至少完成过一轮慢扫：区分「还在连 / 扫」与「扫完了但确实没有业务对象」。
-    var scannedOnce by remember(connectionId) { mutableStateOf(false) }
+    var scannedOnce by remember(effectiveId) { mutableStateOf(false) }
     // 列表页带入的焦点对象名：在 LaunchedEffect（副作用上下文）里 consume——
     // 放在 remember 计算块的话，组合被丢弃/重试时焦点会被消费掉却没应用到图上。
-    var focusName by remember(connectionId) { mutableStateOf<String?>(null) }
+    var focusName by remember(effectiveId) { mutableStateOf<String?>(null) }
 
     /** 从慢扫缓存重建；**空图不落地**——保持加载态或保留旧图（刷新保留旧数据的语义）。 */
     fun rebuild() {
-        val next = buildKuiverFromCache(connectionId, warningThreshold)
+        val next = buildKuiverFromCache(effectiveId, warningThreshold)
         if (next.kuiver.nodes.isNotEmpty()) {
             data = next
         } else {
-            Log.debug(TOPOLOGY_LOG_TAG, "topology rebuild skipped (empty graph): connection=$connectionId")
+            Log.debug(TOPOLOGY_LOG_TAG, "topology rebuild skipped (empty graph): connection=$effectiveId")
         }
     }
 
     /** 强制刷新：显式触发一次对象慢扫（扫完经 OBJECTS_SCANNED 驱动重建）。 */
     val scope = rememberCoroutineScope()
     fun rescan() {
-        Log.debug(TOPOLOGY_LOG_TAG, "topology rescan requested: connection=$connectionId")
+        Log.debug(TOPOLOGY_LOG_TAG, "topology rescan requested: connection=$effectiveId")
         scope.launch {
-            runCatchingCancellable { IbmMQModule.serviceOrNull()?.scanObjects(connectionId) }
+            runCatchingCancellable { IbmMQModule.serviceOrNull()?.scanObjects(effectiveId) }
                 .onFailure {
                     Log.warn(
                         TOPOLOGY_LOG_TAG,
-                        "topology rescan failed: connection=$connectionId error=${it.message ?: it::class.simpleName}",
+                        "topology rescan failed: connection=$effectiveId error=${it.message ?: it::class.simpleName}",
                     )
                 }
         }
     }
 
     // 订阅先于动作（防丢事件）；on(scope = this) 随 LaunchedEffect 离开自动取消。
-    LaunchedEffect(connectionId) {
+    LaunchedEffect(effectiveId) {
         // 消费焦点也放进副作用上下文（与数据流同处，时序上早于 rebuild 即可）。
-        focusName = TopologyFocusHolder.consume(connectionId)?.rootName
+        focusName = TopologyFocusHolder.consume(effectiveId)?.rootName
         val bus = CoreModule.eventBusOrNull
         bus?.on(IbmMQEvents.OBJECTS_SCANNED, scope = this) { event ->
-            if (event.payload["connectionId"] as? String == connectionId) {
+            if (event.payload["connectionId"] as? String == effectiveId) {
                 scannedOnce = true
                 rebuild()
             }
         }
         // 隐式连接建立 → 仅当还没有图（缓存为空）时补一拍慢扫；热缓存不打扰。
         bus?.on(IbmMQEvents.CONNECTED, scope = this) { event ->
-            if (event.payload["connectionId"] as? String == connectionId && data == null) {
-                runCatchingCancellable { IbmMQModule.serviceOrNull()?.scanObjects(connectionId) }
+            if (event.payload["connectionId"] as? String == effectiveId && data == null) {
+                runCatchingCancellable { IbmMQModule.serviceOrNull()?.scanObjects(effectiveId) }
                     .onFailure {
                         Log.warn(
                             TOPOLOGY_LOG_TAG,
-                            "topology initial scan (after connect) failed: connection=$connectionId " +
+                            "topology initial scan (after connect) failed: connection=$effectiveId " +
                                 "error=${it.message ?: it::class.simpleName}",
                         )
                     }
@@ -132,23 +151,34 @@ fun TopologyPanel(
         // 缓存优先：只读缓存出图；缓存为空才继续连 / 扫。
         rebuild()
         if (data == null) {
-            if (IbmMQModule.connectionOrNull(connectionId)?.status == ConnectionStatus.Connected) {
-                runCatchingCancellable { IbmMQModule.serviceOrNull()?.scanObjects(connectionId) }
+            if (IbmMQModule.connectionOrNull(effectiveId)?.status == ConnectionStatus.Connected) {
+                runCatchingCancellable { IbmMQModule.serviceOrNull()?.scanObjects(effectiveId) }
                     .onFailure {
                         Log.warn(
                             TOPOLOGY_LOG_TAG,
-                            "topology initial scan failed: connection=$connectionId " +
+                            "topology initial scan failed: connection=$effectiveId " +
                                 "error=${it.message ?: it::class.simpleName}",
                         )
                     }
             } else {
                 // 未连接：隐式连接（fire-and-forget），连上后由上方 CONNECTED 分支接管扫描。
-                Log.debug(TOPOLOGY_LOG_TAG, "topology implicit connect requested: connection=$connectionId")
-                IbmMQModule.connectAsync(connectionId)
+                Log.debug(TOPOLOGY_LOG_TAG, "topology implicit connect requested: connection=$effectiveId")
+                IbmMQModule.connectAsync(effectiveId)
             }
         }
     }
 
+    // 没有可用连接：明确告知用户「请选择连接」，而非无限转圈 / 误报空数据。
+    if (!hasConnection) {
+        Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(
+                text = stringResource("ibm_mq_page_placeholder"),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        return
+    }
     val current = data
     if (current == null && !scannedOnce) {
         Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -175,7 +205,7 @@ fun TopologyPanel(
         return
     }
     MqTopologyContent(
-        connectionId = connectionId,
+        connectionId = effectiveId,
         data = current,
         focusName = focusName,
         onFocusApplied = { focusName = null },

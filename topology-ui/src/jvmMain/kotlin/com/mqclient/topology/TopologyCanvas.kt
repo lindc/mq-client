@@ -106,11 +106,17 @@ fun TopologyCanvas(
 
     // 类型表随图捕获进 provider 闭包（见 [TopologyLayoutProvider]）：布局在 kuiver 的
     // 后台线程执行、由 resize 等事件重跑，读到的都是**这张图**的不可变快照，不再是
-    // 「模块级变量最后一次写入的值」。layoutConfig 按 (图, 类型表) remember，换图时
-    // 身份变化会让 kuiver 重新走一次布局。
-    val layoutConfig = remember(kuiver, nodeTypes) {
+    // 「模块级变量最后一次写入的值」。
+    //
+    // 关键修正：provider 闭包会被 kuiver 的 viewerState 长期持有（rememberKuiverViewerState
+    // 只在首次组合时创建一次）。若闭包直接捕获首帧的 nodeTypes，后续扫描重建图后类型表
+    // 陈旧 —— IBM MQ 的 columnLayoutProvider 对缺失类型返回第 0 列，于是所有节点塌进同一列、
+    // 连线退化（即「布局塌陷成单列」）。用 rememberUpdatedState 让长生命周期闭包始终读到
+    // 最新 nodeTypes，layoutConfig 自身保持稳定（不随每次重建图而重建，避免 viewerState 抖动）。
+    val currentNodeTypes by rememberUpdatedState(nodeTypes)
+    val layoutConfig = remember {
         LayoutConfig.Custom(
-            provider = { graph, config -> layoutProvider(graph, config, nodeTypes) },
+            provider = { graph, config -> layoutProvider(graph, config, currentNodeTypes) },
         )
     }
 
