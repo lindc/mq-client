@@ -10,6 +10,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -28,12 +29,15 @@ import com.mqclient.ibmmq.messaging.MessageSummary
 import com.mqclient.ibmmq.messaging.sendExpiryTenths
 import com.mqclient.ibmmq.messaging.sendPersistence
 import com.mqclient.ibmmq.messaging.sendPriority
+import com.mqclient.core.log.Log
 import com.mqclient.uicommon.ThemedSnackbarHost
-import com.mqclient.uicommon.dialog.MessageDetailDialog
+import com.mqclient.uicommon.dialog.MessageDetailContent
+import com.mqclient.uicommon.dialog.MessageDetailFooterActions
 import com.mqclient.uicommon.dialog.MessageDetailErrorView
 import com.mqclient.uicommon.dialog.MessageDetailLoadingView
 import com.mqclient.uicommon.dialog.MessageHeaderRow
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
+import com.mqclient.uicommon.dialog.rememberMessageDetailUiState
 import com.mqclient.uicommon.file.pickFile
 import com.mqclient.uicommon.file.saveFileBytes
 import com.mqclient.uicommon.SecondaryButton
@@ -42,39 +46,55 @@ import com.mqclient.uicommon.i18n.withArg
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
 
 /** 详情对话框的三态：加载中 / 失败（带原因，可重试）/ 就绪。 */
 private sealed interface DetailUiState {
-    data object Loading : DetailUiState
-    data class Failed(val reason: String) : DetailUiState
-    data class Ready(val detail: MessageDetail) : DetailUiState
+    /** 日志用的短名（`[ui.detail] state -> ...`）。 */
+    val label: String
+
+    data object Loading : DetailUiState {
+        override val label: String get() = "Loading"
+    }
+
+    data class Failed(val reason: String) : DetailUiState {
+        override val label: String get() = "Failed"
+    }
+
+    data class Ready(val detail: MessageDetail) : DetailUiState {
+        override val label: String get() = "Ready"
+    }
 }
 
 /**
- * 详情加载的协程层超时（毫秒）。
+ * 本宿主的详情链路日志（tag `ui.detail`，与 ui-common / RabbitMQ 同一条流水）。
  *
- * 重要：它只决定状态何时翻走，杀不掉底层的阻塞 MQI queue.get——withTimeout 要等
- * 阻塞调用自己跑完才会抛 TimeoutCancellationException（参考 RabbitMQ 卡死教训）。
- * 所以这里是状态兜底：即便底层卡住，UI 也最多转圈 DETAIL_LOAD_TIMEOUT_MS 毫秒后翻成
- * 加载超时失败态，X / ESC 永远可点、绝不永久停在加载。真正保护底层句柄/锁不被拖死的是
- * getMessageDetail 里的 MQGMO 无等待 + 扫描时间预算 + CancellationException 优先重抛
- * + finally 关闭句柄。
+ * 现场日志已经证明过它的价值：`msg detail completed duration=68ms` 与
+ * `detail loaded total=2773ms` 之间空着 7.5 秒 —— 一眼看出「数据早回来了、界面没动」，
+ * 直接把结论钉到「状态回不到组合」而不是「MQ 慢」。窗口数（[awtWindowCount]）则用来
+ * 验证「三态各 new 一个窗口」这个结构问题没有复发（正常应恒定，不随开关次数上涨）。
  */
-private const val DETAIL_LOAD_TIMEOUT_MS = 5_000L
+private val detailLog = Log.withTag("ui.detail")
+
+/** 当前进程的 AWT 窗口数；取不到（非 AWT 后端）返回 -1。 */
+private fun awtWindowCount(): Int = runCatching { java.awt.Window.getWindows().size }.getOrDefault(-1)
 
 /**
- * 消息详情对话框（浏览消息表格「详细」按钮打开）：三态外壳 —— 就绪态交给公共
- * [MessageDetailDialog]（正文/Header 双 Tab + 解释器区，ui-common 统一渲染），
- * 加载 / 失败态用普通 [ObjectDetailDialog] + 公共 Loading / Error 视图。IBM 侧只
- * 保留数据获取与 dmpmqmsg 导入/导出逻辑；Header 插槽渲染 MQMD 字段列表，底部
- * 额外操作为「下载 / 导出 dmpmqmsg / 导入 dmpmqmsg」。删除消息不走详情对话框，
- * 入口在消息列表的行操作。
+ * 消息详情对话框（浏览消息表格「详细」按钮打开）：**一个**窗口、壳内切三态。
  *
- * 数据经 service 的 getMessageDetail 按 MessageId 现查（独立 browse 句柄，纯浏览
- * 不消费）。
+ * 结构很重要，不要改回「三态各 new 一个 `ObjectDetailDialog`」：每次翻状态都销毁一个
+ * Tao 原生窗口再建一个新的，代价是 Ready 之后还要再等一次窗口创建 + 组合（现场实测
+ * 7.5 秒），而且窗口一销毁就把 `LaunchedEffect` 的协程一起取消 —— 同一条消息被取两次
+ * 就是这么来的。就绪态的内容与底部按钮都从公共的
+ * [com.mqclient.uicommon.dialog.MessageDetailUiState] 读：
+ * [com.mqclient.uicommon.dialog.MessageDetailContent] 负责渲染，
+ * [com.mqclient.uicommon.dialog.MessageDetailFooterActions] 负责下载 / 复制 / 关闭。
+ *
+ * IBM 侧只保留数据获取与 dmpmqmsg 导入/导出逻辑；Header 插槽渲染 MQMD 字段列表，底部
+ * 额外操作为「导出 dmpmqmsg / 导入 dmpmqmsg」。删除消息不走详情对话框，入口在消息列表的
+ * 行操作。
+ *
+ * 数据经 service 的 getMessageDetail 按 MessageId 现查（独立 browse 句柄，纯浏览不消费）。
  */
 @Composable
 internal fun MessageDetailDialog(
@@ -86,36 +106,68 @@ internal fun MessageDetailDialog(
 ) {
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
+    // 组合时刻：所有埋点都以它为基准算相对时间（与 RabbitMqMessageDetailDialog 同一套）。
+    val composedAt = remember { System.currentTimeMillis() }
 
     var uiState by remember(summary.messageId) { mutableStateOf<DetailUiState>(DetailUiState.Loading) }
     var retryKey by remember(summary.messageId) { mutableStateOf(0) }
 
-    LaunchedEffect(summary.messageId, retryKey) {
-        uiState = DetailUiState.Loading
-        var next: DetailUiState = DetailUiState.Loading
-        try {
-            val r = withTimeout(DETAIL_LOAD_TIMEOUT_MS) {
-                withContext(Dispatchers.IO) {
-                    IbmMQModule.serviceOrNull()
-                        ?.getMessageDetail(connectionId, queueName, summary.messageId)
-                        ?: MessageOperationResult.failure(null, "服务未初始化")
-                }
-            }
-            val detail = r.detail
-            next = if (r.success && detail != null) {
-                DetailUiState.Ready(detail)
-            } else {
-                DetailUiState.Failed(r.errorMessage ?: "unknown")
-            }
-        } catch (e: TimeoutCancellationException) {
-            next = DetailUiState.Failed("加载超时（5s），请重试")
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            next = DetailUiState.Failed(e.message ?: e::class.simpleName ?: "unknown")
-        } finally {
-            if (next != DetailUiState.Loading) uiState = next
+    LaunchedEffect(Unit) {
+        detailLog.info(
+            "detail opened: queue=$queueName messageId=${summary.messageId} " +
+                "sinceCompose=${System.currentTimeMillis() - composedAt}ms windows=${awtWindowCount()}",
+        )
+    }
+    DisposableEffect(Unit) {
+        onDispose {
+            detailLog.info(
+                "detail disposed: lifetime=${System.currentTimeMillis() - composedAt}ms " +
+                    "windows=${awtWindowCount()}",
+            )
         }
+    }
+
+    /**
+     * 取数：**直接调用，不包 withContext / withTimeout**。
+     *
+     * `IbmMQService.getMessageDetail` 内部本来就是 `withContext(Dispatchers.IO)`，外面再包
+     * 一层只是多一层调度，并不会让 MQI 更「异步」。而 `withTimeout` 在这里从来不是真守卫：
+     * 它杀不掉阻塞的 MQI 调用，且取消的投递本身也要走那条被饿住的队列 —— 于是一旦队列不推进，
+     * 「5 秒后报错」永远不触发，实际表现是**永久停在加载**（本次故障就是这么来的）。
+     * 真正的边界在 service 里：MQGMO_NO_WAIT + OP_SCAN_BUDGET_MS 扫描预算 +
+     * CancellationException 优先重抛 + finally 关句柄。
+     *
+     * `elapsed` 埋点保留：它是判断「慢在哪一段」的唯一依据（取数 vs 回组合）。
+     */
+    LaunchedEffect(summary.messageId, retryKey) {
+        val requestedAt = System.currentTimeMillis()
+        val from = uiState.label
+        if (uiState !is DetailUiState.Loading) uiState = DetailUiState.Loading
+        detailLog.info("state -> Loading (from=$from) windows=${awtWindowCount()}")
+        val next =
+            try {
+                val r = IbmMQModule.serviceOrNull()
+                    ?.getMessageDetail(connectionId, queueName, summary.messageId)
+                    ?: MessageOperationResult.failure(null, "服务未初始化")
+                val detail = r.detail
+                if (r.success && detail != null) {
+                    DetailUiState.Ready(detail)
+                } else {
+                    DetailUiState.Failed(r.errorMessage ?: "unknown")
+                }
+            } catch (e: CancellationException) {
+                detailLog.info(
+                    "detail load cancelled: elapsed=${System.currentTimeMillis() - requestedAt}ms",
+                )
+                throw e
+            } catch (e: Exception) {
+                DetailUiState.Failed(e.message ?: e::class.simpleName ?: "unknown")
+            }
+        uiState = next
+        detailLog.info(
+            "state -> ${next.label} (from=Loading) " +
+                "elapsed=${System.currentTimeMillis() - requestedAt}ms windows=${awtWindowCount()}",
+        )
     }
 
     /** 导出 dmpmqmsg：IO/Default 线程生成文本，FileKit 另存为。 */
@@ -245,60 +297,79 @@ internal fun MessageDetailDialog(
         }
     }
 
-    when (val state = uiState) {
-        is DetailUiState.Loading -> ObjectDetailDialog(
-            title = stringResource("ibm_mq_msg_detail_title").withArg(summary.messageId),
-            onDismiss = onDismiss,
-            minWidth = 720.dp,
-            minHeight = 480.dp,
-        ) {
-            MessageDetailLoadingView(
-                text = stringResource("ibm_mq_msg_detail_loading"),
-                modifier = Modifier.fillMaxSize(),
+    // **单个窗口 + 壳内切三态**：不要按状态各 new 一个 ObjectDetailDialog。
+    // 每次翻状态都销毁一个 Tao 原生窗口再建一个新的 —— 现场证据是 Ready 之后 7.5s
+    // 才开始渲染，以及同一条消息被取两次（窗口重建把 LaunchedEffect 的协程一起取消了）。
+    val readyDetail = (uiState as? DetailUiState.Ready)?.detail
+    val readyState =
+        if (readyDetail != null) {
+            rememberMessageDetailUiState(
+                rawBody = readyDetail.content,
+                encoding = readyDetail.encoding,
+                codedCharSetId = readyDetail.codedCharSetId,
             )
-            hostOverlay()
+        } else {
+            null
         }
-        is DetailUiState.Failed -> ObjectDetailDialog(
-            title = stringResource("ibm_mq_msg_detail_title").withArg(summary.messageId),
-            onDismiss = onDismiss,
-            minWidth = 720.dp,
-            minHeight = 480.dp,
-        ) {
-            MessageDetailErrorView(
-                reason = state.reason,
-                onRetry = { retryKey++ },
-                modifier = Modifier.fillMaxSize(),
-            )
-            hostOverlay()
-        }
-        is DetailUiState.Ready -> {
-            val detail = state.detail
-            MessageDetailDialog(
-                title = stringResource("ibm_mq_msg_detail_title").withArg(summary.messageId),
-                rawBody = detail.content,
-                onDismiss = onDismiss,
-                subtitleText = summary.messageId,
-                encoding = detail.encoding,
-                codedCharSetId = detail.codedCharSetId,
-                headerContent = {
-                    Column {
-                        for ((key, value) in detail.headers) {
-                            MessageHeaderRow(key = stringResource(key), value = value)
-                        }
-                        Spacer(Modifier.height(12.dp))
-                    }
-                },
-                downloadBaseName = "msg_" + summary.messageId.take(8),
-                extraBottomActions = {
-                    FooterAction(stringResource("ibm_mq_msg_detail_export_dmpmqmsg")) {
-                        exportDmpmqmsg(detail)
-                    }
-                    FooterAction(stringResource("ibm_mq_msg_detail_import_dmpmqmsg")) { startImport() }
-                },
-                minWidth = 720.dp,
-                minHeight = 480.dp,
-                nestedContent = hostOverlay,
-            )
+
+    ObjectDetailDialog(
+        title = stringResource("ibm_mq_msg_detail_title").withArg(summary.messageId),
+        onDismiss = onDismiss,
+        minWidth = 720.dp,
+        minHeight = 480.dp,
+        footerActions = {
+            if (readyDetail != null && readyState != null) {
+                FooterAction(stringResource("ibm_mq_msg_detail_export_dmpmqmsg")) {
+                    exportDmpmqmsg(readyDetail)
+                }
+                FooterAction(stringResource("ibm_mq_msg_detail_import_dmpmqmsg")) { startImport() }
+                MessageDetailFooterActions(
+                    state = readyState,
+                    onClose = onDismiss,
+                    downloadBaseName = "msg_" + summary.messageId.take(8),
+                )
+            } else {
+                // 加载 / 失败态没有可下载、可复制的东西，只给关闭（关闭永不被门禁拦）。
+                Spacer(Modifier.weight(1f))
+                SecondaryButton(onClick = onDismiss) { Text(stringResource("common_close")) }
+            }
+        },
+    ) {
+        when (val state = uiState) {
+            is DetailUiState.Loading -> {
+                MessageDetailLoadingView(
+                    text = stringResource("ibm_mq_msg_detail_loading"),
+                    modifier = Modifier.fillMaxSize(),
+                )
+                hostOverlay()
+            }
+            is DetailUiState.Failed -> {
+                MessageDetailErrorView(
+                    reason = state.reason,
+                    onRetry = { retryKey++ },
+                    modifier = Modifier.fillMaxSize(),
+                )
+                hostOverlay()
+            }
+            is DetailUiState.Ready -> {
+                // ui 必然非空：与 readyDetail 是同一次重组里算出来的。
+                val ui = readyState
+                if (ui != null) {
+                    MessageDetailContent(
+                        state = ui,
+                        subtitleText = summary.messageId,
+                        headerContent = {
+                            Column {
+                                for ((key, value) in state.detail.headers) {
+                                    MessageHeaderRow(key = stringResource(key), value = value)
+                                }
+                                Spacer(Modifier.height(12.dp))
+                            }
+                        },
+                        nestedContent = hostOverlay,
+                    )
+                }
+            }
         }
     }
 }

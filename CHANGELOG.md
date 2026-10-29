@@ -2,6 +2,120 @@
 
 本文件记录 MQClient 的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [Unreleased] — 2026-10-29 (11)
+
+### Fixed
+
+- **消息详情对话框打开后永久停在「正在加载消息…」，点关闭没反应；但拖一下窗口或改窗口
+  大小，数据就突然全出来了**（`ibm-mq-ui` / `kafka-ui` 的 MessageDetailDialog +
+  `ui-common` 公共详情组件）。
+
+  这条不是「MQ 慢」。现场日志（`~/.mqclient/logs/mqclient.log`，同一条消息连开四次）
+  把两段时间并排放着：
+
+  ```
+  11:06:32.932  msg detail start
+  11:06:33.002  msg detail completed  duration=68ms      ← 数据 68 毫秒就回来了
+  11:06:43.322  detail loaded         total=2773ms       ← 界面 7.5 秒后才开始渲染
+  ```
+
+  四次打开的空档分别是 `7.55s` / `0.055s` / `0.98s` / `1.31s` —— 忽快忽慢，是调度
+  而不是 I/O。同期后台每 ~3.5 秒一轮 `pcf scan [q-statuses] count=70 duration=2314–2582ms`
+  与 `scheduled scan (messages) queues=70 messages=266`。
+
+  根因在窗口管线本身：详情框是 nucleus/Tao 自绘窗口（RabbitMQ 侧那份埋点里
+  `awtWindowCount()` 一直是 `windows=0` 就是旁证），**主循环只在收到原生窗口事件时
+  推进**。协程从后台 resume 回界面调度器时排进的那个队列，主循环不自己来取 —— 要等
+  下一次原生事件。这同时也解释了「关闭没反应」：✕ 的处理虽然同步执行了，但「移除这个
+  原生窗口」同样排在同一条队列后面。`ui-common` 的 KDoc 里记着同一条结论的 51 秒原始
+  现场（`1ms 的活等了 51 秒`）。
+
+  上一版（`903d06f`）的修法方向对、落点没在这条队列上：
+
+  1. **按三态各 new 一个 `ObjectDetailDialog`** —— 每翻一次状态都销毁一个 Tao 原生
+     窗口再建一个新的。Ready 之后还得再等一次窗口创建 + 组合（就是那 7.5 秒），而且
+     窗口一销毁就把 `LaunchedEffect` 的协程一起取消了。日志里 `11:07:29.895` 的
+     `msg detail start` 没有对应的 `completed`、2.76 秒后同一 messageId 又来一次
+     `start` —— 同一条消息被取了两次，就是这个结构造的。
+  2. **`withTimeout(5000)` 从来没生效过** —— 它杀不掉阻塞的 MQI 调用，而超时取消的
+     投递本身也要走那条被饿住的队列。所以不是「5 秒后报错」，而是永久停在加载。
+
+  现在：**一个窗口、壳内切三态**（与仓库里 `MqObjectPropertiesDialog` 的既有范本
+  一致）。`ui-common` 拆出 `MessageDetailUiState`（状态与渲染结果不再随窗口重建丢失）、
+  `MessageDetailContent`（内容）与 `RowScope.MessageDetailFooterActions`（下载 / 复制 /
+  关闭）；旧的一行接入 `MessageDetailDialog` 保留签名，RabbitMQ 不受影响。IBM 与
+  Kafka 两个宿主都改为单窗口，取数直接调用（两个 service 内部本来就
+  `withContext(Dispatchers.IO)`，外面再包一层只是多一层调度）。
+
+  关闭**仍然没有任何 `enabled` 门禁**：渲染、下载可以慢，退出不能慢。
+  真正的底层边界留在 service 里（`MQGMO_NO_WAIT` + `OP_SCAN_BUDGET_MS` 扫描预算 +
+  `CancellationException` 优先重抛 + `finally` 关句柄）。
+
+  两个宿主都补了 `[ui.detail]` 四拍埋点，下次不必从猜开始：
+
+  ```
+  detail opened:          sinceCompose=0ms windows=N
+  state -> Loading (from=Ready)
+  state -> Ready (from=Loading) elapsed=68ms windows=N
+  detail loaded total / detail disposed lifetime
+  ```
+
+  判读：`elapsed` 小但界面仍停在加载 → 瓶颈在「回组合」，`windows` 随开关次数上涨 →
+  结构修复失效。
+
+  测试：`MessageDetailUiStateTest`（7 条，新增 —— 钉住「未超限不复制数组」（「转圈
+  不停」那个老 bug 的根）、超限截断但 `rawBody` 完整、二进制默认 hex、切解释器重置
+  参数、重复选中不清用户参数）；`MessageDetailPipelineTest`（4 条）保持全绿。
+
+  **未验证**：GUI 实际行为。改动只到「编译 + 单测 + 结构审查」，卡死是否真的消失、
+  `windows` 是否恒定，需要真机打开一次详情看新的 `[ui.detail]` 段落。
+
+- **七类简单对象页的搜索框与刷新按钮直接显示 i18n key 本身**（`ibm-mq-ui`
+  `SimpleMqObjectListPanel`，主题 / 订阅 / 服务 / 进程定义 / 名称列表 / 认证信息 /
+  通信信息）。
+
+  现象是界面上写着 `topic_refresh` / `topic_search_placeholder` 这种裸 key。根因不是
+  漏调 `stringResource` —— 它调得很规范，键是**运行期拼出来的**：
+  `stringResource("${spec.i18nPrefix}_refresh")`。而 `9571216` 给模块私有键统一加
+  `ibm_mq_` 前缀时，字面量调用点都跟着改了，唯独这张 spec 表漏了（那个提交的文件
+  清单里没有 `SimpleMqObjectListPanel.kt`）。于是拼出 `topic_refresh`，而表里只有
+  `ibm_mq_topic_refresh`，`stringResource` 查不到就原样返回 key。
+
+  影响面比报出来的大：6 类键 × 7 页 = **42 个**（`_search_placeholder` / `_refresh` /
+  `_loading` / `_load_failed` / `_scan_failed` / `_action_properties`），属性按钮的
+  tooltip 也在其中，只是平时不悬停看不到。中英两张表本身不缺键（各 1154 条，脚本
+  核对过），只改前缀即可。
+
+  `scripts/check_i18n_refs.py` 只扫字面量与 `tooltip = "…"`，扫不到插值 —— 这次回归
+  因此一路绿灯。新增 `SimpleMqObjectI18nKeysTest`（2 条）按**与面板完全相同的派生
+  规则**逐键核对两种语言，缺一个就红（已反向验证：把 `TopicSpec` 前缀改回 `"topic"`
+  立即失败）。
+
+- **顶部 Tab 栏在 Tab 溢出时无法用鼠标翻到后面**（`app-ui` `MainWindow`）。
+
+  现状其实已经是 `Row + Modifier.horizontalScroll(...)`，不是普通 `Row` —— 真正缺的
+  是另外两件：没有自动定位（新建 / 激活的 Tab 可能在视口外），以及桌面端没有横向
+  滚动条、鼠标滚轮只滚纵向，等于「能滑但滑不到」。
+
+  现在：激活 Tab 变化（点击 / 新建 / 关闭后落位）时 `animateScrollTo` 滚进视口；
+  右侧溢出处给两个极简翻页按钮（一页 = 视口 80%），不溢出时不占位。测量按**内容
+  坐标**（`positionInWindow - viewportLeft + scroll`），滚动中不会漂、不会与用户手动
+  滚动互相拉扯；完整可见时返回 `null` 不起动画（避免「点一下抖一下」）。
+
+  未采用 `ScrollableTabRow`：它没有关闭按钮的位置，改造它等于重做 × 的命中区。
+  关闭逻辑一字未动（× 仍是唯一关闭入口，`onSelect` / `onClose` 原样透传）。
+  几何部分抽成纯函数 `tabScrollTarget` + `TabScrollTargetTest`（7 条：贴边 / 两侧被裁 /
+  视口未测量 / Tab 宽于视口）。公共表 +2 键（`common_tab_scroll_left` /
+  `common_tab_scroll_right`），中英同步。
+
+### Changed
+
+- `ui-common` 的详情组件按「外壳 / 内容 / 底部动作」拆开
+  （`MessageDetailContent` / `MessageDetailFooterActions` / `MessageDetailUiState`）。
+  一行接入的 `MessageDetailDialog` 签名不变，RabbitMQ 零改动；IBM 与 Kafka 改为自持
+  外壳，因为只有它们有 Loading / Failed 三态。**不要在宿主里按三态各 new 一个
+  `ObjectDetailDialog`** —— 原因见上面第一条。
+
 ## [Unreleased] — 2026-10-29 (10)
 
 ### Fixed

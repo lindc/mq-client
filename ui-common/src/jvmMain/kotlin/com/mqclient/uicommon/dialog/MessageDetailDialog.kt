@@ -43,6 +43,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.Stable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -231,26 +232,350 @@ internal suspend fun buildDetailContent(
 private val detailLog = Log.withTag("ui.detail")
 
 /**
- * 消息详情对话框（公用，IBM MQ / Kafka / RabbitMQ 三家共用，外观 100% 一致）：
- * 左右分栏 3:2 —— 左侧「正文 / Header」两个 Tab（正文由本组件完全接管：UTF-8
- * 解码、二进制 hex 回退、解释器渲染、解析失败横幅、大文本截断/展开），Header Tab
- * 渲染 [headerContent] 插槽（各行用 [MessageHeaderRow]，小节标题用
- * [MessageDetailSectionTitle]）；右侧解释器选择 + 参数区（列表来自
- * [MessageInterpreters]，不在本组件写死；二进制内容默认选中 Hex 解释器）。
- * 底部统一「下载消息 / 复制正文」+ 关闭，[extraBottomActions] 渲染在三者之前；
- * [downloadBaseName] 定制下载文件名主体。
+ * 详情就绪态的全部可变状态（解码结果 / 解释器选择 / 参数 / 渲染结果 / 渲染中 / 卡住告警）。
  *
- * **加载三态不在本组件**：数据获取方式各模块不同（IBM/Kafka 现查 service，
- * Rabbit 本地对象）—— 宿主自行 when 分发，非就绪态用 [MessageDetailLoadingView]
- * / [MessageDetailErrorView] 配一个普通 [ObjectDetailDialog] 呈现。
+ * 为什么单独拿出来：宿主需要**一个窗口、两种内容**。此前 IBM / Kafka 的宿主按三态在三个
+ * `when` 分支里各 new 一个 `ObjectDetailDialog`，状态每翻一次就销毁一个 Tao 原生窗口、
+ * 再建一个新的 —— 现场日志（`~/.mqclient/logs/mqclient.log`）里表现为「数据 68ms 就取回来了，
+ * 界面 7.5s 后才开始渲染」，以及同一条消息被取两次（窗口重建 → 协程取消 → 新窗口的
+ * LaunchedEffect 重跑）。把状态提升到这里之后，宿主只建一次窗口，内容在壳内切换，
+ * 状态与渲染结果不受窗口重建影响。
  *
- * [nestedContent]：需要**挂在本对话框窗口内**的嵌套对话框（如 IBM 的 dmpmqmsg
- * 导入预览）从这里声明 —— compose Dialog 的窗口归属随声明组合走，挂到外层会被
- * 本对话框压住（见 [ObjectDetailDialog] KDoc）。
+ * 不可变部分（消息体 / 二进制判定 / 解释器列表）在构造时算好：这些是 O(n) 的，
+ * 放进组合期会让每次重组都重新判一遍二进制。
+ */
+@Stable
+class MessageDetailUiState internal constructor(
+    val rawBody: ByteArray,
+    val encoding: Int,
+    val codedCharSetId: Int,
+    internal val decodeFailedMessage: String,
+    internal val renderTimeoutReason: String,
+) {
+    val oversized: Boolean = rawBody.size > MAX_BODY_BYTES
+
+    /**
+     * 送进解码 / 解释器的字节（超过 [MAX_BODY_BYTES] 截断）。
+     *
+     * 在构造时算一次而不是组合期算：截断会 `copyOf` 出新数组，数组身份每次变 →
+     * LaunchedEffect 的 key 每次变 → 解码与渲染无限重启，表现就是转圈不停（踩过一次）。
+     */
+    val effectiveBody: ByteArray =
+        if (rawBody.size > MAX_BODY_BYTES) rawBody.copyOf(MAX_BODY_BYTES) else rawBody
+
+    val binary: Boolean = isProbablyBinary(effectiveBody, codedCharSetId)
+
+    /**
+     * 进程级解释器列表（[MessageInterpreters.all] 缓存）。
+     *
+     * 不用 `loadAll()`：后者每次都要走一遍 ServiceLoader 扫 classpath，而本对话框
+     * 每开一次都会读它 —— 开销落在 composition 线程上。
+     */
+    val interpreters: List<MessageInterpreter> = MessageInterpreters.all()
+
+    /** 本对话框自己的 snackbar 反馈（复制 / 下载 / 保存失败）。 */
+    internal val snackbarHostState = SnackbarHostState()
+
+    var selectedId by mutableStateOf(
+        if (binary && interpreters.any { it.id == HEX_INTERPRETER_ID }) {
+            HEX_INTERPRETER_ID
+        } else {
+            interpreters.firstOrNull()?.id.orEmpty()
+        },
+    )
+        internal set
+
+    var params by mutableStateOf<Map<String, String>>(emptyMap())
+        internal set
+
+    /**
+     * 基线（二进制标志 + 原文 / hex）；null = 还没算完。
+     *
+     * internal：`ContentPreview` / `RenderedText` 是模块内实现细节，宿主要读的是
+     * 「有什么可展示」而不是这两个结构本身（内容由 [MessageDetailContent] 渲染，
+     * 复制 / 下载由 [MessageDetailFooterActions] 处理）。
+     */
+    internal var preview by mutableStateOf<ContentPreview?>(null)
+
+    /** 解释器渲染结果；null = 无需渲染或还没算完。internal 理由同上。 */
+    internal var rendered by mutableStateOf<RenderedText?>(null)
+
+    /** 渲染进行中（切换解释器 / 改参数时的角标）。 */
+    var rendering by mutableStateOf(false)
+        internal set
+
+    /** 看门狗到点仍未出结果（见 [STALL_HINT_MS]）。 */
+    var stalled by mutableStateOf(false)
+        internal set
+
+    /** 当前选中解释器；selectedId 不匹配时回落到第一个。 */
+    val interpreter: MessageInterpreter?
+        get() = interpreters.firstOrNull { it.id == selectedId } ?: interpreters.firstOrNull()
+
+    init {
+        // 默认参数随默认解释器走；之后每次切换在 select() 里重置。
+        params = interpreter?.defaultParams ?: emptyMap()
+    }
+
+    /** 切换解释器：连带把参数重置为新解释器的默认值。 */
+    fun select(id: String) {
+        if (id == selectedId) return
+        selectedId = id
+        params = interpreter?.defaultParams ?: emptyMap()
+    }
+
+    fun updateParams(new: Map<String, String>) {
+        params = new
+    }
+
+    /** 落一次「解码 + 渲染」的结果。 */
+    internal fun apply(content: DetailContent) {
+        preview = content.preview
+        content.rendered?.let { rendered = it }
+    }
+}
+
+/**
+ * 建（并按 [rawBody] 记忆）一份 [MessageDetailUiState]。
+ *
+ * 调用方应在**自己的解析范围**里建（例如宿主的三态外壳之外），这样状态不会随内容切换丢失。
+ */
+@Composable
+fun rememberMessageDetailUiState(
+    rawBody: ByteArray,
+    encoding: Int = 0,
+    codedCharSetId: Int = 1208,
+): MessageDetailUiState {
+    // 两个兜底文案在组合期取好：effect / 异常分支不是 @Composable 上下文，拿不到 stringResource。
+    val decodeFailedMessage = stringResource("msg_detail_decode_failed")
+    val renderTimeoutReason = stringResource("msg_detail_render_timeout").withArg(RENDER_TIMEOUT_MS / 1_000)
+    return remember(rawBody, encoding, codedCharSetId, decodeFailedMessage, renderTimeoutReason) {
+        MessageDetailUiState(rawBody, encoding, codedCharSetId, decodeFailedMessage, renderTimeoutReason)
+    }
+}
+
+/**
+ * 就绪态内容（**不含窗口外壳**）：副标题 + 「正文 / Header」双 Tab + 右侧解释器区 + snackbar。
+ *
+ * 拆出来的目的就是让宿主可以在**同一个窗口**里按三态换内容（见 [MessageDetailUiState]）。
+ * [MessageDetailDialog] 仍是一行接入的现成外壳；需要自持外壳的宿主直接用
+ * [ObjectDetailDialog] + 本组件 + [RowScope.MessageDetailFooterActions]。
+ *
+ * [nestedContent] 必须声明在**本组件所属窗口**内（compose Dialog 的窗口归属随声明组合走），
+ * 否则嵌套对话框会被压住 —— 见 [ObjectDetailDialog] KDoc。
+ */
+@Composable
+fun MessageDetailContent(
+    state: MessageDetailUiState,
+    headerContent: (@Composable () -> Unit)? = null,
+    subtitleText: String? = null,
+    nestedContent: @Composable () -> Unit = {},
+) {
+    val clipboard = LocalClipboardManager.current
+    val scope = rememberCoroutineScope()
+
+    /**
+     * **解码与渲染合在一个协程里完成。**
+     *
+     * 分开会多等一帧 —— 在这个应用里「等一帧」可能等于等几十秒。现场日志（见 [detailLog]）
+     * 记着那一幕：渲染本身 1ms，却晚启动了 51 秒。合成一个协程后，点击带来的那一帧里
+     * 既算完基线也算完渲染，不再依赖第二帧。换解释器 / 改参数重跑整段也只是一次
+     * 十毫秒级的解码，不欠债。
+     */
+    LaunchedEffect(state.effectiveBody, state.binary, state.codedCharSetId, state.interpreter, state.params) {
+        val startedAt = System.currentTimeMillis()
+        val target = state.interpreter
+        state.rendering = target != null
+        val content =
+            try {
+                buildDetailContent(
+                    body = state.effectiveBody,
+                    codedCharSetId = state.codedCharSetId,
+                    encoding = state.encoding,
+                    binary = state.binary,
+                    interpreter = target,
+                    params = state.params,
+                    decodeFailedMessage = state.decodeFailedMessage,
+                    renderTimeoutReason = state.renderTimeoutReason,
+                )
+            } finally {
+                state.rendering = false
+            }
+        state.apply(content)
+        detailLog.info(
+            "detail loaded: interpreter=${target?.id ?: "-"} bytes=${state.effectiveBody.size} " +
+                "binary=${state.binary} rendered=${content.rendered != null} " +
+                "total=${System.currentTimeMillis() - startedAt}ms",
+        )
+    }
+
+    // 看门狗：到点还没出结果就把「转圈」换成提示。
+    //
+    // 它只能处理「渲染真的很慢」；处理不了「协程根本没被调度」（那种情况下这一条也一起
+    // 被停住）。但对于解释器卡在大消息上这一类，它是唯一能给出交代的出口。
+    LaunchedEffect(state.effectiveBody, state.selectedId, state.params) {
+        state.stalled = false
+        delay(STALL_HINT_MS)
+        // 到点复查一次真实状态，而不是无条件报警：正常完成的场景不能闪错误条。
+        val base = state.preview
+        state.stalled = when {
+            base == null -> true // 基线还没出来 = 解码卡住
+            base.decodeError != null -> false // 已经有明确原因，不是卡住
+            base.isBinary -> false // 二进制不需要解释器渲染，hex 已在基线里
+            else -> state.rendered == null // 文本解释器还没返回 = 卡住
+        }
+    }
+
+    fun showCopied() {
+        scope.launch { state.snackbarHostState.showSnackbar(stringResource("msg_detail_copied")) }
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            // ---- 副标题：等宽文本 + 复制按钮（可选）----
+            if (subtitleText != null) {
+                Row(
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = subtitleText,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.weight(1f),
+                    )
+                    IconButton(onClick = {
+                        clipboard.setText(AnnotatedString(subtitleText))
+                        showCopied()
+                    }) {
+                        Icon(
+                            imageVector = Icons.Default.ContentCopy,
+                            contentDescription = stringResource("msg_detail_copied"),
+                            modifier = Modifier.height(16.dp),
+                        )
+                    }
+                }
+                HorizontalDivider()
+            }
+
+            DetailReadyPane(
+                oversized = state.oversized,
+                effectiveBody = state.effectiveBody,
+                originalSizeBytes = state.rawBody.size.toLong(),
+                binary = state.binary,
+                selectedId = state.selectedId,
+                interpreters = state.interpreters,
+                interpreter = state.interpreter,
+                params = state.params,
+                preview = state.preview,
+                rendered = state.rendered,
+                rendering = state.rendering,
+                stalled = state.stalled,
+                onSelect = { state.select(it) },
+                onParamsChange = { state.updateParams(it) },
+                headerContent = headerContent,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        ThemedSnackbarHost(
+            state.snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
+    }
+    nestedContent()
+}
+
+/**
+ * 就绪态底部按钮：可选的额外动作 + 「下载消息 / 复制正文 / 关闭」。
+ *
+ * 关闭必须无条件、立即生效：**不要**给它加 `enabled = !rendering` 之类的门禁。渲染 /
+ * 下载可以慢，退出不能慢 —— 一旦这里被拦，用户能选的只剩杀进程。界面上清理状态的职责
+ * 在渲染协程的 finally，不在这个按钮。
+ */
+@Composable
+fun RowScope.MessageDetailFooterActions(
+    state: MessageDetailUiState,
+    onClose: () -> Unit,
+    downloadBaseName: String? = null,
+    extraActions: @Composable RowScope.() -> Unit = {},
+) {
+    val scope = rememberCoroutineScope()
+    val clipboard = LocalClipboardManager.current
+    extraActions()
+    SecondaryButton(
+        onClick = {
+            scope.launch {
+                try {
+                    val ext = when {
+                        state.binary || state.selectedId == HEX_INTERPRETER_ID -> "bin"
+                        state.selectedId == "json" -> "json"
+                        else -> "txt"
+                    }
+                    val baseName = downloadBaseName
+                        ?: "msg_" + java.time.LocalDateTime.now()
+                            .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
+                    val saved = withContext(Dispatchers.IO) {
+                        saveFileBytes(baseName + "." + ext, ext, state.rawBody)
+                    }
+                    if (saved != null) {
+                        state.snackbarHostState.showSnackbar(stringResource("msg_detail_saved").withArg(saved))
+                    }
+                } catch (e: Exception) {
+                    state.snackbarHostState.showSnackbar(
+                        stringResource("msg_detail_save_failed").withArg(e.message ?: ""),
+                    )
+                }
+            }
+        },
+        enabled = state.rawBody.isNotEmpty(),
+    ) { Text(stringResource("msg_detail_download")) }
+    SecondaryButton(
+        onClick = {
+            // 复制当前展示的文本：hex 模式复制 hex；解释器模式复制全量 formatted
+            //（显示截断不影响复制）；未就绪 / 解析失败回退全量原文解码。
+            val copied = when {
+                state.binary || state.selectedId == HEX_INTERPRETER_ID -> state.preview?.hex ?: ""
+                else -> state.rendered?.text?.takeIf { it.isNotEmpty() }
+                    ?: state.preview?.rawText
+                    ?: MessageCharsets.decode(state.rawBody, state.codedCharSetId)
+            }
+            clipboard.setText(AnnotatedString(copied))
+            scope.launch { state.snackbarHostState.showSnackbar(stringResource("msg_detail_copied")) }
+        },
+        enabled = state.rawBody.isNotEmpty(),
+    ) { Text(stringResource("msg_detail_copy_body")) }
+    Spacer(Modifier.weight(1f))
+    SecondaryButton(
+        onClick = onClose,
+    ) { Text(stringResource("common_close")) }
+}
+
+/**
+ * 一行接入的详情对话框（IBM MQ / Kafka / RabbitMQ 共用，外观 100% 一致）：
+ * [ObjectDetailDialog] 外壳 + [MessageDetailContent] + [MessageDetailFooterActions]。
+ *
+ * 左右分栏 3:2 —— 左侧「正文 / Header」两个 Tab（正文由本组件完全接管：UTF-8 解码、
+ * 二进制 hex 回退、解释器渲染、解析失败横幅、大文本截断/展开），Header Tab 渲染
+ * [headerContent] 插槽（各行用 [MessageHeaderRow]，小节标题用 [MessageDetailSectionTitle]）；
+ * 右侧解释器选择 + 参数区（列表来自 [MessageInterpreters]，不在本组件写死；二进制内容
+ * 默认选中 Hex 解释器）。底部统一「下载消息 / 复制正文」+ 关闭，[extraBottomActions]
+ * 渲染在三者之前；[downloadBaseName] 定制下载文件名主体。
+ *
+ * [nestedContent]：需要**挂在本对话框窗口内**的嵌套对话框（如 IBM 的 dmpmqmsg 导入预览）
+ * 从这里声明 —— compose Dialog 的窗口归属随声明组合走，挂到外层会被本对话框压住
+ * （见 [ObjectDetailDialog] KDoc）。
  *
  * [encoding] / [codedCharSetId] 是 MQMD.Encoding / CodedCharSetId 口径的原始值：
- * IBM 传消息详情里的真值；Kafka / RabbitMQ 无此元数据，用默认 0 / 1208（UTF-8
- * 中性值，与原实现一致）。
+ * IBM 传消息详情里的真值；Kafka / RabbitMQ 无此元数据，用默认 0 / 1208（UTF-8 中性值）。
+ *
+ * **加载三态不在本组件**：数据获取方式各模块不同（IBM / Kafka 现查 service，Rabbit 本地
+ * 对象）。宿主有 Loading / Failed 态的，**不要**按三态各 new 一个本组件（那会每次翻状态
+ * 就重建原生窗口，见 [MessageDetailUiState] 的说明）—— 改为自己持有一个
+ * [ObjectDetailDialog]，内容与底部按钮都从 [MessageDetailUiState] 读。
  */
 @Composable
 fun MessageDetailDialog(
@@ -262,235 +587,32 @@ fun MessageDetailDialog(
     subtitleText: String? = null,
     encoding: Int = 0,
     codedCharSetId: Int = 1208,
-    /** 下载消息的默认文件名主体（不带扩展名）；null = msg_<yyyyMMdd_HHmmss>。IBM / Kafka 传各自的定制名。 */
     downloadBaseName: String? = null,
     minWidth: Dp = 760.dp,
     minHeight: Dp = 520.dp,
     nestedContent: @Composable () -> Unit = {},
 ) {
-    val scope = rememberCoroutineScope()
-    val snackbarHostState = remember { SnackbarHostState() }
-    val clipboard = LocalClipboardManager.current
-
-    // 解释器选择与渲染状态：提升到对话框级 —— footer 的「下载消息 / 复制正文」需要
-    // 读取当前展示的文本、二进制标志与选中解释器（原先在 ContentTab 内部拿不到）。
-    //
-    // 用 [MessageInterpreters.all]（进程级缓存）而不是 loadAll()：后者每次都要走一遍
-    // ServiceLoader 扫 classpath，而本对话框每开一次都会读它 —— 开销落在 composition
-    // 线程上。缓存后只有进程内首次要付这个代价。
-    val interpreters = remember { MessageInterpreters.all() }
-    val oversized = rawBody.size > MAX_BODY_BYTES
-    // remember(rawBody)：超大消息的截断拷贝**不能**每次重组都重做。之前写成裸的
-    // `if (oversized) rawBody.copyOf(...)`，数组身份每次都变 → remember / LaunchedEffect
-    // 的 key 每次都变 → 解码与渲染无限重启，最终表现就是转圈不停。
-    val effectiveBody = remember(rawBody) {
-        if (rawBody.size > MAX_BODY_BYTES) rawBody.copyOf(MAX_BODY_BYTES) else rawBody
-    }
-    val binary = remember(effectiveBody, codedCharSetId) { isProbablyBinary(effectiveBody, codedCharSetId) }
-    var selectedId by remember(effectiveBody) {
-        val initial = if (binary && interpreters.any { it.id == HEX_INTERPRETER_ID }) {
-            HEX_INTERPRETER_ID
-        } else {
-            interpreters.firstOrNull()?.id ?: ""
-        }
-        mutableStateOf(initial)
-    }
-    val interpreter = remember(selectedId, interpreters) {
-        interpreters.firstOrNull { it.id == selectedId } ?: interpreters.firstOrNull()
-    }
-    var params by remember(interpreter) { mutableStateOf(interpreter?.defaultParams ?: emptyMap()) }
-    var preview by remember(effectiveBody) { mutableStateOf<ContentPreview?>(null) }
-    var rendered by remember(effectiveBody) { mutableStateOf<RenderedText?>(null) }
-    var rendering by remember(effectiveBody) { mutableStateOf(false) }
-
-    // 看门狗：到点还没出结果就把「转圈」换成提示。
-    //
-    // 它只能处理「渲染真的很慢」；处理不了「协程根本没被调度」（那种情况下这一条
-    // 也一起被停住）。但对于解释器卡在大消息上这一类，它是唯一能给出交代的出口。
-    var stalled by remember(effectiveBody, selectedId, params) { mutableStateOf(false) }
-    LaunchedEffect(effectiveBody, selectedId, params) {
-        stalled = false
-        delay(STALL_HINT_MS)
-        // 到点复查一次真实状态，而不是无条件报警：正常完成的场景不能闪错误条。
-        val base = preview
-        stalled = when {
-            base == null -> true // 基线还没出来 = 解码卡住
-            base.decodeError != null -> false // 已经有明确原因，不是卡住
-            base.isBinary -> false // 二进制不需要解释器渲染，hex 已在基线里
-            else -> rendered == null // 文本解释器还没返回 = 卡住
-        }
-    }
-
-    // 超时 / 解码失败文案先在这里取好：LaunchedEffect 与异常分支都不是 @Composable
-    // 上下文，里面拿不到 stringResource。
-    val decodeFailedMessage = stringResource("msg_detail_decode_failed")
-    val renderTimeoutReason = stringResource("msg_detail_render_timeout").withArg(RENDER_TIMEOUT_MS / 1_000)
-
-    /**
-     * **解码与渲染合在一个协程里完成。**
-     *
-     * 这不是为了少写代码，是因为分开会多等一帧 —— 而在这个应用里「等一帧」可能
-     * 等于等几十秒。现场日志（`[ui.detail]`）测得的事实：
-     *
-     * ```
-     * detail composed:      sinceCompose=16ms
-     * detail preview ready: elapsed=3ms
-     * detail rendered:      render=1ms  total=51021ms   ← 1ms 的活等了 51 秒
-     * ```
-     *
-     * 渲染本身 1ms，却晚启动了 51 秒。旧实现拆成两个 LaunchedEffect：第一个把基线写进
-     * `preview`，第二个以 `preview` 为 key 重启。key 一变，第二个 effect 的启动就**必须等
-     * 下一帧**（Recomposer 的 `withFrameNanos`），而 Tao 主循环只在收到原生事件时推进
-     * —— 用户不动鼠标就没有帧，于是 1ms 的活等了 51 秒。
-     *
-     * 合成一个协程后：点击本身带来一帧，这一帧里既算完基线也算完渲染，不再依赖第二帧。
-     * 用户换解释器 / 改参数时重跑整段也只是一次十毫秒级的解码，不欠债。
-     */
-    LaunchedEffect(effectiveBody, binary, codedCharSetId, interpreter, params) {
-        // 埋点：解码 + 渲染在同一协程内完成（见上方「为什么合并」）。
-        val startedAt = System.currentTimeMillis()
-        val target = interpreter
-        rendering = target != null
-        val content =
-            try {
-                buildDetailContent(
-                    body = effectiveBody,
-                    codedCharSetId = codedCharSetId,
-                    encoding = encoding,
-                    binary = binary,
-                    interpreter = target,
-                    params = params,
-                    decodeFailedMessage = decodeFailedMessage,
-                    renderTimeoutReason = renderTimeoutReason,
-                )
-            } finally {
-                rendering = false
-            }
-        preview = content.preview
-        content.rendered?.let { rendered = it }
-        detailLog.info(
-            "detail loaded: interpreter=${target?.id ?: "-"} bytes=${effectiveBody.size} " +
-                "binary=$binary rendered=${content.rendered != null} " +
-                "total=${System.currentTimeMillis() - startedAt}ms",
-        )
-    }
-
-    fun showCopied() {
-        scope.launch { snackbarHostState.showSnackbar(stringResource("msg_detail_copied")) }
-    }
-
+    val state = rememberMessageDetailUiState(rawBody, encoding, codedCharSetId)
     ObjectDetailDialog(
         title = title,
         onDismiss = onDismiss,
         minWidth = minWidth,
         minHeight = minHeight,
         footerActions = {
-            extraBottomActions()
-            SecondaryButton(
-                onClick = {
-                    scope.launch {
-                        try {
-                            val ext = when {
-                                binary || selectedId == HEX_INTERPRETER_ID -> "bin"
-                                selectedId == "json" -> "json"
-                                else -> "txt"
-                            }
-                            val baseName = downloadBaseName
-                                ?: "msg_" + java.time.LocalDateTime.now()
-                                    .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
-                            val saved = withContext(Dispatchers.IO) {
-                                saveFileBytes(baseName + "." + ext, ext, rawBody)
-                            }
-                            if (saved != null) {
-                                snackbarHostState.showSnackbar(stringResource("msg_detail_saved").withArg(saved))
-                            }
-                        } catch (e: Exception) {
-                            snackbarHostState.showSnackbar(stringResource("msg_detail_save_failed").withArg(e.message ?: ""))
-                        }
-                    }
-                },
-                enabled = rawBody.isNotEmpty(),
-            ) { Text(stringResource("msg_detail_download")) }
-            SecondaryButton(
-                onClick = {
-                    // 复制当前展示的文本：hex 模式复制 hex；解释器模式复制全量 formatted
-                    // （显示截断不影响复制）；未就绪 / 解析失败回退全量原文解码。
-                    val copied = when {
-                        binary || selectedId == HEX_INTERPRETER_ID -> preview?.hex ?: ""
-                        else -> rendered?.text?.takeIf { it.isNotEmpty() }
-                            ?: preview?.rawText
-                            ?: MessageCharsets.decode(rawBody, codedCharSetId)
-                    }
-                    clipboard.setText(AnnotatedString(copied))
-                    showCopied()
-                },
-                enabled = rawBody.isNotEmpty(),
-            ) { Text(stringResource("msg_detail_copy_body")) }
-            Spacer(Modifier.weight(1f))
-            // 关闭必须无条件、立即生效：**不要**给它加 `enabled = !rendering` 之类的
-            // 门禁。渲染 / 下载可以慢，退出不能慢 —— 一旦这里被拦，用户能选的只剩
-            // 杀进程。界面上清理状态的职责在渲染协程的 finally，不在这个按钮。
-            SecondaryButton(
-                onClick = onDismiss,
-            ) { Text(stringResource("common_close")) }
+            MessageDetailFooterActions(
+                state = state,
+                onClose = onDismiss,
+                downloadBaseName = downloadBaseName,
+                extraActions = extraBottomActions,
+            )
         },
     ) {
-        Box(modifier = Modifier.fillMaxSize()) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                // ---- 副标题：等宽文本 + 复制按钮（可选）----
-                if (subtitleText != null) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = subtitleText,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontFamily = FontFamily.Monospace,
-                            modifier = Modifier.weight(1f),
-                        )
-                        IconButton(onClick = {
-                            clipboard.setText(AnnotatedString(subtitleText))
-                            showCopied()
-                        }) {
-                            Icon(
-                                imageVector = Icons.Default.ContentCopy,
-                                contentDescription = stringResource("msg_detail_copied"),
-                                modifier = Modifier.height(16.dp),
-                            )
-                        }
-                    }
-                    HorizontalDivider()
-                }
-
-                DetailReadyPane(
-                    oversized = oversized,
-                    effectiveBody = effectiveBody,
-                    originalSizeBytes = rawBody.size.toLong(),
-                    binary = binary,
-                    selectedId = selectedId,
-                    interpreters = interpreters,
-                    interpreter = interpreter,
-                    params = params,
-                    preview = preview,
-                    rendered = rendered,
-                    rendering = rendering,
-                    stalled = stalled,
-                    onSelect = { selectedId = it },
-                    onParamsChange = { params = it },
-                    headerContent = headerContent,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-            ThemedSnackbarHost(
-                snackbarHostState,
-                modifier = Modifier.align(Alignment.BottomCenter),
-            )
-        }
-        nestedContent()
+        MessageDetailContent(
+            state = state,
+            headerContent = headerContent,
+            subtitleText = subtitleText,
+            nestedContent = nestedContent,
+        )
     }
 }
 
