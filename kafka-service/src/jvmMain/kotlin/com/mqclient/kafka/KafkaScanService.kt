@@ -3,6 +3,7 @@ package com.mqclient.kafka
 import com.mqclient.core.db.CommandAudit
 import com.mqclient.core.cache.CacheManager
 import com.mqclient.core.cache.putIfScanned
+import com.mqclient.core.concurrent.KeyedMutex
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.emit
 import java.util.concurrent.ConcurrentHashMap
@@ -10,8 +11,14 @@ import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.TimeoutCancellationException
 import org.apache.kafka.clients.admin.AdminClient
 import org.apache.kafka.common.config.ConfigResource
 import org.apache.kafka.clients.admin.ListConsumerGroupsOptions
@@ -101,6 +108,8 @@ class KafkaScanService(
     override fun clearScanFailures(connectionId: String) {
         KafkaModule.clearScanFailures(connectionId)
     }
+
+    private val lagScanLocks = KeyedMutex()
 
     override val objectsScanFailedEvent: String = KafkaEvents.OBJECTS_SCAN_FAILED
 
@@ -238,8 +247,8 @@ class KafkaScanService(
      * 单组失败（无权 / 组消失 / 超时）只跳过该组（受限账号的预期现象）；list
      * consumer groups 与 listOffsets 这两步失败才是整轮失败。
      */
-    suspend fun scanGroupLags(connectionId: String) = withScanLock(connectionId) {
-        val (ctx, admin) = scanTargetOrNull(connectionId) ?: return@withScanLock
+    suspend fun scanGroupLags(connectionId: String) = lagScanLocks.withLock(connectionId) {
+        val (ctx, admin) = scanTargetOrNull(connectionId) ?: return@withLock
         try {
             val timeoutMs = ctx.config.connectionTimeout * 1_000L
             val lags = withContext(Dispatchers.IO) { scanAllGroupLags(admin, timeoutMs) }
@@ -672,49 +681,59 @@ class KafkaScanService(
             .map { it.groupId() }
         if (groupIds.isEmpty()) return emptyMap()
 
-        // 空 spec = 「该组的全部分区」，与原来逐组不带 spec 的语义一致。
-        val offsets = admin.listConsumerGroupOffsets(
-            groupIds.associateWith { ListConsumerGroupOffsetsSpec() },
+        // Per-group concurrent Lag: Semaphore(5), hard withTimeout(3000) per group.
+        val log = kafkaLog
+        val semaphore = Semaphore(5)
+        val snapshots = coroutineScope {
+            groupIds.map { groupId ->
+                async {
+                    try {
+                        semaphore.withPermit {
+                            withTimeout(3000) { computeOneGroupLag(admin, groupId, timeoutMs) }
+                        }
+                    } catch (timeout: TimeoutCancellationException) {
+                        log.warn("group lag skipped (timeout): group=$groupId")
+                        null
+                    } catch (cancellation: CancellationException) {
+                        throw cancellation
+                    } catch (error: Throwable) {
+                        log.warn("group lag skipped: group=$groupId error=${kafkaErrorOf(error)}")
+                        null
+                    }
+                }
+            }.awaitAll()
+        }
+        return snapshots.filterNotNull().associateBy { it.groupId }
+    }
+
+    // Single group lag: committed offsets + latest offset per partition -> group lag.
+    private suspend fun computeOneGroupLag(
+        admin: AdminClient,
+        groupId: String,
+        timeoutMs: Long,
+    ): KafkaGroupLagSnapshot {
+        val committed = admin.listConsumerGroupOffsets(
+            mapOf(groupId to ListConsumerGroupOffsetsSpec()),
             ListConsumerGroupOffsetsOptions().timeoutMs(timeoutMs.toInt()),
-        )
-        val committed = groupIds.mapNotNull { groupId ->
-            try {
-                // 按组分期的 future：单组无权 / 不存在只跳过它自己，不连坐整轮。
-                groupId to offsets.partitionsToOffsetAndMetadata(groupId)
-                    .get(timeoutMs, TimeUnit.MILLISECONDS)
-                    .mapValues { (_, m) -> m.offset() }
-            } catch (cancellation: CancellationException) {
-                throw cancellation
-            } catch (error: Throwable) {
-                kafkaLog.warn("group offsets skipped: group=$groupId error=${errorMessage(error)}")
-                null
-            }
-        }.toMap()
-        if (committed.isEmpty()) return emptyMap()
-
-        val allPartitions = committed.values.flatMap { it.keys }.toSet()
-        val latest = if (allPartitions.isEmpty()) {
-            emptyMap()
-        } else {
-            admin.listOffsets(allPartitions.associateWith { OffsetSpec.latest() })
-                .all()
-                .get(timeoutMs, TimeUnit.MILLISECONDS)
-                .mapValues { (_, info) -> info.offset() }
-        }
-
-        return committed.mapValues { (groupId, offsets) ->
-            val details = offsets.map { (tp, current) ->
-                val end = latest[tp] ?: 0L
-                KafkaPartitionLag(
-                    topic = tp.topic(),
-                    partition = tp.partition(),
-                    currentOffset = current,
-                    latestOffset = end,
-                    lag = (end - current).coerceAtLeast(0L),
-                )
-            }.sortedWith(compareBy({ it.topic }, { it.partition }))
-            KafkaGroupLagSnapshot(groupId = groupId, totalLag = details.sumOf { it.lag }, partitions = details)
-        }
+        ).partitionsToOffsetAndMetadata(groupId)
+            .get(timeoutMs, TimeUnit.MILLISECONDS)
+            .mapValues { (_, m) -> m.offset() }
+        if (committed.isEmpty()) return KafkaGroupLagSnapshot(groupId, 0L, emptyList())
+        val latest = admin.listOffsets(committed.keys.associateWith { OffsetSpec.latest() })
+            .all()
+            .get(timeoutMs, TimeUnit.MILLISECONDS)
+            .mapValues { (_, info) -> info.offset() }
+        val details = committed.map { (tp, current) ->
+            val end = latest[tp] ?: 0L
+            KafkaPartitionLag(
+                topic = tp.topic(),
+                partition = tp.partition(),
+                currentOffset = current,
+                latestOffset = end,
+                lag = (end - current).coerceAtLeast(0L),
+            )
+        }.sortedWith(compareBy({ it.topic }, { it.partition }))
+        return KafkaGroupLagSnapshot(groupId = groupId, totalLag = details.sumOf { it.lag }, partitions = details)
     }
 
     /**

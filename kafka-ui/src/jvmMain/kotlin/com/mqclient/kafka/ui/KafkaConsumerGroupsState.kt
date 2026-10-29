@@ -3,6 +3,8 @@ package com.mqclient.kafka.ui
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.withTimeoutOrNull
 import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ConnectionStore
 import com.mqclient.kafka.KafkaModule
@@ -41,6 +43,8 @@ class KafkaConsumerGroupsState(
     /** 至少完成过一轮对象扫描：区分「还在等首扫」与「扫完了但确实没有组」。 */
     var scannedOnce by mutableStateOf(false); private set
 
+    private var loadAwaiter = CompletableDeferred<Unit>()
+
     /** 搜索过滤后的列表（按名称包含匹配，忽略大小写）。 */
     val filtered: List<KafkaGroupInfo>
         get() = when (val s = loadState) {
@@ -68,6 +72,16 @@ class KafkaConsumerGroupsState(
                 return
             }
             ConnectionStatus.Connected -> Unit
+        }
+        refreshFromCache()
+        if (loadState is LoadState.Success) return
+        // 缓存还没有组且首扫未完成：最多等 5 秒；超时不再无限转圈，转可重试错误态。
+        loadAwaiter = CompletableDeferred()
+        if (scannedOnce) { refreshFromCache(); return }
+        val got = withTimeoutOrNull(5000) { loadAwaiter.await() } != null
+        if (!got) {
+            loadState = LoadState.Error(stringResource("kafka_ui_group_load_timeout"))
+            return
         }
         refreshFromCache()
     }
@@ -98,6 +112,7 @@ class KafkaConsumerGroupsState(
     /** OBJECTS_SCANNED 事件回调：读缓存重建；空缓存不落地（保留旧列表 / 保持加载态）。 */
     fun onObjectsScanned() {
         scannedOnce = true
+        if (!loadAwaiter.isCompleted) loadAwaiter.complete(Unit)
         refreshFromCache()
     }
 
@@ -140,6 +155,10 @@ class KafkaConsumerGroupsState(
     fun retry() {
         val status = ConnectionStore.connections.value
             .firstOrNull { it.id == connectionId }?.status ?: ConnectionStatus.Disconnected
-        ensureKafkaConnecting(connectionId, status)
+        when (status) {
+            // 连接仍在：超时通常是首扫慢，直接重新触发一轮慢扫并回到加载态。
+            ConnectionStatus.Connected -> { loadState = LoadState.Loading; requestScan() }
+            else -> ensureKafkaConnecting(connectionId, status)
+        }
     }
 }

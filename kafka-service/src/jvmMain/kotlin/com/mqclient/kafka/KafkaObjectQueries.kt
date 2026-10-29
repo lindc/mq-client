@@ -3,6 +3,11 @@ package com.mqclient.kafka
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import org.apache.kafka.clients.admin.AdminClient
 import org.apache.kafka.clients.admin.ListConsumerGroupsOptions
 import org.apache.kafka.clients.admin.ListTopicsOptions
@@ -109,29 +114,38 @@ internal suspend fun scanKafkaGroups(admin: AdminClient, timeoutMs: Long): List<
         .map { it.groupId() }
         .sorted()
     if (groupIds.isEmpty()) return emptyList()
-    // 逐组 future（describedGroups）：无权组只跳过，不炸整类 —— 与 kafka-ui 列表页同款。
+    // Concurrent per-group describe (Semaphore(8)) instead of a serial future.get()
+    // loop, so a large group list no longer accumulates into minutes of latency.
     val described = admin.describeConsumerGroups(
         groupIds,
         org.apache.kafka.clients.admin.DescribeConsumerGroupsOptions().timeoutMs(timeoutMs.toInt()),
     ).describedGroups()
-    return described.mapNotNull { (groupId, future) ->
-        try {
-            val d = future.get(timeoutMs, TimeUnit.MILLISECONDS)
-            KafkaGroupSnapshot(
-                groupId = groupId,
-                state = d.state().toString(),
-                members = d.members().size,
-                simple = d.isSimpleConsumerGroup,
-                subscribedTopics = d.members()
-                    .flatMap { it.assignment().topicPartitions() }
-                    .map { it.topic() }
-                    .toSortedSet(),
-            )
-        } catch (cancellation: CancellationException) {
-            throw cancellation
-        } catch (error: Throwable) {
-            kafkaLog.warn("group describe skipped: group=$groupId error=${kafkaErrorOf(error)}")
-            null
-        }
-    }.sortedBy { it.groupId }
+    val semaphore = Semaphore(8)
+    return coroutineScope {
+        groupIds.map { groupId ->
+            async {
+                val future = described[groupId] ?: return@async null
+                try {
+                    semaphore.withPermit {
+                        val d = future.get(timeoutMs, TimeUnit.MILLISECONDS)
+                        KafkaGroupSnapshot(
+                            groupId = groupId,
+                            state = d.state().toString(),
+                            members = d.members().size,
+                            simple = d.isSimpleConsumerGroup,
+                            subscribedTopics = d.members()
+                                .flatMap { it.assignment().topicPartitions() }
+                                .map { it.topic() }
+                                .toSortedSet(),
+                        )
+                    }
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (error: Throwable) {
+                    kafkaLog.warn("group describe skipped: group=" + groupId + " error=" + kafkaErrorOf(error))
+                    null
+                }
+            }
+        }.awaitAll()
+    }.filterNotNull().sortedBy { it.groupId }
 }

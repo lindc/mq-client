@@ -48,6 +48,7 @@
   "kafka_ui_nav_cluster": "Cluster Overview",
   "kafka_ui_group_search_placeholder": "Search consumer groups",
   "kafka_ui_group_loading": "Loading consumer groups…",
+  "kafka_ui_group_load_timeout": "Consumer group loading timed out, click refresh to retry",
   "kafka_ui_group_members": "%1$d members",
   "kafka_ui_group_simple": "simple group",
   "kafka_ui_topology_loading": "Loading topology…",
