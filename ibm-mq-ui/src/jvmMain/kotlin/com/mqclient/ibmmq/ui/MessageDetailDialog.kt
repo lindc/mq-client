@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -22,13 +21,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.mqclient.ibmmq.IbmMQModule
 import com.mqclient.ibmmq.messaging.DmpmqmsgFormat
-import com.mqclient.ibmmq.messaging.DmpmqmsgMessage
 import com.mqclient.ibmmq.messaging.MessageDetail
 import com.mqclient.ibmmq.messaging.MessageOperationResult
 import com.mqclient.ibmmq.messaging.MessageSummary
-import com.mqclient.ibmmq.messaging.sendExpiryTenths
-import com.mqclient.ibmmq.messaging.sendPersistence
-import com.mqclient.ibmmq.messaging.sendPriority
 import com.mqclient.core.log.Log
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.dialog.MessageDetailContent
@@ -38,7 +33,6 @@ import com.mqclient.uicommon.dialog.MessageDetailLoadingView
 import com.mqclient.uicommon.dialog.MessageHeaderRow
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.dialog.rememberMessageDetailUiState
-import com.mqclient.uicommon.file.pickFile
 import com.mqclient.uicommon.file.saveFileBytes
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
@@ -90,9 +84,10 @@ private fun awtWindowCount(): Int = runCatching { java.awt.Window.getWindows().s
  * [com.mqclient.uicommon.dialog.MessageDetailContent] 负责渲染，
  * [com.mqclient.uicommon.dialog.MessageDetailFooterActions] 负责下载 / 复制 / 关闭。
  *
- * IBM 侧只保留数据获取与 dmpmqmsg 导入/导出逻辑；Header 插槽渲染 MQMD 字段列表，底部
- * 额外操作为「导出 dmpmqmsg / 导入 dmpmqmsg」。删除消息不走详情对话框，入口在消息列表的
- * 行操作。
+ * IBM 侧只保留数据获取与 dmpmqmsg **导出**；Header 插槽渲染 MQMD 字段列表，
+ * 底部额外操作为「导出 dmpmqmsg」。删除消息不走详情对话框，入口在消息列表的
+ * 行操作；**dmpmqmsg 导入也不在这里** —— 它是队列级的批量发送动作（看的是「要发一批」，
+ * 与当前这一条无关），入口在队列消息处理对话框的「浏览消息」工具栏。
  *
  * 数据经 service 的 getMessageDetail 按 MessageId 现查（独立 browse 句柄，纯浏览不消费）。
  */
@@ -102,7 +97,6 @@ internal fun MessageDetailDialog(
     queueName: String,
     summary: MessageSummary,
     onDismiss: () -> Unit,
-    onImported: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -199,101 +193,15 @@ internal fun MessageDetailDialog(
         }
     }
 
-    // ---- 导入 dmpmqmsg：选文件 → 解析 → 预览确认 / fallback → 发送 ----
-    var importPreview by remember { mutableStateOf<Pair<String, List<DmpmqmsgMessage>>?>(null) }
-    var importFallback by remember { mutableStateOf<Pair<String, ByteArray>?>(null) }
-    var selectedImportIndex by remember { mutableStateOf(0) }
-    var importing by remember { mutableStateOf(false) }
-    var importError by remember { mutableStateOf<String?>(null) }
-
-    fun startImport() {
-        scope.launch {
-            val path = pickFile(stringResource("ibm_mq_msg_import_pick_title"), emptyList()) ?: return@launch
-            val bytes = try {
-                withContext(Dispatchers.IO) { java.io.File(path).readBytes() }
-            } catch (e: Exception) {
-                snackbarHostState.showSnackbar(stringResource("ibm_mq_msg_import_read_failed").withArg(e.message ?: ""))
-                return@launch
-            }
-            val parsed = withContext(Dispatchers.Default) { DmpmqmsgFormat.parse(String(bytes, Charsets.UTF_8)) }
-            importError = null
-            if (parsed.messages.isNotEmpty()) {
-                selectedImportIndex = 0
-                importPreview = java.io.File(path).name to parsed.messages
-            } else {
-                // fallback：不是 dmpmqmsg 格式，可取消或按普通文件发送
-                importFallback = java.io.File(path).name to bytes
-            }
-        }
-    }
-
-    /** 执行导入：[message] 为 null（fallback 路径）时全部走 MQ 默认属性。 */
-    fun performImport(message: DmpmqmsgMessage) {
-        scope.launch {
-            importing = true
-            importError = null
-            try {
-                val service = IbmMQModule.serviceOrNull() ?: error(stringResource("ibm_mq_msg_service_not_ready"))
-                val result = service.sendMessage(
-                    connectionId = connectionId,
-                    queueName = queueName,
-                    content = message.body,
-                    replyToQueue = message.replyToQueue.takeIf { it.isNotBlank() },
-                    persistence = message.sendPersistence(),
-                    priority = message.sendPriority(),
-                    expiryTenths = message.sendExpiryTenths(),
-                    correlationIdBytes = message.correlIdBytes,
-                    characterSet = message.ccsid,
-                    format = message.format.takeIf { it.isNotBlank() },
-                    replyToQMgrName = message.replyToQMgr.takeIf { it.isNotBlank() },
-                )
-                if (result.success) {
-                    importPreview = null
-                    importFallback = null
-                    snackbarHostState.showSnackbar(
-                        stringResource("ibm_mq_msg_import_success").withArg(result.messageId ?: ""),
-                    )
-                    onImported()
-                } else {
-                    importError = result.errorMessage ?: "MQRC ${result.reasonCode ?: "?"}"
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                importError = e.message ?: e::class.simpleName ?: "unknown"
-            } finally {
-                importing = false
-            }
-        }
-    }
-
-    // 本宿主自己的 snackbar 反馈（下载/导入等）+ dmpmqmsg 导入预览 / fallback 对话框。
-    // 声明在当前 ObjectDetailDialog 的 content 内（各分支的 overlay lambda）——compose
-    // Dialog 的窗口归属随声明组合走，挂到外层会被本对话框压住（见 ObjectDetailDialog KDoc）。
+    // 本宿主自己的 snackbar 反馈（导出 / 下载 / 保存失败）。
+    // 声明在当前 ObjectDetailDialog 的 content 内 —— compose Dialog 的窗口归属随声明组合走，
+    // 挂到外层会被本对话框压住（见 ObjectDetailDialog KDoc）。
+    //
+    // dmpmqmsg **导入**不在这里：那是队列级的批量发送动作，入口在队列消息处理对话框
+    // （DmpmqmsgImportState / MessageBrowseTab 工具栏）。
     val hostOverlay: @Composable () -> Unit = {
         Box(modifier = Modifier.fillMaxSize()) {
             ThemedSnackbarHost(snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter))
-        }
-        importPreview?.let { (fileName, messages) ->
-            DmpmqmsgImportDialog(
-                fileName = fileName,
-                messages = messages,
-                selectedIndex = selectedImportIndex,
-                onSelectMessage = { selectedImportIndex = it },
-                executing = importing,
-                errorText = importError,
-                onImport = { performImport(messages[selectedImportIndex.coerceIn(0, messages.lastIndex)]) },
-                onDismiss = { if (!importing) importPreview = null },
-            )
-        }
-        importFallback?.let { (fileName, body) ->
-            DmpmqmsgFallbackDialog(
-                fileName = fileName,
-                executing = importing,
-                errorText = importError,
-                onSendPlain = { performImport(DmpmqmsgMessage(attrs = emptyMap(), body = body)) },
-                onDismiss = { if (!importing) importFallback = null },
-            )
         }
     }
 
@@ -322,7 +230,6 @@ internal fun MessageDetailDialog(
                 FooterAction(stringResource("ibm_mq_msg_detail_export_dmpmqmsg")) {
                     exportDmpmqmsg(readyDetail)
                 }
-                FooterAction(stringResource("ibm_mq_msg_detail_import_dmpmqmsg")) { startImport() }
                 MessageDetailFooterActions(
                     state = readyState,
                     onClose = onDismiss,

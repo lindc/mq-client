@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -83,6 +84,7 @@ import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.file.saveFileBytes
 import com.mqclient.uicommon.i18n.LanguageResources
 import com.mqclient.uicommon.SecondaryButton
+import com.mqclient.uicommon.command.ToolbarButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 import com.mqclient.uicommon.table.TableHeaderText
@@ -153,6 +155,15 @@ internal fun MessageBrowseTab(
     connectionId: String,
     queueName: String,
     modifier: Modifier = Modifier,
+    /**
+     * dmpmqmsg 导入状态（队列级动作，入口在本页工具栏）。null = 不显示导入按钮。
+     *
+     * 状态由宿主对话框持有而不是本页持有：切到「发送消息」Tab 时本页会被销毁，
+     * 进行中的导入不能跟着一起取消。
+     */
+    importState: DmpmqmsgImportState? = null,
+    /** 外部要求重新加载（导入成功后列表要看到新消息）。变化即刷新。 */
+    reloadKey: Int = 0,
 ) {
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -256,6 +267,13 @@ internal fun MessageBrowseTab(
         }
     }
 
+    // 外部要求刷新（如 dmpmqmsg 导入成功）：能就地刷新就刷新，否则重建会话重载首页。
+    // reloadKey 初值 0 不触发 —— 首次加载已经由上面那条 effect 负责。
+    LaunchedEffect(reloadKey) {
+        if (reloadKey == 0) return@LaunchedEffect
+        if (session != null && canRefresh(uiState)) refresh() else retryKey++
+    }
+
     /** 下载：按 MessageId 取完整消息体（独立 browse 句柄纯浏览，队列不动），弹「另存为」写盘。 */
     fun downloadMessage(message: MessageSummary) {
         if (rowActionId != null) return
@@ -344,6 +362,7 @@ internal fun MessageBrowseTab(
             },
             refreshing = ready?.refreshing == true,
             onRefresh = ::refresh,
+            importState = importState,
         )
         HorizontalDivider()
 
@@ -420,8 +439,6 @@ internal fun MessageBrowseTab(
             queueName = queueName,
             summary = message,
             onDismiss = { detailMessage = null },
-            // dmpmqmsg 导入成功后刷新列表（新 MessageId，原列表里没有）
-            onImported = { refresh() },
         )
     }
 }
@@ -458,6 +475,7 @@ private fun BrowseToolbar(
     totalText: String,
     refreshing: Boolean,
     onRefresh: () -> Unit,
+    importState: DmpmqmsgImportState?,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     Row(
@@ -497,6 +515,16 @@ private fun BrowseToolbar(
                 text = totalText,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        // dmpmqmsg 导入：队列级批量发送（导入的是「一批待发消息」，与列表里选中的那条无关，
+        // 所以入口在这里而不是消息详情对话框）。导入中点不动，避免重复触发选文件。
+        if (importState != null) {
+            ToolbarButton(
+                icon = Icons.Default.UploadFile,
+                text = stringResource("ibm_mq_msg_import_button"),
+                onClick = importState::pickFile,
+                enabled = !importState.importing,
             )
         }
         IconButton(onClick = onRefresh, enabled = !refreshing) {

@@ -689,15 +689,21 @@ private fun SendBottomBar(
 
 /* --------------------------- 发送中关闭确认 --------------------------- */
 
-/** 发送进行中关对话框的确认（ObjectDetailDialog 的 onCloseRequest 拦截后弹出）。 */
+/**
+ * 有动作（发送 / dmpmqmsg 导入）进行中关对话框的确认。
+ *
+ * [message] 由调用方给：两种动作的措辞不同（「正在发送」「正在导入」），而关闭确认的
+ * 形状一致 —— 两个几乎一样的对话框没有意义。
+ */
 @Composable
-internal fun ConfirmCloseWhileSendingDialog(
+internal fun ConfirmCloseWhileBusyDialog(
+    message: String,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        text = { Text(stringResource("ibm_mq_msg_send_close_confirm")) },
+        text = { Text(message) },
         confirmButton = {
             PrimaryButton(onClick = onConfirm) { Text(stringResource("common_ok")) }
         },

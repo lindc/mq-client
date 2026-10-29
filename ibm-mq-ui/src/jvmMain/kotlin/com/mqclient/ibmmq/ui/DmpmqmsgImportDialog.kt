@@ -38,8 +38,11 @@ import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 
 /**
- * dmpmqmsg 导入预览对话框（消息详情对话框「导入 dmpmqmsg」）：展示解析出的消息
- * 属性 + 消息体预览，确认后由调用方发送。多消息文件经下拉选择要导入的那一条。
+ * dmpmqmsg 导入预览对话框（队列消息处理对话框「导入 dmpmqmsg」）：展示解析出的消息
+ * **数量**与当前预览那条的属性 + 消息体，确认后由调用方把**整批**发到当前队列。
+ *
+ * 多条时可下拉切换**预览**哪一条 —— 它只是查看器，不改导入范围；范围由提示行写明，
+ * 避免「我选了第 3 条，结果全导入了」这种误解。
  *
  * 属性还原策略（见 DmpmqmsgFormat / sendMessageToQueue）：MessageId 由 MQ 重新生成
  * 不还原；CorrelId（全 0 视为空）/ Persistence / Priority / Expiry / ReplyTo /
@@ -48,10 +51,13 @@ import com.mqclient.uicommon.i18n.withArg
 @Composable
 fun DmpmqmsgImportDialog(
     fileName: String,
+    queueName: String,
     messages: List<DmpmqmsgMessage>,
     selectedIndex: Int,
     onSelectMessage: (Int) -> Unit,
     executing: Boolean,
+    processed: Int,
+    total: Int,
     errorText: String?,
     onImport: () -> Unit,
     onDismiss: () -> Unit,
@@ -64,6 +70,13 @@ fun DmpmqmsgImportDialog(
         text = {
             Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                 Text(stringResource("ibm_mq_msg_import_count").withArg(messages.size.toString()))
+                Spacer(Modifier.height(4.dp))
+                // 范围写明：确认后发的是整批，不是「当前预览的这条」。
+                Text(
+                    text = stringResource("ibm_mq_msg_import_all_hint").withArg(messages.size, queueName),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 if (messages.size > 1) {
                     Spacer(Modifier.height(8.dp))
                     ImportMessageSelector(
@@ -74,6 +87,12 @@ fun DmpmqmsgImportDialog(
                 }
 
                 Spacer(Modifier.height(12.dp))
+                Text(
+                    text = stringResource("ibm_mq_msg_import_preview_heading"),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(Modifier.height(4.dp))
                 ImportAttrRow(stringResource("ibm_mq_msg_detail_h_msgid"), message.msgIdHex.ifBlank { "-" })
                 ImportAttrRow(
                     stringResource("ibm_mq_msg_detail_h_correlid"),
@@ -108,10 +127,20 @@ fun DmpmqmsgImportDialog(
                         .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
                         .padding(8.dp),
                 )
+                if (executing) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = stringResource("ibm_mq_msg_import_progress")
+                            .withArg(processed.coerceAtMost(total), total),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
                 if (errorText != null) {
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        text = stringResource("ibm_mq_msg_import_failed").withArg(errorText),
+                        // 失败原因在这里已经拼好（成功 / 部分失败 / 单条失败都是成品文案）。
+                        text = errorText,
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -183,6 +212,7 @@ private fun ImportMessageSelector(
 @Composable
 fun DmpmqmsgFallbackDialog(
     fileName: String,
+    queueName: String,
     executing: Boolean,
     errorText: String?,
     onSendPlain: () -> Unit,
@@ -193,7 +223,7 @@ fun DmpmqmsgFallbackDialog(
         title = { Text(stringResource("ibm_mq_msg_import_fallback_title")) },
         text = {
             Column {
-                Text(stringResource("ibm_mq_msg_import_fallback_message").withArg(fileName))
+                Text(stringResource("ibm_mq_msg_import_fallback_message").withArg(fileName, queueName))
                 if (errorText != null) {
                     Spacer(Modifier.height(8.dp))
                     Text(
