@@ -2,6 +2,58 @@
 
 本文件记录 MQClient 的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [Unreleased] — 2026-10-29 (12)
+
+### Changed
+
+- **dmpmqmsg 的「导入」从消息详情对话框移到队列消息处理对话框**（`ibm-mq-ui`
+  `MessageDetailDialog` / `DmpmqmsgImport.kt` / `QueueMessagesDialog` / `MessageBrowseTab`）。
+
+  放错了层级的不是按钮位置，是**动作的作用域**：消息详情看的是一条**已存在**的消息，
+  而导入是往队列里发一批**新的**消息 —— 两者没有因果关系。用户在详情里看到「导入」，
+  直觉会以为是「把这条消息导入到别处」，而实际行为与屏幕上这条消息毫无关系。
+
+  现在：
+  - 详情对话框底栏只留「导出 dmpmqmsg / 下载消息 / 复制正文」+ 关闭
+    （净减 113 行；`onImported` 回调随之删除，已无调用方）。
+  - 「导入 dmpmqmsg」进「浏览消息」工具栏（`ToolbarButton`，导入中禁用），
+    与「刷新」同排。
+  - 导入状态（`DmpmqmsgImportState`）挂在**对话框层**，与 `SendMessagesState` 同级：
+    切到「发送消息」Tab 再切回来，进行中的导入不会被打断（Tab 会被销毁，状态不能跟着走）。
+  - 导入成功 → `browseReloadKey++` → 浏览 Tab 就地 `refresh()`，新消息立即可见
+    （新 MessageId 原列表里没有）。
+
+  导入语义从「预览里选一条、发那一条」改为**整批**：这与「导入一个 dmpmqmsg 文件」的
+  本意一致，也是验收要求的「确认后把这批消息批量发送」。为避免「我选了第 3 条，结果全
+  导入了」这类误解：
+  - 预览框新增一行范围说明：「确认后把这 N 条消息全部发送到队列「X」」；
+  - 多条时的下拉降级为**查看器**（只切换预览哪一条，不改变导入范围）。
+
+  批量发送抽成纯函数 `importDmpmqmsgMessages(messages, onProgress, send)`：逐条发送并汇总
+  `sent / failed / firstError`，**一条失败不中断整批**（用户要的是「尽量都进去」），
+  取消原样抛出（调用方靠它结束「导入中」状态）。反馈文案按结果分三种：
+  `成功导入 N 条消息` / `成功导入 N 条，失败 M 条` / `导入失败：<第一条原因>`，
+  进行中显示 `正在导入 n / N…`。
+
+  解析与文件选择复用既有实现（`DmpmqmsgFormat.parse` + FileKit `pickFile`），未改动格式层。
+  唯一的取舍：`pickFile` 按验收要求过滤了扩展名（`txt` / `json`），因此**无扩展名或 `.dmp`
+  后缀的导出文件不在默认列表里**（仍可手动输入文件名）；需要放开是一行改动。
+
+  关闭拦截相应泛化：`ConfirmCloseWhileSendingDialog` → `ConfirmCloseWhileBusyDialog(message)`，
+  发送中 / 导入中各有措辞（`ibm_mq_msg_send_close_confirm` / `ibm_mq_msg_import_close_confirm`）。
+  关闭**仍然没有任何 `enabled` 门禁**，理由同详情对话框：渲染 / 发送可以慢，退出不能慢。
+
+  i18n 中英同步（+7 −2）：新增 `ibm_mq_msg_import_button` / `_all_hint` / `_progress` /
+  `_result` / `_result_partial` / `_close_confirm` / `_preview_heading`；移除
+  `ibm_mq_msg_detail_import_dmpmqmsg`（按钮已搬走）与 `ibm_mq_msg_import_success`
+  （它只报单条 MessageId，整批之后由 `_result*` 取代）。
+
+  测试：`DmpmqmsgImportBatchTest`（6 条，新增 —— 全成功计数、失败计数与首因保留、
+  失败后继续尝试、进度序列、空批次不调 sender、取消原样抛出）。
+
+  **未验证**：GUI 实操。只到编译 + 单测，导入按钮的实际位置、预览框排版、进度刷新节奏
+  需要真机跑一次。
+
 ## [Unreleased] — 2026-10-29 (11)
 
 ### Fixed
