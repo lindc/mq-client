@@ -526,14 +526,21 @@ internal val PARTITION_ROW_HPADDING = 20.dp
 internal const val PARTITION_ZEBRA_ROW_TAG = "partition_zebra_row"
 internal const val PARTITION_PLAIN_ROW_TAG = "partition_plain_row"
 
-/** 表头单元格：labelMedium + 次要色（与 RocketMQ 路由表 / PropertyTable 的标题层级一致）。 */
+/**
+ * 表头单元格：bodyMedium + 次要色 —— 与 PropertyTable 的 **Key 列**同一档。
+ *
+ * 不用 `labelMedium`（12sp）：那样表头比数据小一整档，而概览里的层级差是靠
+ * **颜色**（Key 列 onSurfaceVariant / Value 列 onSurface）表达的，字号两边一致。
+ * 三张自绘表（Kafka 分区 / RocketMQ 路由 / RabbitMQ 绑定）统一走这一档。
+ */
 @Composable
 private fun PartitionHeaderCell(text: String, modifier: Modifier = Modifier) {
     Text(
         text = text,
-        style = MaterialTheme.typography.labelMedium,
+        style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
         modifier = modifier,
     )
 }

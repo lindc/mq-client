@@ -2,6 +2,35 @@
 
 本文件记录 MQClient 的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [Unreleased] — 2026-10-29 (18)
+
+### Changed
+
+- **RocketMQ 主题属性对话框「路由信息」表头对齐概览的 PropertyTable**
+  （`rocketmq-ui` `RocketMqTopicPropertiesDialog` 的 `RoutesTab`，顺带 `kafka-ui` 分区表）。
+
+  现场反馈是「表头和数据字体都偏小」，实际只有**表头**偏小：数据行早就是
+  `bodyMedium` + `onSurface`，还已经带了 `heightIn(min = 40.dp)`、4dp 圆角、
+  奇数行 `surfaceVariant@30%` 斑马纹、10/8 内边距、8dp 行距 —— 三张自绘表里它反而是
+  最接近 PropertyTable 的一张。真正差档的是表头 `labelMedium`（12sp）对
+  `bodyMedium`（14sp）。
+
+  - 表头 → `bodyMedium` + `onSurfaceVariant`，即 PropertyTable 的 **Key 列**那一档；
+    层级差靠颜色（Key 次要色 / Value 主色）表达，两边字号一致。表头内边距 4dp → 8dp、
+    补 `verticalAlignment = CenterVertically`、与首行之间加 8dp 间隔，节奏与数据行对齐；
+  - 数据行视觉不变，只把五格里缺 `maxLines`/`overflow` 的四格补齐（`brokerName` 本来就有）；
+    Master 的 primary 着色保留；
+  - 列宽 `2f / 1f / 1f / 1.2f / 1.2f` 一个不动；
+  - **同步修正 kafka-ui 的 `PartitionHeaderCell`**（上一轮我把它设成了 `labelMedium`）——
+    否则三张表里两张 14sp、一张 12sp。RabbitMQ 绑定表上一轮已经是 14sp，三处现在同档。
+
+  测试：`RocketMqRoutesTabTest`（6 条，新）—— 表头/数据渲染、**表头渲染高度 ≥ 19dp**
+  （bodyMedium 行高 20dp vs labelMedium 16dp，阈值能干净分开）、行高 ≥ 40dp、
+  斑马纹像素断言、空态。负向对照已验证：把表头临时改回 `labelMedium`，该条实测
+  16.0dp 并失败。
+
+  **未验证**：真机观感 —— 同字号下仅靠颜色区分表头，深色主题里层级够不够清楚。
+
 ## [Unreleased] — 2026-10-29 (17)
 
 ### Changed

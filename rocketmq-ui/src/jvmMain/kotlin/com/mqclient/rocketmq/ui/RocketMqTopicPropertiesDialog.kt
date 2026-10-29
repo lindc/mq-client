@@ -35,6 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -276,7 +277,7 @@ private fun OverviewTab(
 /* ------------------------------ Tab 2：路由信息 ------------------------------ */
 
 @Composable
-private fun RoutesTab(
+internal fun RoutesTab(
     routes: List<RocketMqTopicRouteSnapshot>,
     clusterBrokers: List<RocketMqBrokerSnapshot>,
 ) {
@@ -293,13 +294,23 @@ private fun RoutesTab(
     Column(modifier = Modifier.fillMaxSize().padding(vertical = 8.dp)) {
         // 与概览（PropertyTable）同款视觉：斑马纹 + 4dp 圆角 + bodyMedium/onSurface +
         // 40dp 最小行高 + 10/8 内边距 + 8dp 行距，无分割线；列宽统一 weight。
-        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp)) {
-            Text(stringResource("rocketmq_ui_topic_props_col_broker"), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(2f))
-            Text(stringResource("rocketmq_ui_topic_props_col_read"), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
-            Text(stringResource("rocketmq_ui_topic_props_col_write"), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
-            Text(stringResource("rocketmq_ui_topic_props_col_perm"), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1.2f))
-            Text(stringResource("rocketmq_ui_topic_props_col_role"), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1.2f))
+        //
+        // 表头与数据**同档字号**（bodyMedium）：概览里的层级是靠颜色分的（Key 列
+        // onSurfaceVariant / Value 列 onSurface），不是靠字号。表头原先是 labelMedium
+        // —— 比数据小一整档，与概览的 Key 列对不上。
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = ROUTE_ROW_HPADDING, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            RouteHeaderCell(stringResource("rocketmq_ui_topic_props_col_broker"), Modifier.weight(2f))
+            RouteHeaderCell(stringResource("rocketmq_ui_topic_props_col_read"), Modifier.weight(1f))
+            RouteHeaderCell(stringResource("rocketmq_ui_topic_props_col_write"), Modifier.weight(1f))
+            RouteHeaderCell(stringResource("rocketmq_ui_topic_props_col_perm"), Modifier.weight(1.2f))
+            RouteHeaderCell(stringResource("rocketmq_ui_topic_props_col_role"), Modifier.weight(1.2f))
         }
+        Spacer(Modifier.height(8.dp))
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
@@ -311,7 +322,8 @@ private fun RoutesTab(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 40.dp)
+                        .testTag(if (index % 2 == 1) ROUTE_ZEBRA_ROW_TAG else ROUTE_PLAIN_ROW_TAG)
+                        .heightIn(min = ROUTE_ROW_MIN_HEIGHT)
                         .clip(RoundedCornerShape(4.dp))
                         .background(
                             if (index % 2 == 1) {
@@ -320,32 +332,72 @@ private fun RoutesTab(
                                 Color.Transparent
                             },
                         )
-                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                        .padding(horizontal = ROUTE_ROW_HPADDING, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        text = route.brokerName,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(2f),
-                    )
-                    Text(route.readQueueNums.toString(), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
-                    Text(route.writeQueueNums.toString(), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
-                    Text(formatPerm(route.perm), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1.2f))
-                    Text(
+                    RouteCell(route.brokerName, Modifier.weight(2f))
+                    RouteCell(route.readQueueNums.toString(), Modifier.weight(1f))
+                    RouteCell(route.writeQueueNums.toString(), Modifier.weight(1f))
+                    RouteCell(formatPerm(route.perm), Modifier.weight(1.2f))
+                    RouteCell(
                         text = role,
-                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1.2f),
+                        // Master 用 primary 色：路由表里唯一需要一眼扫出的信息。
                         color = if (role == "Master") {
                             MaterialTheme.colorScheme.primary
                         } else {
                             MaterialTheme.colorScheme.onSurface
                         },
-                        modifier = Modifier.weight(1.2f),
                     )
                 }
             }
         }
     }
+}
+
+/* ------------------------------ 路由表零件 ------------------------------ */
+
+/** 路由表行高与 PropertyTable 一致（40dp）。 */
+internal val ROUTE_ROW_MIN_HEIGHT = 40.dp
+
+/** 路由表行内水平内边距：与 PropertyTable 的行内 10dp 同值，两块文字左边缘才对得齐。 */
+internal val ROUTE_ROW_HPADDING = 10.dp
+
+/** 斑马纹行 / 普通行的测试标签（渲染测试用来定位行并断言行高与背景差异）。 */
+internal const val ROUTE_ZEBRA_ROW_TAG = "route_zebra_row"
+internal const val ROUTE_PLAIN_ROW_TAG = "route_plain_row"
+
+/**
+ * 表头单元格：bodyMedium + 次要色 —— 与 PropertyTable 的 Key 列同一档。
+ *
+ * 不用 `labelMedium`：那是 12sp，比数据小一整档。概览里的层级差是靠**颜色**
+ * （Key 列 onSurfaceVariant / Value 列 onSurface）表达的，字号两边一致。
+ */
+@Composable
+private fun RouteHeaderCell(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = modifier,
+    )
+}
+
+/** 数据单元格：bodyMedium + 主色 —— 与 PropertyTable 的 Value 列同一档。 */
+@Composable
+private fun RouteCell(
+    text: String,
+    modifier: Modifier = Modifier,
+    color: Color = MaterialTheme.colorScheme.onSurface,
+) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodyMedium,
+        color = color,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = modifier,
+    )
 }
