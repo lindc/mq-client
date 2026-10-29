@@ -2,6 +2,72 @@
 
 本文件记录 MQClient 的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [Unreleased] — 2026-10-29 (14)
+
+### Changed
+
+- **Kafka 主题属性对话框「分区」表对齐 PropertyTable，消息浏览页的拉取条数换成紧凑输入框**
+  （`kafka-ui` `KafkaTopicPropertiesDialog` / `KafkaMessageBrowseTab`）。
+
+  分区表原来是手写 `bodySmall` + 无背景 + 0.5dp 分割线（行高约 32dp），与隔壁「配置」
+  Tab 的 `PropertyTable` 明显不是一套东西。现在：
+  - 数据行 `heightIn(min = 40.dp)` + 斑马纹（奇数行 `surfaceVariant@30%`）+ 4dp 圆角 +
+    行距 8dp，**去掉全部 `HorizontalDivider`**；
+  - 正文 `bodySmall` → `bodyMedium`，表头 `bodySmall/Medium` → `labelMedium` + 次要色
+    （与 RocketMQ 路由表同款）；
+  - 六列权重不变、全部左对齐；Leader 缺失仍用 error 色；
+  - 代价：数字列失去 Monospace（`PropertyTable` 不暴露字体），与概览/配置两页一致。
+
+  消息浏览页的「拉取条数」从 m3 `OutlinedTextField`（默认 56dp）换成 `ui-common` 的
+  `CompactTextField`（无 label 时 40dp），宽度 80dp；OFFSET 模式的位移框同换（原来两者
+  共用同一个私有 `OutlinedSmallField`，只改一处会留下第二个 56dp 错位）。顺带修了
+  `OutlinedSmallField` 自己的宽度 bug：调用方传 84dp、函数内部又追加 140dp，实际生效的
+  是前者，两个数字都写错了地方。
+
+  测试：`KafkaTopicPropertiesTabsTest` 增 3 条（分区表表头/行值 + 行高 ≥ 40dp、斑马纹像素
+  断言、空态），`KafkaMessageBrowseToolbarTest` 新增 2 条（条数框 = 40dp 且与「读取」
+  按钮等高 < 1dp；OFFSET 模式位移框与条数框等高）。为使 Tab/Rows 可测，`PartitionsTab` /
+  `StartSelectorRow` / `StartMode` 由 `private` 放宽到 `internal`，两处输入框带 testTag。
+
+  **未验证**：真机 GUI 观感（斑马纹对比度、680dp 最小宽度下六列是否挤、输入框与按钮
+  的实际贴合）。本地只到编译 + 单测 + i18n；`verify.sh` 的 `:rabbitmq-service:jvmTest`
+  仍因本机配了 rabbitmq 连接但 broker 未运行而失败（与本次改动无关，依赖图上不相交）。
+
+## [Unreleased] — 2026-10-29 (13)
+
+### Changed
+
+- **Kafka 主题卡片收拢破坏性操作，属性对话框「概览 / 配置」改用 `PropertyTable`**
+  （`kafka-ui` `TopicListPanel` / `KafkaTopicPropertiesDialog`）—— 向 RocketMQ 主题页对齐。
+
+  卡片右下角的垃圾桶其实是「清空消息」（`deleteRecords` 把各分区位移起点推到末端），
+  不是「删除主题」—— 删除主题一直只在属性对话框底部。直接删图标会让「清空消息」
+  在整个 UI 上失去入口，所以**连同确认框一起搬进属性对话框底栏**：
+  - 卡片操作区只剩 `AI / ✉️ / ⓘ`（与 `RocketMqTopicsPanel` 逐项同构）；
+  - 属性对话框底栏：内部主题照旧隐藏两个 danger 按钮；否则「清空消息」在左、
+    「删除主题」在右（破坏性递进），互斥禁用（任一开始执行后两者都不可点）；
+  - 清空成功 → Snackbar 报分区数 → `load()` 重拉位移，概览的「消息总数」不回落在旧值上。
+
+  两个 Tab 废弃手写 Row/Column，改为 `ui-common` 的 `PropertyTableSection`：
+  - **概览**：基础信息（主题名 / 内部主题）、分区配置（分区数 / 副本因子）、
+    统计（消息总数）三组；加载中的消息总数显示 `…` 且 `copyable = false`（否则复制到的是省略号）。
+  - **配置**：常用配置 / 非默认覆盖项两段保留，全部改为 `PropertyItem(key = 配置名, value = 配置值)`。
+    原先「默认值标灰」的语义 `PropertyItem` 没有颜色通道，改用 `description = 默认值` 小字说明。
+
+  i18n 中英同步（+6）：新增 `kafka_ui_topic_props_overview_name` / `_internal_label` /
+  `_section_basic` / `_section_partitions` / `_section_stats` / `kafka_ui_topic_props_configs_default_label`。
+  内部主题标签**不能**复用 `kafka_ui_topic_internal` —— 英文表里它是小写 `internal`，做行标签会读成 `internal  Yes`。
+  清空消息的按钮文案复用卡片原本的 `kafka_ui_topic_clear`（键未变，只是调用点从卡片移到对话框）。
+
+  测试：`KafkaTopicPropertiesTabsTest`（6 条，新增）—— 无头 Compose 渲染两个 Tab：
+  三组标题与字段值、内部主题走「是/否」、行尾复制按钮存在、加载中不复现复制按钮、
+  配置页分组 / 默认值小字 / 空态 / 失败态。两个 Tab 由 `private` 放宽到 `internal` 仅为可测。
+
+  **未验证**：真机 GUI 实操（卡片图标排布、斑马纹观感、长配置表滚动）。本地只到
+  `assemble + jvmTest + i18n`；全仓 `verify.sh` 的 `:rabbitmq-service:jvmTest` 有 4 条
+  既有 Live 探针因本机 `~/.mqclient/config.toml` 存了 rabbitmq 连接、而 broker 未运行
+  连不上而失败（与本次改动无关：rabbitmq-service 不依赖任何 kafka 模块）。
+
 ## [Unreleased] — 2026-10-29 (12)
 
 ### Changed

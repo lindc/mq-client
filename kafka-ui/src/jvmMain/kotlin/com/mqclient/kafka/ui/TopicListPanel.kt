@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Info
@@ -17,11 +16,9 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -33,7 +30,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.mqclient.core.concurrent.runCatchingCancellable
 import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.CoreModule
 import com.mqclient.kafka.KafkaEvents
@@ -48,9 +44,7 @@ import com.mqclient.mqui.objectlist.ObjectListEmptyState
 import com.mqclient.mqui.objectlist.ObjectListPanel
 import com.mqclient.mqui.state.LoadStateContent
 import com.mqclient.uicommon.LocalAiAsk
-import com.mqclient.uicommon.DangerButton
 import com.mqclient.uicommon.ThemedSnackbarHost
-import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 import kotlinx.coroutines.launch
@@ -75,8 +69,6 @@ fun TopicListPanel(
     var propsTopic by remember(connectionId) { mutableStateOf<String?>(null) }
     // 消息对话框的 topic 名（卡片 ✉ / 双击打开）；null = 关闭。
     var messagesTopic by remember(connectionId) { mutableStateOf<String?>(null) }
-    // 清空消息确认框的 topic 名（卡片 🧹 触发）；null = 关闭。内部主题不显示该动作。
-    var clearTopic by remember(connectionId) { mutableStateOf<String?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     // 「询问 AI」宿主回调：宿主没 Provide（独立预览等）时为 null —— AI 按钮不显示。
@@ -181,18 +173,6 @@ fun TopicListPanel(
                                         onClick = { propsTopic = info.name },
                                     ),
                                 )
-                                // 清空消息（deleteRecords 推位移起点到末端）：破坏性操作，
-                                // 走确认框；内部主题（__consumer_offsets 等）绝不可清。
-                                if (!info.internal) {
-                                    add(
-                                        CardAction(
-                                            id = "clear_records",
-                                            icon = Icons.Default.DeleteSweep,
-                                            tooltip = "kafka_ui_topic_clear",
-                                            onClick = { clearTopic = info.name },
-                                        ),
-                                    )
-                                }
                             },
                         )
                     },
@@ -236,45 +216,6 @@ fun TopicListPanel(
             topicName = topicName,
             partitionCount = state.filtered(showSystem).firstOrNull { it.name == topicName }?.partitions,
             onDismiss = { messagesTopic = null },
-        )
-    }
-
-    // 清空消息确认（danger 档）：成功 Snackbar 报分区数；失败显示根因。
-    clearTopic?.let { topicName ->
-        AlertDialog(
-            onDismissRequest = { clearTopic = null },
-            title = { Text(stringResource("kafka_ui_topic_clear_confirm_title")) },
-            text = {
-                Text(
-                    text = stringResource("kafka_ui_topic_clear_confirm_text").withArg(topicName),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            },
-            confirmButton = {
-                DangerButton(
-                    onClick = {
-                        clearTopic = null
-                        scope.launch {
-                            runCatchingCancellable {
-                                KafkaModule.serviceOrNull()?.clearTopicRecords(connectionId, topicName)
-                                    ?: error("服务未初始化")
-                            }.onSuccess { count ->
-                                snackbarHostState.showSnackbar(
-                                    stringResource("kafka_ui_topic_clear_done").withArg(count),
-                                )
-                            }.onFailure { error ->
-                                // 统一出口：解包异常链 + 本地化分类（不再手写 ExecutionException 拆包）。
-                                snackbarHostState.showSnackbar(kafkaErrorText(error))
-                            }
-                        }
-                    },
-                ) { Text(stringResource("kafka_ui_topic_clear_confirm")) }
-            },
-            dismissButton = {
-                SecondaryButton(
-                    onClick = { clearTopic = null },
-                ) { Text(stringResource("common_cancel")) }
-            },
         )
     }
 }

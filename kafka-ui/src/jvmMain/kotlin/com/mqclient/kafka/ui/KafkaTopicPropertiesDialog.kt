@@ -9,13 +9,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -32,11 +32,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.mqclient.core.concurrent.runCatchingCancellable
 import com.mqclient.kafka.KafkaModule
@@ -46,6 +45,8 @@ import com.mqclient.kafka.KafkaTopicSnapshot
 import com.mqclient.mqui.common.CompactSearchField
 import com.mqclient.mqui.state.LoadState
 import com.mqclient.uicommon.DangerButton
+import com.mqclient.uicommon.PropertyItem
+import com.mqclient.uicommon.PropertyTableSection
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
@@ -64,6 +65,10 @@ import kotlinx.coroutines.launch
  * 删除：底部 danger 按钮（内部主题隐藏——概览徽标即提示）→ AlertDialog 二次确认
  * （名称 + 分区数 + 不可恢复警示）→ deleteTopics → 成功关对话框 + scanNow 刷新列表。
  * 按钮 / 确认框布局与 KafkaGroupDetailDialog 同一套约定。
+ *
+ * 清空消息：卡片上的 🧹 动作已收进本对话框（与删除同档 danger，位于其左侧）——
+ * 破坏性操作集中在属性页，卡片只留 AI / ✉️ / ⓘ（对齐 RocketMQ）。同样是二次确认，
+ * 内部主题不渲染；成功后重拉位移，概览的「消息总数」即时归零。
  */
 @Composable
 fun KafkaTopicPropertiesDialog(
@@ -84,6 +89,8 @@ fun KafkaTopicPropertiesDialog(
     var search by remember { mutableStateOf("") }
     var deleteConfirm by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
+    var clearConfirm by remember { mutableStateOf(false) }
+    var clearing by remember { mutableStateOf(false) }
 
     fun load() {
         scope.launch {
@@ -118,15 +125,38 @@ fun KafkaTopicPropertiesDialog(
         }
     }
 
+    fun clearRecords() {
+        scope.launch {
+            clearing = true
+            runCatchingCancellable {
+                KafkaModule.serviceOrNull()?.clearTopicRecords(connectionId, topicName)
+                    ?: error("服务未初始化")
+            }.onSuccess { count ->
+                clearing = false
+                snackbar.showSnackbar(stringResource("kafka_ui_topic_clear_done").withArg(count))
+                // 位移变了：重拉 offsets，概览的「消息总数」不留在旧值上。
+                load()
+            }.onFailure { error ->
+                clearing = false
+                // 统一出口：解包异常链 + 本地化分类（与 TopicListPanel 同源）。
+                snackbar.showSnackbar(kafkaErrorText(error))
+            }
+        }
+    }
+
     ObjectDetailDialog(
         title = topicName,
         onDismiss = onDismiss,
         minWidth = 680.dp,
         minHeight = 440.dp,
         footerActions = {
-            // 内部主题（__consumer_offsets 等）禁止删除：按钮直接隐藏，概览徽标即提示。
+            // 内部主题（__consumer_offsets 等）禁止删除 / 清空：按钮直接隐藏，概览行即提示。
             if (snapshot != null && !snapshot.internal) {
-                DangerButton(onClick = { deleteConfirm = true }) {
+                // 破坏性操作从左到右递进：清空消息 → 删除主题（最右最后一道）。
+                DangerButton(onClick = { clearConfirm = true }, enabled = !deleting && !clearing) {
+                    Text(stringResource("kafka_ui_topic_clear"))
+                }
+                DangerButton(onClick = { deleteConfirm = true }, enabled = !deleting && !clearing) {
                     Text(stringResource("kafka_ui_topic_props_delete"))
                 }
             }
@@ -210,101 +240,105 @@ fun KafkaTopicPropertiesDialog(
                 },
             )
         }
+
+        // ---- 清空消息二次确认（同属外壳 content lambda 内的窗口归属约定）。----
+        if (clearConfirm) {
+            AlertDialog(
+                onDismissRequest = { if (!clearing) clearConfirm = false },
+                title = { Text(stringResource("kafka_ui_topic_clear_confirm_title")) },
+                text = {
+                    Text(
+                        text = stringResource("kafka_ui_topic_clear_confirm_text").withArg(topicName),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                },
+                confirmButton = {
+                    DangerButton(
+                        onClick = {
+                            clearConfirm = false
+                            clearRecords()
+                        },
+                        enabled = !clearing,
+                    ) { Text(stringResource("kafka_ui_topic_clear_confirm")) }
+                },
+                dismissButton = {
+                    SecondaryButton(
+                        onClick = { clearConfirm = false },
+                        enabled = !clearing,
+                    ) { Text(stringResource("common_cancel")) }
+                },
+            )
+        }
     }
 }
-
-/** 概览 Tab 的 label 固定宽度（最长 4 个汉字 + 呼吸感；过长自动换行）。 */
-private val OVERVIEW_LABEL_WIDTH = 80.dp
 
 /**
- * 概览 Tab 一行：label 固定宽在左（次要色），value 紧随其后左对齐占满余量（正常色）。
- * 刻意不用 ui-common 的 PropertyRow（value 右对齐到边缘，label/value 距离过远）。
+ * 概览 Tab：三组 [PropertyTableSection]（基础信息 / 分区配置 / 统计），与 RocketMQ
+ * 主题属性页同一套视觉（斑马纹 + 左对齐 + 行尾复制）。
+ *
+ * 消息总数 = 各分区 (latest - earliest) 合计；随位移实时加载，加载中显示 `…` 占位
+ * 且关闭复制（否则复制到的是省略号）。
  */
 @Composable
-private fun OverviewFieldRow(
-    label: String,
-    value: String,
-    modifier: Modifier = Modifier,
-    monospace: Boolean = false,
-) {
-    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.width(OVERVIEW_LABEL_WIDTH),
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodyMedium,
-            fontFamily = if (monospace) FontFamily.Monospace else FontFamily.Default,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.weight(1f),
-        )
-    }
-}
-
-/** 概览 Tab：主题名独占一行；其余两栏（分区数/消息总数 | 副本因子/内部主题）。 */
-@Composable
-private fun OverviewTab(
+internal fun OverviewTab(
     snapshot: KafkaTopicSnapshot,
     offsets: LoadState<Map<Int, KafkaTopicOffsetRange>>,
     modifier: Modifier = Modifier,
 ) {
-    // 消息总数 = 各分区 (latest - earliest) 合计；随位移实时加载，加载中显示占位。
     val messageTotal = (offsets as? LoadState.Success)?.data
         ?.values
         ?.sumOf { (it.latest - it.earliest).coerceAtLeast(0L) }
     Column(
         modifier = modifier
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+            .padding(vertical = 8.dp),
     ) {
-        OverviewFieldRow(
-            label = stringResource("kafka_ui_topic_create_field_name"),
-            value = snapshot.name,
-            monospace = true,
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                OverviewFieldRow(
-                    label = stringResource("kafka_ui_topic_props_overview_partitions"),
-                    value = snapshot.partitions.size.toString(),
-                )
-                OverviewFieldRow(
-                    label = stringResource("kafka_ui_topic_props_overview_messages"),
-                    value = messageTotal?.let(::formatLag) ?: "…",
-                    monospace = true,
-                )
-            }
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                OverviewFieldRow(
-                    label = stringResource("kafka_ui_topic_props_overview_replicas"),
-                    value = snapshot.partitions.firstOrNull()?.replicaIds?.size?.toString() ?: "-",
-                )
-                OverviewFieldRow(
-                    label = stringResource("kafka_ui_topic_internal"),
-                    value = if (snapshot.internal) {
+        PropertyTableSection(
+            title = stringResource("kafka_ui_topic_props_section_basic"),
+            items = listOf(
+                PropertyItem(stringResource("kafka_ui_topic_props_overview_name"), snapshot.name),
+                PropertyItem(
+                    stringResource("kafka_ui_topic_props_overview_internal_label"),
+                    if (snapshot.internal) {
                         stringResource("kafka_ui_topic_props_overview_internal_yes")
                     } else {
                         stringResource("kafka_ui_topic_props_overview_internal_no")
                     },
-                )
-            }
-        }
+                ),
+            ),
+        )
+        Spacer(Modifier.height(16.dp))
+        PropertyTableSection(
+            title = stringResource("kafka_ui_topic_props_section_partitions"),
+            items = listOf(
+                PropertyItem(
+                    stringResource("kafka_ui_topic_props_overview_partitions"),
+                    snapshot.partitions.size.toString(),
+                ),
+                PropertyItem(
+                    stringResource("kafka_ui_topic_props_overview_replicas"),
+                    snapshot.partitions.firstOrNull()?.replicaIds?.size?.toString() ?: "-",
+                ),
+            ),
+        )
+        Spacer(Modifier.height(16.dp))
+        PropertyTableSection(
+            title = stringResource("kafka_ui_topic_props_section_stats"),
+            items = listOf(
+                PropertyItem(
+                    key = stringResource("kafka_ui_topic_props_overview_messages"),
+                    value = messageTotal?.let(::formatLag) ?: "…",
+                    copyable = messageTotal != null,
+                ),
+            ),
+        )
+        Spacer(Modifier.height(12.dp))
     }
 }
 
-/** 配置 Tab：常用配置（默认值标灰）+ 非默认覆盖项，两列 Key/Value。 */
+/** 配置 Tab：常用配置（默认值行带小字说明）+ 非默认覆盖项，均走 [PropertyTableSection]。 */
 @Composable
-private fun ConfigsTab(state: LoadState<List<KafkaTopicConfigSnapshot>>, modifier: Modifier = Modifier) {
+internal fun ConfigsTab(state: LoadState<List<KafkaTopicConfigSnapshot>>, modifier: Modifier = Modifier) {
     Column(modifier) {
         when (state) {
             is LoadState.Idle, is LoadState.Loading -> {
@@ -339,76 +373,56 @@ private fun ConfigsTab(state: LoadState<List<KafkaTopicConfigSnapshot>>, modifie
                 val overridden = state.data
                     .filter { it.key !in commonKeys && !it.isDefault }
                     .sortedBy { it.key }
-                Column(modifier = Modifier.weight(1f).fillMaxSize().verticalScroll(rememberScrollState())) {
-                    ConfigSection(stringResource("kafka_ui_topic_props_configs_common"))
-                    commonEntries.forEach { entry ->
-                        ConfigRow(entry, dimmed = entry.isDefault)
-                    }
-                    HorizontalDivider()
-                    ConfigSection(stringResource("kafka_ui_topic_props_configs_nondefault"))
+                val defaultLabel = stringResource("kafka_ui_topic_props_configs_default_label")
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(vertical = 8.dp),
+                ) {
+                    PropertyTableSection(
+                        title = stringResource("kafka_ui_topic_props_configs_common"),
+                        items = commonEntries.map { entry ->
+                            PropertyItem(
+                                key = entry.key,
+                                value = entry.value,
+                                // 默认值原来靠灰字区分，PropertyItem 没有颜色通道：
+                                // 改用小字说明，信息量反而更明确。
+                                description = defaultLabel.takeIf { entry.isDefault },
+                            )
+                        },
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    PropertyTableSection(
+                        title = stringResource("kafka_ui_topic_props_configs_nondefault"),
+                        items = overridden.map { PropertyItem(it.key, it.value) },
+                    )
                     if (overridden.isEmpty()) {
                         Text(
                             text = stringResource("kafka_ui_topic_props_configs_empty"),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
                         )
-                    } else {
-                        overridden.forEach { entry -> ConfigRow(entry, dimmed = false) }
                     }
+                    Spacer(Modifier.height(12.dp))
                 }
             }
         }
     }
 }
 
+/**
+ * 分区 Tab：搜索 + 表（Partition / Leader / Replicas / ISR / 最早位移 / 末端位移）。
+ *
+ * 表格视觉严格对齐 `ui-common` 的 [PropertyTable]：数据行最小 40dp、数行斑马纹
+ * （`surfaceVariant@30%` + 4dp 圆角）、行距 8dp、正文 bodyMedium、无分割线 ——
+ * 同一个对话框里「分区」与「配置」两个 Tab 必须长得像同一张表。表头用 labelMedium
+ * + 次要色（与 RocketMQ 路由表同款）。六列均左对齐。
+ */
 @Composable
-private fun ConfigSection(label: String) {
-    Text(
-        text = label,
-        style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-    )
-}
-
-/** 配置行：Key / Value 两列；默认值标灰（常用配置区），非默认正常色。 */
-@Composable
-private fun ConfigRow(entry: KafkaTopicConfigSnapshot, dimmed: Boolean) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = entry.key,
-            style = MaterialTheme.typography.bodySmall,
-            fontFamily = FontFamily.Monospace,
-            color = MaterialTheme.colorScheme.onSurface,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-        Spacer(Modifier.width(16.dp))
-        Text(
-            text = entry.value,
-            style = MaterialTheme.typography.bodySmall,
-            fontFamily = FontFamily.Monospace,
-            color = if (dimmed) {
-                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-            } else {
-                MaterialTheme.colorScheme.onSurface
-            },
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-    }
-    HorizontalDivider(thickness = 0.5.dp)
-}
-
-/** 分区 Tab：搜索 + 表（Partition / Leader / Replicas / ISR / 最早位移 / 末端位移）。 */
-@Composable
-private fun PartitionsTab(
+internal fun PartitionsTab(
     snapshot: KafkaTopicSnapshot,
     offsets: LoadState<Map<Int, KafkaTopicOffsetRange>>,
     search: String,
@@ -427,7 +441,7 @@ private fun PartitionsTab(
         }
     }
     Column(modifier) {
-        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)) {
+        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = PARTITION_ROW_HPADDING, vertical = 8.dp)) {
             CompactSearchField(
                 value = search,
                 onValueChange = onSearchChange,
@@ -435,15 +449,18 @@ private fun PartitionsTab(
                 modifier = Modifier.weight(1f),
             )
         }
-        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
-            DetailHeaderCell(stringResource("kafka_ui_group_detail_col_partition"), Modifier.weight(0.5f))
-            DetailHeaderCell(stringResource("kafka_ui_topic_props_col_leader"), Modifier.weight(0.6f))
-            DetailHeaderCell(stringResource("kafka_ui_topic_props_col_replicas"), Modifier.weight(1f))
-            DetailHeaderCell(stringResource("kafka_ui_broker_detail_col_isr"), Modifier.weight(0.8f))
-            DetailHeaderCell(stringResource("kafka_ui_topic_props_col_earliest"), Modifier.weight(0.7f))
-            DetailHeaderCell(stringResource("kafka_ui_topic_props_col_latest"), Modifier.weight(0.7f))
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = PARTITION_ROW_HPADDING, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            PartitionHeaderCell(stringResource("kafka_ui_group_detail_col_partition"), Modifier.weight(0.5f))
+            PartitionHeaderCell(stringResource("kafka_ui_topic_props_col_leader"), Modifier.weight(0.6f))
+            PartitionHeaderCell(stringResource("kafka_ui_topic_props_col_replicas"), Modifier.weight(1f))
+            PartitionHeaderCell(stringResource("kafka_ui_broker_detail_col_isr"), Modifier.weight(0.8f))
+            PartitionHeaderCell(stringResource("kafka_ui_topic_props_col_earliest"), Modifier.weight(0.7f))
+            PartitionHeaderCell(stringResource("kafka_ui_topic_props_col_latest"), Modifier.weight(0.7f))
         }
-        HorizontalDivider()
+        Spacer(Modifier.height(8.dp))
         if (partitions.isEmpty()) {
             Box(modifier = Modifier.weight(1f).fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
@@ -454,58 +471,87 @@ private fun PartitionsTab(
             }
             return
         }
-        Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-            partitions.forEach { p ->
+        Column(
+            modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
+            // 行距 8dp：与 PropertyTable 的 spacedBy(8.dp) 一致。
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            partitions.forEachIndexed { index, p ->
                 val range = (offsets as? LoadState.Success)?.data?.get(p.id)
+                val zebra = index % 2 == 1
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        // 测试钩子在 heightIn / padding **之前**：语义节点的 bounds 是
+                        // 「此处之后全部修饰符占据的区域」—— 放在 padding 之后会报出
+                        // 内容区高度（40-16=24dp），行高断言就永远看不到真实行高。
+                        .testTag(if (zebra) PARTITION_ZEBRA_ROW_TAG else PARTITION_PLAIN_ROW_TAG)
+                        .heightIn(min = PARTITION_ROW_MIN_HEIGHT)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(
+                            if (zebra) {
+                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                            } else {
+                                Color.Transparent
+                            },
+                        )
+                        .padding(horizontal = PARTITION_ROW_HPADDING, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    DetailDataCell(p.id.toString(), Modifier.weight(0.5f), monospace = true)
-                    DetailDataCell(
+                    PartitionDataCell(p.id.toString(), Modifier.weight(0.5f))
+                    PartitionDataCell(
                         p.leaderId?.toString() ?: "-",
                         Modifier.weight(0.6f),
-                        monospace = true,
+                        // 分区离线（无 leader）用 error 色：这是唯一需要眼睛立刻抓住的异常。
                         color = p.leaderId?.let { MaterialTheme.colorScheme.onSurface }
                             ?: MaterialTheme.colorScheme.error,
                     )
-                    DetailDataCell(p.replicaIds.joinToString(", "), Modifier.weight(1f), monospace = true)
-                    DetailDataCell(p.isrIds.joinToString(", "), Modifier.weight(0.8f), monospace = true)
-                    DetailDataCell(range?.let { formatLag(it.earliest) } ?: "…", Modifier.weight(0.7f), monospace = true)
-                    DetailDataCell(range?.let { formatLag(it.latest) } ?: "…", Modifier.weight(0.7f), monospace = true)
+                    PartitionDataCell(p.replicaIds.joinToString(", "), Modifier.weight(1f))
+                    PartitionDataCell(p.isrIds.joinToString(", "), Modifier.weight(0.8f))
+                    PartitionDataCell(range?.let { formatLag(it.earliest) } ?: "…", Modifier.weight(0.7f))
+                    PartitionDataCell(range?.let { formatLag(it.latest) } ?: "…", Modifier.weight(0.7f))
                 }
-                HorizontalDivider(thickness = 0.5.dp)
             }
         }
     }
 }
 
+/** 分区表行高与 PropertyTable 一致（40dp）。 */
+internal val PARTITION_ROW_MIN_HEIGHT = 40.dp
+
+/** 分区表行内水平内边距：20dp 与同对话框的搜索框 / 配置 Tab 对齐。 */
+internal val PARTITION_ROW_HPADDING = 20.dp
+
+/** 斑马纹行 / 普通行的测试标签（渲染测试用来定位行并断言行高与背景差异）。 */
+internal const val PARTITION_ZEBRA_ROW_TAG = "partition_zebra_row"
+internal const val PARTITION_PLAIN_ROW_TAG = "partition_plain_row"
+
+/** 表头单元格：labelMedium + 次要色（与 RocketMQ 路由表 / PropertyTable 的标题层级一致）。 */
 @Composable
-private fun DetailHeaderCell(text: String, modifier: Modifier = Modifier, width: Dp? = null) {
+private fun PartitionHeaderCell(text: String, modifier: Modifier = Modifier) {
     Text(
         text = text,
-        style = MaterialTheme.typography.bodySmall,
-        fontWeight = FontWeight.Medium,
-        modifier = if (width != null) modifier.width(width) else modifier,
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 1,
+        modifier = modifier,
     )
 }
 
+/** 数据单元格：bodyMedium + 主色（PropertyTable 的 Value 列同款），单行省略。 */
 @Composable
-private fun DetailDataCell(
+private fun PartitionDataCell(
     text: String,
     modifier: Modifier = Modifier,
-    width: Dp? = null,
-    monospace: Boolean = false,
     color: Color = MaterialTheme.colorScheme.onSurface,
 ) {
     Text(
         text = text,
-        style = MaterialTheme.typography.bodySmall,
-        fontFamily = if (monospace) FontFamily.Monospace else FontFamily.Default,
+        style = MaterialTheme.typography.bodyMedium,
+        color = color,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
-        color = color,
-        modifier = if (width != null) modifier.width(width) else modifier,
+        modifier = modifier,
     )
 }
 

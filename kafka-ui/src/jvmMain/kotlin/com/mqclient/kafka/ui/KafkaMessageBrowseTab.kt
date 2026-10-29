@@ -57,6 +57,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -67,6 +68,7 @@ import com.mqclient.kafka.KafkaReadStart
 import com.mqclient.mqui.common.CompactSearchField
 import com.mqclient.mqui.objectlist.ObjectListEmptyState
 import com.mqclient.mqui.common.rememberDebouncedValue
+import com.mqclient.uicommon.CompactTextField
 import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.dialog.DateTimePickerDialog
@@ -95,6 +97,13 @@ internal val MSG_COL_PARTITION = 70.dp
 internal val MSG_COL_ACTIONS = 80.dp
 internal val ROW_HPADDING = 16.dp
 
+/**
+ * 起点选择区两个输入框的测试标签：`hasSetTextAction()` 命中的是框内文字节点
+ * （高度只有行高 20dp），量不到 40dp 的框体 —— 渲染测试用这两个标签量整框高度。
+ */
+internal const val BROWSE_COUNT_FIELD_TAG = "kafka_browse_count_field"
+internal const val BROWSE_OFFSET_FIELD_TAG = "kafka_browse_offset_field"
+
 /** 表格时间列的展示格式（epoch millis → 本地时区，毫秒粒度）。 */
 internal val TIME_FORMATTER: DateTimeFormatter =
     DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS")
@@ -114,7 +123,7 @@ internal fun HoverTooltip(
 /**
  * 浏览起点四选一。OFFSET 仅单分区模式可用（Kafka 的 offset 是分区内的概念）。
  */
-private enum class StartMode(val labelKey: String) {
+internal enum class StartMode(val labelKey: String) {
     LATEST("kafka_ui_msg_browse_start_latest"),
     EARLIEST("kafka_ui_msg_browse_start_earliest"),
     OFFSET("kafka_ui_msg_browse_start_offset"),
@@ -395,7 +404,7 @@ internal fun KafkaMessageBrowseTab(
 /* ------------------------------ 起点选择区 ------------------------------ */
 
 @Composable
-private fun StartSelectorRow(
+internal fun StartSelectorRow(
     partitionCount: Int?,
     selectedPartition: Int,
     onPartitionChange: (Int) -> Unit,
@@ -438,11 +447,12 @@ private fun StartSelectorRow(
             onSelect = onStartModeChange,
         )
         when (startMode) {
-            StartMode.OFFSET -> OutlinedSmallField(
+            StartMode.OFFSET -> CompactTextField(
                 value = offsetText,
                 onValueChange = onOffsetChange,
                 // offset 是分区内概念：全部分区模式下禁用并提示。
                 enabled = selectedPartition >= 0,
+                modifier = Modifier.width(140.dp).testTag(BROWSE_OFFSET_FIELD_TAG),
             )
             StartMode.TIMESTAMP -> {
                 SecondaryButton(
@@ -459,11 +469,12 @@ private fun StartSelectorRow(
             }
             else -> Unit
         }
-        OutlinedSmallField(
+        // 拉取条数：ui-common 的 CompactTextField（无 label 时 40dp，与右侧 PrimaryButton
+        // 严格等高）—— 原 OutlinedTextField 是 M3 默认 56dp，与 40dp 按钮并排失衡。
+        CompactTextField(
             value = countText,
             onValueChange = onCountChange,
-            enabled = true,
-            modifier = Modifier.width(84.dp),
+            modifier = Modifier.width(80.dp).testTag(BROWSE_COUNT_FIELD_TAG),
         )
         PrimaryButton(onClick = onRead, enabled = !reading) {
             Text(
@@ -503,24 +514,6 @@ private fun <T> DropdownButton(
             }
         }
     }
-}
-
-/** 选择区的小号数字输入框。 */
-@Composable
-private fun OutlinedSmallField(
-    value: String,
-    onValueChange: (String) -> Unit,
-    enabled: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    androidx.compose.material3.OutlinedTextField(
-        value = value,
-        onValueChange = onValueChange,
-        enabled = enabled,
-        singleLine = true,
-        textStyle = MaterialTheme.typography.bodySmall,
-        modifier = modifier.width(140.dp),
-    )
 }
 
 /** 自定义时间的展示格式（选择器粒度到分钟）。 */
