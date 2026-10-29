@@ -42,7 +42,9 @@ import com.mqclient.uicommon.i18n.withArg
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 
 /** 详情对话框的三态：加载中 / 失败（带原因，可重试）/ 就绪。 */
 private sealed interface DetailUiState {
@@ -50,6 +52,18 @@ private sealed interface DetailUiState {
     data class Failed(val reason: String) : DetailUiState
     data class Ready(val detail: MessageDetail) : DetailUiState
 }
+
+/**
+ * 详情加载的协程层超时（毫秒）。
+ *
+ * 重要：它只决定状态何时翻走，杀不掉底层的阻塞 MQI queue.get——withTimeout 要等
+ * 阻塞调用自己跑完才会抛 TimeoutCancellationException（参考 RabbitMQ 卡死教训）。
+ * 所以这里是状态兜底：即便底层卡住，UI 也最多转圈 DETAIL_LOAD_TIMEOUT_MS 毫秒后翻成
+ * 加载超时失败态，X / ESC 永远可点、绝不永久停在加载。真正保护底层句柄/锁不被拖死的是
+ * getMessageDetail 里的 MQGMO 无等待 + 扫描时间预算 + CancellationException 优先重抛
+ * + finally 关闭句柄。
+ */
+private const val DETAIL_LOAD_TIMEOUT_MS = 5_000L
 
 /**
  * 消息详情对话框（浏览消息表格「详细」按钮打开）：三态外壳 —— 就绪态交给公共
@@ -78,13 +92,29 @@ internal fun MessageDetailDialog(
 
     LaunchedEffect(summary.messageId, retryKey) {
         uiState = DetailUiState.Loading
-        val result = IbmMQModule.serviceOrNull()
-            ?.getMessageDetail(connectionId, queueName, summary.messageId)
-            ?: MessageOperationResult.failure(null, "服务未初始化")
-        val detail = result.detail
-        uiState = when {
-            result.success && detail != null -> DetailUiState.Ready(detail)
-            else -> DetailUiState.Failed(result.errorMessage ?: "unknown")
+        var next: DetailUiState = DetailUiState.Loading
+        try {
+            val r = withTimeout(DETAIL_LOAD_TIMEOUT_MS) {
+                withContext(Dispatchers.IO) {
+                    IbmMQModule.serviceOrNull()
+                        ?.getMessageDetail(connectionId, queueName, summary.messageId)
+                        ?: MessageOperationResult.failure(null, "服务未初始化")
+                }
+            }
+            val detail = r.detail
+            next = if (r.success && detail != null) {
+                DetailUiState.Ready(detail)
+            } else {
+                DetailUiState.Failed(r.errorMessage ?: "unknown")
+            }
+        } catch (e: TimeoutCancellationException) {
+            next = DetailUiState.Failed("加载超时（5s），请重试")
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            next = DetailUiState.Failed(e.message ?: e::class.simpleName ?: "unknown")
+        } finally {
+            if (next != DetailUiState.Loading) uiState = next
         }
     }
 

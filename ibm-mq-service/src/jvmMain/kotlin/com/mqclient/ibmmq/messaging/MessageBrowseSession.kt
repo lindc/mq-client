@@ -70,8 +70,11 @@ class MessageBrowseSession private constructor(
                 // queue.get 不看协程状态，循环开头是唯一能察觉取消的位置。
                 currentCoroutineContext().ensureActive()
                 val useFirst = firstBrowse
+                // MQGMO_NO_WAIT：每条 get 立即返回（绝不阻塞等消息），保证循环头部的
+                // ensureActive 能及时察觉取消/超时，不会被一次无限等待的 get 卡死。
                 options.options =
                     (if (useFirst) MQConstants.MQGMO_BROWSE_FIRST else MQConstants.MQGMO_BROWSE_NEXT) or
+                        MQConstants.MQGMO_NO_WAIT or
                         MQConstants.MQGMO_FAIL_IF_QUIESCING
                 val message = MQMessage()
                 try {

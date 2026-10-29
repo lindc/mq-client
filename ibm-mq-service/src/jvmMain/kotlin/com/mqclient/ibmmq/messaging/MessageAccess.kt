@@ -37,6 +37,20 @@ data class MessageOperationResult(
 private const val MSG_NOT_FOUND = "未找到该消息（可能已被消费或过期）"
 
 /**
+ * 单消息操作（detail / download / delete）的扫描时间预算（毫秒）。
+ *
+ * 这三个操作都是从头 browse 整条队列、逐条比对 messageId 才能定位目标——队列很深时
+ * 这会变成一次长达数秒到数分钟的阻塞扫描，而且整个过程都握着连接的 mqiLock，会顺带
+ * 冻结同连接的 PCF 扫描与浏览 Tab（一次卡死次次卡死的源头）。给一个预算，超时就主动
+ * 收尾返回失败，把锁和句柄让出来；句柄本就是每次 accessQueue 新建的，finally 关闭后
+ * 下次请求自然拿到新句柄。
+ */
+private const val OP_SCAN_BUDGET_MS = 4_000L
+
+/** 扫描预算提示（用户可读）。 */
+private const val OP_SCAN_TIMEOUT_MSG = "队列过深，定位超时（请缩小范围或直接在服务端查询）"
+
+/**
  * 三个单消息操作（download/detail/delete）共用的失败收尾：日志 + 结果转换一步完成。
  * MQException 带上 reason code 并查 [MqrcTranslator]，其余异常用 message。
  */
@@ -79,8 +93,20 @@ suspend fun downloadMessageBody(
             // 所以「用户关掉对话框」只能靠循环开头这一处察觉：不检查的话，取消之后
             // 这个 while 会继续把剩余队列一路扫完（深队列上就是几十秒的空转 + 占着连接）。
             currentCoroutineContext().ensureActive()
+            // 扫描预算：队列过深时主动收尾，避免一次操作把整条连接（mqiLock）拖死。
+            if (System.currentTimeMillis() - start > OP_SCAN_BUDGET_MS) {
+                ibmMqLog.warn(
+                    "msg download scan aborted (deep queue): queue=$queueName " +
+                        "messageId=$targetHex elapsed=${System.currentTimeMillis() - start}ms",
+                )
+                return@withContext MessageOperationResult.failure(null, OP_SCAN_TIMEOUT_MSG)
+            }
+            // MQGMO_NO_WAIT 显式声明：queue.get 绝不阻塞等消息（默认无 MQGMO_WAIT 也是
+            // 这个语义，但写清楚更稳）。这样每条 get 立即返回，循环头部的 ensureActive
+            // 才能及时察觉取消/超时——否则一次无限等待的 get 会让 withTimeout 也杀不掉它。
             gmo.options =
                 (if (first) MQConstants.MQGMO_BROWSE_FIRST else MQConstants.MQGMO_BROWSE_NEXT) or
+                    MQConstants.MQGMO_NO_WAIT or
                     MQConstants.MQGMO_FAIL_IF_QUIESCING
             val message = MQMessage()
             try {
@@ -142,8 +168,19 @@ suspend fun getMessageDetail(
         while (true) {
             // 同 download：阻塞的 MQI get 不感知取消，循环开头是唯一的终止点。
             currentCoroutineContext().ensureActive()
+            // 扫描预算：队列过深时主动收尾，避免一次操作把整条连接（mqiLock）拖死。
+            if (System.currentTimeMillis() - start > OP_SCAN_BUDGET_MS) {
+                ibmMqLog.warn(
+                    "msg detail scan aborted (deep queue): queue=$queueName " +
+                        "messageId=$targetHex elapsed=${System.currentTimeMillis() - start}ms",
+                )
+                return@withContext MessageOperationResult.failure(null, OP_SCAN_TIMEOUT_MSG)
+            }
+            // MQGMO_NO_WAIT 显式声明：queue.get 绝不阻塞等消息，确保循环头部的 ensureActive
+            // 能及时察觉取消/超时（否则无限等待的 get 会让 withTimeout 也杀不掉它）。
             gmo.options =
                 (if (first) MQConstants.MQGMO_BROWSE_FIRST else MQConstants.MQGMO_BROWSE_NEXT) or
+                    MQConstants.MQGMO_NO_WAIT or
                     MQConstants.MQGMO_FAIL_IF_QUIESCING
             val message = MQMessage()
             try {
@@ -205,8 +242,18 @@ suspend fun deleteMessageById(
             // 这一处若被取消吞没，最坏的后果不是多跑几圈而是**误删**——取消后继续
             // browse 到匹配条目时，那条破坏性 get 依旧会执行。
             currentCoroutineContext().ensureActive()
+            // 扫描预算：定位阶段同样不能无限扫，超时就放弃（不会执行后面的破坏性 get）。
+            if (System.currentTimeMillis() - start > OP_SCAN_BUDGET_MS) {
+                ibmMqLog.warn(
+                    "msg delete scan aborted (deep queue): queue=$queueName " +
+                        "messageId=$targetHex elapsed=${System.currentTimeMillis() - start}ms",
+                )
+                return@withContext MessageOperationResult.failure(null, OP_SCAN_TIMEOUT_MSG)
+            }
+            // MQGMO_NO_WAIT：定位阶段不阻塞等消息，保证 ensureActive 能及时察觉取消。
             gmo.options =
                 (if (first) MQConstants.MQGMO_BROWSE_FIRST else MQConstants.MQGMO_BROWSE_NEXT) or
+                    MQConstants.MQGMO_NO_WAIT or
                     MQConstants.MQGMO_FAIL_IF_QUIESCING
             val message = MQMessage()
             try {
