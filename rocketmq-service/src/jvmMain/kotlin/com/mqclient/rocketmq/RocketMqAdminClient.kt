@@ -8,6 +8,7 @@ import kotlinx.coroutines.withContext
 import org.apache.rocketmq.client.exception.MQClientException
 import org.apache.rocketmq.remoting.protocol.admin.ConsumeStats
 import org.apache.rocketmq.common.TopicConfig
+import org.apache.rocketmq.client.exception.MQBrokerException
 import org.apache.rocketmq.remoting.protocol.body.ClusterInfo
 import org.apache.rocketmq.remoting.protocol.body.ConsumeStatsList
 import org.apache.rocketmq.remoting.protocol.subscription.SubscriptionGroupConfig
@@ -121,13 +122,36 @@ class RocketMqAdminClient(private val config: RocketMqConfig) : AutoCloseable {
     suspend fun fetchConsumeStatsInBroker(brokerAddr: String, timeoutMs: Long): ConsumeStatsList? =
         ioCall { admin.fetchConsumeStatsInBroker(brokerAddr, false, timeoutMs) }
 
-    /** 消费组在线成员（best-effort）：组不在线 / 不存在返回 null（MQClientException）。 */
+    /**
+     * 消费组在线成员（best-effort）：组不在线 / 不存在返回 null。
+     *
+     * **两种异常形态都要接住**：同一件事（组没有在线消费者）在不同路径上会以
+     * `MQClientException` 或 `MQBrokerException` 回来，实测后者更常见：
+     *
+     * ```
+     * MQBrokerException: CODE: 206 DESC: the consumer group[CG_PROGRESS_DEMO] not online
+     *                   BROKER: www.chillbear.top:11207
+     * ```
+     *
+     * 只 catch 前者会让这条**完全正常**的状态漏进 [ioCall] 的 mapError，被包成
+     * IllegalStateException 后由调用方记成 WARN + 完整栈 —— 用户日志里就出现一条
+     * 看着像故障的 20 行堆栈，而它只是「这个组没在跑消费者」。
+     *
+     * 只吞 206 / 17 这两种「组不在线 / 组没有重试队列」；权限、超时等**照常抛出**
+     * —— 那些才是需要留痕的问题。
+     */
     suspend fun fetchConsumerConnection(group: String): ConsumerConnection? =
         ioCall {
             try {
                 admin.examineConsumerConnectionInfo(group)
             } catch (e: MQClientException) {
                 null // CONSUMER_NOT_ONLINE 等预期失败：成员数按 null 展示。
+            } catch (e: MQBrokerException) {
+                if (e.responseCode == RC_NO_CONSUME_STATS || e.responseCode == RC_TOPIC_NO_ROUTE) {
+                    null // 组不在线 / 重试队列无路由：同样是预期状态，不是故障。
+                } else {
+                    throw e
+                }
             }
         }
 

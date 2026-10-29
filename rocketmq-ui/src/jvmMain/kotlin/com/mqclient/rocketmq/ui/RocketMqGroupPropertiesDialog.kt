@@ -1,6 +1,7 @@
 package com.mqclient.rocketmq.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -8,17 +9,19 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryTabRow
@@ -35,8 +38,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -344,22 +348,33 @@ internal fun ProgressTab(
                             text = stringResource("rocketmq_ui_group_props_broker_fallback_note"),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                            modifier = Modifier.padding(horizontal = PROGRESS_ROW_HPADDING, vertical = 4.dp),
                         )
                     }
-                    Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
-                        Text(stringResource("rocketmq_ui_group_props_col_broker"), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(2.5f))
-                        Text(stringResource("rocketmq_ui_group_props_col_topic"), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(2.5f))
-                        Text(stringResource("rocketmq_ui_group_props_col_queue"), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
-                        Text(stringResource("rocketmq_ui_group_props_col_max"), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1.8f))
-                        Text(stringResource("rocketmq_ui_group_props_col_consumer"), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1.8f))
-                        Text(stringResource("rocketmq_ui_group_props_col_lag"), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1.4f))
+                    // 表头与数据同档字号（bodyMedium）：概览里的层级差靠颜色
+                    // （Key 列 onSurfaceVariant / Value 列 onSurface）表达，不靠字号。
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = PROGRESS_ROW_HPADDING, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        ProgressHeaderCell(stringResource("rocketmq_ui_group_props_col_broker"), Modifier.weight(2.5f))
+                        ProgressHeaderCell(stringResource("rocketmq_ui_group_props_col_topic"), Modifier.weight(2.5f))
+                        ProgressHeaderCell(stringResource("rocketmq_ui_group_props_col_queue"), Modifier.weight(1f))
+                        ProgressHeaderCell(stringResource("rocketmq_ui_group_props_col_max"), Modifier.weight(1.8f))
+                        ProgressHeaderCell(stringResource("rocketmq_ui_group_props_col_consumer"), Modifier.weight(1.8f))
+                        ProgressHeaderCell(stringResource("rocketmq_ui_group_props_col_lag"), Modifier.weight(1.4f))
                     }
-                    HorizontalDivider()
+                    Spacer(Modifier.height(8.dp))
                     // LazyColumn：大组（百级 queue）也只组合可见行，滚动无压力。
-                    LazyColumn(modifier = Modifier.fillMaxSize()) {
-                        items(detail.rows.size) { index ->
-                            OffsetRow(detail.rows[index])
+                    // 行距 8dp / 斑马纹 / 40dp 行高与 PropertyTable 逐参数一致。
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        itemsIndexed(detail.rows) { index, row ->
+                            OffsetRow(row, zebra = index % 2 == 1)
                         }
                     }
                 }
@@ -490,28 +505,85 @@ private fun progressHintBody(hint: ProgressHint, error: String?): String = when 
     }
 }
 
-/** 进度行：斑马纹 + lag>0 橙色醒目；数字 monospace。 */
+/**
+ * 进度行：视觉**逐参数对齐概览的 [com.mqclient.uicommon.PropertyTable]** ——
+ * 40dp 最小行高、奇数行斑马纹（surfaceVariant@30%）+ 4dp 圆角、10/8 内边距、
+ * 正文 bodyMedium。lag > 0 用橙色（这一页唯一要一眼抓住的信息）。
+ *
+ * 强调色取代了原来的 `fontWeight = Medium`：主题是单字重字体，`FontWeight` 会被
+ * Skia 伪粗（见 Theme.kt 的 FontSynthesis.None），颜色区分已经够清楚。
+ */
 @Composable
-private fun OffsetRow(row: RocketMqOffsetRowSnapshot) {
+private fun OffsetRow(row: RocketMqOffsetRowSnapshot, zebra: Boolean) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f))
-            .padding(horizontal = 12.dp, vertical = 6.dp),
+            // 测试钩子在 heightIn / padding 之前：语义节点的 bounds 是「此处之后
+            // 全部修饰符占据的区域」，放在 padding 之后量到的是内容区高度。
+            .testTag(if (zebra) PROGRESS_ZEBRA_ROW_TAG else PROGRESS_PLAIN_ROW_TAG)
+            .heightIn(min = PROGRESS_ROW_MIN_HEIGHT)
+            .clip(RoundedCornerShape(4.dp))
+            .background(
+                if (zebra) {
+                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                } else {
+                    Color.Transparent
+                },
+            )
+            .padding(horizontal = PROGRESS_ROW_HPADDING, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(row.broker, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(2.5f))
-        Text(row.topic, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(2.5f))
-        Text(row.queueId.toString(), style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-        Text(row.maxOffset.toString(), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, modifier = Modifier.weight(1.8f))
-        Text(row.consumerOffset.toString(), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, modifier = Modifier.weight(1.8f))
-        Text(
+        ProgressCell(row.broker, Modifier.weight(2.5f))
+        ProgressCell(row.topic, Modifier.weight(2.5f))
+        ProgressCell(row.queueId.toString(), Modifier.weight(1f))
+        ProgressCell(row.maxOffset.toString(), Modifier.weight(1.8f))
+        ProgressCell(row.consumerOffset.toString(), Modifier.weight(1.8f))
+        ProgressCell(
             text = row.lag.toString(),
-            style = MaterialTheme.typography.bodySmall,
-            fontWeight = if (row.lag > 0) FontWeight.Medium else null,
-            color = if (row.lag > 0) LagOrange else MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.weight(1.4f),
+            color = if (row.lag > 0) LagOrange else MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
 
+/* ------------------------------ 进度表零件 ------------------------------ */
+
+/** 进度表行高与 PropertyTable 一致（40dp）。 */
+internal val PROGRESS_ROW_MIN_HEIGHT = 40.dp
+
+/** 进度表行内水平内边距：与 PropertyTable 的行内 10dp 同值，两块文字左边缘才对得齐。 */
+internal val PROGRESS_ROW_HPADDING = 10.dp
+
+/** 斑马纹行 / 普通行的测试标签。 */
+internal const val PROGRESS_ZEBRA_ROW_TAG = "progress_zebra_row"
+internal const val PROGRESS_PLAIN_ROW_TAG = "progress_plain_row"
+
+/** 表头单元格：bodyMedium + 次要色 —— 与 PropertyTable 的 Key 列同一档。 */
+@Composable
+private fun ProgressHeaderCell(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = modifier,
+    )
+}
+
+/** 数据单元格：bodyMedium + 主色 —— 与 PropertyTable 的 Value 列同一档。 */
+@Composable
+private fun ProgressCell(
+    text: String,
+    modifier: Modifier = Modifier,
+    color: Color = MaterialTheme.colorScheme.onSurface,
+) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodyMedium,
+        color = color,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = modifier,
+    )
+}

@@ -2,6 +2,49 @@
 
 本文件记录 MQClient 的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [Unreleased] — 2026-10-29 (22)
+
+### Fixed
+
+- **「消费进度」表与概览的 PropertyTable 视觉对齐；「组不在线」不再刷错误栈**
+  （`rocketmq-ui` `RocketMqGroupPropertiesDialog`，`rocketmq-service` `RocketMqAdminClient`）。
+
+  **表格**：这一页原来用 `labelMedium`（表头）+ `bodySmall`（数据），都是 12sp；行高
+  只有 6dp 内边距（约 28dp）、每行统一 15% 底色（不是斑马纹）、行间还有
+  `HorizontalDivider` —— 与同对话框的概览差一整档。现在逐参数对齐 `PropertyTable`：
+  - 表头 → `bodyMedium` + `onSurfaceVariant`（= Key 列），数据 → `bodyMedium` +
+    `onSurface`（= Value 列）；
+  - 行高 `heightIn(min = 40.dp)` + `padding(horizontal = 10.dp, vertical = 8.dp)`；
+  - 斑马纹：奇数行 `surfaceVariant@30%` + 4dp 圆角，偶数行透明；行距 8dp；
+    删掉 `HorizontalDivider`；
+  - 列宽 `2.5 / 2.5 / 1 / 1.8 / 1.8 / 1.4` 不动；`lag > 0` 的橙色保留，
+    去掉 `fontWeight = Medium`（主题是单字重字体，伪粗反而糊）；
+  - 取舍：数据格不再用等宽字体（PropertyTable 不暴露字体，两块必须一致）。
+
+  **日志**：用户日志里那条 20 行堆栈
+  ```
+  IllegalStateException: CODE: 206 DESC: the consumer group[CG_PROGRESS_DEMO] not online
+    at RocketMqAdminClient.mapError(...)  at ...fetchConsumerConnection(...)
+  Caused by: MQBrokerException: CODE: 206 ...
+  ```
+  不是故障 —— 「组没有在线消费者」是完全正常的状态。根因是
+  `fetchConsumerConnection` 的 catch **只接了 `MQClientException`**，而 broker 对
+  「组不在线」回的是 `MQBrokerException`。漏网的异常进 `ioCall` 被包成
+  IllegalStateException，再由 `bestEffort` 记成 WARN + 完整栈。
+  现在两种异常形态都接：只有 206 / 17 当作预期状态吞掉，**权限与未知错误照常抛出**
+  （那些才是需要留痕的）。
+
+  测试：`RocketMqGroupProgressTableTest`（7 条，新：六列表头与数据渲染、表头渲染高度
+  ≥ 19dp、行高 ≥ 40dp、斑马纹像素断言（奇行 alpha>0 / 偶行 alpha==0）、空态、
+  兜底标注仍在）、`RocketMqConnectionErrorHandlingTest`（6 条，新：206/17 吞掉、
+  权限与未知错误不吞、`MQClientException` 行为不回归、用户日志原报文落在已知档位）。
+  负向对照：把表头退回 `labelMedium` 且把斑马纹退回统一 15% 底色后，两条用例立刻失败。
+
+  **真实集群验证**：`CG_PROGRESS_DEMO` / `CG_NO_PROGRESS` / `CG_Normal` 三个组调
+  `fetchConsumerConnection` 均返回 null，**stderr 干净**（修复前三条都打印堆栈）。
+
+  **未验证**：真机 GUI 观感。
+
 ## [Unreleased] — 2026-10-29 (21)
 
 ### Fixed
