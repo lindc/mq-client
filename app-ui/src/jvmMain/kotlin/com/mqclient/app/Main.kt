@@ -95,6 +95,12 @@ private fun allI18nTables(): List<ModuleI18nTable> =
     }
 
 fun main() {
+    // JVM 启动最早的一脚：在所有模块类（含各 *-ui）被加载之前，先把那些「首个日志类
+    // 加载时就定格系统属性」的第三方库（RocketMQ 5.x 的 shaded logback → 客户端日志
+    // 落点）重定向好。这一步必须早于 LanguageResources.load（它会经 ModuleRegistry.uis
+    // 加载 UI 类，可能牵出客户端类）和 ServiceAdapter.initialize。
+    ModuleRegistry.runJvmBootstraps()
+
     // 启动准备放在窗口创建之前：这里的同步 IO（生成密钥 / 读配置 / 载字符串表）
     // 不该进组合体 —— 组合发生在窗口创建之后、首帧之前（会卡首帧），而且组合体
     // 不保证只执行一次（重组会重跑），更不该顺手在里面做文件 IO。

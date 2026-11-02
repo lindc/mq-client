@@ -7,8 +7,10 @@ import kotlin.jvm.Synchronized
 /**
  * RocketMQ 客户端（shaded logback：`io.github.aliyunmq:rocketmq-logback-classic`）
  * 的日志落点配置 —— **必须在任何 RocketMQ 类被触碰之前调用**（客户端在 shaded
- * LoggerFactory 首次初始化时读取并缓存这些属性，唯一调用点 [RocketMqModule.initialize]
- * 的第一行保证这一点）。
+ * LoggerFactory 首次初始化时读取并缓存这些属性，只读一次）。主力调用点是
+ * [RocketMqJvmBootstrap]（经 `ModuleRegistry.runJvmBootstraps` 在 `main()` 最开头
+ * 跑，早于一切模块类加载）；[RocketMqModule.initialize] 第一行是兜底调用点。两者
+ * 都先于任何 RocketMQ 客户端类被加载，且 [init] 幂等，重复调用零开销。
  *
  * 不配置时 5.x 客户端把 `rocketmq_client.log` 落在 `~/logs/rocketmqlogs`，污染用户
  * HOME 根目录；这里把它引到应用的统一数据目录 `~/.mqclient/logs/rocketmqlogs`
