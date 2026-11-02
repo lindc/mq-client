@@ -15,7 +15,8 @@ object AiSslHint {
 
     /**
      * 「询问 AI」错误的展示文案：SSL 失败翻译成带指引的提示（i18n 键
-     * `ai_ssl_handshake_hint`，缺键回落中文原文）；其余异常原样返回。
+     * `ai_ssl_handshake_hint`，缺键回落英文原文 —— 兜底链的最终语言是英文）；
+     * 其余异常原样返回。
      */
     fun displayMessage(error: Throwable): String {
         if (!error.isAiSslFailure()) return error.message ?: error::class.simpleName ?: "unknown"
@@ -24,6 +25,7 @@ object AiSslHint {
     }
 
     private const val FALLBACK_SSL_HINT =
-        "SSL 握手失败：服务器证书校验未通过。如果您的服务器使用自签名证书，" +
-            "请在 AI 连接设置中开启【忽略 SSL 证书校验】。"
+        "SSL handshake failed: server certificate validation did not pass. " +
+            "If your server uses a self-signed certificate, enable " +
+            "\"Ignore SSL certificate validation\" in the AI connection settings."
 }

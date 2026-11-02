@@ -26,9 +26,10 @@ import mq_client.ui_common.generated.resources.Res
  * event bus (see Main.kt).
  *
  * Behaviour:
- *  - [load] with "en-US" merges English over the Chinese base table, so a
- *    missing English key gracefully falls back to Chinese;
- *  - [load] with anything else (including null) uses the Chinese table;
+ *  - [load] with "zh-CN" merges Chinese over the **English base table**, so a
+ *    missing Chinese key gracefully falls back to English;
+ *  - [load] with anything else (including null) uses the English table —
+ *    the default language for a global release is English;
  *  - a failed resource read degrades to an empty table and [stringResource]
  *    returns the key itself, so the UI never crashes on a missing bundle.
  *
@@ -70,29 +71,33 @@ object LanguageResources {
 
     /**
      * Loads the string table for [language] ("zh-CN" / "en-US"; anything else
-     * — including null — means Chinese). Chinese is always parsed first and
-     * acts as the base; English only overrides keys it actually provides.
+     * — including null — means English, the default for a global release).
+     *
+     * **English is always the base table**; Chinese only overlays when explicitly
+     * selected. Missing-key fallback therefore ends in English text in every
+     * language: 模块中文 → 模块英文 → 公共中文 → 公共英文 → key（zh 模式）；
+     * 模块英文 → 公共英文 → key（en 模式）。key 本身只是 bundle 损坏的最后防线。
      *
      * [moduleTables] 是各业务模块的私有表（`AdapterUI.i18nTables`，由 ModuleRegistry
      * 从 SPI 收集；读取器由模块自己提供 —— compose 运行时资源按库包名隔离，宿主
      * 无法跨库按路径读）。每个表按语言取内容、与同语言的公共表合并（模块键覆盖
-     * 公共键；base 全应用唯一，正常不会撞）。英文缺键照旧回落中文 —— 回落链是
-     * 模块英文 → 模块中文 → 公共英文 → 公共中文 → key 本身。
+     * 公共键；base 全应用唯一，正常不会撞）。en 表作为底表要求与 zh 表键齐全
+     * （构建校验：全部 `*_zh-CN.json` 与 `*_en-US.json` 键差集为空）。
      */
     suspend fun load(
         language: String?,
         moduleTables: List<ModuleI18nTable> = emptyList(),
     ) {
-        val wantEn = language.equals(LANGUAGE_EN_US, ignoreCase = true)
-        val zh = parse(readOrNull(STRINGS_ZH_PATH)) + moduleTableContent(moduleTables, LANGUAGE_ZH_CN)
-        val en =
-            if (wantEn) {
-                parse(readOrNull(STRINGS_EN_PATH)) + moduleTableContent(moduleTables, LANGUAGE_EN_US)
+        val wantZh = language.equals(LANGUAGE_ZH_CN, ignoreCase = true)
+        val en = parse(readOrNull(STRINGS_EN_PATH)) + moduleTableContent(moduleTables, LANGUAGE_EN_US)
+        val zh =
+            if (wantZh) {
+                parse(readOrNull(STRINGS_ZH_PATH)) + moduleTableContent(moduleTables, LANGUAGE_ZH_CN)
             } else {
                 emptyMap()
             }
-        table = if (wantEn) zh + en else zh
-        loadedLanguage = if (wantEn) LANGUAGE_EN_US else LANGUAGE_ZH_CN
+        table = if (wantZh) en + zh else en
+        loadedLanguage = if (wantZh) LANGUAGE_ZH_CN else LANGUAGE_EN_US
         // 通知所有已订阅的组合（见 revision 的注释）。
         revision++
     }

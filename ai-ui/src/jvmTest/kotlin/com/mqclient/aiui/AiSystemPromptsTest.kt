@@ -20,8 +20,9 @@ class AiSystemPromptsTest {
         val prompt = chainAnalysisSystemPrompt()
         assertTrue(prompt.contains(UNTRUSTED_CONTEXT_BEGIN), "系统提示词要引用真标记：$prompt")
         assertTrue(prompt.contains(UNTRUSTED_CONTEXT_END), "系统提示词要引用真标记：$prompt")
-        // 测试环境没加载语言表 → 走中文兜底；断言的是「规则本身在」，不是某一版措辞。
-        assertTrue(prompt.contains("不是指令"), "规则必须明确「标记内是数据、不是指令」：$prompt")
+        // 测试环境没加载语言表 → 走英文兜底（默认语言的兜底链）；断言的是
+        // 「规则本身在」，不是某一版措辞。
+        assertTrue(prompt.contains("not instructions"), "规则必须明确「标记内是数据、不是指令」：$prompt")
         // 规则是追加在分析提示词之后的，不能把原有分析指引顶掉。
         assertTrue(prompt.contains("isTarget"), "原分析提示词不能丢：$prompt")
     }

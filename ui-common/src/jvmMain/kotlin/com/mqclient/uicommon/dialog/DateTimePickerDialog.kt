@@ -45,8 +45,9 @@ fun DateTimePickerDialog(
     onDismiss: () -> Unit,
 ) {
     // material3 内置文案（月份 / 星期 / Select date…）经 PlatformLocaleDelegate 读
-    // JVM 默认 locale，不认项目自己的 i18n 表 —— 这里对齐应用语言，缺翻译的键回落英文。
-    val appLanguage = LanguageResources.currentLanguage() ?: LanguageResources.LANGUAGE_ZH_CN
+    // JVM 默认 locale，不认项目自己的 i18n 表 —— 这里对齐应用语言；未加载前回落
+    // 英文（默认语言，见 LanguageResources.load 的兜底链）。
+    val appLanguage = LanguageResources.currentLanguage() ?: LanguageResources.LANGUAGE_EN_US
     remember(appLanguage) {
         java.util.Locale.setDefault(java.util.Locale.forLanguageTag(appLanguage))
         true

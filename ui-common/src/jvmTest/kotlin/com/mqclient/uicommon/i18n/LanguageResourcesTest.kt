@@ -8,8 +8,10 @@ import kotlin.test.assertNotEquals
 /**
  * Behavioural tests for the i18n startup loading contract:
  *
- *  - `config.general.language` == ENGLISH  → English string table;
- *  - missing (null) or anything else (incl. SIMPLIFIED_CHINESE) → Chinese table;
+ *  - `config.general.language` == SIMPLIFIED_CHINESE → Chinese over the English
+ *    base table (missing zh key falls back to English text);
+ *  - missing (null) or anything else (incl. ENGLISH / junk) → English table
+ *    (the default language for a global release is English);
  *  - unknown keys never crash — they come back as the key itself.
  *
  * These run against the real bundled JSON resources (Gradle puts the
@@ -31,13 +33,13 @@ class LanguageResourcesTest {
     }
 
     @Test
-    fun `missing language defaults to chinese`() {
+    fun `missing language defaults to english`() {
         load(null)
-        assertEquals(LanguageResources.LANGUAGE_ZH_CN, LanguageResources.currentLanguage())
-        assertEquals("设置", LanguageResources.stringResource("settings_title"))
-        assertEquals("文件", LanguageResources.stringResource("menu_file"))
-        assertEquals("新建连接", LanguageResources.stringResource("menu_new_connection"))
-        assertEquals("保存", LanguageResources.stringResource("common_save"))
+        assertEquals(LanguageResources.LANGUAGE_EN_US, LanguageResources.currentLanguage())
+        assertEquals("Settings", LanguageResources.stringResource("settings_title"))
+        assertEquals("File", LanguageResources.stringResource("menu_file"))
+        assertEquals("New Connection", LanguageResources.stringResource("menu_new_connection"))
+        assertEquals("Save", LanguageResources.stringResource("common_save"))
     }
 
     @Test
@@ -48,12 +50,13 @@ class LanguageResourcesTest {
     }
 
     @Test
-    fun `unknown language code falls back to chinese`() {
-        // Any value that isn't exactly en-US (a future third language, a
-        // stale enum name, junk) must not crash and must render Chinese.
+    fun `unknown language code falls back to english`() {
+        // Any value that isn't exactly zh-CN (a future third language, a
+        // stale enum name, junk) must not crash and must render English —
+        // English is the base table and the final fallback language.
         load("fr-FR")
-        assertEquals(LanguageResources.LANGUAGE_ZH_CN, LanguageResources.currentLanguage())
-        assertEquals("设置", LanguageResources.stringResource("settings_title"))
+        assertEquals(LanguageResources.LANGUAGE_EN_US, LanguageResources.currentLanguage())
+        assertEquals("Settings", LanguageResources.stringResource("settings_title"))
     }
 
     @Test

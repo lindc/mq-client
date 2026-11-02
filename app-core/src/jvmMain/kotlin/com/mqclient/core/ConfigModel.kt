@@ -45,7 +45,13 @@ data class ConfigMetadata(
  */
 @Serializable
 data class GeneralConfig(
-    val language: Language = Language.SIMPLIFIED_CHINESE,
+    /**
+     * 界面语言。默认 **English**（面向全球发布；中文用户在设置里切换）。
+     *
+     * 老用户兼容：ktoml 写盘会显式落 `language` 字段，已有 config.toml 的用户保持
+     * 自己的值；只有字段缺失（首次安装 / 手动删除）才走这里的默认。
+     */
+    val language: Language = Language.ENGLISH,
     /** Past-N-days of history the app keeps around before pruning (AI chat history now, status data later). */
     val historyRetentionDays: Int = RETENTION_DAYS_DEFAULT,
 ) {
@@ -71,8 +77,9 @@ data class GeneralConfig(
 
 @Serializable
 enum class Language(val displayName: String) {
-    SIMPLIFIED_CHINESE("简体中文"),
+    // 英文在前：设置下拉（Language.entries）跟随声明序，默认项排最上。
     ENGLISH("English"),
+    SIMPLIFIED_CHINESE("简体中文"),
 }
 
 /**
