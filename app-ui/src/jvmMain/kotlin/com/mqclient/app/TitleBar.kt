@@ -16,7 +16,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -71,8 +70,8 @@ internal fun TitleBarPanel(
         }
         VerticalDivider(modifier = Modifier.height(24.dp))
         MenuBarItem(stringResource("menu_file"), fileMenuExpanded, { fileMenuExpanded = it }) {
-            // 菜单排版：新建连接 / AI 助手（核心卖点，快捷键提示右对齐）/ 设置 /
-            // 关于 / 退出，分组间用分割线（桌面端菜单标准习惯）。
+            // 菜单排版：极简纯列表（无分割线），每项上下 8dp 留出呼吸感；
+            // AI 助手右侧带全局快捷键提示（核心卖点）。
             DropdownMenuItem(
                 text = { Text(stringResource("menu_new_connection")) },
                 // The menu only collapses through its expanded state; an item
@@ -81,8 +80,8 @@ internal fun TitleBarPanel(
                     fileMenuExpanded = false
                     onShowNewConnection()
                 },
+                modifier = Modifier.padding(vertical = 8.dp),
             )
-            HorizontalDivider()
             DropdownMenuItem(
                 text = { Text(stringResource("menu_ai_assistant")) },
                 trailingIcon = {
@@ -96,30 +95,31 @@ internal fun TitleBarPanel(
                     fileMenuExpanded = false
                     onToggleAiPanel()
                 },
+                modifier = Modifier.padding(vertical = 8.dp),
             )
-            HorizontalDivider()
             DropdownMenuItem(
                 text = { Text(stringResource("menu_settings")) },
                 onClick = {
                     fileMenuExpanded = false
                     onShowSettings()
                 },
+                modifier = Modifier.padding(vertical = 8.dp),
             )
-            HorizontalDivider()
             DropdownMenuItem(
                 text = { Text(stringResource("menu_about")) },
                 onClick = {
                     fileMenuExpanded = false
                     onShowAbout()
                 },
+                modifier = Modifier.padding(vertical = 8.dp),
             )
-            HorizontalDivider()
             DropdownMenuItem(
                 text = { Text(stringResource("menu_exit")) },
                 onClick = {
                     fileMenuExpanded = false
                     onExit()
                 },
+                modifier = Modifier.padding(vertical = 8.dp),
             )
         }
         // Only separate the two while there is actually a trail to show.
