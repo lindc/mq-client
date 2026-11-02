@@ -1,5 +1,6 @@
 package com.mqclient.rabbitmq
 
+import com.mqclient.core.ServiceException
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -315,10 +316,11 @@ class RabbitMqAdminClientContractTest {
             HttpClient(engine) { install(io.ktor.client.plugins.HttpTimeout) },
         )
 
-        val error = assertFailsWith<IllegalStateException> { admin.queueDetail("q") }
+        val error = assertFailsWith<ServiceException> { admin.queueDetail("q") }
+        assertEquals("rabbitmq_err_request_timeout", error.errorKey)
         assertTrue(
-            error.message?.contains("请求超时") == true,
-            "超时应转成中文文案，实际 '${error.message}'",
+            error.message?.contains("Request timed out") == true,
+            "超时应转成可读兜底文案，实际 '${error.message}'",
         )
         // 回归守卫：HttpRequestTimeoutException 不是 SocketTimeoutException，
         // 落到 else 分支的话用户看到的就是这句英文。
@@ -329,22 +331,22 @@ class RabbitMqAdminClientContractTest {
     }
 
     @Test
-    fun `错误映射 - 401 403 404 5xx 都转成带原因的中文文案`() = runBlocking {
+    fun `错误映射 - 401 403 404 5xx 都转成带键的可读文案`() = runBlocking {
         val cases = listOf(
-            HttpStatusCode.Unauthorized to "认证失败",
-            HttpStatusCode.Forbidden to "授权失败",
-            HttpStatusCode.NotFound to "未找到",
-            HttpStatusCode.InternalServerError to "HTTP 500",
+            HttpStatusCode.Unauthorized to "rabbitmq_err_auth_failed",
+            HttpStatusCode.Forbidden to "rabbitmq_err_forbidden",
+            HttpStatusCode.NotFound to "rabbitmq_err_not_found",
+            HttpStatusCode.InternalServerError to "rabbitmq_err_http_status",
         )
-        for ((status, expected) in cases) {
+        for ((status, expectedKey) in cases) {
             val (admin, _) = client { status to """{"reason":"boom"}""" }
-            val error = assertFailsWith<IllegalStateException> { admin.deleteQueue("q") }
+            val error = assertFailsWith<ServiceException> { admin.deleteQueue("q") }
+            assertEquals(expectedKey, error.errorKey, "status=$status 键不符，实际 '${error.message}'")
+            // 服务端的 reason 要经 args 透传 —— 用户才知道到底哪里不行。
             assertTrue(
-                error.message?.contains(expected) == true,
-                "status=$status 期望包含 '$expected'，实际 '${error.message}'",
+                error.args.any { it.toString().contains("boom") },
+                "status=$status 丢了 reason：${error.args}",
             )
-            // 服务端的 reason 要带进文案 —— 用户才知道到底哪里不行。
-            assertTrue(error.message?.contains("boom") == true, "status=$status 丢了 reason")
         }
     }
 
@@ -352,24 +354,25 @@ class RabbitMqAdminClientContractTest {
     fun `错误映射 - 401 区分凭据错与 tag 不足`() = runBlocking {
         // 凭据真错：没有 not_authorised，不该叫用户去查 tag。
         val (badCreds, _) = client { HttpStatusCode.Unauthorized to """{"reason":"Login was refused"}""" }
-        val credsError = assertFailsWith<IllegalStateException> { badCreds.deleteQueue("q") }
-        assertTrue(
-            credsError.message?.contains("认证失败") == true,
-            "凭据错应提示认证失败，实际 '${credsError.message}'",
+        val credsError = assertFailsWith<ServiceException> { badCreds.deleteQueue("q") }
+        assertEquals(
+            "rabbitmq_err_auth_failed", credsError.errorKey,
+            "凭据错应提示认证失败，实际 '${credsError.errorKey}'",
         )
 
         // tag 不够（实测原文）：密码是对的，提示必须指向 tag，否则用户会去改密码。
         val (noTag, _) = client {
             HttpStatusCode.Unauthorized to """{"error":"not_authorised","reason":"Not monitor user"}"""
         }
-        val tagError = assertFailsWith<IllegalStateException> { noTag.nodes() }
-        assertTrue(
-            tagError.message?.contains("权限不足") == true,
-            "tag 不足应提示权限不足，实际 '${tagError.message}'",
+        val tagError = assertFailsWith<ServiceException> { noTag.nodes() }
+        assertEquals(
+            "rabbitmq_err_tag_insufficient", tagError.errorKey,
+            "tag 不足应提示权限不足，实际 '${tagError.errorKey}'",
         )
+        // 服务端的 reason 要经 args 透传（展示端插值进文案，用户才知道缺哪个 tag）。
         assertTrue(
-            tagError.message?.contains("Not monitor user") == true,
-            "服务端的 reason 要带进文案（用户才知道缺哪个 tag），实际 '${tagError.message}'",
+            tagError.args.any { it.toString().contains("Not monitor user") },
+            "tag 不足丢了 reason：${tagError.args}",
         )
     }
 

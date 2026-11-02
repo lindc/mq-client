@@ -287,5 +287,19 @@
   "kafka_ui_msg_detail_collapse": "Collapse",
   "kafka_ui_msg_detail_interpreter": "Interpreter",
   "kafka_ui_msg_detail_no_params": "This interpreter has no parameters",
-  "kafka_ui_msg_detail_copy_body": "Copy body"
+  "kafka_ui_msg_detail_copy_body": "Copy body",
+  "kafka_err_refusal_connecting": "Connecting — please wait",
+  "kafka_err_refusal_failed": "Not connected: the last request failed (%1$s)",
+  "kafka_err_refusal_disconnected": "Not connected: connect this Kafka from the sidebar first",
+  "kafka_err_refusal_released": "Not connected: the AdminClient was released — reconnect first",
+  "kafka_err_offset_needs_partition": "A specific offset requires a single selected partition",
+  "kafka_err_offset_not_found": "Offset %1$d does not exist (it may have been deleted by retention)",
+  "kafka_err_not_registered": "Connection not registered: it was deleted or the module is not initialized",
+  "kafka_err_topic_not_found": "Topic '%1$s' does not exist or is not accessible",
+  "kafka_err_module_not_initialized": "Kafka module not initialized",
+  "kafka_err_group_not_found": "Consumer group '%1$s' does not exist",
+  "kafka_err_group_active_members": "The group still has active members (state %1$s) — stop all consumers before resetting offsets",
+  "kafka_err_no_committed_offsets": "The group has no committed offsets to reset",
+  "err_conn_not_registered_id": "Connection '%1$s' is not registered",
+  "err_conn_in_progress": "A connection attempt is already in progress"
 }

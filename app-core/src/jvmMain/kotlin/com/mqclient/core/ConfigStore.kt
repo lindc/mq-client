@@ -81,9 +81,9 @@ object ConfigStore {
         val config = loadConfigOrNull()
         if (config != null) return Result.success(config.connections)
 
-        val failure = IllegalStateException("config.toml 存在但读不出来（连接没有丢，只是这次没读到）")
+        val failure = IllegalStateException("config.toml exists but could not be read (the connections are safe — they just were not loaded this time)")
         CoreModule.reportError(
-            message = failure.message ?: "读取连接列表失败",
+            message = failure.message ?: "Failed to read the connection list",
             source = "core.config",
             error = failure,
         )

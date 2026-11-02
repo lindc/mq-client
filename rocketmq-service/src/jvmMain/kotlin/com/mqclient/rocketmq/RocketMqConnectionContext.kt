@@ -1,6 +1,7 @@
 package com.mqclient.rocketmq
 
 import com.mqclient.core.ConnectionStatus
+import com.mqclient.core.ServiceException
 import com.mqclient.core.concurrent.HandleSlot
 import com.mqclient.mq.base.AbstractConnectionContext
 
@@ -12,13 +13,28 @@ import com.mqclient.mq.base.AbstractConnectionContext
  *  - `Failed` → 必须把上次的原因带出来，否则用户不知道去改什么；
  *  - `Disconnected` → 指去侧边栏；
  *  - `Connected` 但客户端已释放 → 只发生在连接 / 断开的一颠之间，提示重连即可。
+ *
+ * 返回 [ServiceException]（errorKey = `rocketmq_err_refusal_*`）：文案由展示端在
+ * 渲染时点翻译，message 是英文兜底 —— 见 app-core 的 ServiceException。
  */
-internal fun connectionRefusalText(ctx: RocketMqConnectionContext): String = when (ctx.status) {
-    ConnectionStatus.Connecting -> "正在连接，请稍候"
-    ConnectionStatus.Failed ->
-        "未连接：上次请求失败（${ctx.lastError?.takeIf(String::isNotBlank) ?: "原因未知"}）"
-    ConnectionStatus.Disconnected -> "未连接：请先在侧栏连接该 RocketMQ"
-    ConnectionStatus.Connected -> "未连接：管理客户端已释放，请重新连接"
+internal fun connectionRefusal(ctx: RocketMqConnectionContext): ServiceException = when (ctx.status) {
+    ConnectionStatus.Connecting -> ServiceException(
+        "rocketmq_err_refusal_connecting",
+        fallbackMessage = "Connecting — please wait",
+    )
+    ConnectionStatus.Failed -> ServiceException(
+        "rocketmq_err_refusal_failed",
+        args = listOf(ctx.lastError?.takeIf(String::isNotBlank) ?: "unknown reason"),
+        fallbackMessage = "Not connected: the last request failed (%1\$s)",
+    )
+    ConnectionStatus.Disconnected -> ServiceException(
+        "rocketmq_err_refusal_disconnected",
+        fallbackMessage = "Not connected: connect this RocketMQ from the sidebar first",
+    )
+    ConnectionStatus.Connected -> ServiceException(
+        "rocketmq_err_refusal_released",
+        fallbackMessage = "Not connected: the admin client was released — reconnect first",
+    )
 }
 
 /**

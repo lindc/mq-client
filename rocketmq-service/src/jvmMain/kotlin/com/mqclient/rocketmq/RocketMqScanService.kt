@@ -1,5 +1,6 @@
 package com.mqclient.rocketmq
 
+import com.mqclient.core.ServiceException
 import com.mqclient.core.db.CommandAudit
 import com.mqclient.core.cache.CacheManager
 import com.mqclient.core.cache.putIfScanned
@@ -426,6 +427,8 @@ class RocketMqScanService(
                 memberCount = conn?.connectionSet?.size,
                 progressState = progress.state,
                 progressError = progress.error,
+                progressErrorKey = progress.errorKey,
+                progressErrorArgs = progress.errorArgs,
                 progressSource = progress.source,
                 rows = progress.rows,
                 totalLag = progress.rows.sumOf { it.lag },
@@ -559,7 +562,11 @@ class RocketMqScanService(
     suspend fun deleteTopic(connectionId: String, topic: String) {
         // 第二道防呆（第一道是属性对话框按钮禁用）：绕过 UI 的调用路径也拦下。
         if (isSystemTopic(topic)) {
-            throw IllegalStateException("系统内置主题不允许删除：$topic")
+            throw ServiceException(
+                "rocketmq_err_system_topic_delete",
+                args = listOf(topic),
+                fallbackMessage = "Built-in system topic cannot be deleted: %1\$s",
+            )
         }
         val (ctx, admin) = targetOrThrow(connectionId)
         audited(connectionId, "DELETE TOPIC $topic") {
@@ -652,8 +659,11 @@ class RocketMqScanService(
     /** 有客户端就返回；真的没有则抛带具体原因的异常。 */
     private fun targetOrThrow(connectionId: String): ScanTarget {
         val ctx = RocketMqModule.connectionOrNull(connectionId)
-            ?: throw IllegalStateException("连接未登记：该连接已被删除或模块未初始化")
-        val admin = ctx.adminClient ?: throw IllegalStateException(connectionRefusalText(ctx))
+            ?: throw ServiceException(
+                "rocketmq_err_not_registered",
+                fallbackMessage = "Connection not registered: it was deleted or the module is not initialized",
+            )
+        val admin = ctx.adminClient ?: throw connectionRefusal(ctx)
         return ScanTarget(ctx, admin)
     }
 
@@ -753,7 +763,11 @@ internal fun brokerStatsToRows(group: String, list: ConsumeStatsList?): List<Roc
 /** 一次「取消费进度」的结果（状态 + 文案 + 来源 + 行）。 */
 internal data class GroupProgressOutcome(
     val state: RocketMqProgressState,
+    /** 英文兜底文案（展示端优先用 [errorKey] 翻译）。 */
     val error: String?,
+    /** i18n 错误键（null = 无键，直接展示 [error]）。 */
+    val errorKey: String? = null,
+    val errorArgs: List<Any> = emptyList(),
     val source: RocketMqProgressSource,
     val rows: List<RocketMqOffsetRowSnapshot>,
 )
@@ -787,7 +801,9 @@ internal suspend fun resolveGroupProgress(
         )
         return GroupProgressOutcome(
             state = RocketMqProgressState.FAILED,
-            error = "查询超时（${PROGRESS_TIMEOUT_MS / 1000}s 内 Broker 未返回）",
+            errorKey = "rocketmq_err_progress_timeout",
+            errorArgs = listOf(PROGRESS_TIMEOUT_MS / 1000),
+            error = "Query timed out (no response from the broker within %1\$ss)",
             source = RocketMqProgressSource.GROUP,
             rows = emptyList(),
         )

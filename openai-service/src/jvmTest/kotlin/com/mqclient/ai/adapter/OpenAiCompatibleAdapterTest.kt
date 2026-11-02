@@ -126,7 +126,7 @@ class OpenAiCompatibleAdapterTest {
         }
 
         assertTrue(
-            error.message.orEmpty().contains("超时"),
+            error.message.orEmpty().contains("Request timed out"),
             "应是超时文案，实际：${error.message}",
         )
         assertTrue(

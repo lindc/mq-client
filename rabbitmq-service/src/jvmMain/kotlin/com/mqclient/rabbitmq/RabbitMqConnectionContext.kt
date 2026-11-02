@@ -1,6 +1,7 @@
 package com.mqclient.rabbitmq
 
 import com.mqclient.core.ConnectionStatus
+import com.mqclient.core.ServiceException
 import com.mqclient.mq.base.AbstractConnectionContext
 import com.rabbitmq.client.Connection
 
@@ -15,12 +16,24 @@ import com.rabbitmq.client.Connection
  *  - `Connected` 但客户端已释放 → 只发生在连接 / 断开的一颠之间（先置状态后关
  *    句柄），提示重连即可。
  */
-internal fun connectionRefusalText(ctx: RabbitMqConnectionContext): String = when (ctx.status) {
-    ConnectionStatus.Connecting -> "正在连接，请稍候"
-    ConnectionStatus.Failed ->
-        "未连接：上次请求失败（${ctx.lastError?.takeIf(String::isNotBlank) ?: "原因未知"}）"
-    ConnectionStatus.Disconnected -> "未连接：请先在侧栏连接该 RabbitMQ"
-    ConnectionStatus.Connected -> "未连接：管理 API 客户端已释放，请重新连接"
+internal fun connectionRefusal(ctx: RabbitMqConnectionContext): ServiceException = when (ctx.status) {
+    ConnectionStatus.Connecting -> ServiceException(
+        "rabbitmq_err_refusal_connecting",
+        fallbackMessage = "Connecting — please wait",
+    )
+    ConnectionStatus.Failed -> ServiceException(
+        "rabbitmq_err_refusal_failed",
+        args = listOf(ctx.lastError?.takeIf(String::isNotBlank) ?: "unknown reason"),
+        fallbackMessage = "Not connected: the last request failed (%1\$s)",
+    )
+    ConnectionStatus.Disconnected -> ServiceException(
+        "rabbitmq_err_refusal_disconnected",
+        fallbackMessage = "Not connected: connect this RabbitMQ from the sidebar first",
+    )
+    ConnectionStatus.Connected -> ServiceException(
+        "rabbitmq_err_refusal_released",
+        fallbackMessage = "Not connected: the management API client was released — reconnect first",
+    )
 }
 
 /**

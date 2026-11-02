@@ -35,7 +35,7 @@ object AiAdapterRegistry {
     /** 登记（或同名替换）一个 Provider 及其适配器。id 不一致直接拒绝 —— 那是接线错误。 */
     fun register(provider: AiProvider, adapter: AiAdapter) {
         require(provider.id == adapter.providerId) {
-            "provider.id=${provider.id} 与 adapter.providerId=${adapter.providerId} 不一致"
+            "provider.id=${provider.id} does not match adapter.providerId=${adapter.providerId}"
         }
         registry.update { it + (provider.id to Entry(provider, adapter)) }
     }

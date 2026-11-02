@@ -109,7 +109,7 @@ class XmlInterpreterTest {
     fun `mismatched tags fail with the offending name`() {
         val error = failure("<a><b></a>")
 
-        assertTrue(error.message.contains("XML 解析失败"), error.message)
+        assertTrue(error.message.contains("XML parse failed"), error.message)
     }
 
     @Test

@@ -75,8 +75,8 @@ class HandleSlot<T : Any>(private val label: String) {
      */
     fun acquire(canCreate: () -> Boolean = { true }, create: () -> T): T =
         synchronized(lock) {
-            check(!disposed) { "$label 已断开：拒绝创建新句柄（连接已关闭或正在重连）" }
-            check(canCreate()) { "$label 当前状态不允许创建句柄" }
+            check(!disposed) { "$label is disconnected: refusing to create a new handle (closed or reconnecting)" }
+            check(canCreate()) { "$label is in a state that does not allow creating a handle" }
             handle ?: create().also { handle = it }
         }
 

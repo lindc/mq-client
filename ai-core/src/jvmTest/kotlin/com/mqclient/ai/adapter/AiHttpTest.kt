@@ -70,7 +70,7 @@ class AiHttpTest {
         val error = assertFailsWith<AiException> {
             AiHttp.clientFor(connection("not a url"))
         }
-        assertEquals(true, error.message!!.contains("无法解析"), error.message)
+        assertEquals(true, error.message!!.contains("Cannot resolve a hostname"), error.message)
 
         assertFailsWith<AiException> { AiHttp.clientFor(connection("   ")) }
     }

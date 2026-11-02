@@ -1,5 +1,6 @@
 package com.mqclient.rocketmq
 
+import com.mqclient.core.ServiceException
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.AfterTest
@@ -52,8 +53,9 @@ class TlsPemExportTest {
 
     @Test
     fun `只有私钥的 PEM - 抛可读错误`() {
-        val error = assertFailsWith<IllegalStateException> { pemCertOrNull(pemKey.toString()) }
-        assertTrue("没有证书" in error.message.orEmpty())
+        val error = assertFailsWith<ServiceException> { pemCertOrNull(pemKey.toString()) }
+        assertEquals("rocketmq_err_pem_no_certificate", error.errorKey)
+        assertTrue("No certificate" in error.message.orEmpty())
         assertTrue(isPemFile(pemKey.toString()))
     }
 
@@ -65,10 +67,10 @@ class TlsPemExportTest {
 
     @Test
     fun `文件不存在 - 统一可读文案`() {
-        val error = assertFailsWith<IllegalStateException> { pemCertOrNull(missing.toString()) }
-        assertTrue("不存在" in error.message.orEmpty())
-        val error2 = assertFailsWith<IllegalStateException> { isPemFile(missing.toString()) }
-        assertTrue("不存在" in error2.message.orEmpty())
+        val error = assertFailsWith<ServiceException> { pemCertOrNull(missing.toString()) }
+        assertEquals("rocketmq_err_cert_file_missing", error.errorKey)
+        val error2 = assertFailsWith<ServiceException> { isPemFile(missing.toString()) }
+        assertEquals("rocketmq_err_cert_file_missing", error2.errorKey)
     }
 
     @Test

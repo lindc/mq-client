@@ -209,7 +209,7 @@ class AnthropicAdapterTest {
             subject.chat(target, listOf(AiChatMessage(AiRole.USER, "hi")))
         }
 
-        assertTrue(error.message.orEmpty().contains("超时"), "应是超时文案，实际：${error.message}")
+        assertTrue(error.message.orEmpty().contains("Request timed out"), "应是超时文案，实际：${error.message}")
         assertTrue(
             error.message.orEmpty().contains(target.name),
             "超时文案应带连接名，实际：${error.message}",

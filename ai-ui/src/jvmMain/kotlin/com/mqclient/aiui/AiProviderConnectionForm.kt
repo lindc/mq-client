@@ -36,6 +36,7 @@ import com.mqclient.core.AiConnection
 import com.mqclient.core.ConnectionFormState
 import com.mqclient.core.ConnectionFormUi
 import com.mqclient.core.newConnectionId
+import com.mqclient.uicommon.i18n.userMessage
 import com.mqclient.uicommon.LabeledField
 import com.mqclient.uicommon.SettingsDropdownRow
 import com.mqclient.uicommon.i18n.stringResource
@@ -103,7 +104,7 @@ abstract class AiProviderConnectionForm(
                 val created = AiConnectionRepository.create(connection)
                 val failure = created.exceptionOrNull()
                 if (failure != null) {
-                    saveError = failure.message ?: failure::class.simpleName
+                    saveError = failure.userMessage()
                     return false
                 }
                 AiConnectionRepository.setActive(connection.id)

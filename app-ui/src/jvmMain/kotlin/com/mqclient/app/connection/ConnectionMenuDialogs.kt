@@ -32,6 +32,7 @@ import com.mqclient.core.ConnectionInfo
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.CoreModule
 import com.mqclient.core.ModuleRegistry
+import com.mqclient.uicommon.i18n.userMessage
 import com.mqclient.uicommon.DangerButton
 import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.dialog.rememberTwoThirdsScreenSize
@@ -57,7 +58,7 @@ fun ConnectionMenuDialogs(
                 state.deleteTarget = null
                 ConnectionStore.delete(connection.id).onFailure { failure ->
                     CoreModule.reportError(
-                        message = failure.message ?: failure::class.simpleName ?: "unknown",
+                        message = failure.userMessage(),
                         source = "app-ui",
                         error = failure,
                     )

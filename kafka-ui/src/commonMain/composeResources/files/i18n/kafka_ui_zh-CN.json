@@ -287,5 +287,19 @@
   "kafka_ui_msg_detail_collapse": "收起",
   "kafka_ui_msg_detail_interpreter": "解释器",
   "kafka_ui_msg_detail_no_params": "该解释器没有参数",
-  "kafka_ui_msg_detail_copy_body": "复制正文"
+  "kafka_ui_msg_detail_copy_body": "复制正文",
+  "kafka_err_refusal_connecting": "正在连接，请稍候",
+  "kafka_err_refusal_failed": "未连接：上次请求失败（%1$s）",
+  "kafka_err_refusal_disconnected": "未连接：请先在侧栏连接该 Kafka",
+  "kafka_err_refusal_released": "未连接：AdminClient 已释放，请重新连接",
+  "kafka_err_offset_needs_partition": "指定 Offset 需先选择单个分区",
+  "kafka_err_offset_not_found": "offset %1$d 不存在（可能已过期清除）",
+  "kafka_err_not_registered": "连接未登记：该连接已被删除或模块未初始化",
+  "kafka_err_topic_not_found": "topic '%1$s' 不存在或无权访问",
+  "kafka_err_module_not_initialized": "Kafka 模块未初始化",
+  "kafka_err_group_not_found": "消费组不存在: %1$s",
+  "kafka_err_group_active_members": "消费组仍有活跃成员（状态 %1$s），请先停掉所有消费者再重置位移",
+  "kafka_err_no_committed_offsets": "该组没有已提交位移，无法重置",
+  "err_conn_not_registered_id": "连接 '%1$s' 未登记",
+  "err_conn_in_progress": "连接正在进行中"
 }

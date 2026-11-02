@@ -163,7 +163,11 @@ class AbstractConnectionManagerTest {
             manager.contextOrNull("c1")!!.status = ConnectionStatus.Connecting
             val refused = manager.connect("c1")
             assertTrue(refused.isFailure)
-            assertTrue(refused.exceptionOrNull()?.message?.contains("正在进行中") == true)
+            val ex = refused.exceptionOrNull()
+            assertTrue(
+                ex is com.mqclient.core.ServiceException && ex.errorKey == "err_conn_in_progress",
+                "连接中应拒绝且键正确，实际 $ex",
+            )
         } finally {
             scope.cancel()
         }

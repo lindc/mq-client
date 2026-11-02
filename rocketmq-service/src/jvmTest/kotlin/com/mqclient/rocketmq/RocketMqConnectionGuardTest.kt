@@ -52,39 +52,42 @@ class RocketMqConnectionGuardTest {
 
     /* ------------------------- 拒绝文案分层 ------------------------- */
 
+    /** 拒结返回 [com.mqclient.core.ServiceException]：errorKey 供展示端翻译，message 是英文兜底。 */
+    private fun refusalText(ctx: RocketMqConnectionContext): String = connectionRefusal(ctx).message!!
+
     @Test
     fun `Failed 状态必须带出上一次的真实原因`() {
-        val text = connectionRefusalText(
+        val error = connectionRefusal(
             ctx(ConnectionStatus.Failed, lastError = "connect to nameserver failed"),
         )
-        assertTrue(text.contains("上次请求失败"), "要说明是「上次请求」而不是笼统未连接：$text")
-        assertTrue(
-            text.contains("connect to nameserver failed"),
-            "真实原因必须透出来（否则用户不知道去查什么）：$text",
-        )
+        assertEquals("rocketmq_err_refusal_failed", error.errorKey)
+        // 真实原因经 args 透传（展示端 withArg 插值），不再断言 message 里的措辞。
+        assertEquals(listOf("connect to nameserver failed"), error.args)
+        assertTrue(error.message!!.contains("last request failed"), "英文兜底要说明是「上次请求」：${error.message}")
     }
 
     @Test
     fun `Failed 但原因是空的也要可读`() {
-        val text = connectionRefusalText(ctx(ConnectionStatus.Failed))
-        assertTrue(text.contains("原因未知"), "不能出现空括号：$text")
+        val error = connectionRefusal(ctx(ConnectionStatus.Failed))
+        assertEquals(listOf("unknown reason"), error.args, "不能出现空参数：${error.args}")
     }
 
     @Test
     fun `Connecting 提示等待而不是报错`() {
-        val text = connectionRefusalText(ctx(ConnectionStatus.Connecting))
-        assertTrue(text.contains("正在连接"), "连接中应该提示等待：$text")
+        val text = refusalText(ctx(ConnectionStatus.Connecting))
+        assertEquals("rocketmq_err_refusal_connecting", connectionRefusal(ctx(ConnectionStatus.Connecting)).errorKey)
+        assertTrue(text.contains("Connecting"), "连接中应该提示等待：$text")
     }
 
     @Test
     fun `Disconnected 指去侧边栏`() {
-        val text = connectionRefusalText(ctx(ConnectionStatus.Disconnected))
-        assertTrue(text.contains("侧栏"), "未连接应该指去侧栏：$text")
+        val text = refusalText(ctx(ConnectionStatus.Disconnected))
+        assertTrue(text.contains("sidebar"), "未连接应该指去侧栏：$text")
     }
 
     @Test
     fun `四种状态的文案互不相同`() {
-        val texts = ConnectionStatus.entries.map { connectionRefusalText(ctx(it)) }
+        val texts = ConnectionStatus.entries.map { refusalText(ctx(it)) }
         assertEquals(
             ConnectionStatus.entries.size,
             texts.toSet().size,

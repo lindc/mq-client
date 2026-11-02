@@ -1009,7 +1009,6 @@
   "ibm_mq_partial_scan_banner": "Some data was not refreshed: %1$s unavailable",
   "ibm_mq_partial_scan_hint": "Usually a not-authorized (2035) gap or a timeout; the rest was refreshed",
   "ibm_mq_scan_kind_queue_manager": "queue manager",
-
   "ibm_mq_queue_prop_desc_q_name": "Unique name of the object; cannot be changed after creation.",
   "ibm_mq_queue_prop_desc_q_type": "Local / alias / remote / model / cluster queue; cannot be changed after creation.",
   "ibm_mq_queue_prop_desc_qsg_disp": "Object disposition in a z/OS shared queue environment (z/OS only).",
@@ -1065,7 +1064,6 @@
   "ibm_mq_queue_prop_desc_monitoring_q": "Collection level for online monitoring data.",
   "ibm_mq_queue_prop_desc_statistics_q": "Collection level for statistics data.",
   "ibm_mq_queue_prop_desc_accounting_q": "Collection level for accounting data.",
-
   "ibm_mq_qmgr_prop_desc_q_mgr_name": "Unique name of the queue manager; cannot be changed after creation.",
   "ibm_mq_qmgr_prop_desc_platform": "Platform architecture the queue manager runs on.",
   "ibm_mq_qmgr_prop_desc_mqiacf_q_mgr_status": "Queue manager running state: running / starting / stopping / standby.",
@@ -1159,5 +1157,12 @@
   "ibm_mq_msg_import_result": "Imported %s message(s)",
   "ibm_mq_msg_import_result_partial": "Imported %s message(s), %s failed",
   "ibm_mq_msg_import_close_confirm": "Import in progress. Close anyway?",
-  "ibm_mq_msg_import_preview_heading": "Message preview"
+  "ibm_mq_msg_import_preview_heading": "Message preview",
+  "ibm_mq_err_not_connected": "Connection %1$s is not established",
+  "ibm_mq_err_cert_file_missing": "Certificate file not found: %1$s",
+  "ibm_mq_err_keystore_type_unsupported": "Unsupported keystore type %1$s: %2$s",
+  "ibm_mq_err_keystore_load_failed": "Failed to load the keystore (check format and password): %1$s (%2$s)",
+  "ibm_mq_err_keystore_no_private_key": "No private key entry in the keystore (mutual TLS requires a keystore with a private key): %1$s",
+  "ibm_mq_err_key_export_failed": "Failed to export the private key (the key password usually matches the keystore password): %1$s",
+  "ibm_mq_err_temp_keystore_write_failed": "Failed to write the temporary keystore: %1$s"
 }

@@ -140,14 +140,14 @@ object BlockingCalls {
         onAbandoned: (T) -> Unit = {},
         block: () -> T,
     ): T {
-        require(timeoutMs > 0) { "timeoutMs 必须为正数：$timeoutMs" }
+        require(timeoutMs > 0) { "timeoutMs must be positive: $timeoutMs" }
         val future = try {
             workers.submit(Callable { block() })
         } catch (rejected: RejectedExecutionException) {
             // 有界池饱和是**可预期的**上限，不是 bug：转成同一套超时异常，调用方的
             // 既有 catch（扫描 / 连接路径都在 catch BlockingCallTimeoutException）无需改。
             throw BlockingCallTimeoutException(
-                "$label 未执行：阻塞调用线程池已满（并发上限 $MAX_WORKERS，排队上限 $MAX_PENDING）",
+                "$label was not executed: the blocking-call pool is saturated (max workers $MAX_WORKERS, max queued $MAX_PENDING)",
                 rejected,
             )
         }
@@ -177,7 +177,7 @@ object BlockingCalls {
                 coroutineContext.ensureActive()
                 val remaining = deadline - System.currentTimeMillis()
                 if (remaining <= 0L) {
-                    throw BlockingCallTimeoutException("$label 超时（${timeoutMs / 1000}s）")
+                    throw BlockingCallTimeoutException("$label timed out (${timeoutMs / 1000}s)")
                 }
                 try {
                     return@withContext future.get(minOf(remaining, POLL_SLICE_MS), TimeUnit.MILLISECONDS)
@@ -188,7 +188,7 @@ object BlockingCalls {
                     throw failed.cause ?: failed
                 } catch (interrupted: InterruptedException) {
                     Thread.currentThread().interrupt()
-                    throw BlockingCallTimeoutException("$label 被中断", interrupted)
+                    throw BlockingCallTimeoutException("$label was interrupted", interrupted)
                 }
             }
             @Suppress("UNREACHABLE_CODE")

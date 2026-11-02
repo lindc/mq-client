@@ -1,5 +1,7 @@
 package com.mqclient.rocketmq
 
+import com.mqclient.core.LocalizedException
+
 /**
  * 消息域数据模型：浏览/详情一体（[RocketMqMessage]）+ 一页结果（[RocketMqMessagePage]）
  * + 发送结果（[RocketMqSendResult]）。
@@ -67,7 +69,12 @@ data class RocketMqSendResult(
     val brokerName: String? = null,
     val queueId: Int? = null,
     val offset: Long? = null,
+    /** 英文兜底文案（展示端优先用 [errorKey] 翻译）。 */
     val errorMessage: String? = null,
+    /** i18n 错误键（`rocketmq_err_send_*`；null = 无键，直接展示 [errorMessage]）。 */
+    val errorKey: String? = null,
+    /** [errorKey] 的模板参数。 */
+    val errorArgs: List<Any> = emptyList(),
 ) {
     companion object {
         fun success(msgId: String, brokerName: String, queueId: Int, offset: Long): RocketMqSendResult =
@@ -82,6 +89,14 @@ data class RocketMqSendResult(
         fun failure(message: String): RocketMqSendResult = RocketMqSendResult(
             success = false,
             errorMessage = message,
+        )
+
+        /** 从 [LocalizedException] 构造失败结果：键与参数透传给展示端翻译。 */
+        fun failure(error: LocalizedException): RocketMqSendResult = RocketMqSendResult(
+            success = false,
+            errorMessage = error.message,
+            errorKey = error.errorKey,
+            errorArgs = error.args,
         )
     }
 }

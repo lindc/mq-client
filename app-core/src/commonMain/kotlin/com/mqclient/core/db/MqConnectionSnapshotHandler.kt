@@ -44,7 +44,7 @@ class MqConnectionSnapshotHandler(private val repository: MqConnectionSnapshotRe
         runCatchingCancellable { repository.save(snapshot) }
             .onFailure { error ->
                 CoreModule.reportError(
-                    message = "连接快照写入失败（connectionId=$id）",
+                    message = "Connection snapshot save failed (connectionId=$id)",
                     source = "core.db",
                     error = error,
                 )

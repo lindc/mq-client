@@ -44,7 +44,7 @@ class KeyedJobRegistry {
      * @return 新启动的协程（调用方一般不需要持有，取消走 [cancel]）。
      */
     fun launch(scope: CoroutineScope, key: String, block: suspend CoroutineScope.() -> Unit): Job {
-        require(key.isNotBlank()) { "key 不能为空白：它是这条后台任务的唯一标识" }
+        require(key.isNotBlank()) { "key must not be blank: it is the unique id of this background job" }
         val job = scope.launch(block = block)
         val previous = swap(key, job)
         // remove(key, job) 只在「表里还是这一条」时删，不会误删同一 key 上后注册的新协程。

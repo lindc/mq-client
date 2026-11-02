@@ -1,5 +1,6 @@
 package com.mqclient.rabbitmq
 
+import com.mqclient.core.ServiceException
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.engine.java.Java
@@ -232,22 +233,33 @@ class RabbitMqAdminClient internal constructor(
 
     /** 连接类异常 → 统一人类可读文案（GET / PUT / DELETE 共用）。 */
     private fun mapConnectionError(e: Throwable): Exception = when (e) {
-        is ConnectException -> IllegalStateException(friendlyConnectError(), e)
-        is UnknownHostException -> IllegalStateException("无法解析主机「${config.host}」：检查地址拼写与 DNS", e)
-        is ConnectTimeoutException -> IllegalStateException(
-            "连接超时（${config.connectionTimeout}s）：管理 API ${config.host}:${config.managementPort} 无响应",
-            e,
+        is ConnectException -> ServiceException(
+            "rabbitmq_err_mgmt_connect",
+            args = listOf(config.host, config.managementPort.toString()),
+            fallbackMessage = "Cannot connect to %1\$s:%2\$s: check the address and management port (default 15672)", cause = e,
         )
-        is SocketTimeoutException -> IllegalStateException(
-            "请求超时（${config.connectionTimeout}s）：管理 API 响应过慢",
-            e,
+        is UnknownHostException -> ServiceException(
+            "rabbitmq_err_host_resolve",
+            args = listOf(config.host),
+            fallbackMessage = "Cannot resolve host \"%1\$s\": check the spelling and DNS", cause = e,
+        )
+        is ConnectTimeoutException -> ServiceException(
+            "rabbitmq_err_connect_timeout",
+            args = listOf(config.connectionTimeout, config.host, config.managementPort.toString()),
+            fallbackMessage = "Connection timed out (%1\$ss): the management API at %2\$s:%3\$s is not responding", cause = e,
+        )
+        is SocketTimeoutException -> ServiceException(
+            "rabbitmq_err_request_timeout",
+            args = listOf(config.connectionTimeout),
+            fallbackMessage = "Request timed out (%1\$ss): the management API is too slow to respond", cause = e,
         )
         // HttpTimeout 插件的请求级超时。**注意它不是 SocketTimeoutException**（Ktor 3.2.3
         // 里继承 java.io.IOException），不进这一支的话用户看到的会是英文原文
         // `Request timeout has expired [url=..., request_timeout=30000 ms]`。
-        is HttpRequestTimeoutException -> IllegalStateException(
-            "请求超时（${config.connectionTimeout}s）：管理 API 响应过慢",
-            e,
+        is HttpRequestTimeoutException -> ServiceException(
+            "rabbitmq_err_request_timeout",
+            args = listOf(config.connectionTimeout),
+            fallbackMessage = "Request timed out (%1\$ss): the management API is too slow to respond", cause = e,
         )
         else -> IllegalStateException(e.message ?: e::class.simpleName ?: "unknown", e)
     }
@@ -262,16 +274,34 @@ class RabbitMqAdminClient internal constructor(
             //  - **tag 不够** → {"error":"not_authorised","reason":"Not monitor user"}。
             //    密码是对的，去改密码只会白忙。实测：只带 management tag 的账号请求
             //    /api/nodes 就是这条（见 RabbitMqScanPartialLiveTest）。
-            401 -> throw IllegalStateException(
-                if (isTagInsufficient(body)) {
-                    "权限不足（401）：账号缺少所需 tag$reason"
-                } else {
-                    "认证失败（401）：检查用户名 / 密码$reason"
-                },
+            401 -> throw if (isTagInsufficient(body)) {
+                ServiceException(
+                    "rabbitmq_err_tag_insufficient",
+                    args = listOf(reason),
+                    fallbackMessage = "Insufficient permissions (401): the account lacks the required tag%1\$s",
+                )
+            } else {
+                ServiceException(
+                    "rabbitmq_err_auth_failed",
+                    args = listOf(reason),
+                    fallbackMessage = "Authentication failed (401): check the username / password%1\$s",
+                )
+            }
+            403 -> throw ServiceException(
+                "rabbitmq_err_forbidden",
+                args = listOf(reason),
+                fallbackMessage = "Authorization failed (403): insufficient permissions%1\$s",
             )
-            403 -> throw IllegalStateException("授权失败（403）：账号权限不足$reason")
-            404 -> throw IllegalStateException("未找到（404）：检查管理端口与 vhost 是否正确$reason")
-            else -> throw IllegalStateException("管理 API 返回 HTTP $status$reason")
+            404 -> throw ServiceException(
+                "rabbitmq_err_not_found",
+                args = listOf(reason),
+                fallbackMessage = "Not found (404): check the management port and vhost%1\$s",
+            )
+            else -> throw ServiceException(
+                "rabbitmq_err_http_status",
+                args = listOf(status, reason),
+                fallbackMessage = "Management API returned HTTP %1\$d%2\$s",
+            )
         }
     }
 
@@ -306,7 +336,7 @@ class RabbitMqAdminClient internal constructor(
             if (text.isEmpty()) return ""
             val matched = REASON_REGEX.find(text)?.groupValues?.get(1) ?: text
             val snippet = if (matched.length > 200) matched.take(200) + "…" else matched
-            return "：$snippet"
+            return ": $snippet"
         }
     }
 
@@ -332,7 +362,11 @@ class RabbitMqAdminClient internal constructor(
         } catch (e: HttpRequestTimeoutException) {
             // 这次请求的超时值可能小于全局值（如 5s vs 30s），文案得说真实的那一个。
             val seconds = (timeoutMillis ?: (config.connectionTimeout * 1_000L)) / 1_000L
-            throw IllegalStateException("请求超时（${seconds}s）：管理 API 响应过慢", e)
+            throw ServiceException(
+                "rabbitmq_err_request_timeout",
+                args = listOf(seconds),
+                fallbackMessage = "Request timed out (%1\$ss): the management API is too slow to respond", cause = e,
+            )
         } catch (e: Exception) {
             throw mapConnectionError(e)
         }
@@ -369,9 +403,6 @@ class RabbitMqAdminClient internal constructor(
         return body
     }
 
-    /** 连接类错误的统一文案（host:port 指向管理 API）。 */
-    private fun friendlyConnectError(): String =
-        "无法连接 ${config.host}:${config.managementPort}：检查地址与管理端口（默认 15672）"
 
     // ---- 五个管理端点（连接验证 / 扫描共用）----
 

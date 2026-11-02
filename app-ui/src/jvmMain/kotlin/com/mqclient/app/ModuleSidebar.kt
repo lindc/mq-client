@@ -263,7 +263,7 @@ private fun ConnectionRow(
             }
             Spacer(Modifier.width(8.dp))
             Text(
-                text = connection.status.label,
+                text = stringResource(connection.status.toStatusKey()),
                 style = MaterialTheme.typography.labelSmall,
                 color = statusColor(connection.status),
             )
@@ -366,6 +366,14 @@ private fun statusColor(status: ConnectionStatus): Color {
         ConnectionStatus.Failed -> if (dark) Color(0xFFF87171) else Color(0xFFB91C1C)
         ConnectionStatus.Disconnected -> if (dark) Color(0xFF9AA0A6) else Color(0xFF6B7280)
     }
+}
+
+/** 连接状态 → i18n 键（文案在 ui-common 公共表 `err_status_*`，渲染时点翻译）。 */
+private fun ConnectionStatus.toStatusKey(): String = when (this) {
+    ConnectionStatus.Connected -> "err_status_connected"
+    ConnectionStatus.Connecting -> "err_status_connecting"
+    ConnectionStatus.Failed -> "err_status_failed"
+    ConnectionStatus.Disconnected -> "err_status_disconnected"
 }
 
 /**

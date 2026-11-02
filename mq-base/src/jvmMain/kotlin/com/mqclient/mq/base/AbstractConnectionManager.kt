@@ -1,5 +1,7 @@
 package com.mqclient.mq.base
 
+import com.mqclient.core.ServiceException
+
 import com.mqclient.core.ConnectionInfo
 import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ConnectionStore
@@ -178,12 +180,19 @@ abstract class AbstractConnectionManager<C : AbstractConnectionContext<*>>(
      */
     suspend fun connect(connectionId: String): Result<Unit> = locks.withLock(connectionId) {
         val ctx = contexts[connectionId]
-            ?: return@withLock Result.failure(IllegalStateException("连接 $connectionId 未登记"))
+            ?: return@withLock Result.failure(ServiceException(
+                "err_conn_not_registered_id",
+                args = listOf(connectionId),
+                fallbackMessage = "Connection '%1\$s' is not registered",
+            ))
         when (ctx.status) {
             ConnectionStatus.Connected -> return@withLock Result.success(Unit)
             ConnectionStatus.Connecting -> {
                 log.info("connect ignored (already connecting): connection=$connectionId")
-                return@withLock Result.failure(IllegalStateException("连接正在进行中"))
+                return@withLock Result.failure(ServiceException(
+                "err_conn_in_progress",
+                fallbackMessage = "A connection attempt is already in progress",
+            ))
             }
             else -> Unit
         }

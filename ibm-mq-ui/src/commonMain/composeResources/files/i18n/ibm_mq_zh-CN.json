@@ -1157,5 +1157,12 @@
   "ibm_mq_msg_import_result": "成功导入 %s 条消息",
   "ibm_mq_msg_import_result_partial": "成功导入 %s 条，失败 %s 条",
   "ibm_mq_msg_import_close_confirm": "正在导入，确定关闭？",
-  "ibm_mq_msg_import_preview_heading": "消息预览"
+  "ibm_mq_msg_import_preview_heading": "消息预览",
+  "ibm_mq_err_not_connected": "连接 %1$s 未建立",
+  "ibm_mq_err_cert_file_missing": "证书文件不存在：%1$s",
+  "ibm_mq_err_keystore_type_unsupported": "不支持的证书库类型 %1$s：%2$s",
+  "ibm_mq_err_keystore_load_failed": "证书库加载失败（检查文件格式与口令）：%1$s（%2$s）",
+  "ibm_mq_err_keystore_no_private_key": "Keystore 中没有私钥条目（双向认证需要含私钥的证书库）：%1$s",
+  "ibm_mq_err_key_export_failed": "Keystore 私钥导出失败（私钥口令通常与库口令一致）：%1$s",
+  "ibm_mq_err_temp_keystore_write_failed": "临时 keystore 写入失败：%1$s"
 }

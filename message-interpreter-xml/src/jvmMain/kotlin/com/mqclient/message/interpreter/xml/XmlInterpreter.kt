@@ -143,11 +143,11 @@ class XmlInterpreter : MessageInterpreter {
     /** SAXParseException → 「XML 解析失败：第 N 行第 M 列：…」；其它异常原样取 message。 */
     private fun describe(error: Throwable): String = when (error) {
         is SAXParseException -> buildString {
-            append("XML 解析失败：第 ").append(error.lineNumber).append(" 行第 ")
-            append(error.columnNumber).append(" 列：")
+            append("XML parse failed at line ").append(error.lineNumber).append(" 行第 ")
+            append(error.columnNumber).append(", column ")
             append(error.message?.substringBefore('\n')?.trim().orEmpty())
         }
-        else -> "XML 解析失败：${error.message ?: error::class.simpleName ?: "unknown"}"
+        else -> "XML parse failed: ${error.message ?: error::class.simpleName ?: "unknown"}"
     }
 
     /* ------------------------------ 序列化 ------------------------------ */

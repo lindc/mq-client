@@ -31,7 +31,7 @@ class AiConnectionSnapshotHandler(private val repository: AiConnectionSnapshotRe
             throw cancellation
         } catch (error: Throwable) {
             CoreModule.reportError(
-                message = "AI 连接快照写入失败（connectionId=$connectionId）",
+                message = "AI connection snapshot save failed (connectionId=$connectionId)",
                 source = "ai-panel",
                 error = error,
             )

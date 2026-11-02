@@ -133,11 +133,11 @@ object AiHttp {
     internal fun trustAllHostKey(baseUrl: String, connectionName: String): String {
         val trimmed = baseUrl.trim()
         if (trimmed.isEmpty()) {
-            throw AiException("连接「$connectionName」还没填接口地址（baseUrl），无法建立忽略 SSL 的连接")
+            throw AiException("Connection \"$connectionName\" has no base URL configured (baseUrl); cannot set up the ignoring-SSL client")
         }
         val uri = runCatching { java.net.URI(trimmed) }.getOrNull()
         val host = uri?.host?.takeIf { it.isNotBlank() }
-            ?: throw AiException("连接「$connectionName」的 baseUrl 无法解析出主机名：$trimmed")
+            ?: throw AiException("Cannot resolve a hostname from the baseUrl of connection \"$connectionName\": $trimmed")
         val port = uri.port
         return if (port > 0) "$host:$port" else host
     }

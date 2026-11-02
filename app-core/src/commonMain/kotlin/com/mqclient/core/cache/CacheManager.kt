@@ -58,7 +58,7 @@ class CacheManager {
      * @param ttlMs 过期时间（毫秒），0（默认）表示**永不过期**。
      */
     fun put(key: String, value: Any?, ttlMs: Long = 0) {
-        require(key.isNotBlank()) { "缓存 key 不能为空白：它是条目的唯一标识" }
+        require(key.isNotBlank()) { "Cache key must not be blank: it is the unique entry id" }
         val now = systemTimeMillis()
         cache.update { current ->
             current + (key to CacheEntry(value, expiresAt = if (ttlMs > 0) now + ttlMs else 0))
@@ -88,7 +88,7 @@ class CacheManager {
      * @return 缓存内容确实变了返回 true。
      */
     fun update(key: String, ttlMs: Long = 0, transform: (Any?) -> Any?): Boolean {
-        require(key.isNotBlank()) { "缓存 key 不能为空白：它是条目的唯一标识" }
+        require(key.isNotBlank()) { "Cache key must not be blank: it is the unique entry id" }
         val now = systemTimeMillis()
         while (true) {
             val current = cache.value
@@ -121,7 +121,7 @@ class CacheManager {
      * @return key 存在并应用了 [transform] 时返回 true；key 不存在 / 已过期返回 false。
      */
     fun updateIfPresent(key: String, ttlMs: Long = 0, transform: (Any?) -> Any?): Boolean {
-        require(key.isNotBlank()) { "缓存 key 不能为空白：它是条目的唯一标识" }
+        require(key.isNotBlank()) { "Cache key must not be blank: it is the unique entry id" }
         val now = systemTimeMillis()
         while (true) {
             val current = cache.value
@@ -197,7 +197,7 @@ class CacheManager {
      * —— 结尾的分隔点要自己带上。清空整表用 [clear]，空白前缀会被拒绝。
      */
     fun removeByPrefix(prefix: String) {
-        require(prefix.isNotBlank()) { "前缀不能为空白：清空整表用 clear()" }
+        require(prefix.isNotBlank()) { "Prefix must not be blank: use clear() to wipe the whole table" }
         cache.update { current -> current.filterKeys { !it.startsWith(prefix) } }
     }
 

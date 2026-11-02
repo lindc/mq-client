@@ -1,5 +1,6 @@
 package com.mqclient.rabbitmq
 
+import com.mqclient.core.ServiceException
 import com.mqclient.core.cache.allKindsFailed
 import com.mqclient.core.cache.putIfScanned
 import com.mqclient.core.db.CommandAudit
@@ -219,7 +220,7 @@ class RabbitMqScanService(
             // 失败是权限缺口，不是连接坏了。
             // 四类全失败：管理 API 一条都读不通 —— 收尾逻辑在基类（与 Kafka 同一份）。
             if (isConnectionBroken(failures.keys)) {
-                reportAllKindsFailed(connectionId, failures, "管理 API 全部端点均不可达")
+                reportAllKindsFailed(connectionId, failures, "All management API endpoints are unreachable")
                 return@withScanLock
             }
 
@@ -401,8 +402,11 @@ class RabbitMqScanService(
      * 同步剪掉缓存里的交换机与其绑定的边 → 发 OBJECTS_SCANNED 驱动 UI 刷新。
      */
     suspend fun deleteExchange(connectionId: String, name: String) {
-        require(name.isNotEmpty() && !name.startsWith("amq.")) {
-            "默认交换机与系统交换机（amq.*）不可删除"
+        if (name.isEmpty() || name.startsWith("amq.")) {
+            throw ServiceException(
+                "rabbitmq_err_exchange_undeletable",
+                fallbackMessage = "The default exchange and system exchanges (amq.*) cannot be deleted",
+            )
         }
         val (ctx, admin) = targetOrThrow(connectionId)
         audited(connectionId, "DELETE EXCHANGE $name") {
@@ -709,8 +713,11 @@ class RabbitMqScanService(
     /** 有客户端就返回；真的没有则抛带具体原因的异常（未登记 / 连接中 / 失败原因 / 未连）。 */
     private fun targetOrThrow(connectionId: String): ScanTarget {
         val ctx = RabbitMqModule.connectionOrNull(connectionId)
-            ?: throw IllegalStateException("连接未登记：该连接已被删除或模块未初始化")
-        val admin = ctx.admin ?: throw IllegalStateException(connectionRefusalText(ctx))
+            ?: throw ServiceException(
+                "rabbitmq_err_not_registered",
+                fallbackMessage = "Connection not registered: it was deleted or the module is not initialized",
+            )
+        val admin = ctx.admin ?: throw connectionRefusal(ctx)
         return ScanTarget(ctx, admin)
     }
 

@@ -34,7 +34,7 @@ data class MessageOperationResult(
     }
 }
 
-private const val MSG_NOT_FOUND = "未找到该消息（可能已被消费或过期）"
+private const val MSG_NOT_FOUND = "Message not found (it may have been consumed or expired)"
 
 /**
  * 单消息操作（detail / download / delete）的扫描时间预算（毫秒）。
@@ -48,7 +48,7 @@ private const val MSG_NOT_FOUND = "未找到该消息（可能已被消费或过
 private const val OP_SCAN_BUDGET_MS = 4_000L
 
 /** 扫描预算提示（用户可读）。 */
-private const val OP_SCAN_TIMEOUT_MSG = "队列过深，定位超时（请缩小范围或直接在服务端查询）"
+private const val OP_SCAN_TIMEOUT_MSG = "Queue too deep to locate the message in time (narrow the range or query on the server)"
 
 /**
  * 三个单消息操作（download/detail/delete）共用的失败收尾：日志 + 结果转换一步完成。

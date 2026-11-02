@@ -1,6 +1,7 @@
 package com.mqclient.kafka
 
 import com.mqclient.core.ConnectionStatus
+import com.mqclient.core.ServiceException
 import com.mqclient.core.concurrent.HandleSlot
 import com.mqclient.mq.base.AbstractConnectionContext
 import org.apache.kafka.clients.admin.AdminClient
@@ -15,12 +16,24 @@ import org.apache.kafka.clients.admin.AdminClient
  *  - 用户没连（`Disconnected`）→ 指去侧边栏；
  *  - `Connected` 但客户端已释放 → 只发生在连接 / 断开的一颠之间，提示重连即可。
  */
-internal fun connectionRefusalText(ctx: KafkaConnectionContext): String = when (ctx.status) {
-    ConnectionStatus.Connecting -> "正在连接，请稍候"
-    ConnectionStatus.Failed ->
-        "未连接：上次请求失败（${ctx.lastError?.takeIf(String::isNotBlank) ?: "原因未知"}）"
-    ConnectionStatus.Disconnected -> "未连接：请先在侧栏连接该 Kafka"
-    ConnectionStatus.Connected -> "未连接：AdminClient 已释放，请重新连接"
+internal fun connectionRefusal(ctx: KafkaConnectionContext): ServiceException = when (ctx.status) {
+    ConnectionStatus.Connecting -> ServiceException(
+        "kafka_err_refusal_connecting",
+        fallbackMessage = "Connecting — please wait",
+    )
+    ConnectionStatus.Failed -> ServiceException(
+        "kafka_err_refusal_failed",
+        args = listOf(ctx.lastError?.takeIf(String::isNotBlank) ?: "unknown reason"),
+        fallbackMessage = "Not connected: the last request failed (%1\$s)",
+    )
+    ConnectionStatus.Disconnected -> ServiceException(
+        "kafka_err_refusal_disconnected",
+        fallbackMessage = "Not connected: connect this Kafka from the sidebar first",
+    )
+    ConnectionStatus.Connected -> ServiceException(
+        "kafka_err_refusal_released",
+        fallbackMessage = "Not connected: the AdminClient was released — reconnect first",
+    )
 }
 
 /**

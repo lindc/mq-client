@@ -200,7 +200,7 @@ class AnthropicAdapter(
                         val detail = event.error?.message
                         Log.warn(LOG_TAG, "chat stream error frame: model=${connection.model} detail=$detail")
                         throw AiException(
-                            message = "$PROVIDER_LABEL 流式响应失败" + if (detail != null) "：$detail" else "",
+                            message = "$PROVIDER_LABEL streaming failed" + if (detail != null) ": $detail" else "",
                         )
                     }
                 }

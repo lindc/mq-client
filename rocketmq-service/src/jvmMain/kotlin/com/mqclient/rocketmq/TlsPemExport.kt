@@ -1,5 +1,6 @@
 package com.mqclient.rocketmq
 
+import com.mqclient.core.ServiceException
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
@@ -41,7 +42,11 @@ internal fun trustCertsToPem(path: String, password: String): String {
         }
     }
     if (pem.isBlank()) {
-        throw IllegalStateException("Truststore 中没有任何证书：$path")
+        throw ServiceException(
+            "rocketmq_err_truststore_empty",
+            args = listOf(path),
+            fallbackMessage = "No certificates in the Truststore: %1\$s",
+        )
     }
     return pem
 }
@@ -54,13 +59,25 @@ internal fun exportKeyEntryToPem(path: String, storePassword: String): ExportedK
     val store = loadKeyStore(path, storePassword)
     val alias = store.aliases().toList().firstOrNull {
         store.getEntry(it, KeyStore.PasswordProtection(storePassword.toCharArray())) is KeyStore.PrivateKeyEntry
-    } ?: throw IllegalStateException("Keystore 中没有私钥条目（双向认证需要含私钥的证书库）：$path")
+    } ?: throw ServiceException(
+            "rocketmq_err_keystore_no_private_key",
+            args = listOf(path),
+            fallbackMessage = "No private key entry in the keystore (mutual TLS requires a keystore with a private key): %1\$s",
+        )
     val entry =
         store.getEntry(alias, KeyStore.PasswordProtection(storePassword.toCharArray())) as KeyStore.PrivateKeyEntry
     val chain = entry.certificateChain
-        ?: throw IllegalStateException("Keystore 私钥条目缺少证书链：$path")
+        ?: throw ServiceException(
+                "rocketmq_err_keystore_no_cert_chain",
+                args = listOf(path),
+                fallbackMessage = "The private key entry has no certificate chain: %1\$s",
+            )
     if (chain.isEmpty()) {
-        throw IllegalStateException("Keystore 私钥条目缺少证书链：$path")
+        throw ServiceException(
+            "rocketmq_err_keystore_no_cert_chain",
+            args = listOf(path),
+            fallbackMessage = "The private key entry has no certificate chain: %1\$s",
+        )
     }
     val certPem = chain.joinToString("") { pemBlock(it.encoded, "CERTIFICATE") }
     val keyPem = pemBlock(entry.privateKey.encoded, "PRIVATE KEY")
@@ -71,14 +88,22 @@ internal fun exportKeyEntryToPem(path: String, storePassword: String): ExportedK
 private fun loadKeyStore(path: String, password: String): KeyStore {
     val file = File(path)
     if (!file.isFile) {
-        throw IllegalStateException("证书文件不存在：$path")
+        throw ServiceException(
+            "rocketmq_err_cert_file_missing",
+            args = listOf(path),
+            fallbackMessage = "Certificate file not found: %1\$s",
+        )
     }
     val store = KeyStore.getInstance(keystoreTypeFor(path))
     try {
         file.inputStream().use { store.load(it, password.toCharArray()) }
     } catch (e: Exception) {
         val reason = e.message?.takeIf(String::isNotBlank) ?: e::class.simpleName ?: "unknown"
-        throw IllegalStateException("证书文件加载失败（检查文件格式与密码）：$path（$reason）", e)
+        throw ServiceException(
+            "rocketmq_err_cert_load_failed",
+            args = listOf(path, reason),
+            fallbackMessage = "Failed to load the certificate file (check format and password): %1\$s (%2\$s)",
+        ).initCause(e)
     }
     return store
 }
@@ -92,16 +117,28 @@ private fun loadKeyStore(path: String, password: String): KeyStore {
 internal fun pemCertOrNull(path: String): Path? {
     val file = File(path)
     if (!file.isFile) {
-        throw IllegalStateException("证书文件不存在：$path")
+        throw ServiceException(
+            "rocketmq_err_cert_file_missing",
+            args = listOf(path),
+            fallbackMessage = "Certificate file not found: %1\$s",
+        )
     }
     if (file.length() > MAX_PEM_BYTES) {
-        throw IllegalStateException("证书文件异常（超过 1MB）：$path")
+        throw ServiceException(
+            "rocketmq_err_cert_too_large",
+            args = listOf(path),
+            fallbackMessage = "Unexpected certificate file (over 1 MB): %1\$s",
+        )
     }
     val text = file.readText(Charsets.US_ASCII)
     return when {
         text.contains("-----BEGIN CERTIFICATE-----") -> file.toPath()
         text.contains("-----BEGIN") ->
-            throw IllegalStateException("PEM 文件中没有证书（可能只有私钥），Truststore 需要证书文件：$path")
+            throw ServiceException(
+            "rocketmq_err_pem_no_certificate",
+            args = listOf(path),
+            fallbackMessage = "No certificate in the PEM file (private key only?); the Truststore needs a certificate file: %1\$s",
+        )
         else -> null
     }
 }
@@ -110,7 +147,11 @@ internal fun pemCertOrNull(path: String): Path? {
 internal fun isPemFile(path: String): Boolean {
     val file = File(path)
     if (!file.isFile) {
-        throw IllegalStateException("证书文件不存在：$path")
+        throw ServiceException(
+            "rocketmq_err_cert_file_missing",
+            args = listOf(path),
+            fallbackMessage = "Certificate file not found: %1\$s",
+        )
     }
     val head = file.inputStream().use { input ->
         val buf = ByteArray(4096)

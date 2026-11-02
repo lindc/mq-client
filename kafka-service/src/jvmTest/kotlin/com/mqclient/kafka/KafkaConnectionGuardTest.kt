@@ -59,37 +59,34 @@ class KafkaConnectionGuardTest {
 
     @Test
     fun `Failed 状态必须带出上一次的真实原因`() {
-        val text = connectionRefusalText(
+        val error = connectionRefusal(
             ctx(ConnectionStatus.Failed, lastError = "Timed out waiting for a node assignment"),
         )
-        assertTrue(text.contains("上次请求失败"), "要说明是「上次请求」而不是笼统未连接：$text")
-        assertTrue(
-            text.contains("Timed out waiting for a node assignment"),
-            "真实原因必须透出来（否则用户不知道去查什么）：$text",
-        )
+        assertEquals("kafka_err_refusal_failed", error.errorKey)
+        // 真实原因经 args 透传（展示端 withArg 插值）。
+        assertEquals(listOf("Timed out waiting for a node assignment"), error.args)
     }
 
     @Test
     fun `Failed 但原因是空的也要可读`() {
-        val text = connectionRefusalText(ctx(ConnectionStatus.Failed))
-        assertTrue(text.contains("原因未知"), "不能出现空括号：$text")
+        val error = connectionRefusal(ctx(ConnectionStatus.Failed))
+        assertEquals(listOf("unknown reason"), error.args, "不能出现空参数：${error.args}")
     }
 
     @Test
     fun `Connecting 提示等待而不是报错`() {
-        val text = connectionRefusalText(ctx(ConnectionStatus.Connecting))
-        assertTrue(text.contains("正在连接"), "连接中应该提示等待：$text")
+        assertEquals("kafka_err_refusal_connecting", connectionRefusal(ctx(ConnectionStatus.Connecting)).errorKey)
+        assertTrue(connectionRefusal(ctx(ConnectionStatus.Connecting)).message!!.contains("Connecting"), "连接中应该提示等待")
     }
 
     @Test
     fun `Disconnected 指去侧边栏`() {
-        val text = connectionRefusalText(ctx(ConnectionStatus.Disconnected))
-        assertTrue(text.contains("侧栏"), "未连接应该指去侧栏：$text")
+        assertTrue(connectionRefusal(ctx(ConnectionStatus.Disconnected)).message!!.contains("sidebar"), "未连接应该指去侧栏")
     }
 
     @Test
     fun `四种状态的文案互不相同`() {
-        val texts = ConnectionStatus.entries.map { connectionRefusalText(ctx(it)) }
+        val texts = ConnectionStatus.entries.map { connectionRefusal(ctx(it)).message!! }
         assertEquals(
             ConnectionStatus.entries.size,
             texts.toSet().size,

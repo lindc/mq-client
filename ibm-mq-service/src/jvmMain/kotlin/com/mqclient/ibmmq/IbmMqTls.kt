@@ -1,5 +1,6 @@
 package com.mqclient.ibmmq
 
+import com.mqclient.core.ServiceException
 import java.io.File
 import java.io.FileInputStream
 import java.nio.file.Files
@@ -187,21 +188,30 @@ internal object IbmMqTls {
     private fun loadStore(path: String, type: String, password: String): KeyStore {
         val file = File(path)
         if (!file.isFile) {
-            throw IllegalStateException("证书文件不存在：$path")
+            throw ServiceException(
+                "ibm_mq_err_cert_file_missing",
+                args = listOf(path),
+                fallbackMessage = "Certificate file not found: %1\$s",
+            )
         }
         val store = try {
             KeyStore.getInstance(type)
         } catch (e: KeyStoreException) {
-            throw IllegalStateException("不支持的证书库类型 $type：$path", e)
+            throw ServiceException(
+                "ibm_mq_err_keystore_type_unsupported",
+                args = listOf(type, path),
+                fallbackMessage = "Unsupported keystore type %1\$s: %2\$s", cause = e,
+            )
         }
         try {
             FileInputStream(file).use { store.load(it, password.toCharArray()) }
         } catch (e: Exception) {
             // 口令错 / 内容与扩展名不符 / 文件被删都会落到这里。PKCS12 把「口令错」也报成
             // IOException，所以不要按异常类型分类，统一给「检查文件格式与口令」这句话。
-            throw IllegalStateException(
-                "证书库加载失败（检查文件格式与口令）：$path（${e.message ?: e::class.simpleName}）",
-                e,
+            throw ServiceException(
+                "ibm_mq_err_keystore_load_failed",
+                args = listOf(path, e.message ?: e::class.simpleName ?: "unknown"),
+                fallbackMessage = "Failed to load the keystore (check format and password): %1\$s (%2\$s)", cause = e,
             )
         }
         return store
@@ -213,7 +223,11 @@ internal object IbmMqTls {
             runCatching { store.isKeyEntry(alias) }.getOrDefault(false)
         }
         if (!hasKey) {
-            throw IllegalStateException("Keystore 中没有私钥条目（双向认证需要含私钥的证书库）：$path")
+            throw ServiceException(
+                "ibm_mq_err_keystore_no_private_key",
+                args = listOf(path),
+                fallbackMessage = "No private key entry in the keystore (mutual TLS requires a keystore with a private key): %1\$s",
+            )
         }
     }
 
@@ -238,9 +252,10 @@ internal object IbmMqTls {
                 }
             }
         } catch (e: Exception) {
-            throw IllegalStateException(
-                "Keystore 私钥导出失败（私钥口令通常与库口令一致）：${e.message ?: e::class.simpleName}",
-                e,
+            throw ServiceException(
+                "ibm_mq_err_key_export_failed",
+                args = listOf(e.message ?: e::class.simpleName ?: "unknown"),
+                fallbackMessage = "Failed to export the private key (the key password usually matches the keystore password): %1\$s", cause = e,
             )
         }
         val file = Files.createTempFile("mqclient-ibmmq-keystore-", ".jks").toFile()
@@ -251,7 +266,11 @@ internal object IbmMqTls {
             file.outputStream().use { target.store(it, password.toCharArray()) }
         } catch (e: Exception) {
             runCatching { Files.deleteIfExists(file.toPath()) }
-            throw IllegalStateException("临时 keystore 写入失败：${e.message ?: e::class.simpleName}", e)
+            throw ServiceException(
+                "ibm_mq_err_temp_keystore_write_failed",
+                args = listOf(e.message ?: e::class.simpleName ?: "unknown"),
+                fallbackMessage = "Failed to write the temporary keystore: %1\$s", cause = e,
+            )
         }
         return file
     }

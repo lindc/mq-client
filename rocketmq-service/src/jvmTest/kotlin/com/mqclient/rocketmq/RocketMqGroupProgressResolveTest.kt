@@ -135,8 +135,9 @@ class RocketMqGroupProgressResolveTest {
             brokerAddrs = { listOf("broker-a") },
         )
         assertEquals(RocketMqProgressState.FAILED, outcome.state)
+        assertEquals("rocketmq_err_progress_timeout", outcome.errorKey)
         assertTrue(
-            outcome.error!!.contains("超时"),
+            outcome.error!!.contains("timed out"),
             "超时要单独说清楚，不能混成「查询失败」：${outcome.error}",
         )
         assertEquals(0, brokerCalls)

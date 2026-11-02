@@ -1,5 +1,6 @@
 package com.mqclient.aiservice
 
+import com.mqclient.core.ServiceException
 import com.mqclient.core.AiConfig
 import com.mqclient.core.AiConnection
 import com.mqclient.core.AiProviderConfig
@@ -42,9 +43,9 @@ object AiConnectionRepository {
         val config = ConfigStore.loadConfigOrNull()
         if (config != null) return Result.success(config.ai.connections)
 
-        val failure = IllegalStateException("config.toml 存在但读不出来（AI 连接没有丢，只是这次没读到）")
+        val failure = IllegalStateException("config.toml exists but could not be read (the AI connections are safe — just not loaded this time)")
         CoreModule.reportError(
-            message = failure.message ?: "读取 AI 连接失败",
+            message = failure.message ?: "Failed to read AI connections",
             source = "core.ai",
             error = failure,
         )
@@ -74,7 +75,13 @@ object AiConnectionRepository {
     fun create(connection: AiConnection): Result<Unit> =
         ConfigStore.editConfig { config ->
             if (config.ai.connections.any { it.id == connection.id }) {
-                Result.failure(IllegalArgumentException("连接 id '${connection.id}' 已存在，改用 update()"))
+                Result.failure(
+                    ServiceException(
+                        "ai_err_conn_exists",
+                        args = listOf(connection.id),
+                        fallbackMessage = "Connection id '%1\$s' already exists — use update() instead",
+                    ),
+                )
             } else {
                 Result.success(
                     config.copy(ai = config.ai.copy(connections = config.ai.connections + connection)),
@@ -89,7 +96,13 @@ object AiConnectionRepository {
     fun setActive(id: String): Result<Unit> =
         ConfigStore.editConfig { config ->
             if (config.ai.connections.none { it.id == id }) {
-                Result.failure(NoSuchElementException("连接 '$id' 不存在"))
+                Result.failure(
+                    ServiceException(
+                        "ai_err_conn_not_found",
+                        args = listOf(id),
+                        fallbackMessage = "Connection '%1\$s' does not exist",
+                    ),
+                )
             } else {
                 Result.success(config.copy(ai = config.ai.copy(activeConnectionId = id)))
             }
@@ -100,7 +113,13 @@ object AiConnectionRepository {
         ConfigStore.editConfig { config ->
             val index = config.ai.connections.indexOfFirst { it.id == connection.id }
             if (index < 0) {
-                Result.failure(NoSuchElementException("连接 '${connection.id}' 不存在，改用 create()"))
+                Result.failure(
+                    ServiceException(
+                        "ai_err_conn_not_found",
+                        args = listOf(connection.id),
+                        fallbackMessage = "Connection '%1\$s' does not exist — use create() instead",
+                    ),
+                )
             } else {
                 Result.success(
                     config.copy(
@@ -117,7 +136,13 @@ object AiConnectionRepository {
         ConfigStore.editConfig { config ->
             val ai = config.ai
             if (ai.connections.none { it.id == id }) {
-                Result.failure(NoSuchElementException("连接 '$id' 不存在"))
+                Result.failure(
+                    ServiceException(
+                        "ai_err_conn_not_found",
+                        args = listOf(id),
+                        fallbackMessage = "Connection '%1\$s' does not exist",
+                    ),
+                )
             } else {
                 Result.success(
                     config.copy(

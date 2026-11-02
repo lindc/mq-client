@@ -164,9 +164,14 @@ data class RocketMqGroupDetailSnapshot(
      * 进度查询失败的原始摘要（只对 [RocketMqProgressState.FAILED] 有意义）。
      *
      * 17 / 206 / 权限各有专属解释，不需要它；**未知**失败必须让用户看见到底报了什么，
-     * 否则「查询失败」是句空话 —— 这正是本次要修的问题。
+     * 否则「查询失败」是句空话 —— 这正是本次要修的问题。英文兜底文案；展示端优先用
+     * [progressErrorKey] 翻译。
      */
     val progressError: String? = null,
+    /** 进度失败的 i18n 错误键（null = 无键，直接展示 [progressError]）。 */
+    val progressErrorKey: String? = null,
+    /** [progressErrorKey] 的模板参数。 */
+    val progressErrorArgs: List<Any> = emptyList(),
     /** 位点数据的来源（见 [RocketMqProgressSource]）；仅 [RocketMqProgressState.OK] 有意义。 */
     val progressSource: RocketMqProgressSource = RocketMqProgressSource.GROUP,
     /** 消费进度行（按 topic / broker / queueId 排序）；仅 [RocketMqProgressState.OK] 有值。 */

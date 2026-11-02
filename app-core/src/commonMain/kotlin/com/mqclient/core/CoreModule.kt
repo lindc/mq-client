@@ -63,7 +63,7 @@ object CoreModule {
 
     /** 应用级事件总线。在 [initialize] 之前访问会抛 [IllegalStateException]。 */
     val eventBus: EventBus
-        get() = bus ?: error("CoreModule.initialize(scope) 必须先于 CoreModule.eventBus 调用")
+        get() = bus ?: error("CoreModule.initialize(scope) must be called before CoreModule.eventBus")
 
     /**
      * [eventBus] 的「没有就给 null」版本：调用点只是**顺带**广播时用它 ——
@@ -74,7 +74,7 @@ object CoreModule {
 
     /** 应用级 scope —— 所有模块 scope 的父节点。 */
     val scope: CoroutineScope
-        get() = appScope ?: error("CoreModule.initialize(scope) 必须先于 CoreModule.scope 调用")
+        get() = appScope ?: error("CoreModule.initialize(scope) must be called before CoreModule.scope")
 
     /**
      * 应用级定时任务调度器 —— 全进程一个实例，所有模块的任务都登记在它这里，
@@ -84,7 +84,7 @@ object CoreModule {
      * [JobScheduler] 的类注释；任务的注册与取消时机由模块自己定（比如连接建立 / 删除时）。
      */
     val jobScheduler: JobScheduler
-        get() = scheduler ?: error("CoreModule.initialize(scope) 必须先于 CoreModule.jobScheduler 调用")
+        get() = scheduler ?: error("CoreModule.initialize(scope) must be called before CoreModule.jobScheduler")
 
     /** 是否已经初始化过。 */
     val isInitialized: Boolean get() = bus != null

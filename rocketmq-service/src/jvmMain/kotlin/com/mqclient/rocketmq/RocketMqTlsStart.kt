@@ -1,5 +1,6 @@
 package com.mqclient.rocketmq
 
+import com.mqclient.core.ServiceException
 import java.nio.file.Path
 import java.util.UUID
 import kotlinx.coroutines.sync.Mutex
@@ -106,8 +107,10 @@ internal class RocketMqTlsStart(private val config: RocketMqConfig) : AutoClosea
                 config.keyStorePath.trim().takeIf(String::isNotEmpty)
                     ?.let { keyPath ->
                         if (isPemFile(keyPath)) {
-                            throw IllegalStateException(
-                                "Keystore 仅支持 JKS/P12 证书库（需含私钥）；PEM 证书请直接用作 Truststore：$keyPath",
+                            throw ServiceException(
+                                "rocketmq_err_keystore_pem_unsupported",
+                                args = listOf(keyPath),
+                                fallbackMessage = "The keystore supports JKS/P12 only (must contain a private key); use the PEM certificate directly as the Truststore: %1\$s",
                             )
                         }
                         exportKeyEntryToPem(keyPath, config.keyStorePassword)

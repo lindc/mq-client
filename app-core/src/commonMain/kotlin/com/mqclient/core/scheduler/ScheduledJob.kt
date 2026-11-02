@@ -38,9 +38,9 @@ data class ScheduledJob(
 ) {
 
     init {
-        require(id.isNotBlank()) { "ScheduledJob.id 不能为空白：它同时是取消任务用的键" }
-        require(intervalMs > 0L) { "ScheduledJob('$id').intervalMs 必须为正数，否则任务会变成忙等" }
-        require(initialDelayMs >= 0L) { "ScheduledJob('$id').initialDelayMs 不能为负数" }
+        require(id.isNotBlank()) { "ScheduledJob.id must not be blank: it is also the key used to cancel the job" }
+        require(intervalMs > 0L) { "ScheduledJob('$id').intervalMs must be positive, otherwise the job busy-waits" }
+        require(initialDelayMs >= 0L) { "ScheduledJob('$id').initialDelayMs must not be negative" }
     }
 
     companion object {

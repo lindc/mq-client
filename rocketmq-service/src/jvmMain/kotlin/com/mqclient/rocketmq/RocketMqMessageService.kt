@@ -1,5 +1,6 @@
 package com.mqclient.rocketmq
 
+import com.mqclient.core.ServiceException
 import com.mqclient.message.interpreter.isProbablyBinary
 import com.mqclient.message.interpreter.previewTextOf
 import kotlinx.coroutines.CancellationException
@@ -106,7 +107,10 @@ class RocketMqMessageService {
     suspend fun fetchQueueIds(connectionId: String, topic: String): List<Int> {
         val ctx = connectedContext(connectionId)
         val adminClient = ctx.adminClient
-            ?: throw IllegalStateException("连接未建立或已断开，无法读写消息")
+            ?: throw ServiceException(
+                "rocketmq_err_not_connected_messages",
+                fallbackMessage = "Connection not established or already lost; cannot read or send messages",
+            )
         val route = adminClient.fetchTopicRoute(topic)
         val maxReadQueues = route.queueDatas
             .maxOfOrNull { it.readQueueNums }
@@ -141,7 +145,11 @@ class RocketMqMessageService {
                 val consumer = clients.pullConsumer()
                 val mq = consumer.fetchSubscribeMessageQueues(topic)
                     .firstOrNull { it.queueId == queueId }
-                    ?: throw IllegalStateException("队列 $queueId 不存在（topic 路由可能已变化，请重新「读取」）")
+                    ?: throw ServiceException(
+                        "rocketmq_err_queue_not_found",
+                        args = listOf(queueId),
+                        fallbackMessage = "Queue %1\$d not found (topic routing may have changed — click Read to refresh)",
+                    )
                 // 显式超时：4 参重载用 getConsumerPullTimeoutMillis()（默认 10 秒）
                 // 且内部会重试，而这条调用**全程持着共享 consumer 的锁** ——
                 // broker 慢一次，之后的每次读取都要排在它后面（「越开越慢」）。
@@ -220,7 +228,7 @@ class RocketMqMessageService {
                 } catch (cancellation: CancellationException) {
                     throw cancellation
                 } catch (error: Exception) {
-                    RocketMqSendResult.failure(sendErrorMessage(error, timeoutMs))
+                    RocketMqSendResult.failure(sendError(error, timeoutMs))
                 }
                 // 不 shutdown：producer 是连接级共享句柄，随连接断开 / 程序退出统一关。
             }
@@ -247,10 +255,11 @@ class RocketMqMessageService {
     private fun connectedContext(connectionId: String): RocketMqConnectionContext =
         RocketMqModule.connectionOrNull(connectionId)
             ?.takeIf { it.adminClient != null }
-            ?: throw IllegalStateException(
-                RocketMqModule.connectionOrNull(connectionId)?.let { connectionRefusalText(it) }
-                    ?: "连接未登记：该连接已被删除或模块未初始化",
-            )
+            ?: throw RocketMqModule.connectionOrNull(connectionId)?.let { connectionRefusal(it) }
+                ?: ServiceException(
+                    "rocketmq_err_not_registered",
+                    fallbackMessage = "Connection not registered: it was deleted or the module is not initialized",
+                )
 
     /** `MessageExt` → 浏览/详情一体模型（body 全量随行，见 [RocketMqMessage] KDoc）。 */
     private fun MessageExt.toMessage(): RocketMqMessage {
@@ -288,17 +297,39 @@ class RocketMqMessageService {
     }
 
     /** 给失败结果的错误原因：常见发送异常 → 人类可读文案（UI 直出）。 */
-    private fun sendErrorMessage(error: Throwable, timeoutMs: Long): String = when (error) {
+    /**
+     * 发送失败 → [ServiceException]（errorKey = `rocketmq_err_send_*`，展示端在
+     * 渲染时点翻译；message 是英文兜底）。经 [RocketMqSendResult.failure] 带给 UI。
+     */
+    private fun sendError(error: Throwable, timeoutMs: Long): ServiceException = when (error) {
         is org.apache.rocketmq.client.exception.MQClientException ->
-            "发送失败：" + (error.errorMessage ?: error.message ?: error::class.simpleName ?: "unknown") +
-                "（若提示找不到路由，检查 topic 是否存在 / NameServer 是否可达）"
+            ServiceException(
+                "rocketmq_err_send_client_error",
+                args = listOf(error.errorMessage ?: error.message ?: error::class.simpleName ?: "unknown"),
+                fallbackMessage = "Send failed: %1\$s (if the route is missing, check that the topic exists and the NameServer is reachable)",
+            )
         is org.apache.rocketmq.client.exception.MQBrokerException ->
-            "Broker 拒绝（code " + error.responseCode + "）：" +
-                (error.errorMessage ?: error.message ?: "unknown")
+            ServiceException(
+                "rocketmq_err_send_broker_rejected",
+                args = listOf(error.responseCode, error.errorMessage ?: error.message ?: "unknown"),
+                fallbackMessage = "Broker rejected (code %1\$d): %2\$s",
+            )
         is RemotingTimeoutException ->
-            "发送超时（" + timeoutMs / 1000 + "s）：broker 未在时限内确认"
+            ServiceException(
+                "rocketmq_err_send_timeout",
+                args = listOf(timeoutMs / 1000),
+                fallbackMessage = "Send timed out (%1\$ss): the broker did not acknowledge in time",
+            )
         is RemotingException ->
-            "发送失败（网络异常）：" + (error.message ?: error::class.simpleName ?: "unknown")
-        else -> error.message ?: error::class.simpleName ?: "unknown"
+            ServiceException(
+                "rocketmq_err_send_network",
+                args = listOf(error.message ?: error::class.simpleName ?: "unknown"),
+                fallbackMessage = "Send failed (network error): %1\$s",
+            )
+        else -> ServiceException(
+            "rocketmq_err_send_client_error",
+            args = listOf(error.message ?: error::class.simpleName ?: "unknown"),
+            fallbackMessage = "Send failed: %1\$s",
+        )
     }
 }

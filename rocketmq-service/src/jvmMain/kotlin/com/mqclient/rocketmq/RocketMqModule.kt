@@ -1,6 +1,7 @@
 package com.mqclient.rocketmq
 
 import com.mqclient.core.ConnectionStore
+import com.mqclient.core.ServiceException
 import com.mqclient.core.event.EventNames
 import com.mqclient.core.event.getString
 import com.mqclient.core.log.Log
@@ -218,7 +219,10 @@ object RocketMqModule {
      */
     suspend fun testConnection(config: RocketMqConfig) {
         val connectionManager = manager
-            ?: throw IllegalStateException("RocketMQ 模块未初始化，无法测试连接")
+            ?: throw ServiceException(
+            "rocketmq_err_module_not_initialized",
+            fallbackMessage = "RocketMQ module not initialized; cannot test the connection",
+        )
         connectionManager.testConnection(config)
     }
 
@@ -267,7 +271,7 @@ object RocketMqModule {
                 payload = mapOf(
                     "connectionId" to connectionId,
                     "success" to false,
-                    "message" to "连接 '$connectionId' 未登记",
+                    "message" to "Connection '$connectionId' is not registered",
                     "durationMs" to 0L,
                 ),
             )

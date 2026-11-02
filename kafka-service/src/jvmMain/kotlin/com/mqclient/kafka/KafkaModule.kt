@@ -1,6 +1,7 @@
 package com.mqclient.kafka
 
 import com.mqclient.core.ConnectionStore
+import com.mqclient.core.ServiceException
 import com.mqclient.core.event.EventNames
 import com.mqclient.core.event.getString
 import com.mqclient.core.log.Log
@@ -235,7 +236,10 @@ object KafkaModule {
      */
     suspend fun testConnection(config: KafkaConfig) {
         val connectionManager = manager
-            ?: throw IllegalStateException("Kafka 模块未初始化，无法测试连接")
+            ?: throw ServiceException(
+            "kafka_err_module_not_initialized",
+            fallbackMessage = "Kafka module not initialized; cannot test the connection",
+        )
         connectionManager.testConnection(config)
     }
 
@@ -291,7 +295,7 @@ object KafkaModule {
                 payload = mapOf(
                     "connectionId" to connectionId,
                     "success" to false,
-                    "message" to "连接 '$connectionId' 未登记",
+                    "message" to "Connection '$connectionId' is not registered",
                     "durationMs" to 0L,
                 ),
             )

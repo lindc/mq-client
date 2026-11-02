@@ -2,6 +2,7 @@ package com.mqclient.ibmmq
 
 import com.ibm.mq.MQQueueManager
 import com.ibm.mq.constants.MQConstants
+import com.mqclient.core.ServiceException
 import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.cache.CacheManager
@@ -296,7 +297,11 @@ class IbmMQService(private val context: ServiceContext) {
         // null 在轮询里意味着「缓存还没扫到该通道，继续等」，会让一次真实失败
         // 一直轮询到超时、且丢掉原因。
         val ctx = IbmMQModule.connectionOrNull(connectionId)
-            ?: throw IllegalStateException("连接 $connectionId 未建立，无法查询通道状态")
+            ?: throw ServiceException(
+            "ibm_mq_err_not_connected",
+            args = listOf(connectionId),
+            fallbackMessage = "Connection %1\$s is not established",
+            )
         return ctx.mqiLock.withLock { pollChannelStatusLocked(connectionId, name) }
     }
 
@@ -351,7 +356,11 @@ class IbmMQService(private val context: ServiceContext) {
     suspend fun pollListenerStatus(connectionId: String, name: String): String? {
         // 同 pollChannelStatus：连接未登记要抛出，不能退化成「状态未知」。
         val ctx = IbmMQModule.connectionOrNull(connectionId)
-            ?: throw IllegalStateException("连接 $connectionId 未建立，无法查询监听器状态")
+            ?: throw ServiceException(
+            "ibm_mq_err_not_connected",
+            args = listOf(connectionId),
+            fallbackMessage = "Connection %1\$s is not established",
+            )
         return ctx.mqiLock.withLock { pollListenerStatusLocked(connectionId, name) }
     }
 
@@ -403,7 +412,11 @@ class IbmMQService(private val context: ServiceContext) {
      */
     suspend fun getChannelStatus(connectionId: String, name: String): ChannelStatusDetail? {
         val ctx = IbmMQModule.connectionOrNull(connectionId)
-            ?: throw IllegalStateException("连接 $connectionId 未建立，无法查询通道状态")
+            ?: throw ServiceException(
+            "ibm_mq_err_not_connected",
+            args = listOf(connectionId),
+            fallbackMessage = "Connection %1\$s is not established",
+            )
         return ctx.mqiLock.withLock { objectScanner.queryChannelStatusDetail(connectionId, name) }
     }
 
@@ -419,13 +432,21 @@ class IbmMQService(private val context: ServiceContext) {
         val ctx = IbmMQModule.connectionOrNull(connectionId)
             ?: run {
                 ibmMqLog.warn("browse session aborted (not connected): connection=$connectionId queue=$queueName")
-                throw IllegalStateException("连接 $connectionId 未建立，无法浏览队列消息")
+                throw ServiceException(
+            "ibm_mq_err_not_connected",
+            args = listOf(connectionId),
+            fallbackMessage = "Connection %1\$s is not established",
+            )
             }
         return ctx.mqiLock.withLock {
             val manager = ctx.mqConnection
                 ?: run {
                     ibmMqLog.warn("browse session aborted (handle released): connection=$connectionId queue=$queueName")
-                    throw IllegalStateException("连接 $connectionId 未建立，无法浏览队列消息")
+                    throw ServiceException(
+            "ibm_mq_err_not_connected",
+            args = listOf(connectionId),
+            fallbackMessage = "Connection %1\$s is not established",
+            )
                 }
             MessageBrowseSession.open(manager, queueName, ctx.mqiLock)
         }
@@ -434,7 +455,11 @@ class IbmMQService(private val context: ServiceContext) {
     /** 单队列实时 CURDEPTH（PCF INQUIRE_Q 只点名 MQIA_CURRENT_Q_DEPTH，不读缓存）。 */
     suspend fun getQueueDepth(connectionId: String, queueName: String): Int {
         val ctx = IbmMQModule.connectionOrNull(connectionId)
-            ?: throw IllegalStateException("连接 $connectionId 未建立，无法查询队列深度")
+            ?: throw ServiceException(
+            "ibm_mq_err_not_connected",
+            args = listOf(connectionId),
+            fallbackMessage = "Connection %1\$s is not established",
+            )
         return ctx.mqiLock.withLock { objectScanner.queryQueueDepth(connectionId, queueName) }
     }
 
@@ -450,7 +475,11 @@ class IbmMQService(private val context: ServiceContext) {
      */
     suspend fun getClusterRelations(connectionId: String): ClusterRelations {
         val ctx = IbmMQModule.connectionOrNull(connectionId)
-            ?: throw IllegalStateException("连接 $connectionId 未建立，无法查询集群关系")
+            ?: throw ServiceException(
+            "ibm_mq_err_not_connected",
+            args = listOf(connectionId),
+            fallbackMessage = "Connection %1\$s is not established",
+            )
         return ctx.mqiLock.withLock { getClusterRelationsLocked(connectionId) }
     }
 
@@ -487,12 +516,12 @@ class IbmMQService(private val context: ServiceContext) {
         val ctx = IbmMQModule.connectionOrNull(connectionId)
             ?: run {
                 ibmMqLog.warn("msg download aborted (not connected): connection=$connectionId queue=$queueName")
-                return MessageOperationResult.failure(null, "连接 $connectionId 未建立")
+                return MessageOperationResult.failure(null, "Connection \$connectionId is not established")
             }
         return ctx.mqiLock.withLock {
             // 等锁期间连接可能已被断开：锁内再读一次句柄，不拿废句柄去 browse。
             val manager = ctx.mqConnection
-                ?: return@withLock MessageOperationResult.failure(null, "连接 $connectionId 未建立")
+                ?: return@withLock MessageOperationResult.failure(null, "Connection \$connectionId is not established")
             downloadMessageBody(manager, queueName, messageIdHex)
         }
     }
@@ -505,11 +534,11 @@ class IbmMQService(private val context: ServiceContext) {
         val ctx = IbmMQModule.connectionOrNull(connectionId)
             ?: run {
                 ibmMqLog.warn("msg detail aborted (not connected): connection=$connectionId queue=$queueName")
-                return MessageOperationResult.failure(null, "连接 $connectionId 未建立")
+                return MessageOperationResult.failure(null, "Connection \$connectionId is not established")
             }
         return ctx.mqiLock.withLock {
             val manager = ctx.mqConnection
-                ?: return@withLock MessageOperationResult.failure(null, "连接 $connectionId 未建立")
+                ?: return@withLock MessageOperationResult.failure(null, "Connection \$connectionId is not established")
             getMessageDetail(manager, queueName, messageIdHex)
         }
     }
@@ -522,11 +551,11 @@ class IbmMQService(private val context: ServiceContext) {
         val ctx = IbmMQModule.connectionOrNull(connectionId)
             ?: run {
                 ibmMqLog.warn("msg delete aborted (not connected): connection=$connectionId queue=$queueName")
-                return MessageOperationResult.failure(null, "连接 $connectionId 未建立")
+                return MessageOperationResult.failure(null, "Connection \$connectionId is not established")
             }
         return ctx.mqiLock.withLock {
             val manager = ctx.mqConnection
-                ?: return@withLock MessageOperationResult.failure(null, "连接 $connectionId 未建立")
+                ?: return@withLock MessageOperationResult.failure(null, "Connection \$connectionId is not established")
             deleteMessageById(manager, queueName, messageIdHex)
         }
     }
@@ -554,11 +583,11 @@ class IbmMQService(private val context: ServiceContext) {
         val ctx = IbmMQModule.connectionOrNull(connectionId)
             ?: run {
                 ibmMqLog.warn("send aborted (not connected): connection=$connectionId queue=$queueName")
-                return SendResult.failure(null, "连接 $connectionId 未建立，无法发送消息")
+                return SendResult.failure(null, "Connection $connectionId is not established")
             }
         return ctx.mqiLock.withLock {
             val manager = ctx.mqConnection
-                ?: return@withLock SendResult.failure(null, "连接 $connectionId 未建立，无法发送消息")
+                ?: return@withLock SendResult.failure(null, "Connection \$connectionId is not established")
             sendMessageToQueue(
                 manager = manager,
                 queueName = queueName,
@@ -909,7 +938,7 @@ class IbmMQService(private val context: ServiceContext) {
         context.eventBus.emit(
             name = EventNames.ERROR_OCCURRED,
             payload = mapOf(
-                "message" to "释放资源 '$key' 失败：${error.message ?: error::class.simpleName ?: "unknown"}",
+                "message" to "Failed to release resource '$key': ${error.message ?: error::class.simpleName ?: "unknown"}",
                 "moduleId" to context.moduleId,
                 "error" to error::class.simpleName,
             ),
@@ -946,7 +975,11 @@ class IbmMQService(private val context: ServiceContext) {
      */
     suspend fun queryQmgrSnapshot(connectionId: String): MqObjectSnapshot? {
         val ctx = IbmMQModule.connectionOrNull(connectionId)
-            ?: throw IllegalStateException("连接 $connectionId 未建立，无法查询队列管理器属性")
+            ?: throw ServiceException(
+            "ibm_mq_err_not_connected",
+            args = listOf(connectionId),
+            fallbackMessage = "Connection %1\$s is not established",
+            )
         return ctx.mqiLock.withLock { objectScanner.scanQueueManager(connectionId) }
     }
 }

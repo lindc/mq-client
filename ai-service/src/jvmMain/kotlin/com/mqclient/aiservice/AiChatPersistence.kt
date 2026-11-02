@@ -41,7 +41,7 @@ object AiChatPersistence {
         } catch (cancellation: CancellationException) {
             throw cancellation
         } catch (error: Throwable) {
-            CoreModule.reportError(message = "AI 数据库初始化失败，对话不落库", source = SOURCE, error = error)
+            CoreModule.reportError(message = "AI chat database init failed — chat history will not be persisted", source = SOURCE, error = error)
             return emptyList()
         }
         try {
@@ -49,7 +49,7 @@ object AiChatPersistence {
         } catch (cancellation: CancellationException) {
             throw cancellation
         } catch (error: Throwable) {
-            CoreModule.reportError(message = "AI 对话清理失败", source = SOURCE, error = error)
+            CoreModule.reportError(message = "AI chat retention cleanup failed", source = SOURCE, error = error)
         }
 
         val snapshotHandler = AiConnectionSnapshotHandler(AiConnectionSnapshotRepository)

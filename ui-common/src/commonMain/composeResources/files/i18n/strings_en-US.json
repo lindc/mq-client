@@ -124,6 +124,10 @@
   "common_add": "Add",
   "common_search": "Search",
   "common_retry": "Retry",
+  "err_status_connected": "Connected",
+  "err_status_connecting": "Connecting…",
+  "err_status_failed": "Connection failed",
+  "err_status_disconnected": "Disconnected",
   "settings_save_failed": "Failed to save: could not write config.json (%1$s)",
   "menu_connect": "Connect",
   "menu_connecting": "Connecting...",
@@ -218,5 +222,9 @@
   "msg_detail_hex": "Hex",
   "msg_detail_download": "Download message",
   "msg_detail_saved": "Saved to %1$s",
-  "msg_detail_save_failed": "Save failed: %1$s"
+  "msg_detail_save_failed": "Save failed: %1$s",
+  "err_conn_already_exists": "Connection id '%1$s' already exists — edit it instead",
+  "err_conn_service_id_immutable": "The protocol of connection '%1$s' cannot change (%2$s → %3$s); delete and re-create it",
+  "ai_err_conn_exists": "AI connection id '%1$s' already exists — edit it instead",
+  "ai_err_conn_not_found": "AI connection '%1$s' does not exist"
 }

@@ -56,7 +56,7 @@ val aiJson: Json = Json {
  */
 fun AiConnection.baseUrlOrThrow(): String {
     val url = baseUrl.trim().trimEnd('/')
-    if (url.isEmpty()) throw AiException("连接「$name」还没填接口地址（baseUrl）")
+    if (url.isEmpty()) throw AiException("Connection \"$name\" has no base URL configured (baseUrl)")
     return url
 }
 
@@ -72,7 +72,7 @@ suspend fun HttpResponse.throwIfNotSuccess(provider: String) {
     val body = runCatchingCancellable { bodyAsText() }.getOrNull().orEmpty().trim()
     val detail = extractErrorMessage(body) ?: body.take(400)
     throw AiException(
-        message = "$provider 请求失败：HTTP ${status.value}" + if (detail.isNotEmpty()) " — $detail" else "",
+        message = "$provider request failed: HTTP ${status.value}" + if (detail.isNotEmpty()) " — $detail" else "",
         statusCode = status.value,
     )
 }
@@ -129,7 +129,7 @@ suspend fun <T : Any> withNonStreamingDeadline(
     } catch (cancellation: CancellationException) {
         if (deadlineHit.isCompleted) {
             throw AiException(
-                "请求超时（${timeoutMs / 1000}s）：连接「$connectionName」长时间没有完整响应",
+                "Request timed out (${timeoutMs / 1000}s): connection to \"$connectionName\" got no complete response",
                 cause = cancellation,
             )
         }

@@ -17,7 +17,7 @@ import com.mqclient.core.spi.ServiceContext
 class AnthropicServiceAdapter : ServiceAdapter {
     override val id = AnthropicProviders.ANTHROPIC.id
     override val name = "Anthropic"
-    override val description = "Anthropic Messages API 协议的 AI 服务（Claude 系列）"
+    override val description = "AI services speaking the Anthropic Messages API (Claude model family)"
     override val protocol = "Anthropic REST + SSE"
     override val category = "AI"
 

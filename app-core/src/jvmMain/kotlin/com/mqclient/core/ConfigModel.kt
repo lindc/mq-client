@@ -214,13 +214,17 @@ data class ConnectionInfo(
     val endpoint: String get() = "$host:$port"
 }
 
-/** Live state of a connection, as shown by the sidebar's status dot and label. */
+/** Live state of a connection, as shown by the sidebar's status dot and label.
+ *
+ * 展示文案走 i18n 键（`err_status_*`，ui-common 公共表）—— 核心层不产出面向
+ * 用户的文案，侧栏在渲染时点经 stringResource 翻译。
+ */
 @Serializable
-enum class ConnectionStatus(val label: String) {
-    Connected("已连接"),
-    Connecting("连接中..."),
-    Failed("连接失败"),
-    Disconnected("未连接"),
+enum class ConnectionStatus {
+    Connected,
+    Connecting,
+    Failed,
+    Disconnected,
 }
 
 /**

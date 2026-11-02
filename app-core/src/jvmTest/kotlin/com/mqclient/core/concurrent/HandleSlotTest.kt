@@ -61,7 +61,7 @@ class HandleSlotTest {
             slot.acquire { Handle(2) }
         }
         assertTrue(
-            error.message.orEmpty().contains("已断开"),
+            error.message.orEmpty().contains("disconnected"),
             "断开后创建必须被拒，实际=${error.message}",
         )
     }

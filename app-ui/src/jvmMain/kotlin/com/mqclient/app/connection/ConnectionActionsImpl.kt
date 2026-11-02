@@ -10,6 +10,7 @@ import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.CoreModule
 import com.mqclient.core.event.getString
+import com.mqclient.uicommon.i18n.userMessage
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.core.newConnectionId
 import kotlinx.coroutines.CompletableDeferred
@@ -118,7 +119,7 @@ class ConnectionActionsImpl(
             val result = withContext(Dispatchers.IO) { persistence.create(duplicate) }
             result.onFailure { failure ->
                 CoreModule.reportError(
-                    message = failure.message ?: failure::class.simpleName ?: "unknown",
+                    message = failure.userMessage(),
                     source = "app-ui",
                     error = failure,
                 )

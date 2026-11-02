@@ -279,7 +279,7 @@ object IbmMQModule {
                 payload = mapOf(
                     "connectionId" to connectionId,
                     "success" to false,
-                    "message" to "连接 '$connectionId' 未登记",
+                    "message" to "Connection '$connectionId' is not registered",
                     "durationMs" to 0L,
                 ),
             )

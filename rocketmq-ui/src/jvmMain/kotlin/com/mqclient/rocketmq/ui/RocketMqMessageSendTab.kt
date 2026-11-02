@@ -616,7 +616,7 @@ private fun SendTaskRow(task: RocketMqSendTask, state: RocketMqSendMessagesState
         sizeBytes = task.fileSize,
         status = task.status.toSharedStatus(),
         statusText = stringResource(task.status.i18nKey()),
-        errorMessage = task.errorMessage,
+        errorMessage = task.result.displayMessage().ifBlank { task.errorMessage },
         actionLabel = action?.first,
         onAction = action?.second,
     )
@@ -687,7 +687,7 @@ private fun SendBottomBar(
                         tint = FailedRed,
                     )
                     Text(
-                        text = outcome.errorMessage ?: "",
+                        text = outcome.displayMessage(),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                         maxLines = 2,
@@ -737,4 +737,16 @@ private fun SendBottomBar(
             }
         }
     }
+}
+
+/**
+ * 发送失败的用户可读文案：带键的结果（service 抛的 ServiceException 经
+ * [RocketMqSendResult.failure] 透传）在展示时点翻译，缺键回落英文兜底 errorMessage。
+ */
+private fun RocketMqSendResult?.displayMessage(): String {
+    val result = this ?: return ""
+    val key = result.errorKey ?: return result.errorMessage.orEmpty()
+    val resolved = stringResource(key)
+    return if (resolved != key) resolved.withArg(*result.errorArgs.toTypedArray())
+    else result.errorMessage.orEmpty()
 }

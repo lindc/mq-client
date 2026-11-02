@@ -1,5 +1,7 @@
 package com.mqclient.ibmmq.command
 
+import com.mqclient.core.ServiceException
+
 import com.ibm.mq.constants.MQConstants
 import com.ibm.mq.pcf.PCFException
 import com.ibm.mq.pcf.PCFMessage
@@ -34,7 +36,11 @@ class MqscPcfSender : PcfExecutor {
 
     override suspend fun executeMqsc(connectionId: String, command: String): List<String> {
         val ctx = IbmMQModule.connectionOrNull(connectionId)
-            ?: throw IllegalStateException("连接 $connectionId 未建立，无法执行 MQSC 命令")
+            ?: throw ServiceException(
+                "ibm_mq_err_not_connected",
+                args = listOf(connectionId),
+                fallbackMessage = "Connection %1\$s is not established",
+            )
         return ctx.mqiLock.withLock { executeMqscLocked(connectionId, command) }
     }
 
@@ -42,7 +48,11 @@ class MqscPcfSender : PcfExecutor {
     private suspend fun executeMqscLocked(connectionId: String, command: String): List<String> =
         withContext(Dispatchers.IO) {
             val manager = IbmMQModule.connectionOrNull(connectionId)?.mqConnection
-                ?: throw IllegalStateException("连接 $connectionId 未建立，无法执行 MQSC 命令")
+                ?: throw ServiceException(
+                "ibm_mq_err_not_connected",
+                args = listOf(connectionId),
+                fallbackMessage = "Connection %1\$s is not established",
+            )
             val agent = PCFMessageAgent(manager)
             try {
                 val request = escapeRequest(command)
@@ -89,7 +99,7 @@ class MqscPcfSender : PcfExecutor {
      */
     suspend fun diagnose(connectionId: String, queueName: String = "DEV.QUEUE.1"): String {
         val ctx = IbmMQModule.connectionOrNull(connectionId)
-            ?: return "诊断失败：连接 $connectionId 未建立"
+            ?: return "Diagnosis failed: connection $connectionId is not established"
         return ctx.mqiLock.withLock { diagnoseLocked(connectionId, queueName) }
     }
 
@@ -97,7 +107,7 @@ class MqscPcfSender : PcfExecutor {
     private suspend fun diagnoseLocked(connectionId: String, queueName: String): String =
         withContext(Dispatchers.IO) {
             val manager = IbmMQModule.connectionOrNull(connectionId)?.mqConnection
-                ?: return@withContext "诊断失败：连接 $connectionId 未建立"
+                ?: return@withContext "Diagnosis failed: connection $connectionId is not established"
             val agent = PCFMessageAgent(manager)
             try {
                 val request = PCFMessage(MQConstants.MQCMD_INQUIRE_Q).apply {
@@ -105,18 +115,18 @@ class MqscPcfSender : PcfExecutor {
                 }
                 val responses = agent.send(request)
                 buildString {
-                    appendLine("原生 PCF MQCMD_INQUIRE_Q('$queueName')：${responses.size} 条响应")
+                    appendLine("Native PCF MQCMD_INQUIRE_Q('$queueName'): ${responses.size} response(s)")
                     responses.forEach { response ->
                         appendLine("  reason=${response.reason} params=${response.parameterCount}")
                     }
-                    appendLine("→ 原生 PCF 正常，escape 请求构造问题（应已修复）；若失败请查命令服务器与权限。")
+                    appendLine("Native PCF works — the problem was in escape request construction (should be fixed). If it fails again, check the command server and permissions.")
                 }
             } catch (e: PCFException) {
                 buildString {
-                    appendLine("原生 PCF MQCMD_INQUIRE_Q 也失败：reasonCode=${e.reasonCode} " +
+                    appendLine("Native PCF MQCMD_INQUIRE_Q failed as well: reasonCode=${e.reasonCode} " +
                         "completionCode=${e.completionCode}")
-                    appendLine("→ 问题在环境层面：命令服务器未运行 / 无 SYSTEM.ADMIN.COMMAND.QUEUE 权限。")
-                    appendLine("   排查：QMGR 上 `DISPLAY QMGR CMDSERV`、队列深度、AMQERR01.LOG。")
+                    appendLine("Environment-level problem: command server not running, or no access to SYSTEM.ADMIN.COMMAND.QUEUE.")
+                    appendLine("   Check on the QMGR: `DISPLAY QMGR CMDSERV`, queue depth, AMQERR01.LOG.")
                 }
             } finally {
                 runCatching { agent.disconnect() }

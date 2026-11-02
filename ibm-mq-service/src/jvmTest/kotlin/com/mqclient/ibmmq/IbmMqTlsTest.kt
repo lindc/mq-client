@@ -5,6 +5,7 @@ import java.nio.file.Files
 import com.mqclient.testing.assumeLive
 import java.security.KeyStore
 import java.util.concurrent.TimeUnit
+import com.mqclient.core.ServiceException
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -128,28 +129,31 @@ class IbmMqTlsTest {
     @Test
     fun `missing truststore fails before the block runs`() = runBlocking {
         var ran = false
-        val error = assertFailsWith<IllegalStateException> {
+        val error = assertFailsWith<ServiceException> {
             IbmMqTls.withTls(
                 IbmMQConfig(sslEnabled = true, trustStorePath = dir.resolve("nope.p12").absolutePath),
             ) { ran = true }
         }
 
         assertFalse(ran, "证书不可用时不该开始建连")
-        assertTrue(error.message!!.contains("证书文件不存在"), "错误文案要能直接给用户看：${error.message}")
+        assertEquals("ibm_mq_err_cert_file_missing", error.errorKey)
+        assertTrue(error.message!!.contains("Certificate file not found"), "错误文案要能直接给用户看：${error.message}")
     }
 
     @Test
     fun `wrong truststore password is reported readably`() = runBlocking {
         val trust = keystoreFile("trust.p12")
-        val error = assertFailsWith<IllegalStateException> {
+        val error = assertFailsWith<ServiceException> {
             IbmMqTls.withTls(
                 IbmMQConfig(sslEnabled = true, trustStorePath = trust.absolutePath, trustStorePassword = "wrong"),
             ) { }
         }
 
+        assertEquals("ibm_mq_err_keystore_load_failed", error.errorKey)
+        // 口令错必须给出可读原因（而不是让握手报 2393），且原始 IOException 保留为 cause。
         assertTrue(
-            error.message!!.contains("证书库加载失败"),
-            "口令错必须给出可读原因，而不是让握手报 2393：${error.message}",
+            error.message!!.contains("Failed to load the keystore"),
+            "口令错必须给出可读原因：${error.message}",
         )
     }
 
@@ -157,7 +161,7 @@ class IbmMqTlsTest {
     fun `keystore without a private key entry is rejected`() = runBlocking {
         // 只有证书条目的库不能做双向认证：与其让握手静默失去客户端证书，不如直接拒绝。
         val certStore = trustOnlyStore("certs.p12")
-        val error = assertFailsWith<IllegalStateException> {
+        val error = assertFailsWith<ServiceException> {
             IbmMqTls.withTls(
                 IbmMQConfig(
                     sslEnabled = true,
@@ -167,7 +171,8 @@ class IbmMqTlsTest {
             ) { }
         }
 
-        assertTrue(error.message!!.contains("没有私钥条目"), "错误文案：${error.message}")
+        assertEquals("ibm_mq_err_keystore_no_private_key", error.errorKey)
+        assertTrue(error.message!!.contains("No private key entry"), "错误文案：${error.message}")
     }
 
     // --------------------------------------------------- PKCS12 → JKS 转换

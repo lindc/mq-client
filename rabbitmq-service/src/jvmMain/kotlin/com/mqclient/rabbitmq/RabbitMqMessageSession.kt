@@ -1,5 +1,6 @@
 package com.mqclient.rabbitmq
 
+import com.mqclient.core.ServiceException
 import com.mqclient.core.log.Log
 import com.mqclient.message.interpreter.isProbablyBinary
 import com.rabbitmq.client.AMQP
@@ -203,7 +204,10 @@ class RabbitMqMessageSession private constructor(
     override suspend fun fetchNext(limit: Int): List<RabbitMqFetchedMessage> {
         checkOpen()
         if (!fetchInFlight.compareAndSet(false, true)) {
-            throw IllegalStateException("上一次拉取尚未完成，请稍候")
+            throw ServiceException(
+                "rabbitmq_err_fetch_in_progress",
+                fallbackMessage = "The previous fetch is still in progress — please wait",
+            )
         }
         val startedAt = System.currentTimeMillis()
         return try {
@@ -241,7 +245,7 @@ class RabbitMqMessageSession private constructor(
             while (out.size < limit) {
                 // channelRpcTimeout 到这里生效：broker 不应答时 5s 抛
                 // ChannelContinuationTimeoutException，而不是挂 10 分钟。
-                val get = channelCall("拉取消息") { ch.basicGet(queueName, false) } ?: break
+                val get = channelCall("rabbitmq_err_timeout_fetch", "Fetch") { ch.basicGet(queueName, false) } ?: break
                 val tag = get.envelope.deliveryTag
                 withState { heldTags += tag }
                 val body = get.body ?: ByteArray(0)
@@ -290,7 +294,7 @@ class RabbitMqMessageSession private constructor(
                 checkOpen()
                 val ch = ensureChannel()
                 try {
-                    channelCall("确认消息") { ch.basicAck(deliveryTag, false) }
+                    channelCall("rabbitmq_err_timeout_ack", "Acknowledge") { ch.basicAck(deliveryTag, false) }
                     withState { heldTags.remove(deliveryTag) }
                     // 显式 Unit：heldTags.remove 返回 Boolean，不写的话 lambda 会推出它。
                     Unit
@@ -329,7 +333,7 @@ class RabbitMqMessageSession private constructor(
                 checkOpen()
                 val ch = ensureChannel()
                 try {
-                    channelCall("发布消息") {
+                    channelCall("rabbitmq_err_timeout_publish", "Publish") {
                         ch.basicPublish(
                             exchange,
                             routingKey,
@@ -443,17 +447,26 @@ class RabbitMqMessageSession private constructor(
      * 走的是裸 socket 写，没有任何超时 —— 所以任何 abort / 关闭都不能在持锁路径上同步
      * 做，见 [abortInBackground]。
      */
-    private inline fun <T> channelCall(label: String, block: () -> T): T =
+    /**
+     * channel RPC 统一超时翻译：[errorKey] 是本操作的超时文案键（展示端渲染时点
+     * 翻译），[op] 是英文兜底里的操作名 —— 两份信息都给，缺键也不丢语义。
+     */
+    private inline fun <T> channelCall(errorKey: String, op: String, block: () -> T): T =
         try {
             block()
         } catch (e: ChannelContinuationTimeoutException) {
-            throw RabbitMqOperationTimeoutException("$label 超时：broker 未在设定时间内应答", e)
+            throw RabbitMqOperationTimeoutException(errorKey, "$op timed out: the broker did not respond in time", e)
         } catch (e: java.util.concurrent.TimeoutException) {
-            throw RabbitMqOperationTimeoutException("$label 超时：broker 未在设定时间内应答", e)
+            throw RabbitMqOperationTimeoutException(errorKey, "$op timed out: the broker did not respond in time", e)
         }
 
     private fun checkOpen() {
-        if (closed) throw IllegalStateException("消息会话已关闭")
+        if (closed) {
+            throw ServiceException(
+                "rabbitmq_err_session_closed",
+                fallbackMessage = "The message session is closed",
+            )
+        }
     }
 
     /**
@@ -465,10 +478,10 @@ class RabbitMqMessageSession private constructor(
     private fun ensureChannel(): Channel {
         checkOpen()
         channel?.let { return it }
-        val fresh = channelCall("打开 channel") { connection.createChannel() }
+        val fresh = channelCall("rabbitmq_err_timeout_open_channel", "Open channel") { connection.createChannel() }
         try {
             // passive 声明：队列不存在立刻 404，而不是等第一次 basicGet 才发现。
-            channelCall("校验队列") { fresh.queueDeclarePassive(queueName) }
+            channelCall("rabbitmq_err_timeout_declare_queue", "Declare queue") { fresh.queueDeclarePassive(queueName) }
         } catch (e: Exception) {
             // 半成品 channel 不能留在连接上（会占 channel 号）。**后台** abort：
             // 这里持着 channelOps，同步写 socket 会把整把锁一起卡死（见 abortInBackground）。
@@ -492,7 +505,10 @@ class RabbitMqMessageSession private constructor(
         if (!published) {
             // 同样必须在后台 abort：本方法只在 channelOps 临界区里被调用。
             abortInBackground(fresh, "session closed while opening channel")
-            throw IllegalStateException("消息会话已关闭")
+            throw ServiceException(
+                "rabbitmq_err_session_closed",
+                fallbackMessage = "The message session is closed",
+            )
         }
         sessionLog.debug("channel ready: queue=$queueName channel=${fresh.channelNumber}")
         return fresh
@@ -525,7 +541,7 @@ class RabbitMqMessageSession private constructor(
         val tags = withState { heldTags.toList().also { heldTags.clear() } }
         for (tag in tags) {
             // 单条 nack 失败不中断（channel 断开时 broker 会整体重入队）。
-            runCatching { channelCall("回退消息") { ch.basicNack(tag, false, true) } }
+            runCatching { channelCall("rabbitmq_err_timeout_nack", "Requeue") { ch.basicNack(tag, false, true) } }
         }
     }
 
@@ -543,8 +559,8 @@ class RabbitMqMessageSession private constructor(
          * [onSharedConnection]。
          */
         @Deprecated(
-            message = "生产路径请用 onSharedConnection 复用 ConnectionManager 的共享连接；" +
-                "本方法每次 newConnection，仅限测试 / 诊断使用",
+            message = "Use onSharedConnection to reuse the shared connection; " +
+                "this overload opens a new connection per call (tests / diagnostics only)",
             level = DeprecationLevel.WARNING,
         )
         suspend fun open(config: RabbitMqConfig, queueName: String): RabbitMqMessageSession =

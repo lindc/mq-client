@@ -48,6 +48,7 @@ import com.mqclient.core.event.EventNames
 import com.mqclient.core.concurrent.BlockingCalls
 import com.mqclient.core.log.Log
 import com.mqclient.message.interpreter.MessageInterpreters
+import com.mqclient.uicommon.i18n.userMessage
 import com.mqclient.uicommon.i18n.LanguageResources
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.LocalSnackbarHostState
@@ -421,7 +422,7 @@ private fun AppRoot(bootConfig: Config, onExit: () -> Unit) {
                                     null
                                 } else {
                                     stringResource("settings_save_failed").format(
-                                        failure.message ?: failure.javaClass.simpleName,
+                                        failure.userMessage(),
                                     )
                                 }
                             }

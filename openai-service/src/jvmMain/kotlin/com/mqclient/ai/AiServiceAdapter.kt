@@ -20,7 +20,7 @@ import com.mqclient.core.spi.ServiceContext
 class AiServiceAdapter : ServiceAdapter {
     override val id = AiProviders.OPENAI_COMPATIBLE.id
     override val name = "OpenAI Compatible"
-    override val description = "OpenAI 兼容协议的 AI 服务（OpenAI、Ollama、DeepSeek 等）"
+    override val description = "AI services speaking the OpenAI-compatible protocol (OpenAI, Ollama, DeepSeek, etc.)"
     override val protocol = "OpenAI REST + SSE"
     override val category = "AI"
 

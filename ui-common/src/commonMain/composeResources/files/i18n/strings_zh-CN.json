@@ -124,6 +124,10 @@
   "common_add": "添加",
   "common_search": "搜索",
   "common_retry": "重试",
+  "err_status_connected": "已连接",
+  "err_status_connecting": "连接中...",
+  "err_status_failed": "连接失败",
+  "err_status_disconnected": "未连接",
   "settings_save_failed": "保存失败：无法写入 config.json（%1$s）",
   "menu_connect": "连接",
   "menu_connecting": "连接中...",
@@ -218,5 +222,9 @@
   "msg_detail_hex": "十六进制",
   "msg_detail_download": "下载消息",
   "msg_detail_saved": "已保存到 %1$s",
-  "msg_detail_save_failed": "保存失败：%1$s"
+  "msg_detail_save_failed": "保存失败：%1$s",
+  "err_conn_already_exists": "连接 id '%1$s' 已存在，请改用编辑",
+  "err_conn_service_id_immutable": "不允许修改连接 '%1$s' 的协议类型（%2$s → %3$s）；请先删除再新建",
+  "ai_err_conn_exists": "AI 连接 id '%1$s' 已存在，请改用编辑",
+  "ai_err_conn_not_found": "AI 连接 '%1$s' 不存在"
 }

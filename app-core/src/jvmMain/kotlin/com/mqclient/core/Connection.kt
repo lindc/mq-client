@@ -1,6 +1,7 @@
 package com.mqclient.core
 
 import com.github.f4b6a3.uuid.UuidCreator
+import com.mqclient.core.ServiceException
 import com.mqclient.core.event.EventNames
 import com.mqclient.core.log.Log
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -85,7 +86,13 @@ object ConnectionStore {
     fun create(connection: ConnectionInfo): Result<Unit> {
         val current = _connections.value
         if (current.any { it.id == connection.id }) {
-            return Result.failure(IllegalArgumentException("连接 id '${connection.id}' 已存在，改用 update()"))
+            return Result.failure(
+                ServiceException(
+                    "err_conn_already_exists",
+                    args = listOf(connection.id),
+                    fallbackMessage = "Connection id '%1\$s' already exists — use update() instead",
+                ),
+            )
         }
         return saveAll(current + connection)
     }
@@ -108,13 +115,21 @@ object ConnectionStore {
         val current = _connections.value
         val index = current.indexOfFirst { it.id == connection.id }
         if (index < 0) {
-            return Result.failure(NoSuchElementException("连接 '${connection.id}' 不存在，改用 create()"))
+            return Result.failure(
+                ServiceException(
+                    "err_conn_not_found",
+                    args = listOf(connection.id),
+                    fallbackMessage = "Connection '%1\$s' does not exist — use create() instead",
+                ),
+            )
         }
         val previous = current[index]
         if (previous.serviceId != connection.serviceId) {
             return Result.failure(
-                IllegalArgumentException(
-                    "不允许修改连接 '${connection.id}' 的 serviceId（${previous.serviceId} → ${connection.serviceId}）；请先删除再新建",
+                ServiceException(
+                    "err_conn_service_id_immutable",
+                    args = listOf(connection.id, previous.serviceId, connection.serviceId),
+                    fallbackMessage = "The serviceId of connection '%1\$s' cannot change (%2\$s → %3\$s); delete and re-create it",
                 ),
             )
         }
@@ -132,7 +147,13 @@ object ConnectionStore {
     fun delete(connectionId: String): Result<Unit> {
         val current = _connections.value
         if (current.none { it.id == connectionId }) {
-            return Result.failure(NoSuchElementException("连接 '$connectionId' 不存在"))
+            return Result.failure(
+                ServiceException(
+                    "err_conn_not_found",
+                    args = listOf(connectionId),
+                    fallbackMessage = "Connection '%1\$s' does not exist",
+                ),
+            )
         }
         return saveAll(current.filterNot { it.id == connectionId })
     }

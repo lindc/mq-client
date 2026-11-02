@@ -47,7 +47,7 @@ class AiChatHistoryHandler(private val repository: ChatHistoryRepository) {
             throw cancellation
         } catch (error: Throwable) {
             CoreModule.reportError(
-                message = "AI 对话记录写入失败（connectionId=$connectionId）",
+                message = "AI chat history save failed (connectionId=$connectionId)",
                 source = "ai-panel",
                 error = error,
             )

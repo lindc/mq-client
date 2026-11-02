@@ -1,5 +1,6 @@
 package com.mqclient.kafka
 
+import com.mqclient.core.ServiceException
 import com.mqclient.message.interpreter.isProbablyBinary
 import com.mqclient.message.interpreter.previewTextOf
 import java.time.Duration
@@ -110,7 +111,12 @@ class KafkaMessageService {
                     is KafkaReadStart.AtOffset -> {
                         // offset 是分区内概念：全部分区（partition=null 已在 UI 收敛）或
                         // 非法分区号直接拒绝，避免 seek 到不存在的分区。
-                        require(startFrom.partition >= 0) { "指定 Offset 需先选择单个分区" }
+                        require(startFrom.partition >= 0) {
+            throw ServiceException(
+                "kafka_err_offset_needs_partition",
+                fallbackMessage = "A specific offset requires a single selected partition",
+            )
+        }
                         consumer.seek(
                             TopicPartition(topic, startFrom.partition),
                             startFrom.offset,
@@ -206,7 +212,11 @@ class KafkaMessageService {
                         .firstOrNull { it.offset() >= offset }
                 }
                 record?.toDetail()
-                    ?: throw IllegalStateException("offset $offset 不存在（可能已过期清除）")
+                    ?: throw ServiceException(
+                        "kafka_err_offset_not_found",
+                        args = listOf(offset),
+                        fallbackMessage = "Offset %1\$d does not exist (it may have been deleted by retention)",
+                    )
             }
         }
     }
@@ -329,10 +339,11 @@ class KafkaMessageService {
     private fun connectedContext(connectionId: String): KafkaConnectionContext =
         KafkaModule.connectionOrNull(connectionId)
             ?.takeIf { it.adminClient != null }
-            ?: throw IllegalStateException(
-                KafkaModule.connectionOrNull(connectionId)?.let { connectionRefusalText(it) }
-                    ?: "连接未登记：该连接已被删除或模块未初始化",
-            )
+            ?: throw KafkaModule.connectionOrNull(connectionId)?.let { connectionRefusal(it) }
+                ?: ServiceException(
+                    "kafka_err_not_registered",
+                    fallbackMessage = "Connection not registered: it was deleted or the module is not initialized",
+                )
 
     /** 分区解析：指定分区直接用；否则 partitionsFor 现查（不用扫描缓存 —— 分区数可能刚变）。 */
     private fun resolvePartitions(
@@ -342,7 +353,11 @@ class KafkaMessageService {
     ): List<TopicPartition> {
         if (partition != null) return listOf(TopicPartition(topic, partition))
         val infos = consumer.partitionsFor(topic)
-            ?: throw IllegalStateException("topic '$topic' 不存在或无权访问")
+            ?: throw ServiceException(
+                    "kafka_err_topic_not_found",
+                    args = listOf(topic),
+                    fallbackMessage = "Topic '%1\$s' does not exist or is not accessible",
+                )
         return infos.sortedBy { it.partition() }.map { TopicPartition(topic, it.partition()) }
     }
 

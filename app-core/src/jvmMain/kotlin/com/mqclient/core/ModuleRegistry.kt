@@ -104,7 +104,7 @@ object ModuleRegistry {
                     eventBus.emit(
                         name = EventNames.ERROR_OCCURRED,
                         payload = mapOf(
-                            "message" to "模块 '${adapter.id}' 初始化失败：${error.message ?: error::class.simpleName}",
+                            "message" to "Module '${adapter.id}' failed to initialize: ${error.message ?: error::class.simpleName}",
                             "moduleId" to adapter.id,
                             "error" to error::class.simpleName,
                         ),
@@ -147,7 +147,7 @@ object ModuleRegistry {
             bus?.emit(
                 name = EventNames.ERROR_OCCURRED,
                 payload = mapOf(
-                    "message" to "模块 '${adapter.id}' 销毁失败：${error.message ?: error::class.simpleName}",
+                    "message" to "Module '${adapter.id}' failed to dispose: ${error.message ?: error::class.simpleName}",
                     "moduleId" to adapter.id,
                     "error" to error::class.simpleName,
                 ),
@@ -185,7 +185,7 @@ object ModuleRegistry {
     private fun reportUnknownUIServiceIds(eventBus: EventBus) {
         val known = services.mapTo(mutableSetOf()) { it.id }
         unknownUIServiceIds(known, uis.map { it.serviceId }).forEach { serviceId ->
-            val message = "AdapterUI.serviceId '$serviceId' 对不上任何 ServiceAdapter.id，它的界面永远不会显示"
+            val message = "AdapterUI.serviceId '$serviceId' matches no ServiceAdapter.id — its UI will never show"
             Log.error(LOG_TAG, message)
             eventBus.emit(
                 name = EventNames.ERROR_OCCURRED,

@@ -215,7 +215,7 @@ abstract class AbstractScanService<Ctx : AbstractConnectionContext<*>, Kind : An
     protected fun reportAllKindsFailed(
         connectionId: String,
         failures: Map<Kind, String>,
-        fallbackMessage: String = "全部请求均失败",
+        fallbackMessage: String = "All requests failed",
     ): Boolean {
         val message = failures.values.firstOrNull() ?: fallbackMessage
         log.error(

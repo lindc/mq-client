@@ -1,5 +1,7 @@
 package com.mqclient.rabbitmq
 
+import com.mqclient.core.LocalizedException
+import com.mqclient.core.ServiceException
 import com.rabbitmq.client.AMQP
 import com.rabbitmq.client.Channel
 import com.rabbitmq.client.ConnectionFactory
@@ -64,9 +66,10 @@ internal const val AMQP_REQUESTED_HEARTBEAT_S = 60
  * `failureText` / `catch (Exception)` 收尾逻辑无需分支。
  */
 class RabbitMqOperationTimeoutException(
-    message: String,
+    errorKey: String,
+    fallbackMessage: String,
     cause: Throwable? = null,
-) : IllegalStateException(message, cause)
+) : LocalizedException(errorKey, emptyList(), fallbackMessage, cause)
 
 /**
  * 统一的 [ConnectionFactory]。**所有** AMQP 连接都从这里出（共享连接与独占连接），
@@ -230,13 +233,27 @@ internal fun mapAmqpOpenError(e: Throwable, config: RabbitMqConfig): Exception {
     val target = "${config.host}:${config.amqpPort}"
     return when {
         e is java.net.ConnectException ->
-            IllegalStateException("无法连接 AMQP $target：检查地址与端口（默认 5672）", e)
+            ServiceException(
+                "rabbitmq_err_amqp_connect",
+                args = listOf(target),
+                fallbackMessage = "Cannot connect to AMQP %1\$s: check the address and port (default 5672)", cause = e,
+            )
         e is java.util.concurrent.TimeoutException || e.cause is java.util.concurrent.TimeoutException ->
-            IllegalStateException("连接超时（${config.connectionTimeout}s）：AMQP $target 无响应", e)
+            ServiceException(
+                "rabbitmq_err_amqp_connect_timeout",
+                args = listOf(config.connectionTimeout, target),
+                fallbackMessage = "Connection timed out (%1\$ss): AMQP %2\$s is not responding", cause = e,
+            )
         text.contains("ACCESS_REFUSED") || text.contains("authentication", ignoreCase = true) ->
-            IllegalStateException("认证失败：检查用户名 / 密码（AMQP 与管理 API 凭据相同）", e)
+            ServiceException(
+                "rabbitmq_err_amqp_auth_failed",
+                fallbackMessage = "Authentication failed: check the username / password (AMQP and the management API share credentials)", cause = e,
+            )
         text.contains("404") || text.contains("NOT_FOUND") ->
-            IllegalStateException("队列不存在（404）：检查队列名与 vhost", e)
+            ServiceException(
+                "rabbitmq_err_queue_not_found",
+                fallbackMessage = "Queue not found (404): check the queue name and vhost", cause = e,
+            )
         else -> IllegalStateException(e.message ?: e::class.simpleName ?: "unknown", e)
     }
 }

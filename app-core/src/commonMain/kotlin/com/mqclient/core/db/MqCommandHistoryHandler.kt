@@ -46,7 +46,7 @@ class MqCommandHistoryHandler(private val repository: MqCommandHistoryRepository
         runCatchingCancellable { repository.save(record) }
             .onFailure { error ->
                 CoreModule.reportError(
-                    message = "命令历史写入失败（connectionId=$connectionId，command=${command.take(40)}）",
+                    message = "Command history save failed (connectionId=$connectionId, command=${command.take(40)})",
                     source = "core.db",
                     error = error,
                 )

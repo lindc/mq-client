@@ -67,7 +67,7 @@ class PcfScanBudgetTest {
         assertTrue(thrown is ScanBudgetExceededException, "实际抛的是：$thrown")
         assertEquals(1L, thrown.budgetMs)
         assertTrue(
-            thrown.message.orEmpty().contains("预算"),
+            thrown.message.orEmpty().contains("budget"),
             "文案要能让用户看懂，实际：${thrown.message}",
         )
     }

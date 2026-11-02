@@ -1,5 +1,6 @@
 package com.mqclient.kafka
 
+import com.mqclient.core.ServiceException
 import com.mqclient.core.db.CommandAudit
 import com.mqclient.core.cache.CacheManager
 import com.mqclient.core.cache.putIfScanned
@@ -189,7 +190,7 @@ class KafkaScanService(
             // 三类全失败：一条都读不通，连接大概率真的断了 —— 收尾逻辑在基类
             // （清失败标记 → 发失败事件 → 交连接管理器按连续失败阈值判定）。
             if (isConnectionBroken(failures.keys)) {
-                reportAllKindsFailed(connectionId, failures, "Admin API 全部请求均失败")
+                reportAllKindsFailed(connectionId, failures, "All Admin API requests failed")
                 return
             }
 
@@ -308,7 +309,10 @@ class KafkaScanService(
      */
     suspend fun refreshGroups(connectionId: String): List<KafkaGroupSnapshot> {
         val (ctx, admin) = scanTargetOrNull(connectionId)
-            ?: throw IllegalStateException("连接未就绪，无法查询消费组")
+            ?: throw ServiceException(
+                "kafka_err_not_registered",
+                fallbackMessage = "Connection not ready: it was deleted or the module is not initialized",
+            )
         val groups = scanKafkaGroups(admin, ctx.config.groupListTimeoutMs())
         ctx.cache?.put(KEY_GROUPS, groups, ttlMs = objectsTtlMs(ctx))
         return groups
@@ -482,7 +486,11 @@ class KafkaScanService(
                 .allTopicNames()
                 .get(timeoutMs, TimeUnit.MILLISECONDS)[name]
                 ?.partitions()
-                ?: throw IllegalStateException("topic '$name' 不存在或无权访问")
+                ?: throw ServiceException(
+                    "kafka_err_topic_not_found",
+                    args = listOf(name),
+                    fallbackMessage = "Topic '%1\$s' does not exist or is not accessible",
+                )
             val tps = partitions.sortedBy { it.partition() }.map { TopicPartition(name, it.partition()) }
             if (tps.isEmpty()) return@withContext 0
             val beginning = admin.listOffsets(tps.associateWith { OffsetSpec.earliest() })
@@ -523,7 +531,11 @@ class KafkaScanService(
                     .timeoutMs(timeoutMs.toInt()),
             ).describedGroups()[groupId]
                 ?.get(timeoutMs, TimeUnit.MILLISECONDS)
-                ?: throw IllegalStateException("消费组不存在: $groupId")
+                ?: throw ServiceException(
+                    "kafka_err_group_not_found",
+                    args = listOf(groupId),
+                    fallbackMessage = "Consumer group '%1\$s' does not exist",
+                )
 
             val memberDetails = described.members().map { m ->
                 val tps = m.assignment().topicPartitions()
@@ -625,18 +637,27 @@ class KafkaScanService(
                 org.apache.kafka.clients.admin.DescribeConsumerGroupsOptions().timeoutMs(timeoutMs.toInt()),
             ).describedGroups()[groupId]
                 ?.get(timeoutMs, TimeUnit.MILLISECONDS)
-                ?: throw IllegalStateException("消费组不存在: $groupId")
+                ?: throw ServiceException(
+                    "kafka_err_group_not_found",
+                    args = listOf(groupId),
+                    fallbackMessage = "Consumer group '%1\$s' does not exist",
+                )
             val state = described.state().toString().uppercase()
             if (state != "EMPTY" && state != "DEAD") {
-                throw IllegalStateException(
-                    "消费组仍有活跃成员（状态 $state），请先停掉所有消费者再重置位移",
+                throw ServiceException(
+                    "kafka_err_group_active_members",
+                    args = listOf(state),
+                    fallbackMessage = "The group still has active members (state %1\$s) — stop all consumers before resetting offsets",
                 )
             }
             val committed = admin.listConsumerGroupOffsets(groupId)
                 .partitionsToOffsetAndMetadata()
                 .get(timeoutMs, TimeUnit.MILLISECONDS)
             if (committed.isEmpty()) {
-                throw IllegalStateException("该组没有已提交位移，无法重置")
+                throw ServiceException(
+                    "kafka_err_no_committed_offsets",
+                    fallbackMessage = "The group has no committed offsets to reset",
+                )
             }
             val targets: Map<TopicPartition, Long> = when (to) {
                 is KafkaGroupResetTo.Earliest ->
@@ -808,8 +829,11 @@ class KafkaScanService(
     /** 有客户端就返回；真的没有则抛带具体原因的异常。 */
     private fun targetOrThrow(connectionId: String): ScanTarget {
         val ctx = KafkaModule.connectionOrNull(connectionId)
-            ?: throw IllegalStateException("连接未登记：该连接已被删除或模块未初始化")
-        val admin = ctx.adminClient ?: throw IllegalStateException(connectionRefusalText(ctx))
+            ?: throw ServiceException(
+                "kafka_err_not_registered",
+                fallbackMessage = "Connection not registered: it was deleted or the module is not initialized",
+            )
+        val admin = ctx.adminClient ?: throw connectionRefusal(ctx)
         return ScanTarget(ctx, admin)
     }
 

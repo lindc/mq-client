@@ -15,7 +15,7 @@ object AnthropicProviders {
     val ANTHROPIC = AiProvider(
         id = "anthropic",
         name = "Anthropic",
-        description = "Anthropic Messages API 协议，Claude 系列模型",
+        description = "Anthropic Messages API protocol — Claude model family",
         defaultBaseUrl = "https://api.anthropic.com",
         requiresToken = true,
         defaultModels = listOf(

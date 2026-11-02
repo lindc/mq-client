@@ -6,6 +6,7 @@ import com.ibm.mq.pcf.PCFException
 import com.ibm.mq.pcf.PCFMessage
 import com.ibm.mq.pcf.PCFMessageAgent
 import com.ibm.mq.pcf.PCFParameter
+import com.mqclient.core.ServiceException
 import com.mqclient.core.concurrent.BlockingCallTimeoutException
 import com.mqclient.core.concurrent.BlockingCalls
 import com.mqclient.ibmmq.IbmMQModule
@@ -49,7 +50,7 @@ private const val SEND_GRACE_MS = 40_000L
  * 正常断掉 agent —— 没有跑在后台的「幽灵扫描」。
  */
 internal class ScanBudgetExceededException(val budgetMs: Long) :
-    RuntimeException("扫描超出预算（${budgetMs / 1000}s）")
+    RuntimeException("Scan exceeded its budget (${budgetMs / 1000}s)")
 
 /**
  * 一次扫描的截止时间（构造即开始计时）。
@@ -684,14 +685,18 @@ class PcfObjectScanner {
      */
     private suspend fun <T> withAgent(connectionId: String, block: suspend (ScanSession) -> T): T {
         val manager: MQQueueManager = IbmMQModule.connectionOrNull(connectionId)?.mqConnection
-            ?: throw IllegalStateException("连接 $connectionId 未建立，无法执行 PCF 查询")
+            ?: throw ServiceException(
+                "ibm_mq_err_not_connected",
+                args = listOf(connectionId),
+                fallbackMessage = "Connection %1\$s is not established",
+            )
         val start = System.currentTimeMillis()
         ibmMqLog.debug("pcf agent open: connection=$connectionId")
         val budget = ScanBudget()
         return try {
             BlockingCalls.withDeadline(
                 timeoutMs = budget.totalMs + SEND_GRACE_MS,
-                label = "PCF 查询（connection=$connectionId）",
+                label = "PCF query (connection=$connectionId)",
             ) {
                 // 在 worker 线程上桥接挂起函数：block 内部基本是阻塞的 MQI 调用，
                 // 用 runBlocking 把它包成同步体，与 agent 的创建 / 断开同一线程。

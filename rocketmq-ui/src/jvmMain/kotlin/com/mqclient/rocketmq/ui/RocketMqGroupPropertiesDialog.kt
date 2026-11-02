@@ -447,8 +447,13 @@ private fun ProgressWarningBanner(
                     },
                 )
                 Spacer(Modifier.height(4.dp))
+                // 超时等带键的失败：展示时点翻译（缺键回落英文兜底 progressError）。
+                val progressErrorText = detail.progressErrorKey?.let { key ->
+                    stringResource(key).takeIf { resolved -> resolved != key }
+                        ?.withArg(*detail.progressErrorArgs.toTypedArray())
+                } ?: detail.progressError
                 Text(
-                    text = progressHintBody(hint, detail.progressError),
+                    text = progressHintBody(hint, progressErrorText),
                     style = MaterialTheme.typography.bodySmall,
                     color = if (accent) {
                         MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.8f)
@@ -458,7 +463,7 @@ private fun ProgressWarningBanner(
                 )
                 // 未知失败把原始摘要单独列出来（标题里已经说了「失败」，这里只补事实）。
                 if (hint == ProgressHint.FAILED) {
-                    detail.progressError?.takeIf { it.isNotBlank() }?.let { raw ->
+                    progressErrorText?.takeIf { it.isNotBlank() }?.let { raw ->
                         Spacer(Modifier.height(4.dp))
                         Text(
                             text = raw,

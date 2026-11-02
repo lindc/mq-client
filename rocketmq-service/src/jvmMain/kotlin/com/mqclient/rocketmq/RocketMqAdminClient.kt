@@ -2,6 +2,7 @@ package com.mqclient.rocketmq
 
 import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ConnectionStore
+import com.mqclient.core.ServiceException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -167,7 +168,10 @@ class RocketMqAdminClient(private val config: RocketMqConfig) : AutoCloseable {
         val addr = cluster.brokerAddrTable.values
             .flatMap { it.brokerAddrs.values }
             .firstOrNull()
-            ?: throw IllegalStateException("集群中没有可用 Broker，无法查询 Topic 配置")
+            ?: throw ServiceException(
+                "rocketmq_err_no_broker_topic_config",
+                fallbackMessage = "No available broker in the cluster to query the topic config",
+            )
         return ioCall { admin.examineTopicConfig(addr, topic) }
     }
 
@@ -206,7 +210,10 @@ class RocketMqAdminClient(private val config: RocketMqConfig) : AutoCloseable {
         val addr = ioCall { admin.examineBrokerClusterInfo() }.brokerAddrTable.values
             .flatMap { it.brokerAddrs.values }
             .firstOrNull()
-            ?: throw IllegalStateException("集群中没有可用 Broker，无法查询订阅组配置")
+            ?: throw ServiceException(
+                "rocketmq_err_no_broker_group_config",
+                fallbackMessage = "No available broker in the cluster to query the subscription group config",
+            )
         // 不走 ioCall：它要求非空返回；这里 null 是**有意义的业务结果**（组不存在）。
         return withContext(Dispatchers.IO) {
             try {
@@ -306,26 +313,34 @@ class RocketMqAdminClient(private val config: RocketMqConfig) : AutoCloseable {
     private fun mapError(e: Throwable): Exception {
         val text = (e.message ?: "") + " " + (e.cause?.message ?: "")
         return if (e is RemotingConnectException) {
-            IllegalStateException(
-                "无法连接 NameServer " + config.namesrvAddr + "：检查地址与端口（默认 9876）", e,
+            ServiceException(
+                "rocketmq_err_nameserver_connect",
+                args = listOf(config.namesrvAddr),
+                fallbackMessage = "Cannot connect to NameServer %1\$s: check the address and port (default 9876)", cause = e,
             )
         } else if (e is RemotingTimeoutException) {
-            IllegalStateException(
-                "NameServer 连接超时（" + config.connectionTimeout + "s）：" + config.namesrvAddr, e,
+            ServiceException(
+                "rocketmq_err_nameserver_timeout",
+                args = listOf(config.connectionTimeout, config.namesrvAddr),
+                fallbackMessage = "NameServer connection timed out (%1\$ss): %2\$s", cause = e,
             )
         } else if (
             text.contains("ACL", ignoreCase = true) ||
             text.contains("NoPermission", ignoreCase = true) ||
             text.contains("no permission", ignoreCase = true)
         ) {
-            IllegalStateException("ACL 认证失败：检查 AccessKey / SecretKey", e)
+            ServiceException(
+                "rocketmq_err_acl_failed",
+                fallbackMessage = "ACL authentication failed: check the AccessKey / SecretKey", cause = e,
+            )
         } else if (
             text.contains("ssl", ignoreCase = true) ||
             text.contains("certificate", ignoreCase = true) ||
             text.contains("证书")
         ) {
-            IllegalStateException(
-                "TLS/SSL 握手失败：检查证书文件、Truststore 配置与集群 TLS 模式（broker 需开启 tls.enable）", e,
+            ServiceException(
+                "rocketmq_err_tls_handshake",
+                fallbackMessage = "TLS/SSL handshake failed: check the certificate files, Truststore config and cluster TLS mode (the broker needs tls.enable)", cause = e,
             )
         } else {
             IllegalStateException(e.message ?: e::class.simpleName ?: "unknown", e)

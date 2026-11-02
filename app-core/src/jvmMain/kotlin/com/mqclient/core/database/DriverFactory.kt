@@ -27,7 +27,7 @@ actual class DriverFactory {
         val dbDir = ConfigManager.configDir().toNioPath().toFile()
         if (!dbDir.exists() && !dbDir.mkdirs()) {
             Log.error(LOG_TAG, "db dir create failed: dir=${dbDir.absolutePath}")
-            throw IOException("无法创建数据库目录: ${dbDir.absolutePath}")
+            throw IOException("Cannot create the database directory: ${dbDir.absolutePath}")
         }
         val dbPath = File(dbDir, DB_FILE_NAME).absolutePath
         Log.debug(LOG_TAG, "db driver creating: file=$dbPath")

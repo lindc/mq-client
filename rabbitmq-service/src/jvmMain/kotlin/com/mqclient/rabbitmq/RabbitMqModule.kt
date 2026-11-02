@@ -1,6 +1,7 @@
 package com.mqclient.rabbitmq
 
 import com.mqclient.core.ConnectionStore
+import com.mqclient.core.ServiceException
 import com.mqclient.core.event.EventNames
 import com.mqclient.core.event.getString
 import com.mqclient.core.log.Log
@@ -281,12 +282,16 @@ object RabbitMqModule {
         // RabbitMqScanService.targetOrThrow 的说明）。
         val ctx = connectionOrNull(connectionId)
             ?.takeIf { it.admin != null }
-            ?: throw IllegalStateException(
-                connectionOrNull(connectionId)?.let { connectionRefusalText(it) }
-                    ?: "连接未登记：该连接已被删除或模块未初始化",
-            )
+            ?: throw connectionOrNull(connectionId)?.let { connectionRefusal(it) }
+                ?: ServiceException(
+                    "rabbitmq_err_not_registered",
+                    fallbackMessage = "Connection not registered: it was deleted or the module is not initialized",
+                )
         val connectionManager = manager
-            ?: throw IllegalStateException("RabbitMQ 模块未初始化，无法打开消息会话")
+            ?: throw ServiceException(
+                "rabbitmq_err_module_not_initialized",
+                fallbackMessage = "RabbitMQ module not initialized",
+            )
 
         var channel: Channel? = null
         try {
@@ -342,7 +347,10 @@ object RabbitMqModule {
      */
     suspend fun testConnection(config: RabbitMqConfig) {
         val connectionManager = manager
-            ?: throw IllegalStateException("RabbitMQ 模块未初始化，无法测试连接")
+            ?: throw ServiceException(
+                "rabbitmq_err_module_not_initialized",
+                fallbackMessage = "RabbitMQ module not initialized",
+            )
         connectionManager.testConnection(config)
     }
 
@@ -412,7 +420,7 @@ object RabbitMqModule {
                 payload = mapOf(
                     "connectionId" to connectionId,
                     "success" to false,
-                    "message" to "连接 '$connectionId' 未登记",
+                    "message" to "Connection '$connectionId' is not registered",
                     "durationMs" to 0L,
                 ),
             )

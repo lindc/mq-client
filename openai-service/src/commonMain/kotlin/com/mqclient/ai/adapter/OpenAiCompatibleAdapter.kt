@@ -29,7 +29,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 
-private const val PROVIDER_LABEL = "OpenAI 兼容"
+private const val PROVIDER_LABEL = "OpenAI-compatible"
 
 /** OpenAI 协议在流末尾发送的哨兵帧。 */
 private const val DONE_SENTINEL = "[DONE]"
@@ -95,7 +95,7 @@ class OpenAiCompatibleAdapter(
                 val body = response.bodyAsText()
                 errorDetail(body)?.let { detail ->
                     Log.warn(AI_ADAPTER_LOG_TAG, "chat error payload: model=${connection.model} detail=$detail")
-                    throw AiException("$PROVIDER_LABEL 响应失败：$detail")
+                    throw AiException("$PROVIDER_LABEL request failed: $detail")
                 }
 
                 val dto = aiJson.decodeFromString(ChatResponse.serializer(), body)
@@ -162,7 +162,7 @@ class OpenAiCompatibleAdapter(
                 // 回复静默变成空字符串（用户只看到一个空的气泡，日志里什么都没有）。
                 errorDetail(payload)?.let { detail ->
                     Log.warn(AI_ADAPTER_LOG_TAG, "chat stream error frame: model=${connection.model} detail=$detail")
-                    throw AiException("$PROVIDER_LABEL 流式响应失败：$detail")
+                    throw AiException("$PROVIDER_LABEL streaming failed: $detail")
                 }
                 // 解析不了的帧直接跳过：部分兼容服务会插非标准的心跳 / 注释帧。
                 val chunk = runCatching { aiJson.decodeFromString(StreamChunk.serializer(), payload) }.getOrNull()
