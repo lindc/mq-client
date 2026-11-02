@@ -21,6 +21,9 @@ data class MessageOperationResult(
     val detail: MessageDetail? = null,
     val reasonCode: Int? = null,
     val errorMessage: String? = null,
+    /** i18n 错误键（展示端渲染时点翻译；null = 直接展示 errorMessage）。 */
+    val errorKey: String? = null,
+    val errorArgs: List<Any> = emptyList(),
 ) {
     companion object {
         fun success(content: ByteArray? = null): MessageOperationResult =
@@ -31,6 +34,15 @@ data class MessageOperationResult(
 
         fun failure(reasonCode: Int?, message: String): MessageOperationResult =
             MessageOperationResult(success = false, reasonCode = reasonCode, errorMessage = message)
+
+        fun failure(
+            reasonCode: Int?,
+            message: String,
+            errorKey: String?,
+            errorArgs: List<Any> = emptyList(),
+        ): MessageOperationResult =
+            MessageOperationResult(success = false, reasonCode = reasonCode, errorMessage = message,
+                errorKey = errorKey, errorArgs = errorArgs)
     }
 }
 
@@ -60,7 +72,8 @@ private fun operationFailure(op: String, queueName: String, e: Throwable): Messa
             ibmMqLog.error(
                 "msg $op failed: queue=$queueName reason=MQRC ${e.reasonCode}: ${MqrcTranslator.translate(e.reasonCode)}",
             )
-            MessageOperationResult.failure(e.reasonCode, "MQRC ${e.reasonCode}: ${MqrcTranslator.translate(e.reasonCode)}")
+            MessageOperationResult.failure(e.reasonCode, "MQRC ${e.reasonCode}: ${MqrcTranslator.translate(e.reasonCode)}",
+                errorKey = MqrcTranslator.keyOf(e.reasonCode))
         }
         else -> {
             ibmMqLog.error("msg $op failed: queue=$queueName error=${e.message ?: e::class.simpleName}")
@@ -99,7 +112,8 @@ suspend fun downloadMessageBody(
                     "msg download scan aborted (deep queue): queue=$queueName " +
                         "messageId=$targetHex elapsed=${System.currentTimeMillis() - start}ms",
                 )
-                return@withContext MessageOperationResult.failure(null, OP_SCAN_TIMEOUT_MSG)
+                return@withContext MessageOperationResult.failure(null, OP_SCAN_TIMEOUT_MSG,
+                    errorKey = "ibm_mq_err_locate_timeout")
             }
             // MQGMO_NO_WAIT 显式声明：queue.get 绝不阻塞等消息（默认无 MQGMO_WAIT 也是
             // 这个语义，但写清楚更稳）。这样每条 get 立即返回，循环头部的 ensureActive
@@ -114,7 +128,8 @@ suspend fun downloadMessageBody(
             } catch (e: MQException) {
                 if (e.reasonCode == MQConstants.MQRC_NO_MSG_AVAILABLE) {
                     ibmMqLog.warn("msg download not found: queue=$queueName messageId=$targetHex")
-                    return@withContext MessageOperationResult.failure(null, MSG_NOT_FOUND)
+                    return@withContext MessageOperationResult.failure(null, MSG_NOT_FOUND,
+                    errorKey = "ibm_mq_err_message_not_found")
                 }
                 throw e
             }
@@ -130,7 +145,7 @@ suspend fun downloadMessageBody(
             }
         }
         @Suppress("UNREACHABLE_CODE")
-        MessageOperationResult.failure(null, MSG_NOT_FOUND)
+        MessageOperationResult.failure(null, MSG_NOT_FOUND, errorKey = "ibm_mq_err_message_not_found")
     } catch (cancellation: CancellationException) {
         // 必须排在下面两个宽 catch 之前：取消不是「下载失败」，吞掉会变成一条指向
         // 用户的假错误（且让调用方的取消语义失效）。
@@ -174,7 +189,8 @@ suspend fun getMessageDetail(
                     "msg detail scan aborted (deep queue): queue=$queueName " +
                         "messageId=$targetHex elapsed=${System.currentTimeMillis() - start}ms",
                 )
-                return@withContext MessageOperationResult.failure(null, OP_SCAN_TIMEOUT_MSG)
+                return@withContext MessageOperationResult.failure(null, OP_SCAN_TIMEOUT_MSG,
+                    errorKey = "ibm_mq_err_locate_timeout")
             }
             // MQGMO_NO_WAIT 显式声明：queue.get 绝不阻塞等消息，确保循环头部的 ensureActive
             // 能及时察觉取消/超时（否则无限等待的 get 会让 withTimeout 也杀不掉它）。

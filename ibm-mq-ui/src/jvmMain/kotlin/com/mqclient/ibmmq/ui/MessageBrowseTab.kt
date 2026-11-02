@@ -281,7 +281,7 @@ internal fun MessageBrowseTab(
             rowActionId = message.messageId
             val result = IbmMQModule.serviceOrNull()
                 ?.downloadMessageBody(connectionId, queueName, message.messageId)
-                ?: MessageOperationResult.failure(null, "服务未初始化")
+                ?: MessageOperationResult.failure(null, stringResource("ibm_mq_err_module_not_initialized"))
             // showSnackbar 是挂起调用（挂到提示关闭才返回），另起协程弹提示，
             // 不阻塞行状态复位与后续 UI 更新。
             when {
@@ -299,7 +299,7 @@ internal fun MessageBrowseTab(
                 }
                 else -> scope.launch {
                     snackbarHostState.showSnackbar(
-                        stringResource("ibm_mq_msg_browse_op_failed").withArg(result.errorMessage ?: ""),
+                        stringResource("ibm_mq_msg_browse_op_failed").withArg(ibmMqErrorText(result.errorKey, result.errorArgs, result.reasonCode, result.errorMessage)),
                     )
                 }
             }
@@ -316,7 +316,7 @@ internal fun MessageBrowseTab(
             rowActionId = message.messageId
             val result = IbmMQModule.serviceOrNull()
                 ?.deleteMessage(connectionId, queueName, message.messageId)
-                ?: MessageOperationResult.failure(null, "服务未初始化")
+                ?: MessageOperationResult.failure(null, stringResource("ibm_mq_err_module_not_initialized"))
             if (result.success) {
                 // 先更新列表（showSnackbar 挂起会阻塞本协程，提示与刷新互不等待）。
                 (uiState as? BrowseUiState.Ready)?.let { ready ->
@@ -331,7 +331,7 @@ internal fun MessageBrowseTab(
                     if (result.success) {
                         stringResource("ibm_mq_msg_browse_delete_ok")
                     } else {
-                        stringResource("ibm_mq_msg_browse_op_failed").withArg(result.errorMessage ?: "")
+                        stringResource("ibm_mq_msg_browse_op_failed").withArg(ibmMqErrorText(result.errorKey, result.errorArgs, result.reasonCode, result.errorMessage))
                     },
                 )
             }

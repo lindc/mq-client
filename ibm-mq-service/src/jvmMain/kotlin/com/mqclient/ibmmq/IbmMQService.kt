@@ -516,12 +516,14 @@ class IbmMQService(private val context: ServiceContext) {
         val ctx = IbmMQModule.connectionOrNull(connectionId)
             ?: run {
                 ibmMqLog.warn("msg download aborted (not connected): connection=$connectionId queue=$queueName")
-                return MessageOperationResult.failure(null, "Connection \$connectionId is not established")
+                return MessageOperationResult.failure(null, "Connection $connectionId is not established",
+                    errorKey = "ibm_mq_err_not_connected", errorArgs = listOf(connectionId))
             }
         return ctx.mqiLock.withLock {
             // 等锁期间连接可能已被断开：锁内再读一次句柄，不拿废句柄去 browse。
             val manager = ctx.mqConnection
-                ?: return@withLock MessageOperationResult.failure(null, "Connection \$connectionId is not established")
+                ?: return@withLock MessageOperationResult.failure(null, "Connection $connectionId is not established",
+                    errorKey = "ibm_mq_err_not_connected", errorArgs = listOf(connectionId))
             downloadMessageBody(manager, queueName, messageIdHex)
         }
     }
@@ -534,11 +536,13 @@ class IbmMQService(private val context: ServiceContext) {
         val ctx = IbmMQModule.connectionOrNull(connectionId)
             ?: run {
                 ibmMqLog.warn("msg detail aborted (not connected): connection=$connectionId queue=$queueName")
-                return MessageOperationResult.failure(null, "Connection \$connectionId is not established")
+                return MessageOperationResult.failure(null, "Connection $connectionId is not established",
+                    errorKey = "ibm_mq_err_not_connected", errorArgs = listOf(connectionId))
             }
         return ctx.mqiLock.withLock {
             val manager = ctx.mqConnection
-                ?: return@withLock MessageOperationResult.failure(null, "Connection \$connectionId is not established")
+                ?: return@withLock MessageOperationResult.failure(null, "Connection $connectionId is not established",
+                    errorKey = "ibm_mq_err_not_connected", errorArgs = listOf(connectionId))
             getMessageDetail(manager, queueName, messageIdHex)
         }
     }
@@ -551,11 +555,13 @@ class IbmMQService(private val context: ServiceContext) {
         val ctx = IbmMQModule.connectionOrNull(connectionId)
             ?: run {
                 ibmMqLog.warn("msg delete aborted (not connected): connection=$connectionId queue=$queueName")
-                return MessageOperationResult.failure(null, "Connection \$connectionId is not established")
+                return MessageOperationResult.failure(null, "Connection $connectionId is not established",
+                    errorKey = "ibm_mq_err_not_connected", errorArgs = listOf(connectionId))
             }
         return ctx.mqiLock.withLock {
             val manager = ctx.mqConnection
-                ?: return@withLock MessageOperationResult.failure(null, "Connection \$connectionId is not established")
+                ?: return@withLock MessageOperationResult.failure(null, "Connection $connectionId is not established",
+                    errorKey = "ibm_mq_err_not_connected", errorArgs = listOf(connectionId))
             deleteMessageById(manager, queueName, messageIdHex)
         }
     }
@@ -583,11 +589,12 @@ class IbmMQService(private val context: ServiceContext) {
         val ctx = IbmMQModule.connectionOrNull(connectionId)
             ?: run {
                 ibmMqLog.warn("send aborted (not connected): connection=$connectionId queue=$queueName")
-                return SendResult.failure(null, "Connection $connectionId is not established")
+                return SendResult.failure(null, "Connection $connectionId is not established", errorKey = "ibm_mq_err_not_connected", errorArgs = listOf(connectionId))
             }
         return ctx.mqiLock.withLock {
             val manager = ctx.mqConnection
-                ?: return@withLock SendResult.failure(null, "Connection \$connectionId is not established")
+                ?: return@withLock SendResult.failure(null, "Connection $connectionId is not established",
+                    errorKey = "ibm_mq_err_not_connected", errorArgs = listOf(connectionId))
             sendMessageToQueue(
                 manager = manager,
                 queueName = queueName,

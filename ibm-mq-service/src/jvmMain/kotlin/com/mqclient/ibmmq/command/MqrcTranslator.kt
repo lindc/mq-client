@@ -52,6 +52,18 @@ object MqrcTranslator {
     }
 
     /**
+     * 原因码 → i18n 键（`ibm_mq_err_mqrc_<码值>`，与语言表一一对应）；未收录返回 null。
+     * 展示端用它做渲染时点翻译，[translate] 的英文文本只作兜底与日志。
+     */
+    fun keyOf(reasonCode: Int): String? = when (reasonCode) {
+        2035, 2033, 2042, 2046, 2051, 2085, 2087, 2393, 2397,
+        3001, 3002, 3003, 3004, 3005, 3006, 3007, 3008, 3009, 3010, 3011, 3013,
+        3014, 3015, 3017, 3018, 3019, 3020, 3023, 3065, 3247,
+        -> "ibm_mq_err_mqrc_$reasonCode"
+        else -> null
+    }
+
+    /**
      * MQ 查询/命令异常 → 可读文案：PCFException 走原因码翻译表，其余取 message。
      * 放在服务模块的理由：PCFException 是 allclient 类型（implementation 依赖），
      * UI 模块引用不到 —— 调用方只拿 String，不暴露底层类型。

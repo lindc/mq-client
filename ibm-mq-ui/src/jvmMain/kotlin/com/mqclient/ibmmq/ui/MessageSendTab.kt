@@ -99,6 +99,8 @@ data class SendTask(
     val messageId: String? = null,
     val sentAt: Long? = null,
     val errorMessage: String? = null,
+    val errorKey: String? = null,
+    val errorArgs: List<Any> = emptyList(),
 )
 
 /** 多文件「发送全部」一轮的汇总。 */
@@ -290,7 +292,8 @@ internal class SendMessagesState(
     private fun SendTask.withResult(result: SendResult): SendTask = if (result.success) {
         copy(status = SendStatus.SUCCESS, messageId = result.messageId, sentAt = result.sentAt, errorMessage = null)
     } else {
-        copy(status = SendStatus.FAILED, errorMessage = result.errorMessage ?: "Unknown")
+        copy(status = SendStatus.FAILED, errorMessage = result.errorMessage ?: "Unknown",
+            errorKey = result.errorKey, errorArgs = result.errorArgs)
     }
 }
 
@@ -579,7 +582,7 @@ private fun SendTaskRow(task: SendTask, state: SendMessagesState) {
         sizeBytes = task.fileSize,
         status = task.status.toSharedStatus(),
         statusText = stringResource(task.status.i18nKey()),
-        errorMessage = task.errorMessage,
+        errorMessage = task.displayMessage(),
         actionLabel = action?.first,
         onAction = action?.second,
     )
@@ -639,7 +642,7 @@ private fun SendBottomBar(
                 } else {
                     Icon(imageVector = Icons.Default.Cancel, contentDescription = null, modifier = Modifier.size(16.dp), tint = FailedRed)
                     Text(
-                        text = stringResource("ibm_mq_msg_send_failed_reason").withArg(outcome.errorMessage ?: ""),
+                        text = stringResource("ibm_mq_msg_send_failed_reason").withArg(outcome.displayMessage()),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                         maxLines = 2,
@@ -713,4 +716,32 @@ internal fun ConfirmCloseWhileBusyDialog(
             ) { Text(stringResource("common_cancel")) }
         },
     )
+}
+
+/**
+ * 发送失败的用户可读文案：带键的结果（service 抛的 ServiceException 经
+ * [SendResult.failure] 透传）在展示时点翻译；MQRC 走 `ibm_mq_err_mqrc_<码>` 键；
+ * 缺键回落英文兜底 errorMessage。
+ */
+private fun SendResult?.displayMessage(): String {
+    val result = this ?: return ""
+    result.errorKey?.let { key ->
+        val resolved = stringResource(key)
+        if (resolved != key) return resolved.withArg(*result.errorArgs.toTypedArray())
+    }
+    result.reasonCode?.let { code ->
+        val key = "ibm_mq_err_mqrc_$code"
+        val resolved = stringResource(key)
+        if (resolved != key) return resolved
+    }
+    return result.errorMessage.orEmpty()
+}
+
+/** 任务行失败文案：带键（ServiceException 透传）在展示时点翻译，缺键回落 errorMessage。 */
+private fun SendTask.displayMessage(): String {
+    errorKey?.let { key ->
+        val resolved = stringResource(key)
+        if (resolved != key) return resolved.withArg(*errorArgs.toTypedArray())
+    }
+    return errorMessage.orEmpty()
 }

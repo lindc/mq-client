@@ -142,12 +142,12 @@ internal fun MessageDetailDialog(
             try {
                 val r = IbmMQModule.serviceOrNull()
                     ?.getMessageDetail(connectionId, queueName, summary.messageId)
-                    ?: MessageOperationResult.failure(null, "服务未初始化")
+                    ?: MessageOperationResult.failure(null, stringResource("ibm_mq_err_module_not_initialized"))
                 val detail = r.detail
                 if (r.success && detail != null) {
                     DetailUiState.Ready(detail)
                 } else {
-                    DetailUiState.Failed(r.errorMessage ?: "unknown")
+                    DetailUiState.Failed(ibmMqErrorText(r.errorKey, r.errorArgs, r.reasonCode, r.errorMessage) ?: "unknown")
                 }
             } catch (e: CancellationException) {
                 detailLog.info(

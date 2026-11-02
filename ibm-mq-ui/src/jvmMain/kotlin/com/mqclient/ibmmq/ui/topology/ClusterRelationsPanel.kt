@@ -108,7 +108,7 @@ fun ClusterRelationsPanel(
             uiState = ClusterUiState.Loading
             uiState = try {
                 val relations = IbmMQModule.serviceOrNull()?.getClusterRelations(connectionId)
-                    ?: throw IllegalStateException("服务未初始化")
+                    ?: throw IllegalStateException("IBM MQ module not initialized")
                 ClusterUiState.Ready(relations)
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e

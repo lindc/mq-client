@@ -1,5 +1,6 @@
 package com.mqclient.ibmmq.ui.properties.content
 
+import com.mqclient.ibmmq.ui.mqrcUserMessage
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -116,7 +117,7 @@ internal fun ChannelRuntimeStatusPane(
                     refreshTick++ // 重置成功后自动刷新运行状态
                 } else {
                     // 失败保留对话框，显示原因码可读文案，用户可重试或取消。
-                    resetError = result.errorMessage ?: "MQRC ${result.errorCode ?: "?"}"
+                    resetError = mqrcUserMessage(result.errorCode, result.errorMessage)
                 }
             } catch (e: CancellationException) {
                 throw e

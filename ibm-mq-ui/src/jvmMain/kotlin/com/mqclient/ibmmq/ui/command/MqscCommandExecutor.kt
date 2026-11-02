@@ -1,5 +1,6 @@
 package com.mqclient.ibmmq.ui.command
 
+import com.mqclient.ibmmq.ui.mqrcUserMessage
 import com.mqclient.core.log.Log
 import com.mqclient.ibmmq.command.MqscCommandExpander
 import com.mqclient.ibmmq.command.MqscExecutor
@@ -41,7 +42,7 @@ class MqscCommandExecutor(
             output = result.output,
             duration = result.duration,
             errorCode = result.errorCode,
-            errorMessage = result.errorMessage,
+            errorMessage = mqrcUserMessage(result.errorCode, result.errorMessage),
         )
     }
 }

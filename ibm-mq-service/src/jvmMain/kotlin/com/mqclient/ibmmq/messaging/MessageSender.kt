@@ -20,6 +20,9 @@ data class SendResult(
     val sentAt: Long?,
     val reasonCode: Int?,
     val errorMessage: String?,
+    /** i18n 错误键（展示端渲染时点翻译；null = 直接展示 errorMessage）。 */
+    val errorKey: String? = null,
+    val errorArgs: List<Any> = emptyList(),
 ) {
     companion object {
         fun success(messageId: String, sentAt: Long): SendResult =
@@ -27,6 +30,15 @@ data class SendResult(
 
         fun failure(reasonCode: Int?, message: String): SendResult =
             SendResult(success = false, messageId = null, sentAt = null, reasonCode = reasonCode, errorMessage = message)
+
+        fun failure(
+            reasonCode: Int?,
+            message: String,
+            errorKey: String?,
+            errorArgs: List<Any> = emptyList(),
+        ): SendResult =
+            SendResult(success = false, messageId = null, sentAt = null, reasonCode = reasonCode,
+                errorMessage = message, errorKey = errorKey, errorArgs = errorArgs)
     }
 }
 
@@ -104,7 +116,11 @@ suspend fun sendMessageToQueue(
         ibmMqLog.error(
             "send failed: queue=$queueName reason=MQRC ${e.reasonCode}: ${MqrcTranslator.translate(e.reasonCode)}",
         )
-        SendResult.failure(e.reasonCode, "MQRC ${e.reasonCode}: ${MqrcTranslator.translate(e.reasonCode)}")
+        SendResult.failure(
+                e.reasonCode,
+                "MQRC ${e.reasonCode}: ${MqrcTranslator.translate(e.reasonCode)}",
+                errorKey = MqrcTranslator.keyOf(e.reasonCode),
+            )
     } catch (e: Exception) {
         ibmMqLog.error("send failed: queue=$queueName error=${e.message ?: e::class.simpleName}")
         SendResult.failure(null, e.message ?: e::class.simpleName ?: "Unknown")

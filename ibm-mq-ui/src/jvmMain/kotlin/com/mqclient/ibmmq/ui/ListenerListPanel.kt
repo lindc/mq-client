@@ -120,7 +120,7 @@ fun ListenerListPanel(
             val outcome = pollUntil(
                 command = {
                     val result = executor.executeSingle(connectionId, command, 1)
-                    CommandOutcome(result.success, result.errorMessage ?: "MQRC ${result.errorCode ?: "?"}")
+                    CommandOutcome(result.success, mqrcUserMessage(result.errorCode, result.errorMessage))
                 },
                 query = { service.pollListenerStatus(connectionId, name) },
                 isTarget = { isTargetStatus(it, target) },
