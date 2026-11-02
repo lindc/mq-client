@@ -16,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -70,6 +71,8 @@ internal fun TitleBarPanel(
         }
         VerticalDivider(modifier = Modifier.height(24.dp))
         MenuBarItem(stringResource("menu_file"), fileMenuExpanded, { fileMenuExpanded = it }) {
+            // 菜单排版：新建连接 / AI 助手（核心卖点，快捷键提示右对齐）/ 设置 /
+            // 关于 / 退出，分组间用分割线（桌面端菜单标准习惯）。
             DropdownMenuItem(
                 text = { Text(stringResource("menu_new_connection")) },
                 // The menu only collapses through its expanded state; an item
@@ -79,6 +82,22 @@ internal fun TitleBarPanel(
                     onShowNewConnection()
                 },
             )
+            HorizontalDivider()
+            DropdownMenuItem(
+                text = { Text(stringResource("menu_ai_assistant")) },
+                trailingIcon = {
+                    Text(
+                        text = aiAssistantShortcutHint(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                },
+                onClick = {
+                    fileMenuExpanded = false
+                    onToggleAiPanel()
+                },
+            )
+            HorizontalDivider()
             DropdownMenuItem(
                 text = { Text(stringResource("menu_settings")) },
                 onClick = {
@@ -86,13 +105,7 @@ internal fun TitleBarPanel(
                     onShowSettings()
                 },
             )
-            DropdownMenuItem(
-                text = { Text(stringResource("menu_ai_assistant")) },
-                onClick = {
-                    fileMenuExpanded = false
-                    onToggleAiPanel()
-                },
-            )
+            HorizontalDivider()
             DropdownMenuItem(
                 text = { Text(stringResource("menu_about")) },
                 onClick = {
@@ -100,6 +113,7 @@ internal fun TitleBarPanel(
                     onShowAbout()
                 },
             )
+            HorizontalDivider()
             DropdownMenuItem(
                 text = { Text(stringResource("menu_exit")) },
                 onClick = {
@@ -196,4 +210,13 @@ private fun MenuBarItem(
             content = content,
         )
     }
+}
+
+/**
+ * AI 助手的全局快捷键提示（菜单项右侧对齐显示，与 Main.kt 的 onPreviewKeyEvent
+ * 处理保持同一组合）：macOS 显示 ⇧⌘A，其余平台 Ctrl+Shift+A。
+ */
+private fun aiAssistantShortcutHint(): String {
+    val isMac = System.getProperty("os.name").startsWith("Mac", ignoreCase = true)
+    return if (isMac) "⇧⌘A" else "Ctrl+Shift+A"
 }
