@@ -1,11 +1,8 @@
 plugins {
-    alias(libs.plugins.kotlinMultiplatform)
+    id("mq.kotlin-jvm")
 }
 
 kotlin {
-    jvm()
-    jvmToolchain(25)
-
     sourceSets {
         commonMain.dependencies {
             implementation(projects.appCore)

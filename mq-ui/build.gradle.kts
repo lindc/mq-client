@@ -1,13 +1,9 @@
 plugins {
-    alias(libs.plugins.kotlinMultiplatform)
-    alias(libs.plugins.composeMultiplatform)
-    alias(libs.plugins.composeCompiler)
+    id("mq.kotlin-jvm")
+    id("mq.compose")
 }
 
 kotlin {
-    jvm()
-    jvmToolchain(25)
-
     sourceSets {
         commonMain.dependencies {
             // 模型 / 接口（CommandResult / CommandExecutor / SyntaxHighlighter…）是

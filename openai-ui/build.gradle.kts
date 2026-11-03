@@ -1,13 +1,9 @@
 plugins {
-    alias(libs.plugins.kotlinMultiplatform)
-    alias(libs.plugins.composeMultiplatform)
-    alias(libs.plugins.composeCompiler)
+    id("mq.kotlin-jvm")
+    id("mq.compose")
 }
 
 kotlin {
-    jvm()
-    jvmToolchain(25)
-
     sourceSets {
         commonMain.dependencies {
             // ModuleIcon / ConnectionFormUi 契约（本模块两个 SPI 实现）。

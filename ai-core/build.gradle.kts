@@ -1,6 +1,6 @@
 plugins {
-    alias(libs.plugins.kotlinMultiplatform)
-    alias(libs.plugins.kotlinSerialization)
+    id("mq.kotlin-jvm")
+    id("mq.serialization")
 }
 
 /**
@@ -13,9 +13,6 @@ plugins {
  * 包名沿用 `com.mqclient.ai`（契约的天然位置）；模块名区分「核心」与「provider 实现」。
  */
 kotlin {
-    jvm()
-    jvmToolchain(25)
-
     sourceSets {
         commonMain.dependencies {
             // AiConnection（连接模型）在 app-core 的 commonMain，**出现在 AiAdapter 的

@@ -1,11 +1,8 @@
 plugins {
-    alias(libs.plugins.kotlinMultiplatform)
+    id("mq.kotlin-jvm")
 }
 
 kotlin {
-    jvm()
-    jvmToolchain(25)
-
     sourceSets {
         jvmMain.dependencies {
             // ConnectionPersistence 端口（app-core）：记录落盘线程的替身实现它，

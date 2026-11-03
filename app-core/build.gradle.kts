@@ -1,15 +1,11 @@
 plugins {
-    alias(libs.plugins.kotlinMultiplatform)
-    alias(libs.plugins.composeMultiplatform)
-    alias(libs.plugins.composeCompiler)
-    alias(libs.plugins.kotlinSerialization)
-    alias(libs.plugins.sqldelight)
+    id("mq.kotlin-jvm")
+    id("mq.compose")
+    id("mq.serialization")
+    id("mq.sqldelight")
 }
 
 kotlin {
-    jvm()
-    jvmToolchain(25)
-
     sourceSets {
         commonMain.dependencies {
             // Only the Compose runtime is needed for the @Composable contract.

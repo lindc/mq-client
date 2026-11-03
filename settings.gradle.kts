@@ -1,4 +1,7 @@
 rootProject.name = "mq-client"
+// 构建逻辑（convention plugins：mq.kotlin-jvm / mq.compose / mq.serialization /
+// mq.sqldelight）抽到独立 included build，与各模块共享同一份版本目录。
+includeBuild("gradle/plugins")
 // Gradle 9.7.1 仍需这个预览开关：删掉之后各 build.gradle.kts 里的 `projects.appCore`
 // 之类类型安全项目访问器会直接「Unresolved reference」（实测）。
 enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")

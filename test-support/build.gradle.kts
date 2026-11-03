@@ -1,5 +1,5 @@
 plugins {
-    alias(libs.plugins.kotlinMultiplatform)
+    id("mq.kotlin-jvm")
 }
 
 /**
@@ -19,9 +19,6 @@ plugins {
  * 编译产物；只有这样各模块的 jvmTest 才能 `implementation(projects.testSupport)`。
  */
 kotlin {
-    jvm()
-    jvmToolchain(25)
-
     sourceSets {
         jvmMain.dependencies {
             // JUnit4 的 Assume（本项目测试跑在 JUnit4 上，见各模块的 kotlin("test")）。

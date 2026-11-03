@@ -1,12 +1,9 @@
 plugins {
-    alias(libs.plugins.kotlinMultiplatform)
-    alias(libs.plugins.kotlinSerialization)
+    id("mq.kotlin-jvm")
+    id("mq.serialization")
 }
 
 kotlin {
-    jvm()
-    jvmToolchain(25)
-
     sourceSets {
         commonMain.dependencies {
             // AiConnection（配置模型）在 commonMain 里被适配器接口引用。

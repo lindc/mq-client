@@ -1,13 +1,9 @@
 plugins {
-    alias(libs.plugins.kotlinMultiplatform)
-    // 管理 API 响应 DTO（RabbitMqAdminClient）用 kotlinx.serialization 解析。
-    alias(libs.plugins.kotlinSerialization)
+    id("mq.kotlin-jvm")
+    id("mq.serialization")
 }
 
 kotlin {
-    jvm()
-    jvmToolchain(25)
-
     sourceSets {
         commonMain.dependencies {
             implementation(projects.appCore)

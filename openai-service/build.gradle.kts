@@ -1,6 +1,6 @@
 plugins {
-    alias(libs.plugins.kotlinMultiplatform)
-    alias(libs.plugins.kotlinSerialization)
+    id("mq.kotlin-jvm")
+    id("mq.serialization")
 }
 
 /**
@@ -12,9 +12,6 @@ plugins {
  * 去掉即可，AI 栈其余部分不受影响。
  */
 kotlin {
-    jvm()
-    jvmToolchain(25)
-
     sourceSets {
         commonMain.dependencies {
             // api：本模块的消费方（openai-ui / app-ui）同时要用到 ai-core 的

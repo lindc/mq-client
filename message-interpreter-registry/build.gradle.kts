@@ -1,11 +1,8 @@
 plugins {
-    alias(libs.plugins.kotlinMultiplatform)
+    id("mq.kotlin-jvm")
 }
 
 kotlin {
-    jvm()
-    jvmToolchain(25)
-
     sourceSets {
         commonMain.dependencies {
             // 契约 api() 传递给宿主（UI 渲染参数区需要 MessageInterpreter/ParamDef 类型可见）。

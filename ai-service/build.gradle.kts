@@ -1,12 +1,9 @@
 plugins {
-    alias(libs.plugins.kotlinMultiplatform)
-    alias(libs.plugins.sqldelight)
+    id("mq.kotlin-jvm")
+    id("mq.sqldelight")
 }
 
 kotlin {
-    jvm()
-    jvmToolchain(25)
-
     sourceSets {
         commonMain.dependencies {
             // DatabaseManager / ConfigStore / EventNames（core 是事件的发出方）。
