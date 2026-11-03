@@ -1,14 +1,8 @@
 plugins {
-    id("mq.kotlin-jvm")
+    id("mq.jvm")
 }
 
-kotlin {
-    sourceSets {
-        jvmTest.dependencies {
-            implementation(kotlin("test"))
-        }
-        commonMain.dependencies {
-            implementation(projects.messageInterpreterApi)
-        }
-    }
+dependencies {
+    implementation(projects.messageInterpreterApi)
+    testImplementation(kotlin("test"))
 }

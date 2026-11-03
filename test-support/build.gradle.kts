@@ -1,5 +1,5 @@
 plugins {
-    id("mq.kotlin-jvm")
+    id("mq.jvm")
 }
 
 /**
@@ -18,11 +18,7 @@ plugins {
  * 注意：本模块是 `jvmMain`（不是 test source set），因为 KMP 的测试源集之间不共享
  * 编译产物；只有这样各模块的 jvmTest 才能 `implementation(projects.testSupport)`。
  */
-kotlin {
-    sourceSets {
-        jvmMain.dependencies {
-            // JUnit4 的 Assume（本项目测试跑在 JUnit4 上，见各模块的 kotlin("test")）。
-            implementation(libs.junit)
-        }
-    }
+dependencies {
+    // JUnit4 的 Assume（本项目测试跑在 JUnit4 上，见各模块的 kotlin("test")）。
+    implementation(libs.junit)
 }
