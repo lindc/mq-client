@@ -148,6 +148,8 @@
   "rocketmq_ui_group_create_name_invalid": "Name allows letters, digits, dash, underscore and % only; no spaces or non-ASCII",
   "rocketmq_ui_group_create_failed_prefix": "Create failed: ",
   "rocketmq_ui_group_props_progress_unavailable": "Unable to fetch detailed offset info for this group.",
+  "rocketmq_ui_group_props_progress_temp_group": "Temporary browse group does not support progress view",
+  "rocketmq_ui_group_props_progress_temp_group_sub": "This group is created temporarily by the message browse feature (prefix CID_mqclient_browse_) and carries no real consumption, so progress is not applicable.",
   "rocketmq_ui_group_props_no_route_sub": "The retry topic of this group has no route in the NameServer — usually because the group has never consumed (the broker has not reported it yet), automatic topic creation is disabled on the server, or POP consumption is used.",
   "rocketmq_ui_group_props_failed_sub": "Consumer progress query failed; click retry, or check the server connection and permissions.",
   "rocketmq_ui_group_props_no_stats_sub": "This group has no consumer progress yet — the broker returned an empty offset table, which usually means no consumer has ever been online for it.",

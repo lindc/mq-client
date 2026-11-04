@@ -112,6 +112,9 @@ enum class RocketMqProgressState {
      */
     NO_CONSUME_STATS,
 
+    /** 临时浏览组（CID_mqclient_browse_ 前缀）：不参与真实消费，无需查进度，直接快退。 */
+    TEMP_GROUP,
+
     /** ACL 拒绝：当前账号对该 group 没有权限。 */
     NO_PERMISSION,
 

@@ -76,7 +76,7 @@ private val LagOrange = Color(0xFFED6C02)
  * 永久转圈，所以这里再罩一层协程级硬上限：无论底层怎么挂起，最多这么久必须退出 Loading
  * （落到 Error + 重试，而不是无限 spinner）。各子查询自身另有 4s 超时做局部降级。
  */
-private const val GROUP_DETAIL_TIMEOUT_MS = 10_000L
+private const val GROUP_DETAIL_TIMEOUT_MS = 5_000L
 
 /**
  * 消费组属性对话框（消费组卡片 ⓘ 入口）：ObjectDetailDialog 外壳 + PrimaryTabRow
@@ -429,7 +429,8 @@ private fun ProgressWarningBanner(
     val accent = hint == ProgressHint.GROUP_MISSING ||
         hint == ProgressHint.NO_MEMBERS ||
         hint == ProgressHint.RETRY_TOPIC_NO_ROUTE ||
-        hint == ProgressHint.NO_CONSUME_STATS
+        hint == ProgressHint.NO_CONSUME_STATS ||
+        hint == ProgressHint.TEMP_GROUP
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -509,6 +510,7 @@ private fun progressHintTitleKey(hint: ProgressHint): String = when (hint) {
     ProgressHint.RETRY_TOPIC_NO_ROUTE,
     ProgressHint.NO_CONSUME_STATS,
     ProgressHint.FAILED,
+    ProgressHint.TEMP_GROUP,
     -> "rocketmq_ui_group_props_progress_unavailable"
 }
 
@@ -520,6 +522,7 @@ private fun progressHintBody(hint: ProgressHint, error: String?): String = when 
     ProgressHint.NO_MEMBERS -> stringResource("rocketmq_ui_group_props_no_members_sub")
     ProgressHint.RETRY_TOPIC_NO_ROUTE -> stringResource("rocketmq_ui_group_props_no_route_sub")
     ProgressHint.NO_CONSUME_STATS -> stringResource("rocketmq_ui_group_props_no_stats_sub")
+    ProgressHint.TEMP_GROUP -> stringResource("rocketmq_ui_group_props_progress_temp_group_sub")
     ProgressHint.FAILED -> {
         val detail = error?.trim()?.takeIf(String::isNotEmpty)
         if (detail != null) {

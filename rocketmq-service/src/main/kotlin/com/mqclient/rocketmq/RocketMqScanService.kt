@@ -45,6 +45,10 @@ private const val CONFIG_TIMEOUT_MS = 4_000L
 /** 在线成员查询的协程级硬超时：best-effort，超时即视为组无在线成员。 */
 private const val CONNECTION_TIMEOUT_MS = 4_000L
 
+/** 临时浏览组前缀（与 RocketMqMessageService.BROWSE_GROUP_PREFIX 同源）：这类组由消息浏览功能
+ * 临时创建，不承载真实消费，无需查进度。 */
+private const val BROWSE_GROUP_PREFIX = "CID_mqclient_browse_"
+
 /**
  * RocketMQ 扫描服务：定时快扫 / 慢扫 + 缓存写入 + 事件通知，与 kafka 的
  * KafkaScanService 同一套模式（write-through 缓存、事件驱动 UI、失败分级）。
@@ -287,7 +291,10 @@ class RocketMqScanService(
     suspend fun scanGroupLags(connectionId: String) = withScanLock(connectionId) {
         val (ctx, admin) = scanTargetOrNull(connectionId) ?: return@withScanLock
         try {
-            val groups = withContext(Dispatchers.IO) { admin.fetchConsumerGroupList() }
+            // 任务 2：临时浏览组（CID_mqclient_browse_）不承载真实消费，跳过进度查询，
+            // 避免对海量临时组逐个发起 examineConsumeStats，把心跳与详情查询拖死。
+            val allGroups = withContext(Dispatchers.IO) { admin.fetchConsumerGroupList() }
+            val groups = allGroups.filter { !it.startsWith(BROWSE_GROUP_PREFIX) }
             val lags = withContext(Dispatchers.IO) {
                 val sem = Semaphore(ROUTE_CONCURRENCY)
                 coroutineScope {
@@ -785,10 +792,10 @@ internal data class GroupProgressOutcome(
  * 二是兜底的**触发条件**是最容易写错的一处 —— 放宽到「任何失败都兜底」会把一次
  * 超时放大成 N 次 broker 请求，收紧到「只 17」又会漏掉 206。
  *
- * 兜底只在 [RocketMqProgressState.RETRY_TOPIC_NO_ROUTE] 与
- * [RocketMqProgressState.NO_CONSUME_STATS] 两态触发：它们说的是「这个组还没有
- * 该有的元数据」，而位点可能仍然真实存在于 broker 上。权限 / 超时 / 未知失败再查
- * 一遍没有意义。
+ * CODE 17 / CODE 206 现在**不再走 broker 直读兜底**：它们是正常业务态（组从未消费 /
+ * 重试队列无路由 / 没在线消费者），直接降级为空进度 + 友好提示即可。逐 broker 兜底是
+ * 请求风暴元凶——大量临时 / 空组会各发起 N 次阻塞 broker 调用，占满共享 AdminExt 与
+ * IO 线程，拖垮详情对话框（即「UI 卡死」根因）。权限 / 超时 / 未知失败维持原失败态。
  */
 internal suspend fun resolveGroupProgress(
     group: String,
@@ -796,6 +803,16 @@ internal suspend fun resolveGroupProgress(
     fetchBrokerLevel: suspend (String) -> ConsumeStatsList?,
     brokerAddrs: suspend () -> List<String>,
 ): GroupProgressOutcome {
+    // 任务 2：临时浏览组（CID_mqclient_browse_ 前缀）由消息浏览功能临时创建，不承载真实消费，
+    // 根本不发起底层请求，直接快退。
+    if (group.startsWith(BROWSE_GROUP_PREFIX)) {
+        return GroupProgressOutcome(
+            state = RocketMqProgressState.TEMP_GROUP,
+            error = null,
+            source = RocketMqProgressSource.GROUP,
+            rows = emptyList(),
+        )
+    }
     val stats = try {
         withTimeout(PROGRESS_TIMEOUT_MS) { fetchGroupLevel() }
     } catch (timeout: TimeoutCancellationException) {
@@ -822,26 +839,26 @@ internal suspend fun resolveGroupProgress(
                 "code=${failure.code ?: "-"} error=${error.message}\n" +
                 error.stackTraceToString(),
         )
-        val degraded = GroupProgressOutcome(
+        // 任务 1：CODE 17 / CODE 206 是正常业务态（组从未消费 / 重试队列无路由 / 没在线消费者），
+        // 直接降级为空进度 + 友好提示，**不再走 broker 直读兜底**：逐 broker 兜底是请求风暴
+        // 元凶——大量临时 / 空组会各发起 N 次阻塞 broker 调用，占满共享 AdminExt 与 IO 线程，
+        // 把详情对话框拖死（即「UI 卡死」根因）。
+        if (failure.state == RocketMqProgressState.RETRY_TOPIC_NO_ROUTE ||
+            failure.state == RocketMqProgressState.NO_CONSUME_STATS
+        ) {
+            return GroupProgressOutcome(
+                state = failure.state,
+                error = failure.detail,
+                source = RocketMqProgressSource.GROUP,
+                rows = emptyList(),
+            )
+        }
+        // 其余失败（权限 / 未知）维持原失败态，带上原始摘要。
+        return GroupProgressOutcome(
             state = failure.state,
             error = failure.detail,
             source = RocketMqProgressSource.GROUP,
             rows = emptyList(),
-        )
-        if (failure.state != RocketMqProgressState.RETRY_TOPIC_NO_ROUTE &&
-            failure.state != RocketMqProgressState.NO_CONSUME_STATS
-        ) {
-            return degraded
-        }
-        // broker 直读兜底：位点真实存在但组级元数据缺失时，这里能把数据捞回来。
-        val recovered = readFromBrokers(group, fetchBrokerLevel, brokerAddrs)
-        if (recovered.isEmpty()) return degraded
-        rocketMqLog.info("group progress recovered from broker-direct read: group=$group rows=${recovered.size}")
-        return GroupProgressOutcome(
-            state = RocketMqProgressState.OK,
-            error = null,
-            source = RocketMqProgressSource.BROKER_FALLBACK,
-            rows = recovered,
         )
     }
 
@@ -865,36 +882,3 @@ internal suspend fun resolveGroupProgress(
     )
 }
 
-/** 逐 broker 直读（并发、单 broker 5 秒上限、失败只少那一份）。 */
-private suspend fun readFromBrokers(
-    group: String,
-    fetchBrokerLevel: suspend (String) -> ConsumeStatsList?,
-    brokerAddrs: suspend () -> List<String>,
-): List<RocketMqOffsetRowSnapshot> {
-    val addrs = try {
-        brokerAddrs()
-    } catch (cancellation: CancellationException) {
-        throw cancellation
-    } catch (error: Throwable) {
-        rocketMqLog.warn("broker address lookup failed: group=$group error=${error.message}")
-        return emptyList()
-    }
-    if (addrs.isEmpty()) return emptyList()
-    return coroutineScope {
-        addrs.map { addr ->
-            async {
-                try {
-                    brokerStatsToRows(group, withTimeout(PROGRESS_TIMEOUT_MS) { fetchBrokerLevel(addr) })
-                } catch (cancellation: CancellationException) {
-                    throw cancellation
-                } catch (error: Throwable) {
-                    rocketMqLog.warn("broker-direct progress failed: broker=$addr group=$group error=${error.message}")
-                    emptyList()
-                }
-            }
-        }.awaitAll()
-    }
-        .flatten()
-        .distinctBy { Triple(it.topic, it.broker, it.queueId) }
-        .sortedWith(compareBy({ it.topic }, { it.broker }, { it.queueId }))
-}

@@ -148,6 +148,8 @@
   "rocketmq_ui_group_create_name_invalid": "名称仅支持字母、数字、短横线、下划线和 %，不能含空格或中文",
   "rocketmq_ui_group_create_failed_prefix": "创建失败：",
   "rocketmq_ui_group_props_progress_unavailable": "无法获取该消费组的详细位点信息。",
+  "rocketmq_ui_group_props_progress_temp_group": "临时浏览组不支持查看消费进度",
+  "rocketmq_ui_group_props_progress_temp_group_sub": "该组由消息浏览功能临时创建（CID_mqclient_browse_ 前缀），不承载真实消费，无需查看进度。",
   "rocketmq_ui_group_props_no_route_sub": "该消费组在 NameServer 中缺少重试 Topic 的路由信息——通常因为组从未消费（Broker 尚未上报）、服务端未开启自动创建，或使用 POP 消费模式。",
   "rocketmq_ui_group_props_failed_sub": "消费进度查询失败，可点击重试，或检查服务端连接与权限。",
   "rocketmq_ui_group_props_no_stats_sub": "该消费组没有可显示的消费进度（服务端返回的位点表为空，通常是还没有消费者上线消费过）。",

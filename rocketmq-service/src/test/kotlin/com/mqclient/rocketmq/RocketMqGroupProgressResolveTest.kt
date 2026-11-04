@@ -63,24 +63,19 @@ class RocketMqGroupProgressResolveTest {
     }
 
     @Test
-    fun `code 17 with offsets on the broker recovers through the fallback`() = runBlocking {
-        // 原型：CG_PROGRESS_PROBE —— 组级 17，broker 上有位点。
+    fun `code 17 degrades to empty without broker fallback`() = runBlocking {
+        // 原型：CG_PROGRESS_PROBE —— 组级 17；直接降级为空进度，不再逐 broker 直读兜底（避免请求风暴）。
+        var brokerCalls = 0
         val outcome = resolveGroupProgress(
             group = "CG_PROGRESS_PROBE",
             fetchGroupLevel = { throw wrapped("No topic route info: %RETRY%CG_PROGRESS_PROBE", 17) },
-            fetchBrokerLevel = { addr ->
-                if (addr == "broker-b") {
-                    brokerList("CG_PROGRESS_PROBE", stats(mq("broker-b", 0) to (1L to 1L)))
-                } else {
-                    brokerList("CG_PROGRESS_PROBE", stats(mq(addr, 0) to (0L to 0L)))
-                }
-            },
+            fetchBrokerLevel = { brokerCalls++; null },
             brokerAddrs = { listOf("broker-a", "broker-b") },
         )
-        assertEquals(RocketMqProgressState.OK, outcome.state)
-        assertEquals(RocketMqProgressSource.BROKER_FALLBACK, outcome.source)
-        assertNull(outcome.error, "兜底成功后不该再留着失败原因")
-        assertEquals(2, outcome.rows.size)
+        assertEquals(RocketMqProgressState.RETRY_TOPIC_NO_ROUTE, outcome.state)
+        assertEquals(RocketMqProgressSource.GROUP, outcome.source)
+        assertTrue(outcome.rows.isEmpty(), "CODE 17 不应再走 broker 兜底去捞数据")
+        assertEquals(0, brokerCalls, "CODE 17 必须跳过 broker 兜底请求")
     }
 
     @Test
@@ -98,16 +93,17 @@ class RocketMqGroupProgressResolveTest {
     }
 
     @Test
-    fun `code 206 also triggers the fallback`() = runBlocking {
+    fun `code 206 degrades to empty without broker fallback`() = runBlocking {
+        var brokerCalls = 0
         val outcome = resolveGroupProgress(
             group = "G",
             fetchGroupLevel = { throw wrapped("offset table is empty, maybe the consumer not online", 206) },
-            fetchBrokerLevel = { brokerList("G", stats(mq("broker-a", 1) to (5L to 8L))) },
+            fetchBrokerLevel = { brokerCalls++; null },
             brokerAddrs = { listOf("broker-a") },
         )
-        assertEquals(RocketMqProgressState.OK, outcome.state)
-        assertEquals(RocketMqProgressSource.BROKER_FALLBACK, outcome.source)
-        assertEquals(3L, outcome.rows.single().lag)
+        assertEquals(RocketMqProgressState.NO_CONSUME_STATS, outcome.state)
+        assertTrue(outcome.rows.isEmpty())
+        assertEquals(0, brokerCalls)
     }
 
     @Test
@@ -156,18 +152,16 @@ class RocketMqGroupProgressResolveTest {
     }
 
     @Test
-    fun `a broker that fails only loses its own rows`() = runBlocking {
+    fun `code 17 does not call the broker at all`() = runBlocking {
+        var brokerCalls = 0
         val outcome = resolveGroupProgress(
             group = "G",
             fetchGroupLevel = { throw wrapped("No topic route info", 17) },
-            fetchBrokerLevel = { addr ->
-                if (addr == "broker-a") throw IllegalStateException("connect refused")
-                brokerList("G", stats(mq(addr, 0) to (0L to 4L)))
-            },
+            fetchBrokerLevel = { brokerCalls++; null },
             brokerAddrs = { listOf("broker-a", "broker-b") },
         )
-        assertEquals(RocketMqProgressState.OK, outcome.state)
-        assertEquals(listOf("broker-b"), outcome.rows.map { it.broker })
+        assertEquals(RocketMqProgressState.RETRY_TOPIC_NO_ROUTE, outcome.state)
+        assertEquals(0, brokerCalls)
     }
 
     @Test
@@ -180,6 +174,20 @@ class RocketMqGroupProgressResolveTest {
         )
         assertEquals(RocketMqProgressState.RETRY_TOPIC_NO_ROUTE, outcome.state)
         assertTrue(outcome.rows.isEmpty())
+    }
+
+    @Test
+    fun `temp browse group short-circuits without fetching`() = runBlocking {
+        var fetched = false
+        val outcome = resolveGroupProgress(
+            group = "CID_mqclient_browse_abc123",
+            fetchGroupLevel = { fetched = true; ConsumeStats() },
+            fetchBrokerLevel = { null },
+            brokerAddrs = { listOf("broker-a") },
+        )
+        assertEquals(RocketMqProgressState.TEMP_GROUP, outcome.state)
+        assertTrue(outcome.rows.isEmpty())
+        assertTrue(!fetched, "临时浏览组不应发起任何底层请求")
     }
 
     @Test

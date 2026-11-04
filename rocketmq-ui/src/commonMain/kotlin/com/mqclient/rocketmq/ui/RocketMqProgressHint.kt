@@ -45,6 +45,9 @@ internal enum class ProgressHint {
 
     /** 其他失败（超时 / 未知）。 */
     FAILED,
+
+    /** 临时浏览组（CID_mqclient_browse_ 前缀）：不参与真实消费。 */
+    TEMP_GROUP,
 }
 
 /** 由详情快照推导 [ProgressHint]；纯函数，可单测。 */
@@ -61,5 +64,6 @@ internal fun progressHint(detail: RocketMqGroupDetailSnapshot): ProgressHint = w
 
     detail.progressState == RocketMqProgressState.RETRY_TOPIC_NO_ROUTE -> ProgressHint.RETRY_TOPIC_NO_ROUTE
     detail.progressState == RocketMqProgressState.NO_CONSUME_STATS -> ProgressHint.NO_CONSUME_STATS
+    detail.progressState == RocketMqProgressState.TEMP_GROUP -> ProgressHint.TEMP_GROUP
     else -> ProgressHint.FAILED
 }
