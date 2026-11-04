@@ -39,6 +39,12 @@ import com.mqclient.mq.base.AbstractScanService
  */
 private const val PROGRESS_TIMEOUT_MS = 5_000L
 
+/** 订阅组配置查询的协程级硬超时：broker 卡死时不应久等，超时即降级（组配置未知）。 */
+private const val CONFIG_TIMEOUT_MS = 4_000L
+
+/** 在线成员查询的协程级硬超时：best-effort，超时即视为组无在线成员。 */
+private const val CONNECTION_TIMEOUT_MS = 4_000L
+
 /**
  * RocketMQ 扫描服务：定时快扫 / 慢扫 + 缓存写入 + 事件通知，与 kafka 的
  * KafkaScanService 同一套模式（write-through 缓存、事件驱动 UI、失败分级）。
@@ -399,7 +405,11 @@ class RocketMqScanService(
             // 订阅组配置：null + 没抛异常 = 该组在 broker 上确实不存在（与「查询失败」区分）。
             var configLookupFailed = false
             val config: SubscriptionGroupConfig? = try {
-                admin.fetchGroupConfigOrNull(group)
+                withTimeout(CONFIG_TIMEOUT_MS) { admin.fetchGroupConfigOrNull(group) }
+            } catch (timeout: TimeoutCancellationException) {
+                configLookupFailed = true
+                rocketMqLog.warn("group config timed out after ${CONFIG_TIMEOUT_MS}ms: group=$group")
+                null
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (error: Throwable) {
@@ -407,7 +417,17 @@ class RocketMqScanService(
                 rocketMqLog.warn("group config failed: group=$group error=${error.message}")
                 null
             }
-            val conn = bestEffort("group connection", group) { admin.fetchConsumerConnection(group) }
+            val conn = try {
+                withTimeout(CONNECTION_TIMEOUT_MS) { admin.fetchConsumerConnection(group) }
+            } catch (timeout: TimeoutCancellationException) {
+                rocketMqLog.warn("group connection timed out after ${CONNECTION_TIMEOUT_MS}ms: group=$group")
+                null
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Throwable) {
+                rocketMqLog.warn("group connection failed: group=$group error=${error.message}")
+                null
+            }
 
             val progress = resolveGroupProgress(
                 group = group,
@@ -436,21 +456,6 @@ class RocketMqScanService(
         }
     }
 
-    /**
-     * best-effort 子查询：失败记日志返回 null，但**取消必须原样上抛**。
-     *
-     * 等价于 `runCatching { }.getOrNull()`，唯一区别是不吞 `CancellationException`
-     * —— 对话框关掉后这几个查询不该继续跑完。
-     */
-    private suspend fun <T : Any> bestEffort(label: String, group: String, block: suspend () -> T?): T? =
-        try {
-            block()
-        } catch (cancellation: CancellationException) {
-            throw cancellation
-        } catch (error: Throwable) {
-            rocketMqLog.warn("$label failed: group=$group error=${error.message}\n" + error.stackTraceToString())
-            null
-        }
 
     /**
      * 全部 broker 地址：优先取慢扫缓存，未扫过时现查一次。
@@ -463,7 +468,7 @@ class RocketMqScanService(
             .orEmpty()
         if (cached.isNotEmpty()) return cached
         return try {
-            admin.fetchClusterInfo().brokerAddrTable.values
+            withTimeout(CONFIG_TIMEOUT_MS) { admin.fetchClusterInfo() }.brokerAddrTable.values
                 .flatMap { it.brokerAddrs.values }
                 .filter { it.isNotBlank() }
                 .distinct()

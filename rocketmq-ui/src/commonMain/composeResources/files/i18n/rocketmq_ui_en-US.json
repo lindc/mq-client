@@ -129,6 +129,7 @@
   "rocketmq_ui_group_props_total_lag": "Total lag",
   "rocketmq_ui_group_props_members": "Online members",
   "rocketmq_ui_group_props_loading": "Loading group details…",
+  "rocketmq_ui_group_props_timeout": "Loading group details timed out (no response within %1$s s). Check the broker connection or retry later.",
   "rocketmq_ui_group_props_no_rows": "No offset data for this group (may never have consumed)",
   "rocketmq_ui_group_props_col_broker": "Broker",
   "rocketmq_ui_group_props_col_topic": "Topic",

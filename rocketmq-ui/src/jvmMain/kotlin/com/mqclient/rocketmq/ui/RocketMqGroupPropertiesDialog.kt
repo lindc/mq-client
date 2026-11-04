@@ -61,9 +61,22 @@ import com.mqclient.uicommon.i18n.withArg
 import com.mqclient.uicommon.failureText
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.TimeoutCancellationException
 
 /** 积压告警色（>0 橙，与消费组卡片 Lag 告警同口径）。 */
 private val LagOrange = Color(0xFFED6C02)
+
+/**
+ * 消费组详情**端到端**硬超时（毫秒）。
+ *
+ * 底层 RocketMQ 阻塞调用（`examineBrokerClusterInfo` / `examineSubscriptionGroupConfig` /
+ * `examineConsumerConnectionInfo` / `examineConsumeStats`）经 socket 超时兜底，但若 Broker
+ * 卡死 / 网络重试，单次调用就能挂到 connectionTimeout（默认 30s）。详情对话框绝不允许
+ * 永久转圈，所以这里再罩一层协程级硬上限：无论底层怎么挂起，最多这么久必须退出 Loading
+ * （落到 Error + 重试，而不是无限 spinner）。各子查询自身另有 4s 超时做局部降级。
+ */
+private const val GROUP_DETAIL_TIMEOUT_MS = 10_000L
 
 /**
  * 消费组属性对话框（消费组卡片 ⓘ 入口）：ObjectDetailDialog 外壳 + PrimaryTabRow
@@ -101,7 +114,14 @@ fun RocketMqGroupPropertiesDialog(
         try {
             val service = RocketMqModule.serviceOrNull()
                 ?: throw IllegalStateException(stringResource("rocketmq_ui_conn_props_no_service"))
-            detail = LoadState.Success(service.fetchGroupDetail(connectionId, groupName))
+            detail = withTimeout(GROUP_DETAIL_TIMEOUT_MS) {
+                LoadState.Success(service.fetchGroupDetail(connectionId, groupName))
+            }
+        } catch (e: TimeoutCancellationException) {
+            detail = LoadState.Error(
+                message = stringResource("rocketmq_ui_group_props_timeout")
+                    .withArg((GROUP_DETAIL_TIMEOUT_MS / 1000).toString()),
+            )
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

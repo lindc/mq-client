@@ -129,6 +129,7 @@
   "rocketmq_ui_group_props_total_lag": "总积压量",
   "rocketmq_ui_group_props_members": "在线成员数",
   "rocketmq_ui_group_props_loading": "正在加载消费组详情…",
+  "rocketmq_ui_group_props_timeout": "加载消费组详情超时（%1$s 秒内无响应），请检查 Broker 连接或稍后重试。",
   "rocketmq_ui_group_props_no_rows": "该消费组暂无消费位点数据（可能从未消费）",
   "rocketmq_ui_group_props_col_broker": "Broker",
   "rocketmq_ui_group_props_col_topic": "Topic",
