@@ -16,7 +16,7 @@ import com.mqclient.core.LocalizedException
  * 随定时扫描落缓存；消息模型是即时查询的返回值，不进缓存、生命周期只到 UI 渲染为止。
  *
  * ByteArray 字段的 data class equals/hashCode 是引用比较 —— 本类一律不要当
- * LazyColumn key / remember key / 相等判断用（定位消息用 `queueId:offset`）。
+ * LazyColumn key / remember key / 相等判断用（定位消息用 `queueId:offset:msgId`，msgId 由 broker 保证唯一）。
  */
 
 /** value 预览的截断字节数（与 Kafka 同值：256 字节 UTF-8 容错解码）。 */
@@ -55,11 +55,28 @@ data class RocketMqMessage(
     val userProperties: Map<String, String>,
 )
 
-/** 一页读取结果。nextBeginOffset = null 表示已到队列尾（无可续读游标）。 */
+/**
+ * 浏览起点策略（UI 起点下拉的 service 投影）：
+ *  - [Latest]：每队列 seek 到 `max(0, maxOffset - count)` 往前读 count 条（默认，最贴近
+ *    「读最新」直觉，且天然覆盖 RocketMQ 生产者轮询散列到多队列的情形 —— 单队列读 0 号
+ *    往往读不到刚发的消息）；
+ *  - [Earliest]：每队列从 0 往后读 count 条；
+ *  - [AtOffset]：指定队列的指定 offset 起读（仅单队列模式可用，UI 侧保证）。
+ */
+sealed interface RocketMqReadStart {
+    data class Latest(val count: Int) : RocketMqReadStart
+    data class Earliest(val count: Int) : RocketMqReadStart
+    data class AtOffset(val queueId: Int, val offset: Long) : RocketMqReadStart
+}
+
+/** 一页读取结果。nextBeginOffset = null 表示所有队列已到尾（无可续读游标）。 */
 data class RocketMqMessagePage(
     val messages: List<RocketMqMessage>,
-    /** 队列内下一条的 offset（readMessages 的续读入参）。 */
-    val nextBeginOffset: Long?,
+    /**
+     * queueId → 该队列下一条 offset（readMessages 续读入参）。null = 全部队列已穷尽。
+     * 聚合「全部 Queue」时多队列各持一个游标，与 Kafka 的 nextCursor 同构。
+     */
+    val nextBeginOffset: Map<Int, Long>?,
 )
 
 /** 发送结果（对标 KafkaSendResult）：RocketMQ 多返回 msgId / brokerName。 */

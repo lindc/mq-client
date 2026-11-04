@@ -38,3 +38,22 @@ fun rememberTwoThirdsScreenSize(): DpSize {
         }
     }
 }
+
+/**
+ * 屏幕尺寸（宽、高各取全屏），用作对话框初始尺寸的封顶基准：需要让对话框在中小屏不溢出
+ * 时，用 `(screen.width * 0.95f)` 作为 [ObjectDetailDialog] 的 maxWidth / maxHeight
+ * （该 max 只钳制初始尺寸，不限制用户后续手动拉伸）。
+ */
+@Composable
+fun rememberFullScreenSize(): DpSize {
+    val density = LocalDensity.current
+    return remember(density) {
+        val screen = screenSize
+        with(density) {
+            DpSize(
+                width = screen.width.toFloat().toDp(),
+                height = screen.height.toFloat().toDp(),
+            )
+        }
+    }
+}

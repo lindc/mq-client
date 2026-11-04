@@ -61,6 +61,7 @@ import com.mqclient.mqui.objectlist.ObjectListEmptyState
 import com.mqclient.mqui.common.rememberDebouncedValue
 import com.mqclient.rocketmq.RocketMqMessage
 import com.mqclient.rocketmq.RocketMqModule
+import com.mqclient.rocketmq.RocketMqReadStart
 import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.SecondaryButton
@@ -70,6 +71,8 @@ import com.mqclient.uicommon.table.TableHeaderText
 import com.mqclient.uicommon.table.TableRowActionIcon
 import com.mqclient.uicommon.table.formatSize
 import com.mqclient.uicommon.table.formatTimestamp
+import kotlin.comparisons.compareByDescending
+import kotlin.comparisons.thenBy
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -95,8 +98,8 @@ private sealed interface BrowseUiState {
     data class Failed(val reason: String) : BrowseUiState
     data class Ready(
         val messages: List<RocketMqMessage>,
-        /** 本队列的下一条 offset；null = 已到队列尾（无游标可续）。 */
-        val nextBeginOffset: Long?,
+        /** queueId → 下一条 offset；null = 全部队列已到尾（无游标可续）。 */
+        val nextBeginOffset: Map<Int, Long>?,
         val loadingMore: Boolean = false,
     ) : BrowseUiState
 }
@@ -123,7 +126,9 @@ internal fun RocketMqMessageBrowseTab(
 
     // ---- 工具栏状态 ----
     var queueIds by remember(topicName) { mutableStateOf(listOf(0)) }
-    var selectedQueue by remember(topicName) { mutableIntStateOf(0) }
+    // null = 全部 Queue（默认）。RocketMQ 生产者轮询散列到多队列，单队列读往往读不到刚发的消息。
+    var selectedQueue by remember(topicName) { mutableStateOf<Int?>(null) }
+    var startMode by remember(topicName) { mutableStateOf(RmsgStartMode.LATEST) }
     var offsetText by remember(topicName) { mutableStateOf("0") }
     var countText by remember(topicName) { mutableStateOf("20") }
     var retryKey by remember(topicName) { mutableIntStateOf(0) }
@@ -132,6 +137,16 @@ internal fun RocketMqMessageBrowseTab(
     var detailMessage by remember(topicName) { mutableStateOf<RocketMqMessage?>(null) }
 
     fun count(): Int = (countText.toIntOrNull() ?: 20).coerceIn(1, 500)
+
+    /** 当前选择区 → service 读取起点（OFFSET 仅单队列有效，UI 已保证）。 */
+    fun buildStart(): RocketMqReadStart = when (startMode) {
+        RmsgStartMode.LATEST -> RocketMqReadStart.Latest(count())
+        RmsgStartMode.EARLIEST -> RocketMqReadStart.Earliest(count())
+        RmsgStartMode.OFFSET -> RocketMqReadStart.AtOffset(
+            queueId = selectedQueue ?: 0,
+            offset = offsetText.toLongOrNull() ?: 0L,
+        )
+    }
 
     fun showError(text: String) {
         scope.launch { snackbarHostState.showSnackbar(text) }
@@ -145,7 +160,8 @@ internal fun RocketMqMessageBrowseTab(
             val ids = service.fetchQueueIds(connectionId, topicName)
             if (ids.isNotEmpty()) {
                 queueIds = ids
-                if (selectedQueue !in ids) selectedQueue = ids.first()
+                // 仅在选了具体队列且已失效时才回落；默认「全部 Queue」(null) 保持不变。
+                if (selectedQueue != null && selectedQueue !in ids) selectedQueue = ids.first()
             }
         } catch (e: CancellationException) {
             throw e
@@ -164,7 +180,7 @@ internal fun RocketMqMessageBrowseTab(
                 connectionId = connectionId,
                 topic = topicName,
                 queueId = selectedQueue,
-                offset = offsetText.toLongOrNull() ?: 0L,
+                start = buildStart(),
                 count = count(),
             )
             uiState = BrowseUiState.Ready(page.messages, page.nextBeginOffset)
@@ -188,12 +204,19 @@ internal fun RocketMqMessageBrowseTab(
                     connectionId = connectionId,
                     topic = topicName,
                     queueId = selectedQueue,
-                    offset = cursor,
+                    start = buildStart(),
                     count = count(),
+                    cursor = cursor,
                 )
                 val ready = uiState as? BrowseUiState.Ready ?: return@launch
+                // 合并后按时间重新排序（service 首页已排，续读需并入新拉取的消息再排）。
+                val merged = (ready.messages + page.messages).sortedWith(
+                    compareByDescending<RocketMqMessage> { it.storeTimestamp }
+                        .thenBy { it.queueId }
+                        .thenBy { it.offset },
+                )
                 uiState = ready.copy(
-                    messages = ready.messages + page.messages,
+                    messages = merged,
                     nextBeginOffset = page.nextBeginOffset,
                     loadingMore = false,
                 )
@@ -229,14 +252,31 @@ internal fun RocketMqMessageBrowseTab(
             QueueDropdown(
                 selected = selectedQueue,
                 options = queueIds,
-                onSelect = { selectedQueue = it },
+                onSelect = { q ->
+                    selectedQueue = q
+                    // 选回「全部 Queue」时，OFFSET 不再适用，回落到默认 Latest。
+                    if (q == null && startMode == RmsgStartMode.OFFSET) startMode = RmsgStartMode.LATEST
+                },
             )
-            CompactNumberField(
-                value = offsetText,
-                onValueChange = { offsetText = it.filter(Char::isDigit).take(19) },
-                width = 140.dp,
-                hint = stringResource("rocketmq_ui_msg_browse_offset_hint"),
+            StartModeDropdown(
+                startMode = startMode,
+                onSelect = { mode ->
+                    startMode = mode
+                    // OFFSET 仅单队列可用：若当前是「全部 Queue」，落到首个队列。
+                    if (mode == RmsgStartMode.OFFSET && selectedQueue == null) {
+                        selectedQueue = queueIds.firstOrNull()
+                    }
+                },
             )
+            // 仅「指定 Offset」+ 具体队列时，才显示起点 offset 输入框。
+            if (startMode == RmsgStartMode.OFFSET && selectedQueue != null) {
+                CompactNumberField(
+                    value = offsetText,
+                    onValueChange = { offsetText = it.filter(Char::isDigit).take(19) },
+                    width = 140.dp,
+                    hint = stringResource("rocketmq_ui_msg_browse_offset_hint"),
+                )
+            }
             CompactNumberField(
                 value = countText,
                 onValueChange = { countText = it.filter(Char::isDigit).take(4) },
@@ -294,11 +334,15 @@ internal fun RocketMqMessageBrowseTab(
                         ObjectListEmptyState(message = stringResource("rocketmq_ui_msg_browse_empty"))
                     filtered.isEmpty() ->
                         ObjectListEmptyState(message = stringResource("rocketmq_ui_msg_browse_filtered_empty"))
-                    else -> MessageTable(
+                    else -> {
+                        // 调试：列表实际拿到的条数，应与右上角「已加载 N 条」一致（搜索为空时两者相等）。
+                        println("[RocketMqBrowse] render list filtered.size=" + filtered.size + " ready.total=" + (ready?.messages?.size ?: -1))
+                        MessageTable(
                         messages = filtered,
                         onCopy = ::showCopied,
                         onDetail = { detailMessage = it },
                     )
+                    }
                 }
             }
             ThemedSnackbarHost(
@@ -388,12 +432,42 @@ private fun CompactNumberField(
     )
 }
 
+/** 浏览起点策略（类似 Kafka）：最新往前 / 最旧往后 / 指定 Offset。 */
+internal enum class RmsgStartMode(val labelKey: String) {
+    LATEST("rocketmq_ui_msg_browse_start_latest"),
+    EARLIEST("rocketmq_ui_msg_browse_start_earliest"),
+    OFFSET("rocketmq_ui_msg_browse_start_offset"),
+}
+
+/** 起点策略下拉（默认 LATEST）。 */
+@Composable
+private fun StartModeDropdown(
+    startMode: RmsgStartMode,
+    onSelect: (RmsgStartMode) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        SecondaryButton(onClick = { expanded = true }, standardMinWidth = false) {
+            Text(stringResource(startMode.labelKey))
+            Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp))
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            RmsgStartMode.entries.forEach { mode ->
+                DropdownMenuItem(
+                    text = { Text(stringResource(mode.labelKey)) },
+                    onClick = { expanded = false; onSelect(mode) },
+                )
+            }
+        }
+    }
+}
+
 /** Queue 下拉（PrimaryButton + DropdownMenu，与 KafkaMessageBrowseTab 的 DropdownButton 同款）。 */
 @Composable
 private fun QueueDropdown(
-    selected: Int,
+    selected: Int?,
     options: List<Int>,
-    onSelect: (Int) -> Unit,
+    onSelect: (Int?) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box {
@@ -401,10 +475,20 @@ private fun QueueDropdown(
             onClick = { expanded = true },
             standardMinWidth = false,
         ) {
-            Text(stringResource("rocketmq_ui_msg_browse_queue").withArg(selected))
+            Text(
+                if (selected == null) {
+                    stringResource("rocketmq_ui_msg_browse_queue_all")
+                } else {
+                    stringResource("rocketmq_ui_msg_browse_queue").withArg(selected)
+                },
+            )
             Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp))
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(
+                text = { Text(stringResource("rocketmq_ui_msg_browse_queue_all")) },
+                onClick = { expanded = false; onSelect(null) },
+            )
             options.forEach { id ->
                 DropdownMenuItem(
                     text = { Text(stringResource("rocketmq_ui_msg_browse_queue").withArg(id)) },
@@ -421,7 +505,7 @@ private fun QueueDropdown(
 /* ------------------------------- 表格 ------------------------------- */
 
 @Composable
-private fun MessageTable(
+internal fun MessageTable(
     messages: List<RocketMqMessage>,
     onCopy: (String) -> Unit,
     onDetail: (RocketMqMessage) -> Unit,
@@ -447,7 +531,7 @@ private fun MessageTable(
         HorizontalDivider()
         LazyColumn(modifier = Modifier.weight(1f)) {
             // ByteArray 字段是引用相等 —— key 用 "queue:offset" 字符串，绝不用 data class。
-            items(messages, key = { "${it.queueId}:${it.offset}" }) { message ->
+            items(messages, key = { "${it.queueId}:${it.offset}:${it.msgId}" }) { message ->
                 MessageRow(
                     message = message,
                     onCopy = onCopy,

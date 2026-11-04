@@ -7,6 +7,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlin.comparisons.compareByDescending
+import kotlin.comparisons.thenBy
 import org.apache.rocketmq.client.consumer.DefaultMQPullConsumer
 import org.apache.rocketmq.client.consumer.PullStatus
 import org.apache.rocketmq.client.producer.DefaultMQProducer
@@ -14,6 +16,7 @@ import org.apache.rocketmq.client.producer.SendResult
 import org.apache.rocketmq.common.message.Message
 import org.apache.rocketmq.common.message.MessageConst
 import org.apache.rocketmq.common.message.MessageExt
+import org.apache.rocketmq.common.message.MessageQueue
 import org.apache.rocketmq.remoting.exception.RemotingException
 import org.apache.rocketmq.remoting.exception.RemotingTimeoutException
 
@@ -36,7 +39,7 @@ import org.apache.rocketmq.remoting.exception.RemotingTimeoutException
  * 调用自包含。全程 Dispatchers.IO，与 [RocketMqScanService] 的纪律一致；
  * CancellationException 一律原样上抛。
  */
-class RocketMqMessageService {
+open class RocketMqMessageService {
 
     private companion object {
         /** 单次读取的条数上限（UI 侧同样约束）。 */
@@ -104,7 +107,7 @@ class RocketMqMessageService {
      * 路由（`readQueueNums`），不启动临时实例。多 broker 各报各的队列数，取最大
      * —— 下拉多出来的队列号 pull 时会得到可读的「队列不存在」错误，不静默吞。
      */
-    suspend fun fetchQueueIds(connectionId: String, topic: String): List<Int> {
+    open suspend fun fetchQueueIds(connectionId: String, topic: String): List<Int> {
         val ctx = connectedContext(connectionId)
         val adminClient = ctx.adminClient
             ?: throw ServiceException(
@@ -128,49 +131,86 @@ class RocketMqMessageService {
      * @param offset 起点（队列内 offset；续读传上页的 nextBeginOffset）
      * @param count 读取条数（1..500，超范围收敛）
      */
-    suspend fun readMessages(
+    open suspend fun readMessages(
         connectionId: String,
         topic: String,
-        queueId: Int,
-        offset: Long,
+        queueId: Int?,
+        start: RocketMqReadStart,
         count: Int,
+        cursor: Map<Int, Long>? = null,
     ): RocketMqMessagePage {
         val ctx = connectedContext(connectionId)
         val capped = count.coerceIn(1, MAX_READ_COUNT)
         val clients = ctx.clients()
-        // 共享 PullConsumer：**整段持锁** —— fetchSubscribeMessageQueues / pull /
-        // maxOffset 是不可分割的序列（客户端内部有队列缓存状态），只锁创建等于没锁。
+        // 共享 PullConsumer：**整段持锁**。fetchSubscribeMessageQueues / maxOffset / pull
+        // 是不可分割的序列，且 DefaultMQPullConsumer **非线程安全** —— 并发 pull 会破坏其
+        // 内部队列缓存状态，因此「全部 Queue」的逐队列遍历在此锁内**顺序**完成（而非真并发）。
+        // 对外效果等同：一次 Read 把所有队列的消息取回并合并排序。
         return withContext(Dispatchers.IO) {
             clients.access.withLock {
                 val consumer = clients.pullConsumer()
-                val mq = consumer.fetchSubscribeMessageQueues(topic)
-                    .firstOrNull { it.queueId == queueId }
-                    ?: throw ServiceException(
-                        "rocketmq_err_queue_not_found",
-                        args = listOf(queueId),
-                        fallbackMessage = "Queue %1\$d not found (topic routing may have changed — click Read to refresh)",
-                    )
-                // 显式超时：4 参重载用 getConsumerPullTimeoutMillis()（默认 10 秒）
-                // 且内部会重试，而这条调用**全程持着共享 consumer 的锁** ——
-                // broker 慢一次，之后的每次读取都要排在它后面（「越开越慢」）。
-                val pullResult = consumer.pull(mq, "*", offset, capped, READ_TIMEOUT_MS)
-                val messages = if (pullResult.pullStatus == PullStatus.FOUND) {
-                    pullResult.msgFoundList.orEmpty().map { it.toMessage() }
+                val allQueues = consumer.fetchSubscribeMessageQueues(topic).toList()
+                val queues = if (queueId == null) {
+                    allQueues
                 } else {
-                    emptyList()
+                    allQueues.filter { it.queueId == queueId }
+                        .ifEmpty {
+                            throw ServiceException(
+                                "rocketmq_err_queue_not_found",
+                                args = listOf(queueId),
+                                fallbackMessage = "Queue %1\$d not found (topic routing may have changed — click Read to refresh)",
+                            )
+                        }
                 }
-                // 队列尾判定：nextBeginOffset >= maxOffset → 无更多。maxOffset 查询
-                // 失败（-1）时不误判「已耗尽」，把游标交回调用方再试一轮。
-                val maxOffset = runCatching { consumer.maxOffset(mq) }.getOrDefault(-1L)
-                val next = pullResult.nextBeginOffset
-                val hasMore = pullResult.pullStatus == PullStatus.FOUND && (maxOffset < 0 || next < maxOffset)
+
+                // 每队列起点 offset：续读用 cursor；首页按起点策略算。
+                val begins = queues.associateWith { mq ->
+                    cursor?.get(mq.queueId) ?: when (start) {
+                        is RocketMqReadStart.Latest -> {
+                            // 回退 N 条：maxOffset - count，落底到 0（防 OutOfRange）。
+                            val max = maxOffsetOf(consumer, mq)
+                            (max - capped).coerceAtLeast(0L)
+                        }
+                        is RocketMqReadStart.Earliest -> 0L
+                        is RocketMqReadStart.AtOffset -> start.offset.coerceAtLeast(0L)
+                    }
+                }
+
+                // 逐队列 pull（顺序，见上方锁说明），汇总后统一按时间排序。
+                val collected = mutableListOf<RocketMqMessage>()
+                val nextCursor = mutableMapOf<Int, Long>()
+                for ((mq, begin) in begins) {
+                    val pullResult = consumer.pull(mq, "*", begin, capped, READ_TIMEOUT_MS)
+                    if (pullResult.pullStatus == PullStatus.FOUND) {
+                        collected += pullResult.msgFoundList.orEmpty().map { it.toMessage() }
+                    }
+                    // 队列尾判定：nextBeginOffset >= maxOffset → 无更多。maxOffset 查询
+                    // 失败（-1）时不误判「已耗尽」，把游标交回调用方再试一轮。
+                    val maxOffset = maxOffsetOf(consumer, mq)
+                    val next = pullResult.nextBeginOffset
+                    val hasMore = pullResult.pullStatus == PullStatus.FOUND &&
+                        (maxOffset < 0 || next < maxOffset)
+                    if (hasMore) nextCursor[mq.queueId] = next
+                }
+
+                // 按 storeTimestamp 降序合并（同刻回退 queueId / offset，保证稳定排序）。
+                val merged = collected.sortedWith(
+                    compareByDescending<RocketMqMessage> { it.storeTimestamp }
+                        .thenBy { it.queueId }
+                        .thenBy { it.offset },
+                )
                 RocketMqMessagePage(
-                    messages = messages,
-                    nextBeginOffset = if (hasMore) next else null,
+                    messages = merged,
+                    nextBeginOffset = nextCursor.ifEmpty { null },
                 )
             }
         }
     }
+
+    /** maxOffset 查询：失败兜回 -1（上层据此不误判「队列已空」）。 */
+    private fun maxOffsetOf(consumer: DefaultMQPullConsumer, mq: MessageQueue): Long =
+        runCatching { consumer.maxOffset(mq) }.getOrDefault(-1L)
+
 
     // ---------------------------------------------------------------- 发送（写）
 

@@ -17,7 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.SecondaryButton
-import com.mqclient.uicommon.dialog.rememberTwoThirdsScreenSize
+import com.mqclient.uicommon.dialog.rememberFullScreenSize
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
@@ -43,12 +43,16 @@ fun RocketMqMessagesDialog(
     }
     var confirmCloseWhileSending by remember { mutableStateOf(false) }
 
-    // 比默认 2/3 屏更高（0.8 屏，400-600dp 钳制）：发送 Tab 的表单 + 内容区 +
-    // 底部 bar 在小屏也不至于互相挤压；对话框仍可手动 resize。
-    val initialHeight = rememberTwoThirdsScreenSize().height * 1.2f
+    // 初始 800×600；小屏用 95% 全屏做 max 封顶（max 只钳制初始尺寸，不限制手动 resize），
+    // 既满足大屏舒展，又不会在小屏溢出屏幕边缘。内部浏览 LazyColumn / 发送 TextArea 已用
+    // weight(1f) 吃掉剩余高度，组件可正常滚动。
+    val full = rememberFullScreenSize()
     ObjectDetailDialog(
         title = stringResource("rocketmq_ui_messages_title").withArg(topicName),
-        initialHeight = initialHeight.coerceIn(400.dp, 600.dp),
+        initialWidth = 800.dp,
+        initialHeight = 600.dp,
+        maxWidth = full.width * 0.95f,
+        maxHeight = full.height * 0.95f,
         onDismiss = onDismiss,
         onCloseRequest = {
             if (sendState.busy) confirmCloseWhileSending = true else onDismiss()
