@@ -60,6 +60,7 @@ import com.mqclient.mqui.common.CompactSearchField
 import com.mqclient.mqui.objectlist.ObjectListEmptyState
 import com.mqclient.mqui.common.rememberDebouncedValue
 import com.mqclient.rocketmq.RocketMqMessage
+import com.mqclient.core.log.Log
 import com.mqclient.rocketmq.RocketMqModule
 import com.mqclient.rocketmq.RocketMqReadStart
 import com.mqclient.uicommon.PrimaryButton
@@ -336,7 +337,7 @@ internal fun RocketMqMessageBrowseTab(
                         ObjectListEmptyState(message = stringResource("rocketmq_ui_msg_browse_filtered_empty"))
                     else -> {
                         // 调试：列表实际拿到的条数，应与右上角「已加载 N 条」一致（搜索为空时两者相等）。
-                        println("[RocketMqBrowse] render list filtered.size=" + filtered.size + " ready.total=" + (ready?.messages?.size ?: -1))
+                        Log.debug("rocketmq", "browse render list filtered.size=" + filtered.size + " ready.total=" + (ready?.messages?.size ?: -1))
                         MessageTable(
                         messages = filtered,
                         onCopy = ::showCopied,
