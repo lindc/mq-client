@@ -5,7 +5,6 @@ import com.mqclient.core.event.EventNames
 import com.mqclient.core.log.Log
 import com.mqclient.core.scheduler.JobScheduler
 import com.mqclient.core.spi.ConfigMigration
-import com.mqclient.core.spi.JvmBootstrap
 import com.mqclient.core.spi.ServiceContext
 import java.util.ServiceLoader
 import kotlinx.coroutines.CoroutineScope
@@ -28,13 +27,6 @@ object ModuleRegistry {
 
     /** 各模块的品牌图标（谁的图标归谁的 `*-ui` 模块，见 [ModuleIcon]）。 */
     val icons: List<ModuleIcon> by lazy { loadAll(ModuleIcon::class.java) }
-
-    /**
-     * JVM 启动最早期钩子（见 [JvmBootstrap]）：在 `main()` 一开头、任何模块类
-     * （含各 `*-ui`）被加载之前调用，用来在第三方库定格读取系统属性之前把它们设好
-     * （例如 RocketMQ 客户端日志落点）。[runJvmBootstraps] 是实际触发点。
-     */
-    val jvmBootstraps: List<JvmBootstrap> by lazy { loadAll(JvmBootstrap::class.java) }
 
     /** 各模块的新建连接表单（第二步面板，见 [ConnectionFormUi]）。 */
     val forms: List<ConnectionFormUi> by lazy { loadAll(ConnectionFormUi::class.java) }
@@ -70,20 +62,6 @@ object ModuleRegistry {
         config: Config,
         migrations: List<ConfigMigration> = configMigrations,
     ): Config = migrations.fold(config) { current, migration -> migration.migrate(current) }
-
-    /**
-     * 在 `main()` 最开头调用：跑所有 [JvmBootstrap] 钩子，先于任何模块类加载。
-     *
-     * 每个钩子独立兜住异常：一个钩子抛错只跳过它自己、记日志，其余照常执行 —— 一个
-     * 钩子（比如某个库的日志重定向）失败不该拖垮整个应用启动。钩子里只能设 JVM 级
-     * 属性 / 做无副作用准备，此时 `CoreModule` / 数据库 / 总线都还没起来。
-     */
-    fun runJvmBootstraps() {
-        jvmBootstraps.forEach { bootstrap ->
-            runCatching { bootstrap.onJvmStart() }
-                .onFailure { error -> Log.error(LOG_TAG, "jvm bootstrap failed: $error") }
-        }
-    }
 
     /**
      * 本次初始化过的模块：`initializeServices` 拿到的全量「适配器 + 它的模块 scope」

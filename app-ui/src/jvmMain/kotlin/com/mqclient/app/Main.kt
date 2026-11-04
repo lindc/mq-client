@@ -95,11 +95,37 @@ private fun allI18nTables(): List<ModuleI18nTable> =
     }
 
 fun main() {
-    // JVM 启动最早的一脚：在所有模块类（含各 *-ui）被加载之前，先把那些「首个日志类
-    // 加载时就定格系统属性」的第三方库（RocketMQ 5.x 的 shaded logback → 客户端日志
-    // 落点）重定向好。这一步必须早于 LanguageResources.load（它会经 ModuleRegistry.uis
-    // 加载 UI 类，可能牵出客户端类）和 ServiceAdapter.initialize。
-    ModuleRegistry.runJvmBootstraps()
+    // ⚠️ 必须是 main() 的第一行、且不得触碰任何项目类（含 ModuleRegistry /
+    // ServiceLoader）：RocketMQ 5.x 的 shaded logback 在「首个日志类加载」时就定格
+    // 配置，只读一次；而 rocketmq-tools 的 rmq.tools.logback.xml 把路径写死成
+    // ${user.home}/logs/rocketmqlogs，根本不读任何 logRoot 属性 —— 光 setProperty
+    // 不够，必须同时用 rmq.logback.configurationFile 强制覆盖配置文件本身。
+    // 所以这里用纯 JDK 完成「建目录 + 设属性 + 指向应用自带 logback 配置」三件事，
+    // 早于 LanguageResources.load（会经 ModuleRegistry.uis 加载 UI 类，可能牵出客户端
+    // 类）与 ServiceAdapter.initialize，也早于任何 Composable 启动。
+    val mqLogRoot = System.getProperty("mqclient.config.dir")
+        ?: (System.getProperty("user.home") + java.io.File.separator + ".mqclient")
+    val mqLogDir = java.io.File(mqLogRoot, "logs" + java.io.File.separator + "rocketmqlogs")
+    runCatching { mqLogDir.mkdirs() }
+    val mqLogPath = mqLogDir.absolutePath
+
+    // 5.x 口径：rmq.client.logback.xml 里的 ${rocketmq.log.*} 变量（真正生效）。
+    System.setProperty("rocketmq.log.root", mqLogPath)
+    System.setProperty("rocketmq.log.level", "INFO")
+    System.setProperty("rocketmq.log.file.maxIndex", "10")
+    // 4.x 兼容口径（ClientLogger 老名）：防客户端版本变动复发。
+    System.setProperty("rocketmq.client.logRoot", mqLogPath)
+    System.setProperty("rocketmq.client.logLevel", "INFO")
+    System.setProperty("rocketmq.client.logFileMaxIndex", "10")
+    // 强制覆盖 jar 内写死的默认配置：DefaultJoranConfiguratorExt 优先读这个属性，
+    // 非 null 直接返回，早于 configFiles 列表里的 rmq.tools / rmq.client 两份配置。
+    // 指向应用自带的 rmq.logback.xml（路径已写死），文件名在 configFiles 顺序里也靠前，双保险。
+    val mqLogbackUrl = (Thread.currentThread().contextClassLoader ?: object {}.javaClass.classLoader)
+        .getResource("rmq.logback.xml")
+        ?.toExternalForm()
+    if (mqLogbackUrl != null) {
+        System.setProperty("rmq.logback.configurationFile", mqLogbackUrl)
+    }
 
     // 启动准备放在窗口创建之前：这里的同步 IO（生成密钥 / 读配置 / 载字符串表）
     // 不该进组合体 —— 组合发生在窗口创建之后、首帧之前（会卡首帧），而且组合体

@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  应用自带的 RocketMQ 客户端日志配置。
+
+  为什么必须有这份文件：
+  - rocketmq-tools-5.3.1.jar 内 rmq.tools.logback.xml 把 <file> 写死成
+    ${user.home}/logs/rocketmqlogs/tools.log，不引用任何 logRoot 属性；
+  - rocketmq-client-5.3.1.jar 内 rmq.client.logback.xml 的默认值也是
+    ${user.home}/logs/rocketmqlogs（仅当 rocketmq.log.root 未设时才用）。
+  两者都会污染用户 HOME 根目录，且 tools 那份根本无法靠 setProperty 改。
+
+  main() 第一行通过 System.setProperty("rmq.logback.configurationFile", ...) 指向本文件，
+  DefaultJoranConfiguratorExt.findConfigFileURLFromSystemProperties 会优先于 configFiles
+  列表里的 rmq.tools / rmq.client 两份默认配置直接返回它。文件名 rmq.logback.xml 本身也在
+  该列表里靠前（rmq.logback-test.xml 之后），即使系统属性失效也是双保险。
+
+  LOG_HOME 用 ${rocketmq.log.root} 优先（main 已设，跟随 mqclient.config.dir 覆盖），
+  兜底写死绝对路径 ${user.home}/.mqclient/logs/rocketmqlogs —— 绝不回落到 ~/logs。
+  appender 结构与 jar 内 rmq.client.logback.xml 保持一致，确保 shaded logback 能解析。
+-->
+<configuration>
+    <property name="LOG_HOME"
+              value="${rocketmq.log.root:-${user.home}${file.separator}.mqclient${file.separator}logs${file.separator}rocketmqlogs}"/>
+
+    <conversionRule conversionWord="pid"
+                    converterClass="io.github.aliyunmq.logback.extensions.ProcessIdConverter"/>
+
+    <appender name="CustomConsoleAppender" class="io.github.aliyunmq.logback.extensions.CustomConsoleAppender">
+        <encoder>
+            <pattern>%yellow(%d{yyy-MM-dd HH:mm:ss.SSS,GMT+8}) %highlight(%-5p) %boldWhite([%pid]) %magenta([%t]) %boldGreen([%logger{12}#%M:%L]) - %m%n</pattern>
+            <charset class="java.nio.charset.Charset">UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <appender name="DefaultAppenderInner" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <append>true</append>
+        <File>${LOG_HOME}${file.separator}rocketmq_client.log</File>
+        <rollingPolicy class="ch.qos.logback.core.rolling.FixedWindowRollingPolicy">
+            <FileNamePattern>${LOG_HOME}${file.separator}other_days${file.separator}rocketmq_client-%i.log.gz</FileNamePattern>
+            <minIndex>1</minIndex>
+            <maxIndex>${rocketmq.log.file.maxIndex:-10}</maxIndex>
+        </rollingPolicy>
+        <triggeringPolicy class="ch.qos.logback.core.rolling.SizeBasedTriggeringPolicy">
+            <maxFileSize>64MB</maxFileSize>
+        </triggeringPolicy>
+        <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+            <pattern>%d{yyy-MM-dd HH:mm:ss.SSS,GMT+8} %-5p [%pid] [%t] [%logger{12}#%M:%L] - %m%n</pattern>
+            <charset class="java.nio.charset.Charset">UTF-8</charset>
+        </encoder>
+    </appender>
+    <appender name="DefaultAppender" class="ch.qos.logback.classic.AsyncAppender">
+        <appender-ref ref="DefaultAppenderInner"/>
+    </appender>
+
+    <root level="${rocketmq.log.level:-info}">
+        <appender-ref ref="CustomConsoleAppender"/>
+        <appender-ref ref="DefaultAppender" additivity="false"/>
+    </root>
+</configuration>
