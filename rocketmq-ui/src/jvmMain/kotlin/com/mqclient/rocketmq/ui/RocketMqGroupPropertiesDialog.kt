@@ -45,6 +45,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.mqclient.core.log.Log
 import com.mqclient.mqui.state.LoadState
 import com.mqclient.mqui.state.LoadStateContent
 import com.mqclient.rocketmq.RocketMqGroupDetailSnapshot
@@ -80,6 +81,9 @@ private val LagOrange = Color(0xFFED6C02)
  * （落到 Error + 重试，而不是无限 spinner）。各子查询自身另有 4s 超时做局部降级。
  */
 private const val GROUP_DETAIL_TIMEOUT_MS = 15_000L
+
+/** UI 层诊断日志 tag（与 service 的 [rocketmq] 分开，便于一眼区分卡在哪一层）。 */
+private const val UI_LOG_TAG = "rocketmq-ui"
 
 /**
  * 消费组属性对话框（消费组卡片 ⓘ 入口）：ObjectDetailDialog 外壳 + PrimaryTabRow
@@ -132,6 +136,7 @@ fun RocketMqGroupPropertiesDialog(
 
     LaunchedEffect(groupName, retryKey) {
         val myKey = retryKey
+        val startedAt = System.currentTimeMillis()
         // 把这次加载的 Job 交给 closeDialog / onDispose，供关闭时显式取消。
         loadJob = coroutineContext[Job]
         detail = LoadState.Loading
@@ -143,15 +148,39 @@ fun RocketMqGroupPropertiesDialog(
             val result = withTimeout(GROUP_DETAIL_TIMEOUT_MS) {
                 service.fetchGroupDetail(connectionId, groupName)
             }
+            Log.info(
+                UI_LOG_TAG,
+                "group detail UI success: group=$groupName " +
+                    "waitedMs=${System.currentTimeMillis() - startedAt}",
+            )
             if (myKey == retryKey) detail = LoadState.Success(result)
         } catch (e: TimeoutCancellationException) {
+            // 真机「15 秒无响应」之前这一分支完全静默，日志里查不到。补上实际等待、
+            // cap 与 myKey/retryKey，用来和 service 的 group detail done 对比：
+            // done 只用了几百 ms 而这里等满 15s，就说明卡在 UI 帧调度而非底层。
+            Log.warn(
+                UI_LOG_TAG,
+                "group detail UI TIMEOUT: group=$groupName " +
+                    "waitedMs=${System.currentTimeMillis() - startedAt} " +
+                    "capMs=$GROUP_DETAIL_TIMEOUT_MS myKey=$myKey retryKey=$retryKey",
+            )
             if (myKey == retryKey) detail = LoadState.Error(
                 message = stringResource("rocketmq_ui_group_props_timeout")
                     .withArg((GROUP_DETAIL_TIMEOUT_MS / 1000).toString()),
             )
         } catch (e: CancellationException) {
+            Log.info(
+                UI_LOG_TAG,
+                "group detail UI cancelled: group=$groupName " +
+                    "waitedMs=${System.currentTimeMillis() - startedAt}",
+            )
             throw e
         } catch (e: Exception) {
+            Log.warn(
+                UI_LOG_TAG,
+                "group detail UI error: group=$groupName " +
+                    "waitedMs=${System.currentTimeMillis() - startedAt} error=${e.message}",
+            )
             if (myKey == retryKey) detail = LoadState.Error(
                 message = failureText(e),
                 cause = e.cause,

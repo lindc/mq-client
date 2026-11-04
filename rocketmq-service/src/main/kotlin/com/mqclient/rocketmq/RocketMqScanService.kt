@@ -411,6 +411,7 @@ class RocketMqScanService(
         // 排查 4：每次详情查询前留一条生命周期快照。第三次卡死时可直接看
         // started 是否仍是 true（实例被误 shutdown 会变 false）、inFlight 是否已堆高
         // （上一次没被取消的请求残留）、以及 admin=# 是否始终是同一个实例。
+        val startedAt = System.currentTimeMillis()
         rocketMqLog.info("group detail begin: group=$group ${admin.lifecycleState()}")
         return withContext(Dispatchers.IO) {
             // 订阅组配置：null + 没抛异常 = 该组在 broker 上确实不存在（与「查询失败」区分）。
@@ -460,7 +461,7 @@ class RocketMqScanService(
                     brokerAddrs = { brokerAddresses(connectionId, admin) },
                 )
             }
-            RocketMqGroupDetailSnapshot(
+            val snapshot = RocketMqGroupDetailSnapshot(
                 name = group,
                 configFound = config != null,
                 // 查询成功但没这条配置 = 组不存在；查询失败时**不**下这个结论（可能只是连不上）。
@@ -478,6 +479,14 @@ class RocketMqScanService(
                 rows = progress.rows,
                 totalLag = progress.rows.sumOf { it.lag },
             )
+            // 「done」只在成功路径打：超时 / 被取消时它缺失本身就是信号。与 begin
+            // 配对算出 service 真实耗时，再和 UI 的 15s 等待一比，即可判定到底卡在
+            // service 还是 UI 帧调度（真机「15 秒无响应」时 service 往往 400ms 就 done 了）。
+            rocketMqLog.info(
+                "group detail done: group=$group " +
+                    "elapsedMs=${System.currentTimeMillis() - startedAt} ${admin.lifecycleState()}",
+            )
+            snapshot
         }
     }
 
