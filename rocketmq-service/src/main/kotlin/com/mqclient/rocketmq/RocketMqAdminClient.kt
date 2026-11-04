@@ -42,8 +42,10 @@ class RocketMqAdminClient(private val config: RocketMqConfig) : AutoCloseable {
     /** TLS 证书准备 / start 窗口 / ACL RPCHook 的统一持有者。 */
     private val tls = RocketMqTlsStart(config)
 
+    private val ADMIN_OP_TIMEOUT_MS = 5_000L
+
     private val admin: DefaultMQAdminExt =
-        DefaultMQAdminExt(tls.rpcHook, config.connectionTimeout * 1_000L).apply {
+        DefaultMQAdminExt(tls.rpcHook, ADMIN_OP_TIMEOUT_MS).apply {
             setNamesrvAddr(config.namesrvAddr.trim())
             // 开关显式传入：ClientConfig.useTLS 在构造时从 TlsSystemConfig.tlsEnable /
             // tls.enable property 固化初始值，MQClientInstance.start() 里又原样拷贝进

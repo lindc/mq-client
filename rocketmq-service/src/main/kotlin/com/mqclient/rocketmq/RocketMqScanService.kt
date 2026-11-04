@@ -436,12 +436,26 @@ class RocketMqScanService(
                 null
             }
 
-            val progress = resolveGroupProgress(
-                group = group,
-                fetchGroupLevel = { admin.fetchConsumerProgress(group) },
-                fetchBrokerLevel = { addr -> admin.fetchConsumeStatsInBroker(addr, PROGRESS_TIMEOUT_MS) },
-                brokerAddrs = { brokerAddresses(connectionId, admin) },
-            )
+            // 排查4：在线成员为空（成员查询成功但 0 个连接）说明根本没有消费者上线，
+            // 再发起 examineConsumeStats 只会被 broker 阻塞 / 死锁（CG_PROGRESS_DEMO 即此场景）。
+            // 直接按「无消费进度」放行，彻底跳过 Offset 查询。注意：conn == null 表示成员查询
+            // 本身失败 / 超时，没法下结论，仍走真实进度查询（失败会经 CODE 206 等正常降级）。
+            val progress = if (conn != null && conn.connectionSet.isNullOrEmpty()) {
+                rocketMqLog.info("group has no online consumers, skip offset query: group=$group")
+                GroupProgressOutcome(
+                    state = RocketMqProgressState.NO_CONSUME_STATS,
+                    error = null,
+                    source = RocketMqProgressSource.GROUP,
+                    rows = emptyList(),
+                )
+            } else {
+                resolveGroupProgress(
+                    group = group,
+                    fetchGroupLevel = { admin.fetchConsumerProgress(group) },
+                    fetchBrokerLevel = { addr -> admin.fetchConsumeStatsInBroker(addr, PROGRESS_TIMEOUT_MS) },
+                    brokerAddrs = { brokerAddresses(connectionId, admin) },
+                )
+            }
             RocketMqGroupDetailSnapshot(
                 name = group,
                 configFound = config != null,
