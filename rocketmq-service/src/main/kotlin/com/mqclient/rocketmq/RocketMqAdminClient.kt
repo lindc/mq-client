@@ -5,6 +5,7 @@ import com.mqclient.core.ConnectionStore
 import com.mqclient.core.ServiceException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
 import org.apache.rocketmq.client.exception.MQClientException
 import org.apache.rocketmq.remoting.protocol.admin.ConsumeStats
@@ -68,7 +69,7 @@ class RocketMqAdminClient(private val config: RocketMqConfig) : AutoCloseable {
     suspend fun startAndVerify() {
         // 先置位再 start：start 抛异常时 close() 仍必须走 shutdown()。
         startAttempted = true
-        ioCall { tls.start { admin.start() } }
+        withContext(Dispatchers.IO) { tls.start { admin.start() } }
         ioCall { admin.examineBrokerClusterInfo() }
     }
 
@@ -215,7 +216,8 @@ class RocketMqAdminClient(private val config: RocketMqConfig) : AutoCloseable {
                 fallbackMessage = "No available broker in the cluster to query the subscription group config",
             )
         // 不走 ioCall：它要求非空返回；这里 null 是**有意义的业务结果**（组不存在）。
-        return withContext(Dispatchers.IO) {
+        // 同样用 runInterruptible：对话框关闭/超时取消时，必须能真正打断底层阻塞调用。
+        return runInterruptible(Dispatchers.IO) {
             try {
                 admin.examineSubscriptionGroupConfig(addr, groupName)
             } catch (e: CancellationException) {
@@ -298,8 +300,14 @@ class RocketMqAdminClient(private val config: RocketMqConfig) : AutoCloseable {
      * `suspend` 是因为 TLS start 窗口要挂在 [Mutex] 上等锁（可取消）—— `tls.start`
      * 本身是挂起调用，非挂起的 lambdas 依然可以传进来。
      */
-    private suspend fun <T> ioCall(block: suspend () -> T): T =
-        withContext(Dispatchers.IO) {
+    private suspend fun <T> ioCall(block: () -> T): T {
+        // runInterruptible（而非 withContext）：RocketMQ 的 examineXxx 是阻塞 Java 调用，
+        // 协程取消时 withContext 只标记取消、底层线程会继续跑到底（connectionTimeout 才返回），
+        // 于是关闭/切换对话框后这些「僵尸」阻塞调用仍占着 Dispatchers.IO 线程，快速连开连关
+        // 就会把 IO 池与共享 AdminExt 占满，下一次查询排队超时——正是「第二次/快速切换必卡死」的根因。
+        // runInterruptible 在取消时会对底层线程 Thread.interrupt()，Netty 读会抛 InterruptedException
+        // 提前返回，阻塞调用真正被中断，不再泄漏线程。
+        return runInterruptible(Dispatchers.IO) {
             try {
                 block()
             } catch (e: CancellationException) {
@@ -309,6 +317,7 @@ class RocketMqAdminClient(private val config: RocketMqConfig) : AutoCloseable {
             }
         }
 
+    }
     /** RocketMQ 异常 → 人类可读文案（UI 直出）。 */
     private fun mapError(e: Throwable): Exception {
         val text = (e.message ?: "") + " " + (e.cause?.message ?: "")

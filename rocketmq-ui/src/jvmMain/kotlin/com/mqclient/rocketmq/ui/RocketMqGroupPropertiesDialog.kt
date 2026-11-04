@@ -110,24 +110,25 @@ fun RocketMqGroupPropertiesDialog(
     var deleteError by remember(groupName) { mutableStateOf<String?>(null) }
 
     LaunchedEffect(groupName, retryKey) {
+        val myKey = retryKey
         detail = LoadState.Loading
         try {
             val service = RocketMqModule.serviceOrNull()
                 ?: throw IllegalStateException(stringResource("rocketmq_ui_conn_props_no_service"))
-            detail = withTimeout(GROUP_DETAIL_TIMEOUT_MS) {
-                LoadState.Success(service.fetchGroupDetail(connectionId, groupName))
+            val result = withTimeout(GROUP_DETAIL_TIMEOUT_MS) {
+                service.fetchGroupDetail(connectionId, groupName)
             }
+            if (myKey == retryKey) detail = LoadState.Success(result)
         } catch (e: TimeoutCancellationException) {
-            detail = LoadState.Error(
+            if (myKey == retryKey) detail = LoadState.Error(
                 message = stringResource("rocketmq_ui_group_props_timeout")
                     .withArg((GROUP_DETAIL_TIMEOUT_MS / 1000).toString()),
             )
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            detail = LoadState.Error(
+            if (myKey == retryKey) detail = LoadState.Error(
                 message = failureText(e),
-                // 只在有独立根因时挂（无则不渲染灰字行，避免红灰同文重复）。
                 cause = e.cause,
             )
         }
