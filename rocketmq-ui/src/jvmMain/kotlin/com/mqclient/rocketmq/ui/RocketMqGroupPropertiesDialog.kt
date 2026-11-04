@@ -216,8 +216,6 @@ fun RocketMqGroupPropertiesDialog(
     ObjectDetailDialog(
         title = stringResource("rocketmq_ui_group_props_title").withArg(groupName),
         onDismiss = closeDialog,
-        minWidth = 680.dp,
-        minHeight = 440.dp,
         footerActions = {
             // 系统保留消费组：不渲染删除按钮（service 层 isSystemGroup 防呆保留）。
             if (!systemGroup) {

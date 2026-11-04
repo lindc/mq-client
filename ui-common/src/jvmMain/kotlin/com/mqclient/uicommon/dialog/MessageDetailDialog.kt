@@ -52,7 +52,6 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.mqclient.core.log.Log
 import com.mqclient.message.interpreter.InterpreterResult
@@ -592,16 +591,12 @@ fun MessageDetailDialog(
     encoding: Int = 0,
     codedCharSetId: Int = 1208,
     downloadBaseName: String? = null,
-    minWidth: Dp = 760.dp,
-    minHeight: Dp = 520.dp,
     nestedContent: @Composable () -> Unit = {},
 ) {
     val state = rememberMessageDetailUiState(rawBody, encoding, codedCharSetId)
     ObjectDetailDialog(
         title = title,
         onDismiss = onDismiss,
-        minWidth = minWidth,
-        minHeight = minHeight,
         footerActions = {
             MessageDetailFooterActions(
                 state = state,

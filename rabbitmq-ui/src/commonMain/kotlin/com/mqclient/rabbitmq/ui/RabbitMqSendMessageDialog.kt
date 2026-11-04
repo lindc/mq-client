@@ -54,6 +54,7 @@ import com.mqclient.mqui.objectlist.ObjectListEmptyState
 import com.mqclient.rabbitmq.RabbitMqModule
 import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.ThemedSnackbarHost
+import com.mqclient.uicommon.dialog.DialogSizeClass
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.file.pickFiles
 import com.mqclient.uicommon.CompactTextField
@@ -316,11 +317,9 @@ fun RabbitMqSendMessageDialog(
     }
 
     ObjectDetailDialog(
+        sizeClass = DialogSizeClass.FORM,
         title = stringResource("rabbitmq_ui_send_title").withArg(displayName),
         onDismiss = onDismiss,
-        minWidth = 660.dp,
-        minHeight = 700.dp,
-        maxHeight = 840.dp,
         footerActions = {
             SecondaryButton(
                 onClick = onDismiss,

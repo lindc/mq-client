@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.mqclient.rocketmq.RocketMqModule
 import com.mqclient.uicommon.PrimaryButton
+import com.mqclient.uicommon.dialog.DialogSizeClass
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
@@ -87,10 +88,9 @@ fun RocketMqCreateGroupDialog(
     }
 
     ObjectDetailDialog(
+        sizeClass = DialogSizeClass.FORM,
         title = stringResource("rocketmq_ui_group_create_title"),
         onDismiss = onDismiss,
-        minWidth = 480.dp,
-        minHeight = 320.dp,
         footerActions = {
             PrimaryButton(onClick = { submit() }, enabled = !creating) {
                 Text(stringResource("rocketmq_ui_group_create_action"))

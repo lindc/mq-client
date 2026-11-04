@@ -28,6 +28,7 @@ import com.mqclient.rabbitmq.RabbitMqModule
 import com.mqclient.uicommon.LabeledField
 import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.SettingsDropdownRow
+import com.mqclient.uicommon.dialog.DialogSizeClass
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.SecondaryButton
@@ -129,10 +130,9 @@ fun RabbitMqForwardMessageDialog(
     }
 
     ObjectDetailDialog(
+        sizeClass = DialogSizeClass.FORM,
         title = stringResource("rabbitmq_ui_msg_forward_title"),
         onDismiss = onDismiss,
-        minWidth = 480.dp,
-        minHeight = 380.dp,
         footerActions = {
             PrimaryButton(onClick = { submit() }, enabled = !forwarding && destination != null) {
                 Text(stringResource("rabbitmq_ui_msg_action_forward"))

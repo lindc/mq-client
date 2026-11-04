@@ -29,7 +29,6 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.rememberDialogState
@@ -43,11 +42,11 @@ import dev.nucleusframework.window.windowDragArea
  * 对象详情对话框：外观与设置对话框（SettingsDialog）一致——
  * nucleus 自绘标题栏（[windowDragArea] 拖拽 + ✕ 关闭按钮）、底部操作区、
  * 窗口边缘原生 resize（`resizable = true`），min 尺寸经 [LocalNucleusWindow]
- * 的 `setMinimumSize` 落地；max 仅钳制**初始**尺寸（框架无 setMaximumSize，
- * 与 SettingsDialog 只设 min 的行为一致）。
+ * 的 `setMinimumSize` 落地（框架无 setMaximumSize，上限只钳制**初始**尺寸）。
  *
- * 默认初始尺寸为屏幕的 2/3（宽高各 2/3，[rememberTwoThirdsScreenSize]）；
- * 调用方可用 [initialWidth] / [initialHeight] 显式覆盖。
+ * **尺寸统一由公共层决定**：[sizeClass] 选择语义档位（属性/消息用 CONTENT、
+ * 表单用 FORM），实际 dp 由 [rememberStandardDialogSize] 按屏幕比例计算并钳到
+ * [DialogSizeSpec] 的 min / 95% 屏幕上限；调用方不得再写死宽高。
  *
  * 必须用 nucleus 的 `DecoratedDialog` 而非 compose 的 `DialogWindow`：
  * 项目的窗口管线是 nucleus/Tao 自绘框架（主线程非 AWT EDT），compose 的
@@ -66,12 +65,7 @@ fun ObjectDetailDialog(
     title: String,
     onDismiss: () -> Unit,
     onCloseRequest: (() -> Unit)? = null,
-    initialWidth: Dp? = null, // null → 屏幕宽的 2/3
-    initialHeight: Dp? = null, // null → 屏幕高的 2/3
-    minWidth: Dp = 400.dp,
-    minHeight: Dp = 300.dp,
-    maxWidth: Dp = Dp.Infinity,
-    maxHeight: Dp = Dp.Infinity,
+    sizeClass: DialogSizeClass = DialogSizeClass.CONTENT,
     /**
      * 底部操作区内容；null（默认）保留单一「关闭」按钮，由调用方（如消息详情的
      * 「下载 | 删除 | 关闭」）提供时原样渲染、布局间隔自理。放在 [RowScope] 里，
@@ -89,10 +83,8 @@ fun ObjectDetailDialog(
     //
     // 只用于**放行**动作（✕ / ESC / 默认关闭）；onCloseRequest 这种「可能拦截」的入口
     // 保持原样 —— 拦截意味着这次点击不该关窗，提前 hide 会关错。
-    // 初始尺寸与 min/max 求交集：调用方配置失配时不至于开局越界。
-    val twoThirdsScreen = rememberTwoThirdsScreenSize()
-    val startWidth = (initialWidth ?: twoThirdsScreen.width).coerceIn(minWidth, maxWidth)
-    val startHeight = (initialHeight ?: twoThirdsScreen.height).coerceIn(minHeight, maxHeight)
+    // 标准尺寸由公共层按屏幕比例统一计算（min / 95% 屏幕上限已内置）。
+    val startSize = rememberStandardDialogSize(sizeClass)
 
     DecoratedDialog(
         onCloseRequest = requestClose,
@@ -104,14 +96,14 @@ fun ObjectDetailDialog(
                 false
             }
         },
-        state = rememberDialogState(size = DpSize(startWidth, startHeight)),
+        state = rememberDialogState(size = startSize),
         title = title,
         resizable = true,
     ) {
         // min 尺寸落地（框架无 setMaximumSize，max 只钳制初始尺寸）。
         val nucleusWindow = LocalNucleusWindow.current
         LaunchedEffect(nucleusWindow) {
-            nucleusWindow.setMinimumSize(DpSize(minWidth, minHeight))
+            nucleusWindow.setMinimumSize(DpSize(DialogSizeSpec.MIN_WIDTH, DialogSizeSpec.MIN_HEIGHT))
         }
         // 兜底：内容换了（标题变 = 打开的是另一个对象）就把窗口显示回来。
         //

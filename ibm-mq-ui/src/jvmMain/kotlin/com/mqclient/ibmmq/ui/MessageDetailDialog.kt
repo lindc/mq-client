@@ -223,8 +223,6 @@ internal fun MessageDetailDialog(
     ObjectDetailDialog(
         title = stringResource("ibm_mq_msg_detail_title").withArg(summary.messageId),
         onDismiss = onDismiss,
-        minWidth = 720.dp,
-        minHeight = 480.dp,
         footerActions = {
             if (readyDetail != null && readyState != null) {
                 FooterAction(stringResource("ibm_mq_msg_detail_export_dmpmqmsg")) {

@@ -22,7 +22,8 @@ import java.awt.Toolkit
 private val screenSize by lazy { Toolkit.getDefaultToolkit().screenSize }
 
 /**
- * 屏幕尺寸的 2/3（宽、高各取 2/3），用作对象属性类对话框的默认初始尺寸。
+ * 屏幕尺寸的 2/3（宽、高各取 2/3）。**仅保留给 app-ui 里直接用 `DecoratedDialog` 的
+ * 连接属性对话框**；[ObjectDetailDialog] 的默认尺寸已改走 [rememberStandardDialogSize]。
  * 物理像素经当前 [LocalDensity] 换算成 dp，与 `DialogState.size` 的单位一致。
  */
 @Composable
@@ -40,19 +41,20 @@ fun rememberTwoThirdsScreenSize(): DpSize {
 }
 
 /**
- * 屏幕尺寸（宽、高各取全屏），用作对话框初始尺寸的封顶基准：需要让对话框在中小屏不溢出
- * 时，用 `(screen.width * 0.95f)` 作为 [ObjectDetailDialog] 的 maxWidth / maxHeight
- * （该 max 只钳制初始尺寸，不限制用户后续手动拉伸）。
+ * 标准弹窗尺寸：按 [DialogSizeClass] 档位取屏幕比例，并钳到 [DialogSizeSpec] 的统一
+ * min / 95% 屏幕上限。所有 [ObjectDetailDialog] 都走这里，业务模块不再自行写死宽高。
+ * 物理像素经当前 [LocalDensity] 换算成 dp，与 `DialogState.size` 的单位一致。
  */
 @Composable
-fun rememberFullScreenSize(): DpSize {
+fun rememberStandardDialogSize(sizeClass: DialogSizeClass = DialogSizeClass.CONTENT): DpSize {
     val density = LocalDensity.current
-    return remember(density) {
+    return remember(density, sizeClass) {
         val screen = screenSize
         with(density) {
-            DpSize(
-                width = screen.width.toFloat().toDp(),
-                height = screen.height.toFloat().toDp(),
+            computeStandardDialogSize(
+                screenWidth = screen.width.toFloat().toDp(),
+                screenHeight = screen.height.toFloat().toDp(),
+                sizeClass = sizeClass,
             )
         }
     }

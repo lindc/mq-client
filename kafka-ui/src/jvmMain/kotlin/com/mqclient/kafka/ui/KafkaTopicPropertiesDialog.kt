@@ -147,8 +147,6 @@ fun KafkaTopicPropertiesDialog(
     ObjectDetailDialog(
         title = topicName,
         onDismiss = onDismiss,
-        minWidth = 680.dp,
-        minHeight = 440.dp,
         footerActions = {
             // 内部主题（__consumer_offsets 等）禁止删除 / 清空：按钮直接隐藏，概览行即提示。
             if (snapshot != null && !snapshot.internal) {

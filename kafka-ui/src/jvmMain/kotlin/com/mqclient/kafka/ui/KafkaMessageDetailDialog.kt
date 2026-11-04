@@ -171,8 +171,6 @@ internal fun KafkaMessageDetailDialog(
     ObjectDetailDialog(
         title = stringResource("kafka_ui_msg_detail_title").withArg(summary.partition, summary.offset),
         onDismiss = onDismiss,
-        minWidth = 720.dp,
-        minHeight = 480.dp,
         footerActions = {
             if (readyState != null && readyDetail != null) {
                 MessageDetailFooterActions(

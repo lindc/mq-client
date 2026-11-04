@@ -25,6 +25,7 @@ import com.mqclient.rabbitmq.RabbitMqModule
 import com.mqclient.uicommon.LabeledField
 import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.SettingsDropdownRow
+import com.mqclient.uicommon.dialog.DialogSizeClass
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
@@ -121,10 +122,9 @@ fun RabbitMqAddBindingDialog(
     }
 
     ObjectDetailDialog(
+        sizeClass = DialogSizeClass.FORM,
         title = stringResource("rabbitmq_ui_binding_add_title").withArg(exchangeName),
         onDismiss = onDismiss,
-        minWidth = 480.dp,
-        minHeight = 340.dp,
         footerActions = {
             PrimaryButton(
                 onClick = { submit() },

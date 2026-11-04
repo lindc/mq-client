@@ -40,8 +40,6 @@ internal fun RocketMqMessageDetailDialog(
             formatTimestamp(message.storeTimestamp),
         headerContent = { RocketMqHeaderContent(message) },
         downloadBaseName = "msg_" + message.topic + "_q" + message.queueId + "_o" + message.offset,
-        minWidth = 720.dp,
-        minHeight = 480.dp,
     )
 }
 

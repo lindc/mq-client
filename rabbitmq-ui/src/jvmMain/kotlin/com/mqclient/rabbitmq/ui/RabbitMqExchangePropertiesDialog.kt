@@ -181,8 +181,6 @@ fun RabbitMqExchangePropertiesDialog(
     ObjectDetailDialog(
         title = stringResource("rabbitmq_ui_exchange_props_title").withArg(displayName),
         onDismiss = onDismiss,
-        minWidth = 640.dp,
-        minHeight = 420.dp,
         footerActions = {
             // 默认交换机 / amq.* / internal 禁止删除：按钮直接隐藏（与 Kafka 内部主题同一约定）。
             if (!systemExchange && !internal) {

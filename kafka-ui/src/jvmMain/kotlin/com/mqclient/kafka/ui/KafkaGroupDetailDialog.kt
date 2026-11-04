@@ -131,8 +131,6 @@ fun KafkaGroupDetailDialog(
     ObjectDetailDialog(
         title = groupId,
         onDismiss = onDismiss,
-        minWidth = 640.dp,
-        minHeight = 420.dp,
         footerActions = {
             // MQ 约定：操作按钮在左，弹性 Spacer 占位，「关闭」独占右侧。
             val ready = (detail as? LoadState.Success)?.data

@@ -423,8 +423,6 @@ fun RabbitMqQueueMessagesDialog(
     ObjectDetailDialog(
         title = stringResource("rabbitmq_ui_msg_title").withArg(queueName),
         onDismiss = onDismiss,
-        minWidth = 780.dp,
-        minHeight = 580.dp,
         footerActions = {
             Spacer(Modifier.weight(1f))
             SecondaryButton(

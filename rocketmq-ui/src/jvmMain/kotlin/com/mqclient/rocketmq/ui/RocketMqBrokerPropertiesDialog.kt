@@ -50,8 +50,6 @@ fun RocketMqBrokerPropertiesDialog(
     ObjectDetailDialog(
         title = stringResource("rocketmq_ui_broker_props_title").withArg(brokerName),
         onDismiss = onDismiss,
-        minWidth = 520.dp,
-        minHeight = 400.dp,
     ) {
         Column(
             modifier = Modifier

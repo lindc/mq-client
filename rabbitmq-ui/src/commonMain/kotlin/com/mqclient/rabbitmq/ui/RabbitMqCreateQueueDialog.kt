@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import com.mqclient.rabbitmq.RabbitMqModule
 import com.mqclient.uicommon.LabeledField
 import com.mqclient.uicommon.PrimaryButton
+import com.mqclient.uicommon.dialog.DialogSizeClass
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
@@ -114,10 +115,9 @@ fun RabbitMqCreateQueueDialog(
     }
 
     ObjectDetailDialog(
+        sizeClass = DialogSizeClass.FORM,
         title = stringResource("rabbitmq_ui_queue_create_title"),
         onDismiss = onDismiss,
-        minWidth = 480.dp,
-        minHeight = 460.dp,
         footerActions = {
             PrimaryButton(
                 onClick = { submit() },

@@ -189,8 +189,6 @@ fun RabbitMqQueuePropertiesDialog(
     ObjectDetailDialog(
         title = stringResource("rabbitmq_ui_queue_props_title").withArg(queueName),
         onDismiss = onDismiss,
-        minWidth = 660.dp,
-        minHeight = 560.dp,
         footerActions = {
             DangerButton(onClick = { purgeConfirm = true }, enabled = !operating) {
                 Text(stringResource("rabbitmq_ui_queue_purge"))

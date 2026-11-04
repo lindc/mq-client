@@ -99,8 +99,6 @@ fun KafkaBrokerDetailDialog(
     ObjectDetailDialog(
         title = stringResource("kafka_ui_broker_detail_title").withArg(broker.brokerId),
         onDismiss = onDismiss,
-        minWidth = 640.dp,
-        minHeight = 420.dp,
         footerActions = {
             SecondaryButton(
                 onClick = onDismiss,

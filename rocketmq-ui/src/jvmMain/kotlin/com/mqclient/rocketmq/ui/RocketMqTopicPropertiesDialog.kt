@@ -134,8 +134,6 @@ fun RocketMqTopicPropertiesDialog(
     ObjectDetailDialog(
         title = stringResource("rocketmq_ui_topic_props_title").withArg(topicName),
         onDismiss = onDismiss,
-        minWidth = 680.dp,
-        minHeight = 440.dp,
         footerActions = {
             // 系统内置主题：不渲染删除按钮（service 层 isSystemTopic 第二道防呆保留）。
             if (!systemTopic) {
