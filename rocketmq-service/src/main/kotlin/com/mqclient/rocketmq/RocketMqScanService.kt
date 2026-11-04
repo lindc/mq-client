@@ -408,6 +408,10 @@ class RocketMqScanService(
      */
     suspend fun fetchGroupDetail(connectionId: String, group: String): RocketMqGroupDetailSnapshot {
         val (ctx, admin) = targetOrThrow(connectionId)
+        // 排查 4：每次详情查询前留一条生命周期快照。第三次卡死时可直接看
+        // started 是否仍是 true（实例被误 shutdown 会变 false）、inFlight 是否已堆高
+        // （上一次没被取消的请求残留）、以及 admin=# 是否始终是同一个实例。
+        rocketMqLog.info("group detail begin: group=$group ${admin.lifecycleState()}")
         return withContext(Dispatchers.IO) {
             // 订阅组配置：null + 没抛异常 = 该组在 broker 上确实不存在（与「查询失败」区分）。
             var configLookupFailed = false

@@ -18,6 +18,7 @@ import org.apache.rocketmq.remoting.protocol.body.ConsumerConnection
 import org.apache.rocketmq.remoting.exception.RemotingConnectException
 import org.apache.rocketmq.remoting.exception.RemotingTimeoutException
 import org.apache.rocketmq.tools.admin.DefaultMQAdminExt
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * RocketMQ 管理 API 客户端（Remoting，`DefaultMQAdminExt` 封装）：连接验证与
@@ -66,6 +67,17 @@ class RocketMqAdminClient(private val config: RocketMqConfig) : AutoCloseable {
      */
     @Volatile
     private var startAttempted = false
+
+    /** 在途管理调用数：诊断「请求堆积 / 僵尸调用没被取消释放」。 */
+    private val inFlight = AtomicInteger(0)
+
+    /**
+     * AdminExt 生命周期快照（排查 4）。`DefaultMQAdminExt` 没有公开的 `isStarted()`，
+     * 这里用本类自己维护的 [startAttempted]（只有 [startAndVerify] / [close] 两处写入）
+     * + 实例身份 + 在途数，确认每次查询用的是同一个、已 start 且从未被 shutdown 的实例。
+     */
+    fun lifecycleState(): String =
+        "admin=#${System.identityHashCode(admin)} started=$startAttempted inFlight=${inFlight.get()}"
 
     /** start + examineBrokerClusterInfo：NameServer 连通性 / ACL 一次验完。 */
     suspend fun startAndVerify() {
@@ -297,10 +309,10 @@ class RocketMqAdminClient(private val config: RocketMqConfig) : AutoCloseable {
         tls.close()
     }
 
-    /** 所有管理调用的统一出口：IO 线程 + 错误映射。
+    /** 所有管理调用的统一出口：IO 线程 + 错误映射 + 在途计数。
      *
-     * `suspend` 是因为 TLS start 窗口要挂在 [Mutex] 上等锁（可取消）—— `tls.start`
-     * 本身是挂起调用，非挂起的 lambdas 依然可以传进来。
+     * 这里**没有互斥锁**：`DefaultMQAdminExt` 自身线程安全，进度查询路径不经过任何
+     * Mutex（全局 `TLS_BUILD_LOCK` 只在 `start()` 窗口用，且 `withLock` 的 finally 会释放）。
      */
     private suspend fun <T> ioCall(block: () -> T): T {
         // runInterruptible（而非 withContext）：RocketMQ 的 examineXxx 是阻塞 Java 调用，
@@ -309,16 +321,22 @@ class RocketMqAdminClient(private val config: RocketMqConfig) : AutoCloseable {
         // 就会把 IO 池与共享 AdminExt 占满，下一次查询排队超时——正是「第二次/快速切换必卡死」的根因。
         // runInterruptible 在取消时会对底层线程 Thread.interrupt()，Netty 读会抛 InterruptedException
         // 提前返回，阻塞调用真正被中断，不再泄漏线程。
-        return runInterruptible(Dispatchers.IO) {
-            try {
-                block()
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Throwable) {
-                throw mapError(e)
+        val n = inFlight.incrementAndGet()
+        rocketMqLog.debug("rmq call begin (#$n): ${lifecycleState()}")
+        try {
+            return runInterruptible(Dispatchers.IO) {
+                try {
+                    block()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    throw mapError(e)
+                }
             }
+        } finally {
+            inFlight.decrementAndGet()
+            rocketMqLog.debug("rmq call end (#$n): ${lifecycleState()}")
         }
-
     }
     /** RocketMQ 异常 → 人类可读文案（UI 直出）。 */
     private fun mapError(e: Throwable): Exception {

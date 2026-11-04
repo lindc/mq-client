@@ -29,6 +29,7 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -60,6 +61,7 @@ import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 import com.mqclient.uicommon.failureText
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
@@ -112,8 +114,26 @@ fun RocketMqGroupPropertiesDialog(
     // 超过 3 秒仍未返回时翻成“正在获取 Broker 状态和位点信息”，缓解用户焦虑。
     var slowLoading by remember(groupName) { mutableStateOf(false) }
 
+    // 当前在途加载 Job（排查 2）：ObjectDetailDialog 关闭是同步 nucleusWindow.hide()，
+    // 组合真正销毁要等父重组的一帧（见 ObjectDetailDialog 的 KDoc）。只靠 LaunchedEffect
+    // 的隐式取消，从点「关闭」到那一帧之间这次查询仍占着共享 AdminExt / IO 线程，
+    // 快速「开→关→开」就会把僵尸请求堆在同一条 Remoting 通道上排队等死。
+    // 持有显式句柄：关闭瞬间就 cancel，不依赖窗口组合何时被销毁。
+    var loadJob by remember(groupName) { mutableStateOf<Job?>(null) }
+    val closeDialog = {
+        loadJob?.cancel()
+        loadJob = null
+        onDismiss()
+    }
+    // 兜底：组合被销毁（含 hide 后延迟销毁、切换连接、窗口关闭）时一定取消在途请求。
+    DisposableEffect(Unit) {
+        onDispose { loadJob?.cancel() }
+    }
+
     LaunchedEffect(groupName, retryKey) {
         val myKey = retryKey
+        // 把这次加载的 Job 交给 closeDialog / onDispose，供关闭时显式取消。
+        loadJob = coroutineContext[Job]
         detail = LoadState.Loading
         slowLoading = false
         val slowTimer = launch { delay(3_000L); if (myKey == retryKey) slowLoading = true }
@@ -153,7 +173,7 @@ fun RocketMqGroupPropertiesDialog(
                 service.deleteConsumerGroup(connectionId, groupName)
                 deleting = false
                 deleteConfirm = false
-                onDismiss()
+                closeDialog()
                 onDeleted()
             } catch (e: CancellationException) {
                 throw e
@@ -166,7 +186,7 @@ fun RocketMqGroupPropertiesDialog(
 
     ObjectDetailDialog(
         title = stringResource("rocketmq_ui_group_props_title").withArg(groupName),
-        onDismiss = onDismiss,
+        onDismiss = closeDialog,
         minWidth = 680.dp,
         minHeight = 440.dp,
         footerActions = {
@@ -178,7 +198,7 @@ fun RocketMqGroupPropertiesDialog(
             }
             Spacer(Modifier.weight(1f))
             SecondaryButton(
-                onClick = onDismiss,
+                onClick = closeDialog,
             ) { Text(stringResource("common_close")) }
         },
     ) {
