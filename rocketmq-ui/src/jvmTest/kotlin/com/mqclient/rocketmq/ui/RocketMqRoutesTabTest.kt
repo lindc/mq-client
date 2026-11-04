@@ -20,7 +20,6 @@ import androidx.compose.ui.unit.dp
 import com.mqclient.uicommon.i18n.LanguageResources
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
-import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
@@ -165,41 +164,17 @@ class RocketMqRoutesTabTest {
     }
 
     /**
-     * [responsiveTabWidth] 曲线：`min(W, max(0.8W, 900dp))`。
-     *
-     * 用纯函数单测而不是渲染测宽度：Compose 测试根视口只有约 1024dp，
-     * `Modifier.size(1600.dp)` 会被父约束钳掉，造不出超宽窗口。纯函数不受此限。
+     * 宽度规范已上提到公共外壳 ObjectDetailDialog，
+     * 路由表不再自己设宽度：在 1000dp 容器里应铺满、而不是被私有容器夹到 900dp。
+     * 这是「清理各模块私有宽度覆盖」的渲染守卫。
      */
     @Test
-    fun `responsive width is full width then 900dp floor then 80 percent`() {
-        // 小窗口：全宽，不被 0.8W 压窄
-        assertEquals(800f, responsiveTabWidth(800.dp).value, 0.01f)
-        assertEquals(900f, responsiveTabWidth(900.dp).value, 0.01f)
-        // 中窗口：900dp 保底
-        assertEquals(900f, responsiveTabWidth(1000.dp).value, 0.01f)
-        // 1125dp 是连续点：0.8 × 1125 = 900，两侧无跳变
-        assertEquals(900f, responsiveTabWidth(1125.dp).value, 0.01f)
-        assertTrue(
-            kotlin.math.abs(responsiveTabWidth(1126.dp).value - 900.8f) < 0.01f,
-            "1126dp 应为 900.8dp（80% 分支起点），实测 ${responsiveTabWidth(1126.dp).value}dp",
-        )
-        // 大窗口：80% 跟随，且随对话框线性变化
-        assertEquals(1280f, responsiveTabWidth(1600.dp).value, 0.01f)
-        assertEquals(1520f, responsiveTabWidth(1900.dp).value, 0.01f)
-        assertTrue(responsiveTabWidth(1900.dp) > responsiveTabWidth(1600.dp))
-    }
-
-    /**
-     * 渲染守卫：[ResponsiveTabContainer] 内容居中、不再贴边（1000dp 容器 →
-     * 900dp 内容、左右各 50dp）。两 Tab 共用该容器，因此也钉住了内容左边缘对齐。
-     */
-    @Test
-    fun `tab content is centered and not flush with the edge`() = runComposeUiTest {
+    fun `routes tab no longer applies a private width cap`() = runComposeUiTest {
         loadTables()
         setContent {
             MaterialTheme {
                 Box(Modifier.size(1000.dp, 400.dp)) {
-                    ResponsiveTabContainer { RoutesTab(routes(), brokers()) }
+                    RoutesTab(routes(), brokers())
                 }
             }
         }
@@ -207,9 +182,8 @@ class RocketMqRoutesTabTest {
 
         val row = onAllNodesWithTag(ROUTE_PLAIN_ROW_TAG)[0].fetchSemanticsNode().boundsInRoot
         assertTrue(
-            row.width > 890f && row.width < 910f,
-            "1000dp 容器内容应保底 900dp，实测 ${row.width}dp",
+            row.width > 980f,
+            "路由表应铺满父容器（宽度由公共外壳统一施加），实测 ${row.width}dp",
         )
-        assertTrue(row.left >= 40f, "内容应居中留白约 50dp，实测 left=${row.left}dp")
     }
 }

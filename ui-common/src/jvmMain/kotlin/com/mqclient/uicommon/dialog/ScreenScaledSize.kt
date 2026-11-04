@@ -3,6 +3,7 @@ package com.mqclient.uicommon.dialog
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
 import java.awt.Toolkit
 
@@ -40,5 +41,18 @@ fun rememberStandardDialogSize(sizeClass: DialogSizeClass = DialogSizeClass.CONT
                 sizeClass = sizeClass,
             )
         }
+    }
+}
+
+/**
+ * 主屏宽度（dp）。用于 [ObjectDetailDialog] 计算窗口最小宽度：内容区要求 900dp，
+ * 但小屏上 900dp 的最小窗口会撑出屏幕，需按屏幕 95% 封顶（见
+ * [computeWindowMinWidth]）。物理像素经当前 [LocalDensity] 换算成 dp。
+ */
+@Composable
+fun rememberScreenWidth(): Dp {
+    val density = LocalDensity.current
+    return remember(density) {
+        with(density) { screenSize.width.toFloat().toDp() }
     }
 }

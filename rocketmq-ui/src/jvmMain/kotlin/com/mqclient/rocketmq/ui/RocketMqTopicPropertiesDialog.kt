@@ -2,18 +2,15 @@ package com.mqclient.rocketmq.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -50,7 +47,6 @@ import com.mqclient.rocketmq.RocketMqTopicSnapshot
 import com.mqclient.rocketmq.RocketMqTopicRouteSnapshot
 import com.mqclient.uicommon.DangerButton
 import com.mqclient.uicommon.PropertyItem
-import com.mqclient.uicommon.PropertyTableMaxWidth
 import com.mqclient.uicommon.PropertyTableSection
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.SecondaryButton
@@ -182,12 +178,10 @@ fun RocketMqTopicPropertiesDialog(
                 )
             }
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                ResponsiveTabContainer {
-                    if (tab == 0) {
-                        OverviewTab(topicName, messageTypeText, snapshot)
-                    } else {
-                        RoutesTab(snapshot?.routes.orEmpty(), clusterBrokers)
-                    }
+                if (tab == 0) {
+                    OverviewTab(topicName, messageTypeText, snapshot)
+                } else {
+                    RoutesTab(snapshot?.routes.orEmpty(), clusterBrokers)
                 }
             }
         }
@@ -228,48 +222,6 @@ fun RocketMqTopicPropertiesDialog(
                     ) { Text(stringResource("common_cancel")) }
                 },
             )
-        }
-    }
-}
-
-/* ------------------------------ 两 Tab 共用的响应式限宽容器 ------------------------------ */
-
-/**
- * 「80% 跟随 + 900dp 保底」的内容容器，水平居中：
- * `内容宽 = min(W, max(0.8W, PropertyTableMaxWidth))`，W 为对话框内容区宽度。
- *
- * 为什么是这条曲线（而不是纯 80% 或固定 900dp）：
- * - 小窗口（W ≤ 900dp）：全宽，5 列路由表不被 0.8W 压窄、文字不提前截断；
- * - 中窗口（900 < W < 1125dp）：保持 900dp，沿用 [PropertyTableMaxWidth] 的
- *   防拉散设计（Key / Value 两列不被推得过远，见 PropertyTable.kt）；
- * - 大窗口（W ≥ 1125dp）：按 80% 跟随对话框缩放，两侧留白恒为 10%，不再出现
- *   固定 900dp 在 1632dp 对话框里只占 55%、留白 366dp 的空旷感。
- *
- * 1125dp 是连续点（0.8 × 1125 = 900），曲线无跳变。两个 Tab 共用本容器，且
- * [OverviewTab] 的 PropertyTableSection 传 `maxWidth = Dp.Infinity` 避免二次限宽，
- * 因此两 Tab 的内容左边缘与文字左边缘都逐像素对齐。
- */
-/**
- * 宽度曲线的纯计算部分：`min(W, max(0.8W, PropertyTableMaxWidth))`。
- * 抽成无 Compose 依赖的函数，便于无头单测钉住三档区间与 1125dp 连续点。
- */
-internal fun responsiveTabWidth(availableWidth: Dp): Dp {
-    val proportional = availableWidth * 0.8f
-    val floored = if (proportional > PropertyTableMaxWidth) proportional else PropertyTableMaxWidth
-    return if (availableWidth < floored) availableWidth else floored
-}
-
-@Composable
-internal fun ResponsiveTabContainer(
-    modifier: Modifier = Modifier,
-    content: @Composable () -> Unit,
-) {
-    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
-        val contentWidth = responsiveTabWidth(maxWidth)
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-            Box(modifier = Modifier.width(contentWidth).fillMaxHeight()) {
-                content()
-            }
         }
     }
 }
@@ -341,76 +293,71 @@ internal fun RoutesTab(
         }
         return
     }
-    // 内容宽度与居中统一由外层 [ResponsiveTabContainer] 提供（80% 跟随 + 900dp 保底），
-    // 本 Tab 只填满容器、不再自行限宽；行内 10.dp 与概览 PropertyTable 一致，
+    // 内容宽度与居中统一由公共外壳 ObjectDetailDialog 强制施加（80% 跟随 + 900dp 保底），
+    // 本 Tab 只填满容器、不再自行限宽或居中；行内 10.dp 与概览 PropertyTable 一致，
     // 两个 Tab 的文字左边缘因此逐像素对齐。
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.TopCenter,
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(vertical = 8.dp),
     ) {
-        Column(
+        // 与概览（PropertyTable）同款视觉：斑马纹 + 4dp 圆角 + bodyMedium/onSurface +
+        // 40dp 最小行高 + 10/8 内边距 + 8dp 行距，无分割线；列宽统一 weight。
+        //
+        // 表头与数据**同档字号**（bodyMedium）：概览里的层级是靠颜色分的（Key 列
+        // onSurfaceVariant / Value 列 onSurface），不是靠字号。表头原先是 labelMedium
+        // —— 比数据小一整档，与概览的 Key 列对不上。
+        Row(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(vertical = 8.dp),
+                .fillMaxWidth()
+                .padding(horizontal = ROUTE_ROW_HPADDING, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            // 与概览（PropertyTable）同款视觉：斑马纹 + 4dp 圆角 + bodyMedium/onSurface +
-            // 40dp 最小行高 + 10/8 内边距 + 8dp 行距，无分割线；列宽统一 weight。
-            //
-            // 表头与数据**同档字号**（bodyMedium）：概览里的层级是靠颜色分的（Key 列
-            // onSurfaceVariant / Value 列 onSurface），不是靠字号。表头原先是 labelMedium
-            // —— 比数据小一整档，与概览的 Key 列对不上。
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = ROUTE_ROW_HPADDING, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                RouteHeaderCell(stringResource("rocketmq_ui_topic_props_col_broker"), Modifier.weight(2f))
-                RouteHeaderCell(stringResource("rocketmq_ui_topic_props_col_read"), Modifier.weight(1f))
-                RouteHeaderCell(stringResource("rocketmq_ui_topic_props_col_write"), Modifier.weight(1f))
-                RouteHeaderCell(stringResource("rocketmq_ui_topic_props_col_perm"), Modifier.weight(1.2f))
-                RouteHeaderCell(stringResource("rocketmq_ui_topic_props_col_role"), Modifier.weight(1.2f))
-            }
-            Spacer(Modifier.height(8.dp))
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
-            ) {
-                itemsIndexed(routes) { index, route ->
-                    val role = clusterBrokers
-                        .firstOrNull { it.brokerName == route.brokerName }
-                        ?.role ?: "-"
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag(if (index % 2 == 1) ROUTE_ZEBRA_ROW_TAG else ROUTE_PLAIN_ROW_TAG)
-                            .heightIn(min = ROUTE_ROW_MIN_HEIGHT)
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(
-                                if (index % 2 == 1) {
-                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-                                } else {
-                                    Color.Transparent
-                                },
-                            )
-                            .padding(horizontal = ROUTE_ROW_HPADDING, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        RouteCell(route.brokerName, Modifier.weight(2f))
-                        RouteCell(route.readQueueNums.toString(), Modifier.weight(1f))
-                        RouteCell(route.writeQueueNums.toString(), Modifier.weight(1f))
-                        RouteCell(formatPerm(route.perm), Modifier.weight(1.2f))
-                        RouteCell(
-                            text = role,
-                            modifier = Modifier.weight(1.2f),
-                            // Master 用 primary 色：路由表里唯一需要一眼扫出的信息。
-                            color = if (role == "Master") {
-                                MaterialTheme.colorScheme.primary
+            RouteHeaderCell(stringResource("rocketmq_ui_topic_props_col_broker"), Modifier.weight(2f))
+            RouteHeaderCell(stringResource("rocketmq_ui_topic_props_col_read"), Modifier.weight(1f))
+            RouteHeaderCell(stringResource("rocketmq_ui_topic_props_col_write"), Modifier.weight(1f))
+            RouteHeaderCell(stringResource("rocketmq_ui_topic_props_col_perm"), Modifier.weight(1.2f))
+            RouteHeaderCell(stringResource("rocketmq_ui_topic_props_col_role"), Modifier.weight(1.2f))
+        }
+        Spacer(Modifier.height(8.dp))
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+        ) {
+            itemsIndexed(routes) { index, route ->
+                val role = clusterBrokers
+                    .firstOrNull { it.brokerName == route.brokerName }
+                    ?.role ?: "-"
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag(if (index % 2 == 1) ROUTE_ZEBRA_ROW_TAG else ROUTE_PLAIN_ROW_TAG)
+                        .heightIn(min = ROUTE_ROW_MIN_HEIGHT)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(
+                            if (index % 2 == 1) {
+                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
                             } else {
-                                MaterialTheme.colorScheme.onSurface
+                                Color.Transparent
                             },
                         )
-                    }
+                        .padding(horizontal = ROUTE_ROW_HPADDING, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RouteCell(route.brokerName, Modifier.weight(2f))
+                    RouteCell(route.readQueueNums.toString(), Modifier.weight(1f))
+                    RouteCell(route.writeQueueNums.toString(), Modifier.weight(1f))
+                    RouteCell(formatPerm(route.perm), Modifier.weight(1.2f))
+                    RouteCell(
+                        text = role,
+                        modifier = Modifier.weight(1.2f),
+                        // Master 用 primary 色：路由表里唯一需要一眼扫出的信息。
+                        color = if (role == "Master") {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
+                    )
                 }
             }
         }

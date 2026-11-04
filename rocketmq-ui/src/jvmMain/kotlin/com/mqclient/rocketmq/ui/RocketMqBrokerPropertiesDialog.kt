@@ -12,6 +12,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.mqclient.rocketmq.RocketMqBrokerSnapshot
 import com.mqclient.rocketmq.RocketMqModule
@@ -58,6 +59,7 @@ fun RocketMqBrokerPropertiesDialog(
                 .padding(horizontal = 20.dp, vertical = 8.dp),
         ) {
             PropertyTableSection(
+                maxWidth = Dp.Infinity,
                 title = stringResource("rocketmq_ui_overview_cluster"),
                 items = listOf(
                     PropertyItem(stringResource("rocketmq_ui_overview_col_name"), brokerName),
@@ -84,6 +86,7 @@ fun RocketMqBrokerPropertiesDialog(
                     Spacer(Modifier.height(16.dp))
                     val (ip, port) = brokerAddressParts(broker.address)
                     PropertyTableSection(
+                        maxWidth = Dp.Infinity,
                         title = stringResource("rocketmq_ui_broker_props_section_instance")
                             .withArg("${broker.brokerId} · ${broker.role}"),
                         items = listOf(

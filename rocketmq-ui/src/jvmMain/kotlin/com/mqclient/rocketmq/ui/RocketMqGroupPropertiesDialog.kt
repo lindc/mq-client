@@ -44,6 +44,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.mqclient.core.log.Log
 import com.mqclient.mqui.state.LoadState
@@ -331,6 +332,7 @@ private fun OverviewTab(detail: RocketMqGroupDetailSnapshot) {
             )
         }
         PropertyTableSection(
+            maxWidth = Dp.Infinity,
             title = stringResource("rocketmq_ui_group_props_section_basic"),
             items = listOf(
                 PropertyItem(stringResource("rocketmq_ui_group_props_name"), detail.name),
@@ -358,6 +360,7 @@ private fun OverviewTab(detail: RocketMqGroupDetailSnapshot) {
         )
         Spacer(Modifier.height(12.dp))
         PropertyTableSection(
+            maxWidth = Dp.Infinity,
             title = stringResource("rocketmq_ui_group_props_section_metrics"),
             items = if (detail.progressState == RocketMqProgressState.OK) {
                 listOf(

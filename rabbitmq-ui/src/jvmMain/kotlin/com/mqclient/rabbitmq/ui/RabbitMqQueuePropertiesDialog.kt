@@ -39,6 +39,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.mqclient.core.ConnectionStatus
 import com.mqclient.mqui.state.LoadState
@@ -351,6 +352,7 @@ private fun OverviewPane(detail: RabbitMqQueueDetailSnapshot) {
             .padding(vertical = 8.dp),
     ) {
         PropertyTableSection(
+            maxWidth = Dp.Infinity,
             title = stringResource("rabbitmq_ui_queue_props_section_basic"),
             items = listOf(
                 PropertyItem(stringResource("rabbitmq_ui_queue_field_state_label"), detail.state),
@@ -362,6 +364,7 @@ private fun OverviewPane(detail: RabbitMqQueueDetailSnapshot) {
         )
         Spacer(Modifier.height(16.dp))
         PropertyTableSection(
+            maxWidth = Dp.Infinity,
             title = stringResource("rabbitmq_ui_queue_props_section_metrics"),
             items = listOf(
                 PropertyItem(stringResource("rabbitmq_ui_overview_total_messages"), detail.messages.toString()),

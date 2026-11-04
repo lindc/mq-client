@@ -36,6 +36,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.mqclient.core.concurrent.runCatchingCancellable
 import com.mqclient.kafka.KafkaModule
@@ -292,6 +293,7 @@ internal fun OverviewTab(
             .padding(vertical = 8.dp),
     ) {
         PropertyTableSection(
+            maxWidth = Dp.Infinity,
             title = stringResource("kafka_ui_topic_props_section_basic"),
             items = listOf(
                 PropertyItem(stringResource("kafka_ui_topic_props_overview_name"), snapshot.name),
@@ -307,6 +309,7 @@ internal fun OverviewTab(
         )
         Spacer(Modifier.height(16.dp))
         PropertyTableSection(
+            maxWidth = Dp.Infinity,
             title = stringResource("kafka_ui_topic_props_section_partitions"),
             items = listOf(
                 PropertyItem(
@@ -321,6 +324,7 @@ internal fun OverviewTab(
         )
         Spacer(Modifier.height(16.dp))
         PropertyTableSection(
+            maxWidth = Dp.Infinity,
             title = stringResource("kafka_ui_topic_props_section_stats"),
             items = listOf(
                 PropertyItem(
@@ -380,6 +384,7 @@ internal fun ConfigsTab(state: LoadState<List<KafkaTopicConfigSnapshot>>, modifi
                         .padding(vertical = 8.dp),
                 ) {
                     PropertyTableSection(
+                        maxWidth = Dp.Infinity,
                         title = stringResource("kafka_ui_topic_props_configs_common"),
                         items = commonEntries.map { entry ->
                             PropertyItem(
@@ -393,6 +398,7 @@ internal fun ConfigsTab(state: LoadState<List<KafkaTopicConfigSnapshot>>, modifi
                     )
                     Spacer(Modifier.height(16.dp))
                     PropertyTableSection(
+                        maxWidth = Dp.Infinity,
                         title = stringResource("kafka_ui_topic_props_configs_nondefault"),
                         items = overridden.map { PropertyItem(it.key, it.value) },
                     )

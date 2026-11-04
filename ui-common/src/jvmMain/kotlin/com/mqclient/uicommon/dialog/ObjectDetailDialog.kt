@@ -2,10 +2,12 @@ package com.mqclient.uicommon.dialog
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -101,9 +103,19 @@ fun ObjectDetailDialog(
         resizable = true,
     ) {
         // min 尺寸落地（框架无 setMaximumSize，max 只钳制初始尺寸）。
+        // CONTENT 档（属性/消息/详情，含表格）用内容区下限 900dp 并按屏幕 95% 封顶：
+        // 既保证用户拖拽缩放时表格不被拉变形（任务 4），又不会在小屏上把窗口撑出屏幕。
+        // FORM 档（创建/绑定/转发等表单，无宽表格）保持统一 MIN_WIDTH —— 否则小屏上
+        // 一个创建表单窗口会被 900dp 下限撑到占满 88% 屏宽，反而是回归。
         val nucleusWindow = LocalNucleusWindow.current
-        LaunchedEffect(nucleusWindow) {
-            nucleusWindow.setMinimumSize(DpSize(DialogSizeSpec.MIN_WIDTH, DialogSizeSpec.MIN_HEIGHT))
+        val screenWidth = rememberScreenWidth()
+        val windowMinWidth = if (sizeClass == DialogSizeClass.CONTENT) {
+            computeWindowMinWidth(screenWidth)
+        } else {
+            DialogSizeSpec.MIN_WIDTH
+        }
+        LaunchedEffect(nucleusWindow, windowMinWidth) {
+            nucleusWindow.setMinimumSize(DpSize(windowMinWidth, DialogSizeSpec.MIN_HEIGHT))
         }
         // 兜底：内容换了（标题变 = 打开的是另一个对象）就把窗口显示回来。
         //
@@ -154,8 +166,23 @@ fun ObjectDetailDialog(
                 // 分割线 / 底部按钮栏上。模块内部的布局错误应该表现为「底部被切」，
                 // 而不是「分割线从 Loading 中间穿过」—— 后者会让人以为分割线归错了
                 // 容器（实测就踩过：RabbitMQ 交换机属性对话框的固定高度栈溢出）。
+                //
+                // 宽度规范由外壳**强制**施加，调用方无法覆盖：全项目所有属性 / 消息 /
+                // 表单对话框的内容区统一为 min(W, max(0.8W, 900dp)) 并水平居中
+                // （见 [computeContentWidth]）。用 BoxWithConstraints 取实际可用宽度
+                // 再夹到 W，小屏上不会因 widthIn(min=900dp) 撑出窗口被裁掉右侧。
                 Box(modifier = Modifier.weight(1f).fillMaxWidth().clipToBounds()) {
-                    content()
+                    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                        val contentWidth = computeContentWidth(maxWidth)
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.TopCenter,
+                        ) {
+                            Box(modifier = Modifier.width(contentWidth).fillMaxHeight()) {
+                                content()
+                            }
+                        }
+                    }
                 }
 
                 // 3. 底部操作区：调用方定制（footerActions）或默认单一「关闭」

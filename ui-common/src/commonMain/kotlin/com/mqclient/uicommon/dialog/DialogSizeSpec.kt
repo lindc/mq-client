@@ -28,6 +28,49 @@ object DialogSizeSpec {
     /** 统一最小尺寸（原各模块 400~780dp 各异，现收敛为一套）。 */
     val MIN_WIDTH: Dp = 480.dp
     val MIN_HEIGHT: Dp = 320.dp
+
+    /**
+     * 内容区宽度占对话框**窗口**宽度的比例（不是屏幕宽度——窗口本身已是屏幕的
+     * 85%/60%，见 [DialogSizeClass]）。由 [computeContentWidth] 统一计算，
+     * 调用方无法覆盖。
+     */
+    const val CONTENT_WIDTH_FRACTION = 0.8f
+
+    /** 内容区最小宽度：窄窗口下保证表格不被压变形，同时也是窗口拖拽下限。 */
+    val CONTENT_MIN_WIDTH: Dp = 900.dp
+}
+
+/**
+ * 内容区宽度曲线：`min(W, max(0.8W, 900dp))`，W 为内容区可用宽度。
+ *
+ * 等价于 `Modifier.fillMaxWidth(0.8f).widthIn(min = 900.dp)` 但**在 W < 900dp 时
+ * 会退回 W 而不是撑出窗口**（被外壳 `clipToBounds` 裁掉右侧）。1125dp 是连续点
+ * （0.8 × 1125 = 900），窗口缩放时宽度变化无跳变。
+ *
+ * 抽成无 Compose / 无 AWT 依赖的纯函数，便于无头单测钉住三档区间。
+ */
+fun computeContentWidth(availableWidth: Dp): Dp {
+    val proportional = availableWidth * DialogSizeSpec.CONTENT_WIDTH_FRACTION
+    val floored = if (proportional > DialogSizeSpec.CONTENT_MIN_WIDTH) {
+        proportional
+    } else {
+        DialogSizeSpec.CONTENT_MIN_WIDTH
+    }
+    return if (availableWidth < floored) availableWidth else floored
+}
+
+/**
+ * 窗口最小宽度：内容区下限 [DialogSizeSpec.CONTENT_MIN_WIDTH]，但**不超过屏幕的
+ * 95%** —— 否则小屏（如 1024×600）上 900dp 的最小窗口会撑出屏幕。
+ * 供 `setMinimumSize` 使用，保证用户拖拽缩放时 900dp 约束依然生效。
+ */
+fun computeWindowMinWidth(screenWidth: Dp): Dp {
+    val cap = screenWidth * DialogSizeSpec.MAX_SCREEN_FRACTION
+    return if (DialogSizeSpec.CONTENT_MIN_WIDTH < cap) {
+        DialogSizeSpec.CONTENT_MIN_WIDTH
+    } else {
+        cap
+    }
 }
 
 /**
