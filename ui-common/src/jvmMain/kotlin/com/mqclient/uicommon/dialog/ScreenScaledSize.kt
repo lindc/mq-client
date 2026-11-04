@@ -16,34 +16,17 @@ import java.awt.Toolkit
  * 对话框就重查一次 `screenSize`，叠加在本来就要建 AMQP 连接的打开路径上。
  *
  * 代价：进程启动后分辨率变更（多显示器切换、缩放调整）不会被感知。对「对话框初始
- * 尺寸取屏幕 2/3」这个用途可以接受 —— 窗口一旦打开，用户就是手动调整大小，而不是
+ * 尺寸取屏幕比例」这个用途可以接受 —— 窗口一旦打开，用户就是手动调整大小，而不是
  * 期待它跟着屏变。
  */
 private val screenSize by lazy { Toolkit.getDefaultToolkit().screenSize }
 
 /**
- * 屏幕尺寸的 2/3（宽、高各取 2/3）。**仅保留给 app-ui 里直接用 `DecoratedDialog` 的
- * 连接属性对话框**；[ObjectDetailDialog] 的默认尺寸已改走 [rememberStandardDialogSize]。
- * 物理像素经当前 [LocalDensity] 换算成 dp，与 `DialogState.size` 的单位一致。
- */
-@Composable
-fun rememberTwoThirdsScreenSize(): DpSize {
-    val density = LocalDensity.current
-    return remember(density) {
-        val screen = screenSize
-        with(density) {
-            DpSize(
-                width = screen.width.toFloat().toDp() * 2f / 3f,
-                height = screen.height.toFloat().toDp() * 2f / 3f,
-            )
-        }
-    }
-}
-
-/**
  * 标准弹窗尺寸：按 [DialogSizeClass] 档位取屏幕比例，并钳到 [DialogSizeSpec] 的统一
- * min / 95% 屏幕上限。所有 [ObjectDetailDialog] 都走这里，业务模块不再自行写死宽高。
- * 物理像素经当前 [LocalDensity] 换算成 dp，与 `DialogState.size` 的单位一致。
+ * min / 95% 屏幕上限。**全项目所有独立窗口弹窗**（[ObjectDetailDialog] 及 app-ui 里
+ * 直接用 `DecoratedDialog` / `Dialog` 的连接、设置、关于窗口）都走这里，业务模块
+ * 不再自行写死宽高。物理像素经当前 [LocalDensity] 换算成 dp，与 `DialogState.size`
+ * 的单位一致。
  */
 @Composable
 fun rememberStandardDialogSize(sizeClass: DialogSizeClass = DialogSizeClass.CONTENT): DpSize {

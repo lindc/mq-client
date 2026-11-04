@@ -51,6 +51,8 @@ import androidx.compose.ui.window.Dialog
 import com.mqclient.core.CoreModule
 import com.mqclient.core.ModuleRegistry
 import com.mqclient.uicommon.PrimaryButton
+import com.mqclient.uicommon.dialog.DialogSizeClass
+import com.mqclient.uicommon.dialog.rememberStandardDialogSize
 import com.mqclient.uicommon.PropertyItem
 import com.mqclient.uicommon.PropertyTableSection
 import com.mqclient.uicommon.SecondaryButton
@@ -92,11 +94,13 @@ import org.jetbrains.compose.resources.painterResource
  * （默认是内置的霞鹜文楷 Mono），在这里写死任何一个字族都会覆盖用户选择。
  *
  * 行数：6 行拆两段 = 4×40+3×8 + 2×40+8 = 272dp（[PropertyTableSection] 行高
- * `heightIn(min = 40.dp)` + 行距 8dp），所以窗口取 620×700 而不是更矮。
+ * `heightIn(min = 40.dp)` + 行距 8dp）。窗口尺寸走公共规范（FORM，屏幕 60%），
+ * 不再写死 620×700 —— 内容用 `fillMaxSize` 跟随窗口自适应。
  */
 @Composable
 internal fun AboutDialog(onDismiss: () -> Unit) {
     var showLicense by remember { mutableStateOf(false) }
+    val dialogSize = rememberStandardDialogSize(DialogSizeClass.FORM)
     Dialog(
         onDismissRequest = onDismiss,
         properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
@@ -107,7 +111,7 @@ internal fun AboutDialog(onDismiss: () -> Unit) {
                 shape = MaterialTheme.shapes.medium,
                 color = MaterialTheme.colorScheme.surface,
                 tonalElevation = 6.dp,
-                modifier = Modifier.size(620.dp, 700.dp),
+                modifier = Modifier.size(dialogSize.width, dialogSize.height),
             ) {
                 Column(Modifier.fillMaxSize()) {
                     // 1. 标题栏：无彩色底，标题直接写「关于」。

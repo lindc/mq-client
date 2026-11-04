@@ -48,6 +48,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.rememberDialogState
 import com.mqclient.core.Config
 import dev.nucleusframework.application.LocalNucleusWindow
+import com.mqclient.uicommon.dialog.DialogSizeClass
+import com.mqclient.uicommon.dialog.DialogSizeSpec
+import com.mqclient.uicommon.dialog.rememberStandardDialogSize
 import com.mqclient.uicommon.DangerButton
 import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.SecondaryButton
@@ -100,7 +103,7 @@ fun SettingsDialog(
     DecoratedDialog(
         // Alt+F4 / 系统关闭请求和 ESC / ✕ / 取消走同一条 guard 路径：有改动先确认。
         onCloseRequest = { closeGuard.requestClose(isDirty) },
-        state = rememberDialogState(size = DpSize(760.dp, 600.dp)),
+        state = rememberDialogState(size = rememberStandardDialogSize(DialogSizeClass.FORM)),
         title = stringResource("settings_title"),
         resizable = true,
         onPreviewKeyEvent = { event ->
@@ -115,7 +118,7 @@ fun SettingsDialog(
         // Keep the window usable: don't let it shrink below what the side rail
         // + tab content need. 放 effect 里：组合体会随重组反复执行，窗口副作用不该在那儿。
         val nucleusWindow = LocalNucleusWindow.current
-        LaunchedEffect(nucleusWindow) { nucleusWindow.setMinimumSize(DpSize(720.dp, 480.dp)) }
+        LaunchedEffect(nucleusWindow) { nucleusWindow.setMinimumSize(DpSize(DialogSizeSpec.MIN_WIDTH, DialogSizeSpec.MIN_HEIGHT)) }
 
         Surface(
             modifier = Modifier.fillMaxSize(),

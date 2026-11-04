@@ -47,6 +47,9 @@ import com.mqclient.app.connection.toMiddlewareType
 import com.mqclient.core.ConnectionFormState
 import com.mqclient.core.ModuleRegistry
 import com.mqclient.core.ServiceAdapter
+import com.mqclient.uicommon.dialog.DialogSizeClass
+import com.mqclient.uicommon.dialog.DialogSizeSpec
+import com.mqclient.uicommon.dialog.rememberStandardDialogSize
 import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
@@ -102,12 +105,13 @@ internal fun NewConnectionDialog(
         key(form.serviceId) { formStates[form.serviceId] = form.rememberFormState(defaultName) }
     }
 
-    // 可缩放的真实窗口（Compose Dialog 不支持用户拖拽缩放）：初始 780×560，
-    // 用户自由调整大小 —— 页面填满窗口、只保留窗口最小尺寸限制（见 setMinimumSize）。
+    // 可缩放的真实窗口（Compose Dialog 不支持用户拖拽缩放）：初始尺寸走公共规范
+    // （FORM，屏幕 60%），用户自由调整大小 —— 页面填满窗口、只保留窗口最小尺寸
+    // 限制（见 setMinimumSize，统一 480×320）。
     // Esc 关闭走 onPreviewKeyEvent：对话框没有系统标题栏，键盘出口得自己接。
     DecoratedDialog(
         onCloseRequest = onDismiss,
-        state = rememberDialogState(size = DpSize(780.dp, 560.dp)),
+        state = rememberDialogState(size = rememberStandardDialogSize(DialogSizeClass.FORM)),
         title = stringResource("menu_new_connection"),
         resizable = true,
         onPreviewKeyEvent = { event ->
@@ -120,7 +124,7 @@ internal fun NewConnectionDialog(
         },
     ) {
         val nucleusWindow = LocalNucleusWindow.current
-        LaunchedEffect(nucleusWindow) { nucleusWindow.setMinimumSize(DpSize(720.dp, 480.dp)) }
+        LaunchedEffect(nucleusWindow) { nucleusWindow.setMinimumSize(DpSize(DialogSizeSpec.MIN_WIDTH, DialogSizeSpec.MIN_HEIGHT)) }
 
         Surface(
             modifier = Modifier.fillMaxSize(),

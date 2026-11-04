@@ -31,6 +31,9 @@ import androidx.compose.ui.window.rememberDialogState
 import com.mqclient.core.ConnectionInfo
 import com.mqclient.core.ConnectionFormState
 import com.mqclient.core.ModuleRegistry
+import com.mqclient.uicommon.dialog.DialogSizeClass
+import com.mqclient.uicommon.dialog.DialogSizeSpec
+import com.mqclient.uicommon.dialog.rememberStandardDialogSize
 import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
@@ -81,7 +84,7 @@ internal fun EditConnectionDialog(
 
     DecoratedDialog(
         onCloseRequest = onDismiss,
-        state = rememberDialogState(size = DpSize(780.dp, 560.dp)),
+        state = rememberDialogState(size = rememberStandardDialogSize(DialogSizeClass.FORM)),
         title = stringResource("menu_edit_connection"),
         resizable = true,
         onPreviewKeyEvent = { event ->
@@ -94,7 +97,7 @@ internal fun EditConnectionDialog(
         },
     ) {
         val nucleusWindow = LocalNucleusWindow.current
-        LaunchedEffect(nucleusWindow) { nucleusWindow.setMinimumSize(DpSize(720.dp, 480.dp)) }
+        LaunchedEffect(nucleusWindow) { nucleusWindow.setMinimumSize(DpSize(DialogSizeSpec.MIN_WIDTH, DialogSizeSpec.MIN_HEIGHT)) }
 
         Surface(
             modifier = Modifier.fillMaxSize(),

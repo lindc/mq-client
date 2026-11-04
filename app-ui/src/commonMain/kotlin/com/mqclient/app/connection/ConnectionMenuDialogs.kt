@@ -35,7 +35,7 @@ import com.mqclient.core.ModuleRegistry
 import com.mqclient.uicommon.i18n.userMessage
 import com.mqclient.uicommon.DangerButton
 import com.mqclient.uicommon.PrimaryButton
-import com.mqclient.uicommon.dialog.rememberTwoThirdsScreenSize
+import com.mqclient.uicommon.dialog.rememberStandardDialogSize
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import dev.nucleusframework.application.DecoratedDialog
@@ -220,8 +220,8 @@ internal fun ConnectionPropertiesDialog(connection: ConnectionInfo, onDismiss: (
     }
     DecoratedDialog(
         onCloseRequest = onDismiss,
-        // 初始尺寸：屏幕的 2/3（宽高各 2/3），同 MQ 对象属性对话框。
-        state = rememberDialogState(size = rememberTwoThirdsScreenSize()),
+        // 初始尺寸走公共规范（CONTENT，屏幕 85%），与 MQ 对象属性对话框一致。
+        state = rememberDialogState(size = rememberStandardDialogSize()),
         title = stringResource("qmgr_properties_title").format(connection.name),
         resizable = true,
         // ESC 关闭（对话框无系统标题栏，键盘出口得自己接——同 SettingsDialog）。
