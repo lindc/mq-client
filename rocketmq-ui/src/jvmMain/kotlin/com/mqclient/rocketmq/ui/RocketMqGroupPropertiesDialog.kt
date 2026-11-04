@@ -60,6 +60,7 @@ import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 import com.mqclient.uicommon.failureText
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.TimeoutCancellationException
@@ -76,7 +77,7 @@ private val LagOrange = Color(0xFFED6C02)
  * 永久转圈，所以这里再罩一层协程级硬上限：无论底层怎么挂起，最多这么久必须退出 Loading
  * （落到 Error + 重试，而不是无限 spinner）。各子查询自身另有 4s 超时做局部降级。
  */
-private const val GROUP_DETAIL_TIMEOUT_MS = 5_000L
+private const val GROUP_DETAIL_TIMEOUT_MS = 15_000L
 
 /**
  * 消费组属性对话框（消费组卡片 ⓘ 入口）：ObjectDetailDialog 外壳 + PrimaryTabRow
@@ -108,10 +109,14 @@ fun RocketMqGroupPropertiesDialog(
     var deleteConfirm by remember(groupName) { mutableStateOf(false) }
     var deleting by remember(groupName) { mutableStateOf(false) }
     var deleteError by remember(groupName) { mutableStateOf<String?>(null) }
+    // 超过 3 秒仍未返回时翻成“正在获取 Broker 状态和位点信息”，缓解用户焦虑。
+    var slowLoading by remember(groupName) { mutableStateOf(false) }
 
     LaunchedEffect(groupName, retryKey) {
         val myKey = retryKey
         detail = LoadState.Loading
+        slowLoading = false
+        val slowTimer = launch { delay(3_000L); if (myKey == retryKey) slowLoading = true }
         try {
             val service = RocketMqModule.serviceOrNull()
                 ?: throw IllegalStateException(stringResource("rocketmq_ui_conn_props_no_service"))
@@ -131,6 +136,9 @@ fun RocketMqGroupPropertiesDialog(
                 message = failureText(e),
                 cause = e.cause,
             )
+        } finally {
+            slowTimer.cancel()
+            if (myKey == retryKey) slowLoading = false
         }
     }
 
@@ -205,7 +213,9 @@ fun RocketMqGroupPropertiesDialog(
                     LoadStateContent(
                         state = state,
                         onRetry = { retryKey++ },
-                        loadingMessage = stringResource("rocketmq_ui_group_props_loading"),
+                        loadingMessage = stringResource(
+                            if (slowLoading) "rocketmq_ui_group_props_loading_slow" else "rocketmq_ui_group_props_loading",
+                        ),
                         modifier = Modifier.fillMaxSize(),
                     ) { }
                 }

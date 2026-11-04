@@ -37,7 +37,7 @@ import com.mqclient.mq.base.AbstractScanService
  * 而不是「底层请求被取消」。想真正取消得用带 timeout 的 API，而
  * `examineConsumeStats` 的带超时重载要求指定 broker + topic，做不了「按组查全部」。
  */
-private const val PROGRESS_TIMEOUT_MS = 5_000L
+private const val PROGRESS_TIMEOUT_MS = 15_000L
 
 /** 订阅组配置查询的协程级硬超时：broker 卡死时不应久等，超时即降级（组配置未知）。 */
 private const val CONFIG_TIMEOUT_MS = 4_000L
