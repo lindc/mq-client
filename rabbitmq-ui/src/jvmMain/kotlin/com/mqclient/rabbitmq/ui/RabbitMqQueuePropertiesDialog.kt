@@ -42,6 +42,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.mqclient.core.ConnectionStatus
+import com.mqclient.core.log.Log
 import com.mqclient.mqui.state.LoadState
 import com.mqclient.rabbitmq.RabbitMqModule
 import com.mqclient.rabbitmq.RabbitMqQueueDetailSnapshot
@@ -54,6 +55,7 @@ import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.failureText
 import com.mqclient.uicommon.i18n.stringResource
+import com.mqclient.uicommon.i18n.userMessage
 import com.mqclient.uicommon.i18n.withArg
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
@@ -69,14 +71,13 @@ private val LIMIT_KEYS = setOf("x-message-ttl", "x-max-length", "x-expires", "x-
 /**
  * 详情加载的 UI 层兜底超时，覆盖整条详情（概览 / 参数 / 消费者三个 Tab 同源一次 GET）。
  *
- * **为什么比 HttpClient 的 5s（[com.mqclient.rabbitmq.RabbitMqAdminClient.DETAIL_TIMEOUT_MS]）
- * 更长**：两道超时管不同的事。客户端那道是请求本身的截止时间，到点抛带「请求超时」
- * 文案的异常，用户看到的是具体原因；这道只是「协程层绝不无限等下去」的最后一道保险
- * （防 service 层在请求之外卡住，例如取 context / 切线程）。所以刻意让它晚 1s 触
- * 发，让更具体的那个文案先说话 —— 两道都设 5s 的话，谁先到不确定，提示会在
- * 「请求超时」和笼统的「数据加载超时」之间摇摆。
+ * **为什么比 HttpClient 的 15s（[com.mqclient.rabbitmq.RabbitMqAdminClient.DETAIL_TIMEOUT_MS]）
+ * 更长**：两道超时管不同的事。客户端那道是请求本身的截止时间（原 5s，慢扫占用
+ * 连接池时偶发误报，已放宽到 15s），到点抛带「请求超时」文案的异常；这道只是
+ * 「协程层绝不无限等下去」的最后一道保险（防 service 层在请求之外卡住，例如取
+ * context / 切线程）。所以刻意让它晚 1s 触发，让更具体的那个文案先说话。
  */
-private const val DETAIL_TIMEOUT_MS = 6_000L
+private const val DETAIL_TIMEOUT_MS = 16_000L
 
 /**
  * 消费者表格单次渲染行数上限。
@@ -92,8 +93,10 @@ private const val MAX_RENDERED_CONSUMERS = 200
  * PrimaryTabRow 三个 Tab（概览 / 参数 / 消费者），与 RabbitMqSendMessageDialog
  * 同款 Tab。
  *
- * 数据：打开即实时拉详情（[RabbitMqModule] service queueDetail —— 慢扫快照没有
- * arguments 与 queue_type），LoadState 三态。**三个 Tab 共用这一次请求**：消费者明细
+ * 数据：**缓存优先秒开** —— 打开先用慢扫静态属性 + 快扫计数立刻渲染（不白屏、
+ * 不弹遮罩），后台再静默发实时 GET 补齐 arguments / queue_type / consumerDetails
+ * 并只更新数字；刷新失败保留缓存数据不把页面变红。缓存未就绪才走 Loading +
+ * 错误态（带重试）。**三个 Tab 共用这一次请求**：消费者明细
  * 就在详情的 `consumer_details` 字段里（管理 API 没有「某队列的消费者」端点），
  * 所以消费者 Tab 没有自己的加载态、也不会再卡在转圈上。
  *
@@ -130,10 +133,26 @@ fun RabbitMqQueuePropertiesDialog(
 
     fun load() {
         scope.launch {
-            detailState = LoadState.Loading
-            detailState = loadDetail(timeoutMessage) {
-                val service = RabbitMqModule.serviceOrNull() ?: error(noServiceMessage)
-                service.queueDetail(connectionId, queueName)
+            val service = RabbitMqModule.serviceOrNull()
+            // 缓存优先：慢扫静态属性 + 快扫计数就地拼出详情，打开即渲染，不白屏、
+            // 不弹 Loading 遮罩。后台再静默发实时 GET，成功后只更新数字。
+            val cached = service?.cachedQueueDetail(connectionId, queueName)
+            if (cached != null) {
+                detailState = LoadState.Success(cached)
+            } else {
+                detailState = LoadState.Loading
+            }
+            val result = loadDetail(timeoutMessage) {
+                val s = service ?: error(noServiceMessage)
+                s.queueDetail(connectionId, queueName)
+            }
+            when {
+                result is LoadState.Success -> detailState = result   // 静默刷新：无遮罩
+                cached == null -> detailState = result               // 无缓存：错误态 + 重试
+                else -> Log.warn(                                     // 有缓存：保留已渲染数据
+                    "rabbitmq-ui",
+                    "queue detail refresh failed, keeping cached data: queue=$queueName",
+                )
             }
         }
     }
@@ -580,6 +599,8 @@ private suspend fun loadDetail(
     LoadState.Error(timeoutMessage)
 } catch (e: CancellationException) {
     throw e
-} catch (e: Exception) {
-    LoadState.Error(failureText(e))
-}
+    } catch (e: Exception) {
+        // ServiceException 的中文文案（如「请求超时（15s）」）在展示时点按 errorKey
+        // 翻译；failureText 只取英文 message，会把友好提示变成一坨底层报错。
+        LoadState.Error(e.userMessage())
+    }

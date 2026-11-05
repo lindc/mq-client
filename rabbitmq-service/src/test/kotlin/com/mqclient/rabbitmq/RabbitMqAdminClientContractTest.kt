@@ -303,11 +303,11 @@ class RabbitMqAdminClientContractTest {
     }
 
     @Test
-    fun `queueDetail - 超过 5s 硬超时抛中文文案而不是英文原文`() = runBlocking {
-        // 真实的 5s 等待：这例的价值就在「真的会超时触发」——MockEngine 拖 6s，
-        // 断言 queueDetail 在 5s（DETAIL_TIMEOUT_MS）时抛错且文案已被翻译。
+    fun `queueDetail - 请求级硬超时抛中文文案而不是英文原文`() = runBlocking {
+        // 注入 2s 请求超时 + MockEngine 拖 3s：真的触发 HttpTimeout 并断言文案已翻译。
+        // 生产默认已放宽到 15s（DETAIL_TIMEOUT_MS），这里用短超时让单测快速跑完。
         val engine = MockEngine {
-            kotlinx.coroutines.delay(6_000)
+            kotlinx.coroutines.delay(3_000)
             respond("{\"name\":\"q\"}", HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
         }
         // HttpTimeout 插件必须装（timeout {} 靠它生效；不装就是静默忽略）。
@@ -316,7 +316,7 @@ class RabbitMqAdminClientContractTest {
             HttpClient(engine) { install(io.ktor.client.plugins.HttpTimeout) },
         )
 
-        val error = assertFailsWith<ServiceException> { admin.queueDetail("q") }
+        val error = assertFailsWith<ServiceException> { admin.queueDetail("q", timeoutMillis = 2_000) }
         assertEquals("rabbitmq_err_request_timeout", error.errorKey)
         assertTrue(
             error.message?.contains("Request timed out") == true,

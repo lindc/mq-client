@@ -333,6 +333,30 @@ class RabbitMqScanService(
     fun cachedQueueStatus(connectionId: String): Map<String, RabbitMqQueueStatusSnapshot> =
         cacheOf(connectionId)?.getAs(KEY_QUEUE_STATUS) ?: emptyMap()
 
+    /**
+     * **缓存优先**：用慢扫静态属性 + 快扫计数就地拼出详情快照，供属性对话框打开时
+     * 立刻渲染（不发 HTTP、不弹 Loading 遮罩）。缓存里没有 arguments / queue_type /
+     * consumerDetails —— 这些留给后台的实时详情请求静默补齐。队列不在缓存中返回 null。
+     */
+    fun cachedQueueDetail(connectionId: String, name: String): RabbitMqQueueDetailSnapshot? {
+        val queue = cachedQueues(connectionId).firstOrNull { it.name == name } ?: return null
+        val status = cachedQueueStatus(connectionId)[name]
+        return RabbitMqQueueDetailSnapshot(
+            name = name,
+            state = status?.state ?: queue.state,
+            queueType = "",
+            durable = queue.durable,
+            autoDelete = queue.autoDelete,
+            exclusive = queue.exclusive,
+            arguments = emptyMap(),
+            messages = status?.messages ?: 0,
+            messagesReady = status?.messagesReady ?: 0,
+            messagesUnacknowledged = status?.messagesUnacknowledged ?: 0,
+            consumers = status?.consumers ?: 0,
+            consumerDetails = emptyList(),
+        )
+    }
+
     /** 集群元信息（建连时入缓存）；未就绪为 null。 */
     fun cachedClusterInfo(connectionId: String): RabbitMqClusterInfoSnapshot? =
         cacheOf(connectionId)?.getAs(KEY_CLUSTER_INFO)

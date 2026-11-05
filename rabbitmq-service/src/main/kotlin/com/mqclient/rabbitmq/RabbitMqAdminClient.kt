@@ -19,6 +19,7 @@ import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.contentType
+import java.io.IOException
 import java.net.ConnectException
 import java.net.UnknownHostException
 import java.util.Base64
@@ -204,10 +205,16 @@ data class RabbitMqNodeDto(
 class RabbitMqAdminClient internal constructor(
     private val config: RabbitMqConfig,
     private val http: HttpClient,
+    /** 详情查询专用：**独立连接池**，慢扫拉几百个队列不会把交互请求排队卡死。 */
+    private val detailHttp: HttpClient = http,
 ) : AutoCloseable {
 
-    /** 生产构造：自建 Java 引擎客户端（TLS 信任库随配置）。 */
-    constructor(config: RabbitMqConfig) : this(config, defaultHttpClient(config))
+    /** 生产构造：两个独立 Java 引擎实例 —— 扫描与交互请求互不争抢连接池。 */
+    constructor(config: RabbitMqConfig) : this(
+        config,
+        defaultHttpClient(config),
+        defaultHttpClient(config),
+    )
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -321,11 +328,11 @@ class RabbitMqAdminClient internal constructor(
 
     companion object {
         /**
-         * 队列详情 GET 的硬超时（5s）：属性对话框打开时的交互请求，详见 [queueDetail]。
-         * 5s 对毫秒级的单对象查询有三个数量级余量；它不是「多一点耐心」，而是「保证
-         * 有尽头」。
+         * 队列详情 GET 的硬超时（15s）：属性对话框打开时的交互请求，详见 [queueDetail]。
+         * 原为 5s —— 慢扫占用连接池 / broker 繁忙时偶发「数据加载超时」；单对象查询
+         * 正常只要毫秒级，15s 仍有三个数量级余量，同时给排队留足时间。
          */
-        const val DETAIL_TIMEOUT_MS = 5_000L
+        const val DETAIL_TIMEOUT_MS = 15_000L
 
         /** RabbitMQ 错误响应（JSON）里 reason 字段的提取；plain text 响应整体兜底。 */
         private val REASON_REGEX = Regex("\"reason\"\\s*:\\s*\"([^\"]+)\"")
@@ -340,39 +347,66 @@ class RabbitMqAdminClient internal constructor(
         }
     }
 
+    /** 单次 GET：只负责网络与读 body，异常原样上抛（便于调用方决定重试 / 映射）。 */
+    private suspend fun getOnce(
+        client: HttpClient,
+        segments: Array<out String>,
+        timeoutMillis: Long?,
+    ): Pair<Int, String> {
+        val response: HttpResponse = client.get(apiUrl(*segments)) {
+            header(HttpHeaders.Authorization, authHeader)
+            if (timeoutMillis != null) timeout { requestTimeoutMillis = timeoutMillis }
+        }
+        return response.status.value to response.bodyAsText()
+    }
+
     /**
-     * GET 请求（JSON 文本）。[timeoutMillis] 非 null 时**只给这一次请求**上硬超时
-     * （`HttpTimeout` 的 requestTimeoutMillis），其余请求继续用连接配置里的全局超时。
+     * GET 请求（JSON 文本）。[timeoutMillis] 非 null 时**只给这一次请求**上硬超时；
+     * [useDetailClient] 为 true 时走独立的详情连接池（与后台慢扫 / 快扫隔离），并在
+     * 遇到坏 Keep-Alive socket（[IOException]）时自动重试一次 —— JDK HttpClient 会
+     * 丢弃坏连接并新建 socket。
      *
-     * 为什么要能单独收紧：属性对话框的详情 GET 是「点开就要反应」的交互，等全局
-     * 30s（用户还能改成更大）与「卡死」无区别；后台慢扫则应该容忍慢响应。一个全局
-     * 超时值无法同时满足两者。
+     * 详情 GET 与后台扫描不能共用超时 / 连接池：慢扫拉几百个队列时，交互请求会在
+     * 队列里排队，等全局 30s（用户还能改更大）与卡死无异。
      */
     private suspend fun getJson(
         vararg segments: String,
         timeoutMillis: Long? = null,
+        useDetailClient: Boolean = false,
     ): String {
-        val response: HttpResponse = try {
-            http.get(apiUrl(*segments)) {
-                header(HttpHeaders.Authorization, authHeader)
-                if (timeoutMillis != null) timeout { requestTimeoutMillis = timeoutMillis }
+        val client = if (useDetailClient) detailHttp else http
+        // 详情请求对坏 socket 自动重建一次连接；扫描请求保持原语义（不重试）。
+        val attempts = if (useDetailClient) 2 else 1
+        repeat(attempts) { attempt ->
+            // checkStatus 必须留在 try 之外：401 / 403 / 404 抛的是带中文文案的
+            // ServiceException，不能被下面的 catch(Exception) 转成 IllegalStateException。
+            val response: Pair<Int, String> = try {
+                getOnce(client, segments, timeoutMillis)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: HttpRequestTimeoutException) {
+                // 这次请求的超时值可能小于全局值（如 15s vs 30s），文案得说真实的那一个。
+                // 超时不重试（避免把 15s 翻倍），交给 UI 的重试按钮。
+                val seconds = (timeoutMillis ?: (config.connectionTimeout * 1_000L)) / 1_000L
+                throw ServiceException(
+                    "rabbitmq_err_request_timeout",
+                    args = listOf(seconds),
+                    fallbackMessage = "Request timed out (%1\$ss): the management API is too slow to respond", cause = e,
+                )
+            } catch (e: IOException) {
+                // 连接被对端关掉 / Keep-Alive 失效：详情请求自动丢弃坏 socket 再试一次。
+                if (useDetailClient && attempt == 0) {
+                    rabbitMqLog.warn("[Warn] management API connection broken, retrying once on a fresh socket: ${e.message}")
+                    return@repeat
+                }
+                throw mapConnectionError(e)
+            } catch (e: Exception) {
+                throw mapConnectionError(e)
             }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: HttpRequestTimeoutException) {
-            // 这次请求的超时值可能小于全局值（如 5s vs 30s），文案得说真实的那一个。
-            val seconds = (timeoutMillis ?: (config.connectionTimeout * 1_000L)) / 1_000L
-            throw ServiceException(
-                "rabbitmq_err_request_timeout",
-                args = listOf(seconds),
-                fallbackMessage = "Request timed out (%1\$ss): the management API is too slow to respond", cause = e,
-            )
-        } catch (e: Exception) {
-            throw mapConnectionError(e)
+            checkStatus(response.first, response.second)
+            return response.second
         }
-        val body = response.bodyAsText()
-        checkStatus(response.status.value, body)
-        return body
+        throw mapConnectionError(IOException("management API request failed after retry"))
     }
 
     /**
@@ -538,14 +572,22 @@ class RabbitMqAdminClient internal constructor(
      * 指定队列详情（实时查询，不走缓存）：属性对话框数据源（arguments / queue_type /
      * 计数 / consumer_details）。
      *
-     * 走 [DETAIL_TIMEOUT_MS]（5s）而不是全局连接超时：这是用户点开对话框时的一发
-     * 交互请求，三个 Tab 都靠它的结果，不能让 UI 陪着全局 30s 一起等。超时抛
-     * 带中文文案的 [IllegalStateException]，由 UI 转成错误态 + 重试。
+     * 走 [DETAIL_TIMEOUT_MS]（15s）且用独立详情连接池：这是用户点开对话框时的一发
+     * 交互请求，三个 Tab 都靠它的结果，既不能陪着全局 30s 一起等，也不能被后台慢扫
+     * 在连接池里排队卡死。超时抛带中文文案的超时异常，由 UI 转成错误态 + 重试。
      */
-    suspend fun queueDetail(name: String): RabbitMqQueueDetailDto =
+    suspend fun queueDetail(
+        name: String,
+        /** 请求级超时；默认 [DETAIL_TIMEOUT_MS]（15s），测试可注入短值快速验证。 */
+        timeoutMillis: Long = DETAIL_TIMEOUT_MS,
+    ): RabbitMqQueueDetailDto =
         json.decodeFromString(
             RabbitMqQueueDetailDto.serializer(),
-            getJson("queues", vhostSegment(), pathSegment(name), timeoutMillis = DETAIL_TIMEOUT_MS),
+            getJson(
+                "queues", vhostSegment(), pathSegment(name),
+                timeoutMillis = timeoutMillis,
+                useDetailClient = true,
+            ),
         )
 
     /**
@@ -604,6 +646,7 @@ class RabbitMqAdminClient internal constructor(
 
     override fun close() {
         http.close()
+        if (detailHttp !== http) detailHttp.close()
     }
 }
 
