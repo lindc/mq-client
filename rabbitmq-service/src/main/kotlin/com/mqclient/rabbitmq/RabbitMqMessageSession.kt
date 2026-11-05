@@ -549,7 +549,10 @@ class RabbitMqMessageSession private constructor(
         try {
             return block(ch)
         } finally {
-            abortInBackground(ch, "$op: one-shot channel released")
+            // Connection 已被 broker 断开时，channel 的 close/abort 可能抛异常；
+            // 必须 runCatching 吞掉，绝不能掩盖真实的业务错误（540 / 超时 / 404）。
+            runCatching { abortInBackground(ch, "$op: one-shot channel released") }
+                .onFailure { sessionLog.warn("one-shot channel release failed (connection may be closed): ${it.message}") }
         }
     }
 

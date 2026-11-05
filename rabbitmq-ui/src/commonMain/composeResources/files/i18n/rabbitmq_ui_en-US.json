@@ -211,6 +211,7 @@
   "rabbitmq_ui_msg_deleted": "Message deleted (acked)",
   "rabbitmq_ui_msg_fetched_count": "%1$d message(s) fetched",
   "rabbitmq_ui_msg_exhausted": " (no more visible messages in queue)",
+  "rabbitmq_ui_msg_stream_blocked": "This is a Stream queue; basic.get preview is not supported, please use consume mode",
   "rabbitmq_ui_msg_pick_title": "Select files to send",
   "rabbitmq_ui_msg_batch_done": "Batch send completed",
   "rabbitmq_ui_msg_detail_title": "Message detail",

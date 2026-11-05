@@ -211,6 +211,7 @@
   "rabbitmq_ui_msg_deleted": "消息已删除（已确认消费）",
   "rabbitmq_ui_msg_fetched_count": "已拉取 %1$d 条",
   "rabbitmq_ui_msg_exhausted": "（队列已无更多可见消息）",
+  "rabbitmq_ui_msg_stream_blocked": "该队列为 Stream 队列，不支持 basic.get 单条预览，请使用消费模式查看",
   "rabbitmq_ui_msg_pick_title": "选择要发送的文件",
   "rabbitmq_ui_msg_batch_done": "批量发送完成",
   "rabbitmq_ui_msg_detail_title": "消息详情",

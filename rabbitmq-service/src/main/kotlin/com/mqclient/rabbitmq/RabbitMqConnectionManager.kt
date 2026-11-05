@@ -127,7 +127,20 @@ class RabbitMqConnectionManager(
      * 抛出的异常已转成人类可读文案（[mapAmqpOpenError]），由调用方转「加载失败」。
      */
     suspend fun amqpConnection(ctx: RabbitMqConnectionContext): Connection {
-        ctx.amqp?.takeIf { it.isOpen }?.let { return it }
+        // 每次把 Connection 交给业务层之前**显式判活**：540 等协议错误会让 broker
+        // 强制关闭底层 TCP，若继续返回这条死连接，后续所有 createChannel 都会报
+        // "connection closed"。!isOpen → 立刻移出上下文、清理残留、自动重连。
+        val existing = ctx.amqp
+        if (existing != null) {
+            if (!existing.isOpen) {
+                log.warn("[Warn] 检测到 AMQP 连接已断开，已触发自动重连: connection=${ctx.connectionId}")
+                ctx.amqp = null
+                runCatching { existing.abort() }
+                    .onFailure { log.warn("stale amqp connection abort failed: connection=${ctx.connectionId} error=$it") }
+            } else {
+                return existing
+            }
+        }
         return withConnectionLock(ctx.connectionId) {
             // 双检：排队期间可能已被另一个调用方建好。
             ctx.amqp?.takeIf { it.isOpen }?.let { return@withConnectionLock it }

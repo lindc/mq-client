@@ -25,6 +25,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.json.JsonPrimitive
 import kotlin.jvm.Synchronized
 
 /**
@@ -277,6 +278,28 @@ object RabbitMqModule {
      * AMQP 建不起来时由 manager 把整条连接置 `Failed`（产品决定），这里只把异常
      * （已是人类可读文案）向上抛，由对话框转「加载失败」。
      */
+    /**
+     * **前置拦截**：basic.get 之前先查队列类型（管理 API，纯 HTTP，绝不碰 AMQP
+     * Connection）。Stream 队列不支持 `basic.get`（540 NOT_IMPLEMENTED），而该错误会
+     * 让 broker 强制关闭底层 TCP —— 一旦发出就必然引爆共享连接。
+     *
+     * 返回 `"stream"` 时调用方必须**直接返回错误态**，不得发起任何 AMQP 操作；
+     * 返回 null 表示类型查不到（管理 API 不可用 / 队列刚被删），放行由连接自愈兜底。
+     * 两个来源都判：管理端点的 `queue_type` 字段，以及声明参数 `x-queue-type`。
+     */
+    suspend fun queueTypeOf(connectionId: String, queueName: String): String? {
+        val admin = connectionOrNull(connectionId)?.admin ?: return null
+        val detail = runCatching { admin.queueDetail(queueName) }
+            .onFailure { rabbitMqLog.warn("queue type probe failed: queue=$queueName error=${it.message}") }
+            .getOrNull() ?: return null
+        val declared = (detail.arguments["x-queue-type"] as? JsonPrimitive)?.content
+        val queueType = if (detail.queueType.equals("stream", ignoreCase = true) ||
+            declared.equals("stream", ignoreCase = true)
+        ) "stream" else detail.queueType
+        rabbitMqLog.debug("queue type probed: queue=$queueName type=$queueType declared=$declared")
+        return queueType
+    }
+
     suspend fun openMessageSession(connectionId: String, queueName: String): RabbitMqQueueSession {
         // 与扫描 / 查询同一口径：有管理客户端就继续，不拿 status 当否决票（见
         // RabbitMqScanService.targetOrThrow 的说明）。
@@ -319,7 +342,10 @@ object RabbitMqModule {
             // 半成品 channel 不能留在共享连接上（会白占一个 channel 号）。
             // 交后台 abort：这一步在失败路径上，而写帧无超时 —— 对端不读 socket 时
             // 同步 abort 会把「打开失败」变成一个永不返回的调用（对话框一直转圈）。
-            abortInBackground(channel, "open failed")
+            // 连接已断时 abort 本身也可能失败：runCatching 兜底，别把 open 的
+            // 真实异常（404 / 连接级故障）替换成一个释放异常。
+            runCatching { abortInBackground(channel, "open failed") }
+                .onFailure { rabbitMqLog.warn("open-failed channel abort rejected: ${it.message}") }
             throw error
         }
     }

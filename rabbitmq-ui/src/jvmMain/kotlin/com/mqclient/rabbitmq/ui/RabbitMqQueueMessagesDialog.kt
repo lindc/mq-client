@@ -241,6 +241,18 @@ fun RabbitMqQueueMessagesDialog(
             "[MQ-Perf][RabbitMQ] 用户触发拉取，UI 进入 Loading, queue=$queueName, limit=${effectiveLimit(limit)}",
         )
         scope.launch {
+            // 前置拦截：Stream 队列的 basic.get 会触发 540 NOT_IMPLEMENTED，broker 会
+            // 强制关闭底层 TCP。必须在 ensureSession()（建 AMQP 会话）之前就拦下 ——
+            // 一次 AMQP 请求都不发，共享 Connection 完全不受影响。
+            val queueType = RabbitMqModule.queueTypeOf(connectionId, queueName)
+            if (queueType == "stream") {
+                Log.info(
+                    "rabbitmq-ui",
+                    "[MQ-Perf][RabbitMQ] Stream 队列前置拦截，未发起 basic.get: queue=$queueName",
+                )
+                snackbar.showSnackbar(stringResource("rabbitmq_ui_msg_stream_blocked"))
+                return@launch
+            }
             fetching = true
             try {
                 val s = ensureSession() ?: return@launch
@@ -280,6 +292,16 @@ fun RabbitMqQueueMessagesDialog(
 
     fun refreshQueue() {
         scope.launch {
+            // 同 [fetchMore] 的前置拦截：Stream 队列绝不发起 basic.get / 建 AMQP 会话。
+            val queueType = RabbitMqModule.queueTypeOf(connectionId, queueName)
+            if (queueType == "stream") {
+                Log.info(
+                    "rabbitmq-ui",
+                    "[MQ-Perf][RabbitMQ] Stream 队列前置拦截，未发起 basic.get: queue=$queueName",
+                )
+                snackbar.showSnackbar(stringResource("rabbitmq_ui_msg_stream_blocked"))
+                return@launch
+            }
             fetching = true
             try {
                 val s = ensureSession() ?: return@launch
