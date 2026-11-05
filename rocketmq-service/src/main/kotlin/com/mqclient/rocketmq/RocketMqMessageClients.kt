@@ -79,6 +79,21 @@ class RocketMqMessageClients(private val config: RocketMqConfig) {
         }
     }
 
+    /**
+     * 一次性临时 PullConsumer（消息浏览「全部 Queue」并行分片用）：与共享实例同 group
+     * 同配置，但**不登记**——调用方负责 [DefaultMQPullConsumer.shutdown]。pull 全程
+     * 手动 begin / 不提交位点，实例间无共享状态，可安全并发。
+     */
+    suspend fun tempPullConsumer(): DefaultMQPullConsumer = withContext(Dispatchers.IO) {
+        val created = DefaultMQPullConsumer(PULL_GROUP, tls.rpcHook).apply {
+            setNamesrvAddr(config.namesrvAddr.trim())
+            setUseTLS(config.tlsEnabled)
+        }
+        withContext(Dispatchers.IO) { tls.start { created.start() } }
+        rocketMqLog.debug("temp pull consumer started: namesrv=${config.namesrvAddr}")
+        created
+    }
+
     /** 共享 Producer；首次调用时创建并 start。 */
     suspend fun producer(): DefaultMQProducer {
         producer?.let { return it }

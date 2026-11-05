@@ -216,6 +216,7 @@
   "rocketmq_ui_msg_browse_failed": "Read failed: %1$s",
   "rocketmq_ui_msg_browse_empty": "No matching messages",
   "rocketmq_ui_msg_browse_idle": "Click Read to load messages",
+  "rocketmq_ui_msg_browse_timeout": "Fetch timed out (15s) - the topic route may point to a stale broker address, please retry later",
   "rocketmq_ui_msg_browse_filtered_empty": "No messages match the filter",
   "rocketmq_ui_msg_browse_search": "Search MsgId / Tag / Key / Value",
   "rocketmq_ui_msg_browse_empty_value": "[Empty message]",

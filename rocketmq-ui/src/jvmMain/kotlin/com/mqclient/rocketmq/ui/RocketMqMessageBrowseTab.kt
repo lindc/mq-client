@@ -76,6 +76,8 @@ import kotlin.comparisons.compareByDescending
 import kotlin.comparisons.thenBy
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 
 /** 消息表格的固定列宽：Queue / Offset / MsgId / Tags / Keys / Timestamp / Size / 操作（Value 弹性）。 */
@@ -203,7 +205,17 @@ internal fun RocketMqMessageBrowseTab(
                 "[MQ-Perf][RocketMQ] 渲染完成，UI 退出 Loading, 总耗时=${System.currentTimeMillis() - startedAt}ms",
             )
         } catch (e: CancellationException) {
-            throw e
+            // service 层整体超时（readMessages 的 withTimeout 15s）抛的
+            // TimeoutCancellationException 也是 CancellationException 子类，但它不是
+            // 本协程的取消 —— 直接 rethrow 会静默结束 effect，UI 永远停在 Loading。
+            // ensureActive 区分：本协程真被取消（关对话框）→ 在此抛出走正常取消路径。
+            currentCoroutineContext().ensureActive()
+            Log.warn(
+                "rocketmq-ui",
+                "[MQ-Perf][RocketMQ] 拉取超时, 耗时达到=${System.currentTimeMillis() - startedAt}ms, " +
+                    "已被强制取消: 异常类型=${e::class.simpleName}, 详情=${e.message}",
+            )
+            uiState = BrowseUiState.Failed(stringResource("rocketmq_ui_msg_browse_timeout"))
         } catch (e: Exception) {
             Log.warn(
                 "rocketmq-ui",

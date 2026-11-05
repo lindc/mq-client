@@ -5,9 +5,20 @@ import com.mqclient.message.interpreter.isProbablyBinary
 import com.mqclient.message.interpreter.previewTextOf
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runInterruptible
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import java.util.Collections
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
+import kotlin.math.ceil
 import kotlin.comparisons.compareByDescending
 import kotlin.comparisons.thenBy
 import org.apache.rocketmq.client.consumer.DefaultMQPullConsumer
@@ -56,6 +67,22 @@ open class RocketMqMessageService {
          * 都要排队，表现就是「越开越慢」。
          */
         const val READ_TIMEOUT_MS = 5_000L
+
+        /**
+         * 单次读取的整体超时（毫秒）。路由指向坏地址（如 BenchmarkTest 注册到了
+         * RabbitMQ 的 11207 端口）时，逐队列的失败往返会把读取拖到百秒级 —— 这里
+         * 到点强制取消。pull / maxOffset 都经 runInterruptible，取消能真正打断。
+         */
+        const val READ_TOTAL_TIMEOUT_MS = 15_000L
+
+        /** 「全部 Queue」启用并行遍历的队列数阈值（小 topic 单实例顺序，行为不变）。 */
+        const val PARALLEL_THRESHOLD = 64
+
+        /** 并行遍历的临时 PullConsumer 实例数（= 分片数）。 */
+        const val READ_QUEUE_PARALLELISM = 8
+
+        /** 并行路径下每队列的耗时预算（实测 ~32ms/队列含 3 次 RPC，50ms 留余量）。 */
+        const val PER_QUEUE_BUDGET_MS = 50L
 
         /** 临时浏览实例的 group 前缀（broker 侧可见，标识本工具的只读浏览）。 */
         const val BROWSE_GROUP_PREFIX = "CID_mqclient_browse_"
@@ -147,11 +174,10 @@ open class RocketMqMessageService {
         )
         val capped = count.coerceIn(1, MAX_READ_COUNT)
         val clients = ctx.clients()
-        // 共享 PullConsumer：**整段持锁**。fetchSubscribeMessageQueues / maxOffset / pull
-        // 是不可分割的序列，且 DefaultMQPullConsumer **非线程安全** —— 并发 pull 会破坏其
-        // 内部队列缓存状态，因此「全部 Queue」的逐队列遍历在此锁内**顺序**完成（而非真并发）。
-        // 对外效果等同：一次 Read 把所有队列的消息取回并合并排序。
+        // 路由查询：共享 PullConsumer，锁内一次（consumer 非线程安全）；自身有
+        // Remoting 层超时兜底。遍历段见下方并行化说明。
         return withContext(Dispatchers.IO) {
+            val queues = withTimeout(READ_TOTAL_TIMEOUT_MS) {
             clients.access.withLock {
                 // 实例获取：复用共享 PullConsumer 时 ≈0ms；首次调用含 start（建连）。
                 val instanceStart = System.currentTimeMillis()
@@ -174,55 +200,86 @@ open class RocketMqMessageService {
                             )
                         }
                 }
+                queues
+            }
+            }
 
+            // ---- 遍历并行化：benchmark 类 topic 队列数巨大（实测 BenchmarkTest 有
+            //     3072 个队列），顺序遍历分钟级。共享 consumer 非线程安全不能并发，
+            //     并行路径改用**一次性临时 PullConsumer**（每分片一个，对标发送链路的
+            //     临时 producer 模式）：pull 全程手动 begin / 不提交位点，实例间无共享
+            //     状态。小 topic（< PARALLEL_THRESHOLD）仍单实例顺序，行为不变。
+            val parallelism = if (queues.size >= PARALLEL_THRESHOLD) READ_QUEUE_PARALLELISM else 1
+            // 动态超时：正常 topic 固定 15s；大 topic 按 队列数 × 每队列预算 ÷ 并发度
+            // 放大（BenchmarkTest：3072 × 50ms / 8 ≈ 19s，总 ~34s）。
+            val totalTimeoutMs = READ_TOTAL_TIMEOUT_MS + queues.size * PER_QUEUE_BUDGET_MS / parallelism
+            rocketMqLog.info(
+                "[MQ-Perf][RocketMQ] 队列数=${queues.size}, 并发度=$parallelism, 本次超时=${totalTimeoutMs}ms",
+            )
+            val ioTotal = AtomicLong()
+            val parseTotal = AtomicLong()
+            val collected = Collections.synchronizedList(mutableListOf<RocketMqMessage>())
+            val nextCursor = ConcurrentHashMap<Int, Long>()
+
+            /** 单队列拉取（临时 / 共享实例均可）：begin -> pull -> 解析 -> maxOffset 判尾。 */
+            suspend fun pullOne(consumer: DefaultMQPullConsumer, mq: MessageQueue) {
                 // 每队列起点 offset：续读用 cursor；首页按起点策略算。
-                val begins = queues.associateWith { mq ->
-                    cursor?.get(mq.queueId) ?: when (start) {
-                        is RocketMqReadStart.Latest -> {
-                            // 回退 N 条：maxOffset - count，落底到 0（防 OutOfRange）。
-                            val max = maxOffsetOf(consumer, mq)
-                            (max - capped).coerceAtLeast(0L)
-                        }
-                        is RocketMqReadStart.Earliest -> 0L
-                        is RocketMqReadStart.AtOffset -> start.offset.coerceAtLeast(0L)
+                val begin = cursor?.get(mq.queueId) ?: when (start) {
+                    is RocketMqReadStart.Latest -> {
+                        // 回退 N 条：maxOffset - count，落底到 0（防 OutOfRange）。
+                        val max = maxOffsetOf(consumer, mq)
+                        (max - capped).coerceAtLeast(0L)
                     }
+                    is RocketMqReadStart.Earliest -> 0L
+                    is RocketMqReadStart.AtOffset -> start.offset.coerceAtLeast(0L)
                 }
+                // runInterruptible（而非裸调用）：UI 取消（关对话框 / 点重试）时对阻塞
+                // 线程 Thread.interrupt()，pull 立刻抛返回。协程取消本身打不断阻塞
+                // socket，裸调用下僵尸 pull 要等满 5s 协议超时才放锁 —— 期间所有后续
+                // 读取都排队，「越开越慢」的直接来源。
+                var t = System.currentTimeMillis()
+                val pullResult = runInterruptible {
+                    consumer.pull(mq, "*", begin, capped, READ_TIMEOUT_MS)
+                }
+                ioTotal.addAndGet(System.currentTimeMillis() - t)
+                // 数据解析：MessageExt -> RocketMqMessage（DTO -> Domain）。
+                t = System.currentTimeMillis()
+                if (pullResult.pullStatus == PullStatus.FOUND) {
+                    collected += pullResult.msgFoundList.orEmpty().map { it.toMessage() }
+                }
+                parseTotal.addAndGet(System.currentTimeMillis() - t)
+                // 队列尾判定：nextBeginOffset >= maxOffset → 无更多。maxOffset 查询
+                // 失败（-1）时不误判「已耗尽」，把游标交回调用方再试一轮。
+                t = System.currentTimeMillis()
+                val maxOffset = maxOffsetOf(consumer, mq)
+                ioTotal.addAndGet(System.currentTimeMillis() - t)
+                val next = pullResult.nextBeginOffset
+                val hasMore = pullResult.pullStatus == PullStatus.FOUND &&
+                    (maxOffset < 0 || next < maxOffset)
+                if (hasMore) nextCursor[mq.queueId] = next
+            }
 
-                // 逐队列 pull（顺序，见上方锁说明），汇总后统一按时间排序。
-                val collected = mutableListOf<RocketMqMessage>()
-                val nextCursor = mutableMapOf<Int, Long>()
-                var ioMs = 0L
-                var parseMs = 0L
-                for ((mq, begin) in begins) {
-                    // runInterruptible（而非裸调用）：UI 取消（关对话框 / 换队列 / 点重试）时
-                    // 对阻塞线程 Thread.interrupt()，pull 立刻抛返回、access 锁立即释放。
-                    // 协程取消本身打不断阻塞 socket，裸调用下僵尸 pull 要等满 5s 协议
-                    // 超时才放锁 —— 期间所有后续读取都排队，「越开越慢」的直接来源。
-                    var t = System.currentTimeMillis()
-                    val pullResult = runInterruptible {
-                        consumer.pull(mq, "*", begin, capped, READ_TIMEOUT_MS)
+            withTimeout(totalTimeoutMs) {
+                // 均分队列，每分片一个临时实例（并行创建 start）。
+                val chunkSize = ceil(queues.size / parallelism.toDouble()).toInt().coerceAtLeast(1)
+                val chunks = queues.chunked(chunkSize)
+                val consumers = chunks.map { async { clients.tempPullConsumer() } }.awaitAll()
+                try {
+                    coroutineScope {
+                        chunks.forEachIndexed { index, chunk ->
+                            launch {
+                                for (mq in chunk) pullOne(consumers[index], mq)
+                            }
+                        }
                     }
-                    ioMs += System.currentTimeMillis() - t
-                    // 数据解析：MessageExt -> RocketMqMessage（DTO -> Domain）。
-                    t = System.currentTimeMillis()
-                    if (pullResult.pullStatus == PullStatus.FOUND) {
-                        collected += pullResult.msgFoundList.orEmpty().map { it.toMessage() }
-                    }
-                    parseMs += System.currentTimeMillis() - t
-                    // 队列尾判定：nextBeginOffset >= maxOffset → 无更多。maxOffset 查询
-                    // 失败（-1）时不误判「已耗尽」，把游标交回调用方再试一轮。
-                    t = System.currentTimeMillis()
-                    val maxOffset = maxOffsetOf(consumer, mq)
-                    ioMs += System.currentTimeMillis() - t
-                    val next = pullResult.nextBeginOffset
-                    val hasMore = pullResult.pullStatus == PullStatus.FOUND &&
-                        (maxOffset < 0 || next < maxOffset)
-                    if (hasMore) nextCursor[mq.queueId] = next
+                } finally {
+                    consumers.forEach { consumer -> runCatching { consumer.shutdown() } }
                 }
+            }
 
                 rocketMqLog.info(
-                    "[MQ-Perf][RocketMQ] read done: topic=$topic, instanceMs=$instanceMs, " +
-                        "ioMs=$ioMs, parseMs=$parseMs, messages=${collected.size}, " +
+                    "[MQ-Perf][RocketMQ] read done: topic=$topic, queues=${queues.size}, parallelism=$parallelism, " +
+                        "ioMs=${ioTotal.get()}, parseMs=${parseTotal.get()}, messages=${collected.size}, " +
                         "totalMs=${System.currentTimeMillis() - perfStart}",
                 )
                 // 按 storeTimestamp 降序合并（同刻回退 queueId / offset，保证稳定排序）。
@@ -233,15 +290,34 @@ open class RocketMqMessageService {
                 )
                 RocketMqMessagePage(
                     messages = merged,
-                    nextBeginOffset = nextCursor.ifEmpty { null },
+                    nextBeginOffset = nextCursor.toMap().ifEmpty { null },
                 )
-            }
         }
     }
 
-    /** maxOffset 查询：失败兜回 -1（上层据此不误判「队列已空」）。 */
-    private fun maxOffsetOf(consumer: DefaultMQPullConsumer, mq: MessageQueue): Long =
-        runCatching { consumer.maxOffset(mq) }.getOrDefault(-1L)
+    /**
+     * maxOffset 查询：失败兜回 -1（上层据此不误判「队列已空」）。
+     *
+     * **必须可打断**：真机实测，BenchmarkTest 这类路由指向坏地址（broker 地址注册成了
+     * RabbitMQ 的 11207 端口）时，12 个队列顺序 maxOffset 各撞 ~9s 且 `runCatching`
+     * 静默吞错 —— 一次读取拖成 107 秒黑洞，且旧实现不可打断，关闭对话框也没响应。
+     * runInterruptible 让取消（关对话框 / 整体超时）立刻 Thread.interrupt() 返回。
+     */
+    private suspend fun maxOffsetOf(consumer: DefaultMQPullConsumer, mq: MessageQueue): Long =
+        try {
+            runInterruptible { consumer.maxOffset(mq) }
+        } catch (e: Throwable) {
+            // 关键：被取消时（withTimeout 到点 / 关对话框）RocketMQ 会把
+            // InterruptedException 包装成 MQClientException 抛出 —— 不是
+            // CancellationException，直接返回 -1 会丢掉取消语义，循环继续撞下一个
+            // 队列。用 ensureActive 把取消翻译回来；正常业务失败才 -1 兜底。
+            currentCoroutineContext().ensureActive()
+            rocketMqLog.warn(
+                "[MQ-Perf][RocketMQ] maxOffset failed: queue=${mq.queueId}, " +
+                    "异常类型=${e::class.simpleName}, 详情=${e.message}",
+            )
+            -1L
+        }
 
 
     // ---------------------------------------------------------------- 发送（写）
