@@ -50,6 +50,12 @@ import org.apache.rocketmq.client.producer.DefaultMQProducer
  */
 class RocketMqMessageClients(private val config: RocketMqConfig) {
 
+    init {
+        // 与 RocketMqAdminClient 同一道兜底（幂等）：Producer / PullConsumer 同样会
+        // 牵出 shaded logback，落点必须在它们构造之前就定好。
+        RocketMqLogging.install()
+    }
+
     /** 与客户端同生共死的 TLS 持有者（含临时 PEM，close 时删除）。 */
     private val tls = RocketMqTlsStart(config)
 

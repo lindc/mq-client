@@ -1,26 +1,28 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  应用自带的 RocketMQ 客户端日志配置。
+  应用自带的 RocketMQ 客户端日志配置 —— **所有 RocketMQ 日志的唯一落点声明**。
 
-  为什么必须有这份文件：
-  - rocketmq-tools-5.3.1.jar 内 rmq.tools.logback.xml 把 <file> 写死成
-    ${user.home}/logs/rocketmqlogs/tools.log，不引用任何 logRoot 属性；
-  - rocketmq-client-5.3.1.jar 内 rmq.client.logback.xml 的默认值也是
-    ${user.home}/logs/rocketmqlogs（仅当 rocketmq.log.root 未设时才用）。
-  两者都会污染用户 HOME 根目录，且 tools 那份根本无法靠 setProperty 改。
+  为什么这份文件在 rocketmq-service 而不是 app-ui：
+  - RocketMQ 5.x 的 shaded logback（io.github.aliyunmq:rocketmq-logback-classic）
+    只初始化一个 LoggerContext，配置由 DefaultJoranConfiguratorExt 按名称顺序查找：
+      rmq.logback-test.xml → **rmq.logback.xml** → rmq.proxy → rmq.broker →
+      rmq.namesrv → rmq.controller → rmq.tools.logback.xml → rmq.client.logback.xml
+  - jar 内 rmq.tools.logback.xml 把 <file> 写死成
+    ${user.home}/logs/rocketmqlogs/tools.log，**不读任何 logRoot 属性**；
+    rmq.client.logback.xml 的默认值同样是 ${user.home}/logs/rocketmqlogs。
+  - 因此「只设系统属性」永远治不了 tools 那份；唯一可靠的手段是让
+    rmq.logback.xml 出现在 classpath 上（按名称排在 tools/client 之前）。
+  - 放在 rocketmq-service 的 resources 里 = 只要火箭 MQ 在 classpath，这份配置就在：
+    应用、各模块测试、诊断工具、未来的 CLI 都覆盖，不再依赖某个入口先跑 setProperty。
 
-  main() 第一行通过 System.setProperty("rmq.logback.configurationFile", ...) 指向本文件，
-  DefaultJoranConfiguratorExt.findConfigFileURLFromSystemProperties 会优先于 configFiles
-  列表里的 rmq.tools / rmq.client 两份默认配置直接返回它。文件名 rmq.logback.xml 本身也在
-  该列表里靠前（rmq.logback-test.xml 之后），即使系统属性失效也是双保险。
-
-  LOG_HOME 用 ${rocketmq.log.root} 优先（main 已设，跟随 mqclient.config.dir 覆盖），
-  兜底写死绝对路径 ${user.home}/.mqclient/logs/rocketmqlogs —— 绝不回落到 ~/logs。
-  appender 结构与 jar 内 rmq.client.logback.xml 保持一致，确保 shaded logback 能解析。
+  LOG_HOME 三级回退，任何一级都不指向 ${user.home}/logs：
+    rocketmq.log.root（RocketMqLogging.install 设置）
+      → ${mqclient.config.dir}/logs/rocketmqlogs（便携模式 / 测试重定向）
+      → ${user.home}/.mqclient/logs/rocketmqlogs
 -->
 <configuration>
     <property name="LOG_HOME"
-              value="${rocketmq.log.root:-${user.home}${file.separator}.mqclient${file.separator}logs${file.separator}rocketmqlogs}"/>
+              value="${rocketmq.log.root:-${mqclient.config.dir:-${user.home}${file.separator}.mqclient}${file.separator}logs${file.separator}rocketmqlogs}"/>
 
     <conversionRule conversionWord="pid"
                     converterClass="io.github.aliyunmq.logback.extensions.ProcessIdConverter"/>

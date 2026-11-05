@@ -40,6 +40,13 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 class RocketMqAdminClient(private val config: RocketMqConfig) : AutoCloseable {
 
+    init {
+        // 服务层兜底：即便有调用方绕过 main() 直接 new 客户端（诊断工具 / 未来的 CLI），
+        // 也要在 DefaultMQAdminExt 首次触到日志类之前把落点设好。幂等，代价是一次
+        // volatile 读。属性必须早于任何 RocketMQ 类加载，所以放在类体最前面。
+        RocketMqLogging.install()
+    }
+
     /** TLS 证书准备 / start 窗口 / ACL RPCHook 的统一持有者。 */
     private val tls = RocketMqTlsStart(config)
 
