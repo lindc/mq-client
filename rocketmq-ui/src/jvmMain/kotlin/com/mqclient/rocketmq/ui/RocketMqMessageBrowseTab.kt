@@ -93,8 +93,10 @@ internal val RMSG_ROW_HPADDING = 16.dp
 internal val RMSG_TIME_FORMATTER: DateTimeFormatter =
     DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS")
 
-/** 浏览页三态：初始加载 / 失败（带原因 + 重试）/ 就绪。 */
+/** 浏览页状态：空闲（未拉取）/ 加载中 / 失败（带原因 + 重试）/ 就绪。 */
 private sealed interface BrowseUiState {
+    /** 打开对话框的初始态：**不自动拉取**，等用户点「读取」（retryKey++）才加载。 */
+    data object Idle : BrowseUiState
     data object Loading : BrowseUiState
     data class Failed(val reason: String) : BrowseUiState
     data class Ready(
@@ -134,7 +136,7 @@ internal fun RocketMqMessageBrowseTab(
     var countText by remember(topicName) { mutableStateOf("20") }
     var retryKey by remember(topicName) { mutableIntStateOf(0) }
 
-    var uiState by remember(topicName) { mutableStateOf<BrowseUiState>(BrowseUiState.Loading) }
+    var uiState by remember(topicName) { mutableStateOf<BrowseUiState>(BrowseUiState.Idle) }
     var detailMessage by remember(topicName) { mutableStateOf<RocketMqMessage?>(null) }
 
     fun count(): Int = (countText.toIntOrNull() ?: 20).coerceIn(1, 500)
@@ -171,8 +173,10 @@ internal fun RocketMqMessageBrowseTab(
         }
     }
 
-    /** 读首页（初始加载与「读取」按钮共用，retryKey++ 触发重跑）。 */
+    /** 读首页：只有用户显式点「读取」（retryKey++）才拉 —— 打开对话框不自动拉取，
+     *  避免弹窗被一次 pull 拖慢（与 RabbitMQ 会话槽「建连推迟到第一个显式动作」同一规范）。 */
     LaunchedEffect(topicName, retryKey) {
+        if (retryKey == 0) return@LaunchedEffect
         uiState = BrowseUiState.Loading
         try {
             val service = RocketMqModule.messageServiceOrNull()
@@ -324,6 +328,9 @@ internal fun RocketMqMessageBrowseTab(
         // ---- 2. 表格 / 状态区 ----
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
             when (val state = uiState) {
+                BrowseUiState.Idle -> ObjectListEmptyState(
+                    message = stringResource("rocketmq_ui_msg_browse_idle"),
+                )
                 BrowseUiState.Loading -> BrowseLoadingView(Modifier.fillMaxSize())
                 is BrowseUiState.Failed -> BrowseErrorView(
                     reason = state.reason,

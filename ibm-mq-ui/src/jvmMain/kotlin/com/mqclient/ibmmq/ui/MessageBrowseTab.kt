@@ -129,6 +129,8 @@ internal enum class BrowseTimeRange(val labelKey: String) {
  * 在就绪态内按列表与过滤结果分流，不单独建模。
  */
 internal sealed interface BrowseUiState {
+    /** 打开对话框的初始态：**不自动拉取**，等用户点「读取」（retryKey++）才开会话。 */
+    data object Idle : BrowseUiState
     data object Loading : BrowseUiState
     data class Failed(val reason: String) : BrowseUiState
     data class Ready(
@@ -169,12 +171,15 @@ internal fun MessageBrowseTab(
     val snackbarHostState = remember { SnackbarHostState() }
     val clipboard = LocalClipboardManager.current
 
-    var uiState by remember(queueName) { mutableStateOf<BrowseUiState>(BrowseUiState.Loading) }
+    var uiState by remember(queueName) { mutableStateOf<BrowseUiState>(BrowseUiState.Idle) }
     var session by remember(queueName) { mutableStateOf<MessageBrowseSession?>(null) }
     // 初始加载 / 失败重试共用这条 effect：retryKey++ 触发重跑，重跑前先关旧会话。
     var retryKey by remember(queueName) { mutableIntStateOf(0) }
 
     LaunchedEffect(queueName, retryKey) {
+        // 打开对话框不自动拉取：openBrowseSession 整段持 mqiLock（与 PCF 扫描 / 发送
+        // 串行），弹窗即建连正是「弹窗慢」的来源。只有用户点「读取」（retryKey++）才开。
+        if (retryKey == 0) return@LaunchedEffect
         session?.close()
         session = null
         try {
@@ -370,6 +375,9 @@ internal fun MessageBrowseTab(
         //      局部放一个，复制提示 / 加载更多失败都打在这里）----
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
             when (val state = uiState) {
+                BrowseUiState.Idle -> ObjectListEmptyState(
+                    message = stringResource("ibm_mq_msg_browse_idle"),
+                )
                 BrowseUiState.Loading -> BrowseLoadingView(Modifier.fillMaxSize())
                 is BrowseUiState.Failed -> BrowseErrorView(
                     reason = state.reason,

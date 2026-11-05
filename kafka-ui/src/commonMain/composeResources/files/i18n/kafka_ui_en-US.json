@@ -221,6 +221,7 @@
   "kafka_ui_msg_browse_loading": "Reading messages…",
   "kafka_ui_msg_browse_failed": "Read failed: %1$s",
   "kafka_ui_msg_browse_empty": "No data for the current criteria",
+  "kafka_ui_msg_browse_idle": "Click Read to load messages",
   "kafka_ui_msg_browse_timestamp_empty": "No data at or after this timestamp",
   "kafka_ui_msg_browse_filtered_empty": "No matching messages",
   "kafka_ui_msg_browse_search": "Search key / value / timestamp",

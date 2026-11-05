@@ -5,6 +5,7 @@ import com.mqclient.message.interpreter.isProbablyBinary
 import com.mqclient.message.interpreter.previewTextOf
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlin.comparisons.compareByDescending
@@ -180,7 +181,13 @@ open class RocketMqMessageService {
                 val collected = mutableListOf<RocketMqMessage>()
                 val nextCursor = mutableMapOf<Int, Long>()
                 for ((mq, begin) in begins) {
-                    val pullResult = consumer.pull(mq, "*", begin, capped, READ_TIMEOUT_MS)
+                    // runInterruptible（而非裸调用）：UI 取消（关对话框 / 换队列 / 点重试）时
+                    // 对阻塞线程 Thread.interrupt()，pull 立刻抛返回、access 锁立即释放。
+                    // 协程取消本身打不断阻塞 socket，裸调用下僵尸 pull 要等满 5s 协议
+                    // 超时才放锁 —— 期间所有后续读取都排队，「越开越慢」的直接来源。
+                    val pullResult = runInterruptible {
+                        consumer.pull(mq, "*", begin, capped, READ_TIMEOUT_MS)
+                    }
                     if (pullResult.pullStatus == PullStatus.FOUND) {
                         collected += pullResult.msgFoundList.orEmpty().map { it.toMessage() }
                     }

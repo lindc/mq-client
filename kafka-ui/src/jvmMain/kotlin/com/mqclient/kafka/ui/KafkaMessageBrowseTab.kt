@@ -130,8 +130,10 @@ internal enum class StartMode(val labelKey: String) {
     TIMESTAMP("kafka_ui_msg_browse_start_timestamp"),
 }
 
-/** 浏览页三态：初始加载 / 失败（带原因 + 重试）/ 就绪。 */
+/** 浏览页状态：空闲（未拉取）/ 加载中 / 失败（带原因 + 重试）/ 就绪。 */
 private sealed interface BrowseUiState {
+    /** 打开对话框的初始态：**不自动拉取**，等用户点「读取」（retryKey++）才加载。 */
+    data object Idle : BrowseUiState
     data object Loading : BrowseUiState
     data class Failed(val reason: String) : BrowseUiState
     data class Ready(
@@ -173,7 +175,7 @@ internal fun KafkaMessageBrowseTab(
     var countText by remember(topicName) { mutableStateOf("50") }
     var retryKey by remember(topicName) { mutableIntStateOf(0) }
 
-    var uiState by remember(topicName) { mutableStateOf<BrowseUiState>(BrowseUiState.Loading) }
+    var uiState by remember(topicName) { mutableStateOf<BrowseUiState>(BrowseUiState.Idle) }
     var detailMessage by remember(topicName) { mutableStateOf<KafkaMessageSummary?>(null) }
     // 行操作（下载）进行中的行 key（"p:o"）：同一时刻只允许一个行操作。
     var rowActionKey by remember { mutableStateOf<String?>(null) }
@@ -204,8 +206,10 @@ internal fun KafkaMessageBrowseTab(
         scope.launch { snackbarHostState.showSnackbar(stringResource("kafka_ui_msg_copied")) }
     }
 
-    /** 读首页（初始加载与「读取」按钮共用，retryKey++ 触发重跑）。 */
+    /** 读首页：只有用户显式点「读取」（retryKey++）才拉 —— 打开对话框不自动拉取
+     *  （poll 虽有 500ms 自限，但整段持共享 consumer 的锁，僵尸拉取会让后续读取排队）。 */
     LaunchedEffect(topicName, retryKey) {
+        if (retryKey == 0) return@LaunchedEffect
         uiState = BrowseUiState.Loading
         try {
             val service = KafkaModule.messageServiceOrNull()
@@ -332,6 +336,9 @@ internal fun KafkaMessageBrowseTab(
         // ---- 2. 表格 / 状态区 ----
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
             when (val state = uiState) {
+                BrowseUiState.Idle -> ObjectListEmptyState(
+                    message = stringResource("kafka_ui_msg_browse_idle"),
+                )
                 BrowseUiState.Loading -> BrowseLoadingView(Modifier.fillMaxSize())
                 is BrowseUiState.Failed -> BrowseErrorView(
                     reason = state.reason,

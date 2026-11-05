@@ -7,6 +7,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
 import androidx.compose.ui.unit.dp
 import com.mqclient.rocketmq.RocketMqMessage
@@ -87,6 +89,22 @@ class RocketMqBrowseTabRenderTest {
                     )
                 }
             }
+            // Idle 门控复现验证：打开对话框只渲染引导空态，**不自动拉取**。
+            // 先确认引导文案在场、消息行不存在（readMessages 一次都没被调），
+            // 再模拟用户点「读取」触发首页加载。
+            var idleHintShown = false
+            repeat(20) {
+                try {
+                    onNodeWithText("点击「读取」按钮加载消息").assertExists()
+                    idleHintShown = true
+                    return@repeat
+                } catch (_: Throwable) {
+                    awaitIdle()
+                }
+            }
+            assertTrue(idleHintShown, "打开对话框应先渲染 Idle 引导空态，而不是自动拉取")
+            onAllNodesWithText("MSG-FAKE-ONE").assertCountEquals(0)
+            onNodeWithText("读取").performClick()
             // 轮询等 LaunchedEffect 跑完（fetchQueueIds + readMessages -> Ready(2)）。
             var oneFound = false
             repeat(100) {

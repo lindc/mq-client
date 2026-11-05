@@ -33,6 +33,7 @@
   "ibm_mq_msg_browse_loading_more": "Loading…",
   "ibm_mq_msg_browse_loading": "Loading messages…",
   "ibm_mq_msg_browse_empty": "No messages in this queue",
+  "ibm_mq_msg_browse_idle": "Click Read to load messages",
   "ibm_mq_msg_browse_filter_empty": "No matching messages",
   "ibm_mq_msg_browse_failed": "Failed to load messages: %s",
   "ibm_mq_msg_copied": "Copied",

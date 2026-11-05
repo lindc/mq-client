@@ -215,6 +215,7 @@
   "rocketmq_ui_msg_browse_loading": "正在读取消息…",
   "rocketmq_ui_msg_browse_failed": "读取失败：%1$s",
   "rocketmq_ui_msg_browse_empty": "没有符合条件的数据",
+  "rocketmq_ui_msg_browse_idle": "点击「读取」按钮加载消息",
   "rocketmq_ui_msg_browse_filtered_empty": "没有匹配的消息",
   "rocketmq_ui_msg_browse_search": "搜索 MsgId / Tag / Key / Value",
   "rocketmq_ui_msg_browse_empty_value": "[空消息]",
