@@ -165,6 +165,8 @@ class RabbitMqMessageSession private constructor(
     private val connection: Connection,
     private val ownsConnection: Boolean,
     initialChannel: Channel,
+    /** createChannel 失败（共享连接已死 / 半开）时通知 ConnectionManager 作废重建。 */
+    private val onConnectionBroken: () -> Unit = {},
 ) : RabbitMqQueueSession {
 
     /**
@@ -294,9 +296,34 @@ class RabbitMqMessageSession private constructor(
                 "[MQ-Perf][RabbitMQ] 拉取失败, 异常类型=${e::class.simpleName}, " +
                     "详情=${e.message ?: "unknown"}, 已耗时=${ioMs + parseMs}ms",
             )
+            // channel 级协议错误：报废这条 channel（共享 Connection 不受影响，
+            // 下次点击会从它上面新建 channel 继续工作）。
             discardChannel(ch, e)
+            // Stream 队列不支持 basic.get（540 NOT_IMPLEMENTED）：翻译成业务提示，
+            // 而不是把一坨底层 AMQP 报错糊到界面上。
+            if (isStreamUnsupported(e)) {
+                throw ServiceException(
+                    "rabbitmq_err_stream_browse_unsupported",
+                    fallbackMessage = "This is a Stream queue; single-message preview (basic.get) is not supported",
+                )
+            }
             throw e
         }
+    }
+
+    /** Stream 队列的 basic.get 被 broker 以 540 NOT_IMPLEMENTED 拒绝（含 cause 链）。 */
+    private fun isStreamUnsupported(error: Throwable): Boolean {
+        val text = buildString {
+            var current: Throwable? = error
+            while (current != null) {
+                append(current.message.orEmpty())
+                append(' ')
+                current = current.cause
+            }
+        }
+        return text.contains("540") ||
+            text.contains("NOT_IMPLEMENTED", ignoreCase = true) ||
+            text.contains("basic.get not supported", ignoreCase = true)
     }
 
     /* ------------------------------ 计数 ------------------------------ */
@@ -358,8 +385,9 @@ class RabbitMqMessageSession private constructor(
         withContext(Dispatchers.IO) {
             channelOps.withLock {
                 checkOpen()
-                val ch = ensureChannel()
-                try {
+                // 每次发布都新建独立 Channel，try-finally 无条件释放（见
+                // [withOperationChannel]）。发送失败只毁这一条 channel。
+                withOperationChannel("Publish") { ch ->
                     // Default exchange 直发：routing key 就是队列名。队列不存在（被删 /
                     // 从未声明）时 basicPublish **不会报错** —— unroutable 消息被 broker
                     // 静默丢弃，UI 却显示「发送成功」（真机踩过：demo.chain.q1 已被删除，
@@ -378,9 +406,6 @@ class RabbitMqMessageSession private constructor(
                             body,
                         )
                     }
-                } catch (e: Exception) {
-                    discardChannel(ch, e)
-                    throw e
                 }
             }
         }
@@ -507,6 +532,28 @@ class RabbitMqMessageSession private constructor(
     }
 
     /**
+     * 无状态 AMQP 操作（publish / forward）的**一次性 Channel**：每次从共享
+     * [Connection] 上 createChannel()，无论成功或异常都在 finally 里立刻释放。
+     *
+     * AMQP 黄金法则：Connection 长连共享、Channel 短命独占。publish 遇到任何
+     * channel 级协议错误（404 / 540 / 超时）只会毁掉这一条新建的 channel，既不会
+     * 连坐会话里持有 unacked 消息的浏览 channel，也不会污染共享 Connection。
+     *
+     * 释放统一走 [abortInBackground]：channel.close() 的写帧无超时，同步调用会把
+     * 持锁的调用方永久钉住；abort 是同一语义但不等待 close-ok。
+     */
+    private inline fun <T> withOperationChannel(op: String, block: (Channel) -> T): T {
+        val ch = channelCall("rabbitmq_err_timeout_open_channel", "Open channel") {
+            connection.createChannel()
+        }
+        try {
+            return block(ch)
+        } finally {
+            abortInBackground(ch, "$op: one-shot channel released")
+        }
+    }
+
+    /**
      * 已持 [channelOps]、已在 IO 上。channel 被报废过就重建一条。
      *
      * `createChannel` 与 `queueDeclarePassive` 都是 RPC，同样受 `channelRpcTimeout`
@@ -515,7 +562,15 @@ class RabbitMqMessageSession private constructor(
     private fun ensureChannel(): Channel {
         checkOpen()
         channel?.let { return it }
-        val fresh = channelCall("rabbitmq_err_timeout_open_channel", "Open channel") { connection.createChannel() }
+        // createChannel 失败说明共享 Connection 已死或半开（broker 关过 channel 后
+        // 客户端 isOpen 仍可能为 true）。强制作废重建，避免「一次协议错误之后所有
+        // 请求都复用同一条死连接」的全瘫。
+        val fresh = try {
+            channelCall("rabbitmq_err_timeout_open_channel", "Open channel") { connection.createChannel() }
+        } catch (e: Exception) {
+            onConnectionBroken()
+            throw e
+        }
         try {
             // passive 声明：队列不存在立刻 404，而不是等第一次 basicGet 才发现。
             // 返回值里的 consumerCount 是「影子消费者」排查的直接证据（>0 = 有别的
@@ -631,7 +686,11 @@ class RabbitMqMessageSession private constructor(
          * 连接的所有权不在会话手上，所以 [close] 只关 channel —— 关掉共享连接会把
          * 同一连接上别的对话框一起断掉。
          */
-        fun onSharedConnection(queueName: String, connection: Connection, channel: Channel) =
-            RabbitMqMessageSession(queueName, connection, ownsConnection = false, channel)
+        fun onSharedConnection(
+            queueName: String,
+            connection: Connection,
+            channel: Channel,
+            onConnectionBroken: () -> Unit = {},
+        ) = RabbitMqMessageSession(queueName, connection, ownsConnection = false, channel, onConnectionBroken)
     }
 }

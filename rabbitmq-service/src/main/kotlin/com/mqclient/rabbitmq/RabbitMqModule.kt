@@ -300,19 +300,42 @@ object RabbitMqModule {
             // passive 声明：队列不存在立刻 404，而不是等第一次 basicGet。
             // 与 createChannel 一样受 channelRpcTimeout（5s）约束。
             withContext(Dispatchers.IO) { channel.queueDeclarePassive(queueName) }
-            val session = RabbitMqMessageSession.onSharedConnection(queueName, connection, channel)
+            val session = RabbitMqMessageSession.onSharedConnection(
+                queueName, connection, channel,
+                onConnectionBroken = { connectionManager.invalidateAmqpConnection(ctx) },
+            )
             // 入账的是包装：任意一条关闭路径（对话框 / 模块异步 / shutdown）都会销账。
             val tracked = TrackedSession(session) { closed -> openSessions.remove(closed) }
             openSessions.add(tracked)
             return tracked
         } catch (error: Throwable) {
             if (error is CancellationException) throw error
+            // createChannel / passive 声明阶段的 connection 级失败（含半开）→ 强制作废
+            // 共享连接，下次任何操作会重新握手；404（队列不存在）不动连接，避免把别的
+            // 对话框一起断掉。
+            if (isAmqpConnectionFailure(error)) {
+                connectionManager.invalidateAmqpConnection(ctx)
+            }
             // 半成品 channel 不能留在共享连接上（会白占一个 channel 号）。
             // 交后台 abort：这一步在失败路径上，而写帧无超时 —— 对端不读 socket 时
             // 同步 abort 会把「打开失败」变成一个永不返回的调用（对话框一直转圈）。
             abortInBackground(channel, "open failed")
             throw error
         }
+    }
+
+    /** 区分「连接级故障」与 404 等业务错误：只有前者才值得作废共享 Connection。 */
+    private fun isAmqpConnectionFailure(error: Throwable): Boolean {
+        var current: Throwable? = error
+        while (current != null) {
+            val text = current.message.orEmpty()
+            if (text.contains("connection", ignoreCase = true) ||
+                text.contains("already closed", ignoreCase = true) ||
+                text.contains("socket", ignoreCase = true)
+            ) return true
+            current = current.cause
+        }
+        return error is com.rabbitmq.client.AlreadyClosedException
     }
 
     /**

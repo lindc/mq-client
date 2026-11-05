@@ -182,6 +182,23 @@ class RabbitMqConnectionManager(
         }
     }
 
+    /**
+     * 连接级故障后强制作废共享 AMQP [Connection]——包括**半开连接**：broker 已经
+     * 关了 socket，客户端 `isOpen` 却仍返回 true，[amqpConnection] 的「isOpen 才复用」
+     * 判不出来，于是每次 createChannel 都撞同一条死连接，表现为「一次 basic.get
+     * 报错之后所有请求都提示 connection closed」。
+     *
+     * 置 null 后下一次 [amqpConnection] 必然重新握手建连；旧连接用 abort（本地操作、
+     * 不等 close-ok）回收，不阻塞调用方。
+     */
+    fun invalidateAmqpConnection(ctx: RabbitMqConnectionContext) {
+        val dead = ctx.amqp ?: return
+        ctx.amqp = null
+        log.warn("invalidating shared amqp connection after connection-level failure: connection=${ctx.connectionId}")
+        runCatching { dead.abort() }
+            .onFailure { log.warn("amqp abort failed: connection=${ctx.connectionId} error=${it.message}") }
+    }
+
     /* ------------------------------ 内部 ------------------------------ */
 
     /**

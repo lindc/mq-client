@@ -286,6 +286,7 @@
   "rabbitmq_err_fetch_in_progress": "The previous fetch is still in progress — please wait",
   "rabbitmq_err_session_closed": "The message session is closed",
   "rabbitmq_err_timeout_fetch": "Fetch timed out: the broker did not respond in time",
+  "rabbitmq_err_stream_browse_unsupported": "This is a Stream queue; single-message preview (basic.get) is not supported",
   "rabbitmq_err_timeout_ack": "Acknowledge timed out: the broker did not respond in time",
   "rabbitmq_err_timeout_publish": "Publish timed out: the broker did not respond in time",
   "rabbitmq_err_timeout_open_channel": "Opening the channel timed out: the broker did not respond in time",

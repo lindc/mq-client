@@ -70,6 +70,7 @@ import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.file.pickFiles
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
+import com.mqclient.uicommon.i18n.userMessage
 import com.mqclient.uicommon.i18n.withArg
 import com.mqclient.uicommon.table.formatSize
 import com.mqclient.uicommon.failureText
@@ -228,7 +229,7 @@ fun RabbitMqQueueMessagesDialog(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            sessionState = LoadState.Error(failureText(e))
+            sessionState = LoadState.Error(e.userMessage())
             null
         }
     }
@@ -264,11 +265,13 @@ fun RabbitMqQueueMessagesDialog(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                // ServiceException 的中文文案在展示时点按 errorKey 翻译（userMessage），
+                // failureText 只取英文 message —— Stream 队列的 540 会变成一坨底层报错。
                 Log.warn(
                     "rabbitmq-ui",
-                    "[MQ-Perf][RabbitMQ] 拉取失败, 异常类型=${e::class.simpleName}, 详情=${failureText(e)}",
+                    "[MQ-Perf][RabbitMQ] 拉取失败, 异常类型=${e::class.simpleName}, 详情=${e.userMessage()}",
                 )
-                snackbar.showSnackbar(failureText(e))
+                snackbar.showSnackbar(e.userMessage())
             } finally {
                 fetching = false
             }
@@ -292,7 +295,7 @@ fun RabbitMqQueueMessagesDialog(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                snackbar.showSnackbar(failureText(e))
+                snackbar.showSnackbar(e.userMessage())
             } finally {
                 fetching = false
             }
