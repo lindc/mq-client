@@ -330,10 +330,23 @@ class RocketMqScanService(
                                         rows = rows,
                                     )
                                 }.getOrElse {
-                                    rocketMqLog.warn(
-                                        "group lag failed, fallback to 0: group=" + group +
-                                            " error=" + (it.message ?: it::class.simpleName),
-                                    )
+                                    // 同 resolveGroupProgress：CODE 17 / 206（组从未消费 /
+                                    // 无在线消费者）是预期业务态，每轮心跳重复出现，只打
+                                    // 一行 INFO；真异常才 WARN 留详情。
+                                    val failure = classifyProgressFailure(it)
+                                    val expected = failure.state == RocketMqProgressState.RETRY_TOPIC_NO_ROUTE ||
+                                        failure.state == RocketMqProgressState.NO_CONSUME_STATS
+                                    if (expected) {
+                                        rocketMqLog.info(
+                                            "[MQ-Perf][RocketMQ] group lag empty (expected): group=" + group +
+                                                ", state=" + failure.state + ", code=" + (failure.code ?: "-"),
+                                        )
+                                    } else {
+                                        rocketMqLog.warn(
+                                            "group lag failed, fallback to 0: group=" + group +
+                                                " error=" + (it.message ?: it::class.simpleName),
+                                        )
+                                    }
                                     RocketMqGroupLagSnapshot(group = group, totalLag = 0, queueCount = 0)
                                 }
                             }
@@ -860,19 +873,30 @@ internal suspend fun resolveGroupProgress(
         throw cancellation
     } catch (error: Throwable) {
         val failure = classifyProgressFailure(error)
-        // 完整栈进日志（console + 文件）：只有 message 时，CODE 与调用链都丢了。
-        rocketMqLog.warn(
-            "group progress failed: group=$group state=${failure.state} " +
-                "code=${failure.code ?: "-"} error=${error.message}\n" +
-                error.stackTraceToString(),
-        )
+        val expected = failure.state == RocketMqProgressState.RETRY_TOPIC_NO_ROUTE ||
+            failure.state == RocketMqProgressState.NO_CONSUME_STATS
+        if (expected) {
+            // CODE 17 / CODE 206 是预期业务态（组从未消费 / 重试队列无路由 / 没在线消费者）：
+            // 详情页已有友好文案，且 15s 心跳会反复触发 —— 日志一行即可，打 27 行堆栈会把
+            // 「正常现象」刷成故障现场。
+            rocketMqLog.info(
+                "[MQ-Perf][RocketMQ] group progress empty (expected): group=$group, " +
+                    "state=${failure.state}, code=${failure.code ?: "-"}, 详情=${error.message}",
+            )
+        } else {
+            // 真异常（权限 / 超时 / 未知）：完整栈保留 —— 只有 message 时 CODE 与调用链
+            // 都丢了，这类才是需要现场排查的。
+            rocketMqLog.warn(
+                "group progress failed: group=$group state=${failure.state} " +
+                    "code=${failure.code ?: "-"} error=${error.message}\n" +
+                    error.stackTraceToString(),
+            )
+        }
         // 任务 1：CODE 17 / CODE 206 是正常业务态（组从未消费 / 重试队列无路由 / 没在线消费者），
         // 直接降级为空进度 + 友好提示，**不再走 broker 直读兜底**：逐 broker 兜底是请求风暴
         // 元凶——大量临时 / 空组会各发起 N 次阻塞 broker 调用，占满共享 AdminExt 与 IO 线程，
         // 把详情对话框拖死（即「UI 卡死」根因）。
-        if (failure.state == RocketMqProgressState.RETRY_TOPIC_NO_ROUTE ||
-            failure.state == RocketMqProgressState.NO_CONSUME_STATS
-        ) {
+        if (expected) {
             return GroupProgressOutcome(
                 state = failure.state,
                 error = failure.detail,
