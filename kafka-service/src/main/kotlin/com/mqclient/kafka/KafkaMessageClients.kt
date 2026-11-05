@@ -11,65 +11,38 @@ import org.apache.kafka.common.serialization.ByteArrayDeserializer
 import org.apache.kafka.common.serialization.ByteArraySerializer
 
 /**
- * 一条 Kafka 连接的**共享消息客户端**：一个浏览 consumer + 一个 producer，懒建、
- * 复用、直到连接断开或程序退出。
+ * 一条 Kafka 连接的**共享消息客户端**：只持有连接级 Producer（懒建、复用、直到
+ * 连接断开或程序退出）。
  *
- * ## 为什么不再每次操作都新建
+ * ## 句柄隔离规范（底层连接共享，业务句柄用完即毁）
  *
- * 旧实现每读一次消息 `KafkaConsumer(...)`、每发一条 `KafkaProducer(...)`，用完即关。
- * 两者都不便宜：
- *
- *  - **`KafkaConsumer` 构造即做元数据拉取**（`partitionsFor` / `beginningOffsets`
- *    都要先有 metadata），每次都重新握手一遍 coordinator / broker 连接池；
- *  - **`KafkaProducer` 构造起后台 sender 线程 + 缓冲池 + 到各 broker 的连接**。
- *    Kafka 官方明确 producer「设计为可共享、创建成本高」，逐条新建是最典型的误用。
- *
- * 现在的行为：进程内每条连接一份，`disconnect` / `connection.deleted` / 模块关闭时
- * 统一关闭（见 [KafkaConnectionManager.closeQuietly]）。
- *
- * ## 两个句柄的线程语义**不同**，别混为一谈
- *
- *  - **producer 线程安全**（Kafka 官方保证）：多协程并发发送直接共用，无需加锁。
- *  - **consumer 非线程安全**：`assign` / `seek` / `poll` 必须串行。[consumerAccess]
- *    就是那把锁，**调用方必须整段持有**（从 assign 到 poll 结束），不能只锁创建。
+ *  - **Producer 共享**：构造起后台 sender 线程 + 缓冲池 + 到各 broker 的连接，
+ *    Kafka 官方明确「设计为可共享、创建成本高」，且线程安全，多协程并发直接共用。
+ *    每条连接只建一次，`disconnect` / `connection.deleted` / 模块关闭时统一关闭。
+ *  - **Consumer 绝不共享**：`KafkaConsumer` 非线程安全，`assign` / `seek` / `poll`
+ *    带位置状态，跨请求复用会让一次 poll 异常污染后续所有读取。每次「读取消息」/
+ *    后台拉取都由 [KafkaMessageService.withBrowseConsumer] 新建独立实例，`finally`
+ *    中 `close`（5s 上限）。构造虽需元数据拉取，但换来的是故障隔离。
  *
  * ## 浏览语义不变
  *
  * consumer 固定走 `assign + seek + poll`（不 subscribe、不 join group），
  * `enable.auto.commit=false` 且全程不 commit —— 不产生任何提交位移，不影响任何
- * 消费组的进度。`group.id` 只是个过配置校验的固定 dummy 值（以前的随机值是为了
- * 「每次都是新消费者」，现在共享一个反而更干净：broker 侧不会攒出一堆幽灵组）。
+ * 消费组的进度。`group.id` 只是个过配置校验的固定 dummy 值，broker 侧不会攒出
+ * 一堆幽灵组。
  */
 class KafkaMessageClients(private val config: KafkaConfig) {
 
     /**
-     * 串行化 consumer 访问。**必须整段持有**（assign → seek → poll → 取结果），
-     * 只锁创建等于没锁 —— 两个协程同时 seek 同一个 consumer 会互相窜改位置。
+     * 共享 Producer（连接级唯一）。**不再持有任何 Consumer** —— 每次读取由
+     * [KafkaMessageService.withBrowseConsumer] 新建独立实例并 finally close，
+     * 见那里的说明。
      */
-    val consumerAccess = Mutex()
-
-    @Volatile
-    private var browseConsumer: KafkaConsumer<ByteArray, ByteArray>? = null
-
     @Volatile
     private var producer: KafkaProducer<ByteArray, ByteArray>? = null
 
-    /** 创建 / 取用 consumer 的串行点（首次创建只发生一次）。 */
+    /** 共享 Producer 懒建的串行点（双检，只建一次）。 */
     private val createLock = Mutex()
-
-    /** 共享浏览 consumer；首次调用时创建。 */
-    suspend fun browseConsumer(): KafkaConsumer<ByteArray, ByteArray> {
-        browseConsumer?.let { return it }
-        return createLock.withLock {
-            browseConsumer?.let { return@withLock it }
-            val created = withContext(Dispatchers.IO) {
-                KafkaConsumer<ByteArray, ByteArray>(browseConsumerProperties(config, MAX_POLL_RECORDS))
-            }
-            browseConsumer = created
-            kafkaLog.debug("shared browse consumer created: bootstrap=${config.bootstrapServers}")
-            created
-        }
-    }
 
     /** 共享 producer；首次调用时创建。**线程安全，可直接并发使用**。 */
     suspend fun producer(): KafkaProducer<ByteArray, ByteArray> {
@@ -86,25 +59,14 @@ class KafkaMessageClients(private val config: KafkaConfig) {
     }
 
     /**
-     * 关闭全部句柄。**不等待 [consumerAccess]** —— 若此刻有协程正卡在 `poll` 里，
-     * 等锁就等于把断开路径一起拖死（这正是 RabbitMQ 那轮踩过的坑）。
+     * 关闭共享 Producer（连接断开 / 模块关闭时）。Consumer 已改为每次操作独立并
+     * 在 `finally` 关闭，断开路径不再需要 wakeup / 等锁。
      *
-     * 正确做法是 `wakeup()`：Kafka 官方指定的「从别的线程打断 poll」原语，它让
-     * 进行中的 `poll` 立刻抛 `WakeupException` 返回，之后 `close` 才有意义。
-     *
-     * `close` 各自带超时：consumer 5s、producer 5s（Kafka 的 close 会等未完成的
-     * 发送与心跳，没有上限就会卡 30s 默认值）。
+     * `close` 带 5s 超时（Kafka 的 close 会等未完成的发送与心跳，没有上限会卡
+     * 30s 默认值）。
      */
     suspend fun closeQuietly() = withContext(Dispatchers.IO) {
-        val consumer = browseConsumer.also { browseConsumer = null }
         val prod = producer.also { producer = null }
-
-        consumer?.let {
-            // wakeup 是线程安全的；先唤醒再关，避免 close 等一个永远不返回的 poll。
-            runCatching { it.wakeup() }
-            runCatching { it.close(CLOSE_TIMEOUT) }
-                .onFailure { e -> kafkaLog.warn("shared consumer close failed: $e") }
-        }
         prod?.let {
             runCatching { it.close(CLOSE_TIMEOUT) }
                 .onFailure { e -> kafkaLog.warn("shared producer close failed: $e") }

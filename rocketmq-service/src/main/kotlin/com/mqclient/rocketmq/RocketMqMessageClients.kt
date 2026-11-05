@@ -32,6 +32,15 @@ import org.apache.rocketmq.client.producer.DefaultMQProducer
  * `fetchSubscribeMessageQueues` 这类带客户端状态的操作并发调用的行为没有承诺）。
  * 所以统一用 [access] 串行化 —— 与 RabbitMQ 的 channel 同一处理方式。
  *
+ * ## 句柄隔离规范（底层连接共享，业务句柄用完即毁）
+ *
+ * 本类持有的是**重量级连接级句柄**：[producer] 与 [pullConsumer] 懒建一次、随连接
+ * 存活，只在断连 / 模块关闭时 [shutdown]，绝不单次查询后 shutdown。
+ * 真正的消息拉取由 [tempPullConsumer] 为每次浏览新建**独立 PullConsumer**，用完在
+ * `finally` 中 shutdown（见 [RocketMqMessageService.readMessages] 的并行分片）——
+ * 单次 pull 异常只毁这一条临时实例，不会污染共享客户端、更不会连坐底层连接。
+ * 共享句柄的每次访问都整段持 [access] 锁，保证严格单线程隔离。
+ *
  * ## TLS
  *
  * RocketMQ 的证书走 `TlsSystemConfig` **进程级静态字段**，而客户端只在 `start()`

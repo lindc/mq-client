@@ -6,15 +6,15 @@ import kotlin.test.assertSame
 import kotlinx.coroutines.runBlocking
 
 /**
- * 共享消息客户端**只建一次**。
+ * 句柄隔离规范：**重量级 Producer 共享只建一次，Consumer 每次读取独立新建**。
  *
- * 这条测试钉死本轮重构的核心断言：同一条连接上反复读 / 发消息，用的必须是同一个
- * consumer / producer 实例，而不是每次新建。旧实现每读一次 `KafkaConsumer(...)`、
- * 每发一条 `KafkaProducer(...)`，那正是「逐次变慢」的来源。
+ * 本测试钉死连接级部分（Producer 懒建复用、属性单一来源）。Consumer 已不再由
+ * [KafkaMessageClients] 持有，改由 `KafkaMessageService.withBrowseConsumer` 每次
+ * 新建并在 finally close —— 编译期即保证本类无法交出共享 Consumer。
  *
- * **不需要 broker**：`KafkaConsumer` / `KafkaProducer` 的构造只做配置校验（网络发生在
- * 首次 poll / send），所以句柄身份可以在离线环境验证。真正的连通性由
- * `KafkaMessageDiagTest`（`-Dkafkadiag.enabled=true`）覆盖。
+ * **不需要 broker**：`KafkaProducer` 的构造只做配置校验（网络发生在首次 send），
+ * 所以句柄身份可以在离线环境验证。真正的连通性由 `KafkaMessageDiagTest`
+ *（`-Dkafkadiag.enabled=true`）覆盖。
  */
 class KafkaMessageClientsTest {
 
@@ -22,22 +22,6 @@ class KafkaMessageClientsTest {
         bootstrapServers = "127.0.0.1:9092",
         connectionTimeout = 5,
     )
-
-    @Test
-    fun `browse consumer is created once and reused`() = runBlocking {
-        val clients = KafkaMessageClients(config())
-        try {
-            val first = clients.browseConsumer()
-            val second = clients.browseConsumer()
-            val third = clients.browseConsumer()
-
-            assertNotNull(first)
-            assertSame(first, second, "重复取用必须返回同一个 consumer —— 每次新建就是「逐次变慢」")
-            assertSame(first, third)
-        } finally {
-            clients.closeQuietly()
-        }
-    }
 
     @Test
     fun `producer is created once and reused`() = runBlocking {
@@ -53,19 +37,13 @@ class KafkaMessageClientsTest {
     }
 
     @Test
-    fun `close then reuse creates a fresh consumer`() = runBlocking {
+    fun `close is idempotent and leaves no shared consumer`() = runBlocking {
         val clients = KafkaMessageClients(config())
-        val first = clients.browseConsumer()
+        clients.producer()
         clients.closeQuietly()
-
-        val second = clients.browseConsumer()
-        try {
-            // 关闭后必须能重建（断开重连场景），且**不能**是已关闭的旧句柄。
-            assertNotNull(second)
-            kotlin.test.assertNotSame(first, second, "关闭之后必须重建，不能把已关的句柄交出去")
-        } finally {
-            clients.closeQuietly()
-        }
+        // 重复断开（模块 shutdown / 连接重建竞态）不应抛异常，也不再有共享 Consumer
+        // 需要 wakeup；只验证收尾幂等。
+        clients.closeQuietly()
     }
 
     @Test

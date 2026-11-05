@@ -152,8 +152,8 @@ class KafkaConnectionManager(
                 log.warn("admin client close failed: connection=${ctx.connectionId} error=$error")
             }
         }
-        // 共享 consumer / producer：先 wakeup 打断可能在跑的 poll，再带超时 close。
-        // 不等待 consumerAccess —— 等锁等于把断开路径一起拖死。
+        // 连接级共享 Producer 带超时 close；Consumer 已改为每次操作独立并在
+        // finally 关闭，断开路径不再需要 wakeup / 等业务锁。
         if (clients != null) {
             try {
                 clients.closeQuietly()

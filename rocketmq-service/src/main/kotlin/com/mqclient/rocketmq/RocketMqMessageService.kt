@@ -323,8 +323,10 @@ open class RocketMqMessageService {
     // ---------------------------------------------------------------- 发送（写）
 
     /**
-     * 发送一条消息（同步 send，阻塞等 broker 确认）。每次临时建 producer
-     * （group 随机生成，用完 shutdown）—— 对标 KafkaMessageService 的独立句柄模式。
+     * 发送一条消息（同步 send，阻塞等 broker 确认）。使用连接级共享 Producer
+     * （[RocketMqMessageClients.producer]，懒建一次、整段持 access 锁、绝不单次
+     * shutdown）—— 与 [RocketMqAdminClient] 同为重量级连接句柄，随连接存活。
+     * 轻量句柄隔离由 [RocketMqMessageClients.tempPullConsumer] 在浏览链路负责。
      *
      * 消息生产**不进写操作审计**（mq_command 表语义是管理操作，且高频批量会膨胀
      * 审计表 —— 与 Kafka / IBM MQ 的发送口径一致）。

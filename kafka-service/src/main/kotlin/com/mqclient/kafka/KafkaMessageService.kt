@@ -20,14 +20,12 @@ import org.apache.kafka.common.TopicPartition
  * （MessageBrowseSession / MessageSender / MessageAccess）同职责、同「即时查询、
  * 不进缓存、不发事件」的定位。
  *
- * **句柄生命周期：每条连接一份共享 consumer / producer**（[KafkaMessageClients]，
- * 挂在 [KafkaConnectionContext] 上，懒建、随连接存活、断开 / 退出时统一关闭）。
- * 旧实现每次操作临时新建再 close，那才是「越用越慢」的来源：consumer 构造要拉
- * 元数据、producer 构造要起 sender 线程与 broker 连接池。
- *
- * consumer 非线程安全，所有 `assign / seek / poll` 整段持
- * [KafkaMessageClients.consumerAccess]；producer 线程安全，可直接并发。
- * 仍只有 `config` 的重载（diag / 单测）没有连接上下文，退回临时句柄用完即关。
+ * **句柄生命周期：连接级共享 Producer，业务级隔离 Consumer**（[KafkaMessageClients]）。
+ * Producer 挂在 [KafkaConnectionContext] 上，懒建、随连接存活、断开 / 退出时统一关闭
+ * （构造要起 sender 线程与 broker 连接池，Kafka 官方明确应共享）。
+ * Consumer 非线程安全且 `assign / seek / poll` 带位置状态：每次读取新建独立实例，
+ * [withBrowseConsumer] 的 `finally` 强制 `close` —— 一次 poll 异常不会再污染后续
+ * 所有请求。AdminClient 同样是连接级共享句柄。
  *
  * **浏览不消费**：consumer 走 `assign + seek + poll`（不 subscribe、不 join group），
  * `enable.auto.commit=false` 且全程不 commit —— 不产生任何提交位移，不影响任何
@@ -409,27 +407,25 @@ class KafkaMessageService {
         config: KafkaConfig,
         maxPollRecords: Int,
         block: suspend (KafkaConsumer<ByteArray, ByteArray>) -> T,
-    ): T =
-        if (ctx == null) {
-            val t0 = System.currentTimeMillis()
-            val consumer = newConsumer(config, maxPollRecords)
-            kafkaLog.info(
-                "[MQ-Perf][Kafka] 获取/初始化客户端实例耗时=${System.currentTimeMillis() - t0}ms (新建临时实例)",
-            )
-            try {
-                block(consumer)
-            } finally {
-                runCatching { consumer.close(CLOSE_TIMEOUT) }
-            }
-        } else {
-            val clients = ctx.clients()
-            val t0 = System.currentTimeMillis()
-            val consumer = clients.browseConsumer()
-            kafkaLog.info(
-                "[MQ-Perf][Kafka] 获取/初始化客户端实例耗时=${System.currentTimeMillis() - t0}ms (共享实例复用)",
-            )
-            clients.consumerAccess.withLock { block(consumer) }
+    ): T {
+        // 规范：重量级连接（AdminClient / Producer）共享，业务句柄（Consumer）隔离。
+        // KafkaConsumer 非线程安全，且 assign / seek / poll 带位置状态 —— 严禁跨协程、
+        // 跨请求复用：一次 poll 异常会污染内部状态，后续读取全部瘫痪。每次读取都新建
+        // 独立 Consumer，无论成功或异常都在 finally 中 close（带 5s 上限）。
+        // ctx 仅用于日志标记连接 / diag 路径，不再决定句柄来源。
+        val t0 = System.currentTimeMillis()
+        val consumer = newConsumer(config, maxPollRecords)
+        kafkaLog.info(
+            "[MQ-Perf][Kafka] 获取/初始化客户端实例耗时=${System.currentTimeMillis() - t0}ms " +
+                "(每次读取新建独立 Consumer, connection=${ctx?.connectionId ?: "diag"})",
+        )
+        try {
+            return block(consumer)
+        } finally {
+            runCatching { consumer.close(CLOSE_TIMEOUT) }
+                .onFailure { kafkaLog.warn("browse consumer close failed: $it") }
         }
+    }
 
     private fun ConsumerRecord<ByteArray, ByteArray>.toSummary(topic: String): KafkaMessageSummary {
         // tombstone（value = null，合法的「删除标记」）当空消息处理：原来直接喂给
