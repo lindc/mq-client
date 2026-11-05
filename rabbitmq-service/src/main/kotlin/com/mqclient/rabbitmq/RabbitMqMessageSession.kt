@@ -210,20 +210,23 @@ class RabbitMqMessageSession private constructor(
             )
         }
         val startedAt = System.currentTimeMillis()
+        sessionLog.info("[MQ-Perf][RabbitMQ] Service 开始处理拉取请求: queue=$queueName, limit=$limit")
         return try {
             withContext(Dispatchers.IO) {
                 channelOps.withLock { drain(limit) }
             }.also { batch ->
-                sessionLog.debug(
-                    "fetched: queue=$queueName count=${batch.size} limit=$limit " +
-                        "elapsed=${System.currentTimeMillis() - startedAt}ms",
+                // io/parse 细分由 [drain] 打点；这里汇总整次 fetch 的端到端耗时。
+                sessionLog.info(
+                    "[MQ-Perf][RabbitMQ] fetch done: queue=$queueName, messages=${batch.size}, " +
+                        "totalMs=${System.currentTimeMillis() - startedAt}ms",
                 )
             }
         } catch (e: RabbitMqOperationTimeoutException) {
-            // 超时是「会话可能已坏」的第一信号，必须留下记录。
+            // 超时是「会话可能已坏」的第一信号，必须留下记录。RabbitMQ 无 UI 侧
+            // withTimeout（见对话框 KDoc），这是底层 channelRpcTimeout=5s 到点抛出。
             sessionLog.warn(
-                "fetch timed out: queue=$queueName limit=$limit elapsed=${System.currentTimeMillis() - startedAt}ms " +
-                    "detail=${e.message}",
+                "[MQ-Perf][RabbitMQ] 拉取超时, 耗时达到=${System.currentTimeMillis() - startedAt}ms, " +
+                    "已被底层 RPC 超时强制取消: queue=$queueName, 异常类型=${e::class.simpleName}, 详情=${e.message}",
             )
             throw e
         } finally {
@@ -241,15 +244,22 @@ class RabbitMqMessageSession private constructor(
         checkOpen()
         val ch = ensureChannel()
         val out = ArrayList<RabbitMqFetchedMessage>(limit)
+        var ioMs = 0L
+        var parseMs = 0L
         try {
             while (out.size < limit) {
                 // channelRpcTimeout 到这里生效：broker 不应答时 5s 抛
                 // ChannelContinuationTimeoutException，而不是挂 10 分钟。
+                // 网络 IO：basicGet 本体。
+                var t = System.currentTimeMillis()
                 val get = channelCall("rabbitmq_err_timeout_fetch", "Fetch") { ch.basicGet(queueName, false) } ?: break
+                ioMs += System.currentTimeMillis() - t
                 val tag = get.envelope.deliveryTag
                 withState { heldTags += tag }
                 val body = get.body ?: ByteArray(0)
                 val props = get.props
+                // 数据解析：GetResult -> RabbitMqFetchedMessage（DTO -> Domain）。
+                t = System.currentTimeMillis()
                 out += RabbitMqFetchedMessage(
                     deliveryTag = tag,
                     body = body,
@@ -266,9 +276,17 @@ class RabbitMqMessageSession private constructor(
                     replyTo = props.replyTo,
                     headers = props.headers?.mapValues { (_, v) -> v?.toString().orEmpty() } ?: emptyMap(),
                 )
+                parseMs += System.currentTimeMillis() - t
             }
+            sessionLog.info(
+                "[MQ-Perf][RabbitMQ] drain done: queue=$queueName, ioMs=$ioMs, parseMs=$parseMs, messages=${out.size}",
+            )
             return out
         } catch (e: Exception) {
+            sessionLog.error(
+                "[MQ-Perf][RabbitMQ] 拉取失败, 异常类型=${e::class.simpleName}, " +
+                    "详情=${e.message ?: "unknown"}, 已耗时=${ioMs + parseMs}ms",
+            )
             discardChannel(ch, e)
             throw e
         }

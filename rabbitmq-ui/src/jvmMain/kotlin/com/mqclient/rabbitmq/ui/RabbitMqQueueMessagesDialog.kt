@@ -51,6 +51,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.mqclient.core.log.Log
 import com.mqclient.mqui.file.MAX_MESSAGE_FILE_MB
 import com.mqclient.mqui.file.MessageFileFailure
 import com.mqclient.mqui.file.readMessageBytes
@@ -229,19 +230,40 @@ fun RabbitMqQueueMessagesDialog(
     }
 
     fun fetchMore() {
+        val startedAt = System.currentTimeMillis()
+        Log.info(
+            "rabbitmq-ui",
+            "[MQ-Perf][RabbitMQ] 用户触发拉取，UI 进入 Loading, queue=$queueName, limit=${effectiveLimit(limit)}",
+        )
         scope.launch {
             fetching = true
             try {
                 val s = ensureSession() ?: return@launch
                 val batch = s.fetchNext(effectiveLimit(limit))
+                Log.info(
+                    "rabbitmq-ui",
+                    "[MQ-Perf][RabbitMQ] 数据返回，开始渲染列表, 耗时=${System.currentTimeMillis() - startedAt}ms, messages=${batch.size}",
+                )
                 messages = messages + batch
                 exhausted = batch.isEmpty()
                 held = s.heldCount()
+                Log.info(
+                    "rabbitmq-ui",
+                    "[MQ-Perf][RabbitMQ] 渲染完成，UI 退出 Loading, 总耗时=${System.currentTimeMillis() - startedAt}ms",
+                )
             } catch (e: RabbitMqOperationTimeoutException) {
+                Log.warn(
+                    "rabbitmq-ui",
+                    "[MQ-Perf][RabbitMQ] 拉取超时, 耗时达到=${System.currentTimeMillis() - startedAt}ms, 已被底层 RPC 超时强制取消",
+                )
                 snackbar.showSnackbar(timeoutText)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                Log.warn(
+                    "rabbitmq-ui",
+                    "[MQ-Perf][RabbitMQ] 拉取失败, 异常类型=${e::class.simpleName}, 详情=${failureText(e)}",
+                )
                 snackbar.showSnackbar(failureText(e))
             } finally {
                 fetching = false

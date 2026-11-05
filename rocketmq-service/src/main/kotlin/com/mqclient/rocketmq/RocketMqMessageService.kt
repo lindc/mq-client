@@ -141,6 +141,10 @@ open class RocketMqMessageService {
         cursor: Map<Int, Long>? = null,
     ): RocketMqMessagePage {
         val ctx = connectedContext(connectionId)
+        val perfStart = System.currentTimeMillis()
+        rocketMqLog.info(
+            "[MQ-Perf][RocketMQ] Service 开始处理拉取请求: topic=$topic, queueId=$queueId, count=$count, connectionId=$connectionId",
+        )
         val capped = count.coerceIn(1, MAX_READ_COUNT)
         val clients = ctx.clients()
         // 共享 PullConsumer：**整段持锁**。fetchSubscribeMessageQueues / maxOffset / pull
@@ -149,7 +153,14 @@ open class RocketMqMessageService {
         // 对外效果等同：一次 Read 把所有队列的消息取回并合并排序。
         return withContext(Dispatchers.IO) {
             clients.access.withLock {
+                // 实例获取：复用共享 PullConsumer 时 ≈0ms；首次调用含 start（建连）。
+                val instanceStart = System.currentTimeMillis()
                 val consumer = clients.pullConsumer()
+                val instanceMs = System.currentTimeMillis() - instanceStart
+                rocketMqLog.info(
+                    "[MQ-Perf][RocketMQ] 获取/初始化客户端实例耗时=${instanceMs}ms" +
+                        if (instanceMs > 100) " (首次调用：含 client start 建连)" else " (共享实例复用)",
+                )
                 val allQueues = consumer.fetchSubscribeMessageQueues(topic).toList()
                 val queues = if (queueId == null) {
                     allQueues
@@ -180,26 +191,40 @@ open class RocketMqMessageService {
                 // 逐队列 pull（顺序，见上方锁说明），汇总后统一按时间排序。
                 val collected = mutableListOf<RocketMqMessage>()
                 val nextCursor = mutableMapOf<Int, Long>()
+                var ioMs = 0L
+                var parseMs = 0L
                 for ((mq, begin) in begins) {
                     // runInterruptible（而非裸调用）：UI 取消（关对话框 / 换队列 / 点重试）时
                     // 对阻塞线程 Thread.interrupt()，pull 立刻抛返回、access 锁立即释放。
                     // 协程取消本身打不断阻塞 socket，裸调用下僵尸 pull 要等满 5s 协议
                     // 超时才放锁 —— 期间所有后续读取都排队，「越开越慢」的直接来源。
+                    var t = System.currentTimeMillis()
                     val pullResult = runInterruptible {
                         consumer.pull(mq, "*", begin, capped, READ_TIMEOUT_MS)
                     }
+                    ioMs += System.currentTimeMillis() - t
+                    // 数据解析：MessageExt -> RocketMqMessage（DTO -> Domain）。
+                    t = System.currentTimeMillis()
                     if (pullResult.pullStatus == PullStatus.FOUND) {
                         collected += pullResult.msgFoundList.orEmpty().map { it.toMessage() }
                     }
+                    parseMs += System.currentTimeMillis() - t
                     // 队列尾判定：nextBeginOffset >= maxOffset → 无更多。maxOffset 查询
                     // 失败（-1）时不误判「已耗尽」，把游标交回调用方再试一轮。
+                    t = System.currentTimeMillis()
                     val maxOffset = maxOffsetOf(consumer, mq)
+                    ioMs += System.currentTimeMillis() - t
                     val next = pullResult.nextBeginOffset
                     val hasMore = pullResult.pullStatus == PullStatus.FOUND &&
                         (maxOffset < 0 || next < maxOffset)
                     if (hasMore) nextCursor[mq.queueId] = next
                 }
 
+                rocketMqLog.info(
+                    "[MQ-Perf][RocketMQ] read done: topic=$topic, instanceMs=$instanceMs, " +
+                        "ioMs=$ioMs, parseMs=$parseMs, messages=${collected.size}, " +
+                        "totalMs=${System.currentTimeMillis() - perfStart}",
+                )
                 // 按 storeTimestamp 降序合并（同刻回退 queueId / offset，保证稳定排序）。
                 val merged = collected.sortedWith(
                     compareByDescending<RocketMqMessage> { it.storeTimestamp }

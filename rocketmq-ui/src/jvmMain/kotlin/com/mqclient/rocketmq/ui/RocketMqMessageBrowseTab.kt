@@ -177,6 +177,11 @@ internal fun RocketMqMessageBrowseTab(
      *  避免弹窗被一次 pull 拖慢（与 RabbitMQ 会话槽「建连推迟到第一个显式动作」同一规范）。 */
     LaunchedEffect(topicName, retryKey) {
         if (retryKey == 0) return@LaunchedEffect
+        val startedAt = System.currentTimeMillis()
+        Log.info(
+            "rocketmq-ui",
+            "[MQ-Perf][RocketMQ] 开始拉取，UI 进入 Loading, topic=$topicName, queue=${selectedQueue ?: "all"}",
+        )
         uiState = BrowseUiState.Loading
         try {
             val service = RocketMqModule.messageServiceOrNull()
@@ -188,10 +193,22 @@ internal fun RocketMqMessageBrowseTab(
                 start = buildStart(),
                 count = count(),
             )
+            Log.info(
+                "rocketmq-ui",
+                "[MQ-Perf][RocketMQ] 数据返回，开始渲染列表, 耗时=${System.currentTimeMillis() - startedAt}ms, messages=${page.messages.size}",
+            )
             uiState = BrowseUiState.Ready(page.messages, page.nextBeginOffset)
+            Log.info(
+                "rocketmq-ui",
+                "[MQ-Perf][RocketMQ] 渲染完成，UI 退出 Loading, 总耗时=${System.currentTimeMillis() - startedAt}ms",
+            )
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            Log.warn(
+                "rocketmq-ui",
+                "[MQ-Perf][RocketMQ] 拉取失败, 异常类型=${e::class.simpleName}, 详情=${e.message}",
+            )
             uiState = BrowseUiState.Failed(e.message ?: e::class.simpleName ?: "unknown")
         }
     }
@@ -288,7 +305,13 @@ internal fun RocketMqMessageBrowseTab(
                 width = 84.dp,
             )
             PrimaryButton(
-                onClick = { retryKey++ },
+                onClick = {
+                    Log.info(
+                        "rocketmq-ui",
+                        "[MQ-Perf][RocketMQ] 用户触发拉取, topic=$topicName, queue=${selectedQueue ?: "all"}, mode=$startMode",
+                    )
+                    retryKey++
+                },
                 enabled = uiState != BrowseUiState.Loading,
             ) {
                 Text(

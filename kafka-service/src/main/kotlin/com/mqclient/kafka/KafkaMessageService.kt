@@ -79,6 +79,9 @@ class KafkaMessageService {
         count: Int,
     ): KafkaMessagePage {
         val ctx = connectedContext(connectionId)
+        kafkaLog.info(
+            "[MQ-Perf][Kafka] Service 开始处理拉取请求: topic=$topic, partition=$partition, count=$count",
+        )
         return readMessages(ctx.config, topic, partition, startFrom, count, ctx)
     }
 
@@ -153,6 +156,9 @@ class KafkaMessageService {
         count: Int,
     ): KafkaMessagePage {
         val ctx = connectedContext(connectionId)
+        kafkaLog.info(
+            "[MQ-Perf][Kafka] Service 开始处理续读请求: topic=$topic, cursorPartitions=${cursor.keys}, count=$count",
+        )
         return readMoreMessages(ctx.config, topic, cursor, count, ctx)
     }
 
@@ -231,8 +237,12 @@ class KafkaMessageService {
     ): KafkaMessagePage {
         val deadline = System.currentTimeMillis() + timeoutMs
         val collected = mutableListOf<ConsumerRecord<ByteArray, ByteArray>>()
+        var ioMs = 0L
         while (collected.size < count && System.currentTimeMillis() < deadline) {
+            // 网络 IO：poll 本体（每轮上限 POLL_INTERVAL_MS=500ms）。
+            val t0 = System.currentTimeMillis()
             val records = consumer.poll(Duration.ofMillis(POLL_INTERVAL_MS))
+            ioMs += System.currentTimeMillis() - t0
             if (records.isEmpty) {
                 // 到货后一轮空 poll = 尾部已到，收手（不白等满 deadline）；
                 // 从未到货则继续转，直到 deadline（空分区 / 空 topic 场景）。
@@ -241,8 +251,14 @@ class KafkaMessageService {
             }
             records.forEach { collected += it }
         }
+        // 数据解析：ConsumerRecord -> KafkaMessageSummary（DTO -> Domain）。
+        val parseStart = System.currentTimeMillis()
         val messages = KafkaMessageReadLogic.mergeAndCap(collected, count)
             .map { it.toSummary(topic) }
+        kafkaLog.info(
+            "[MQ-Perf][Kafka] collectPage done: topic=$topic, ioMs=$ioMs, " +
+                "parseMs=${System.currentTimeMillis() - parseStart}, messages=${messages.size}",
+        )
         val advanced = KafkaMessageReadLogic.nextCursorOf(collected)
         val exhausted = collected.size < count
         val merged = when {
@@ -395,7 +411,11 @@ class KafkaMessageService {
         block: suspend (KafkaConsumer<ByteArray, ByteArray>) -> T,
     ): T =
         if (ctx == null) {
+            val t0 = System.currentTimeMillis()
             val consumer = newConsumer(config, maxPollRecords)
+            kafkaLog.info(
+                "[MQ-Perf][Kafka] 获取/初始化客户端实例耗时=${System.currentTimeMillis() - t0}ms (新建临时实例)",
+            )
             try {
                 block(consumer)
             } finally {
@@ -403,7 +423,11 @@ class KafkaMessageService {
             }
         } else {
             val clients = ctx.clients()
+            val t0 = System.currentTimeMillis()
             val consumer = clients.browseConsumer()
+            kafkaLog.info(
+                "[MQ-Perf][Kafka] 获取/初始化客户端实例耗时=${System.currentTimeMillis() - t0}ms (共享实例复用)",
+            )
             clients.consumerAccess.withLock { block(consumer) }
         }
 

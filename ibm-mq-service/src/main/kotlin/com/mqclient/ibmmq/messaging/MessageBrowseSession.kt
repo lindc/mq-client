@@ -61,9 +61,11 @@ class MessageBrowseSession private constructor(
 
     private suspend fun browsePage(count: Int): List<MessageSummary> = withContext(Dispatchers.IO) {
         val start = System.currentTimeMillis()
-        ibmMqLog.debug("browse next: queue=$queueName count=$count")
+        ibmMqLog.info("[MQ-Perf][IBM MQ] Service 开始处理拉取请求: queue=$queueName, count=$count")
         try {
             val result = ArrayList<MessageSummary>(count)
+            var ioMs = 0L
+            var parseMs = 0L
             val options = MQGetMessageOptions()
             repeat(count) {
                 // 对话框关掉 / 切队列时，重复的阻塞 get 必须停在这一圈：
@@ -77,24 +79,31 @@ class MessageBrowseSession private constructor(
                         MQConstants.MQGMO_NO_WAIT or
                         MQConstants.MQGMO_FAIL_IF_QUIESCING
                 val message = MQMessage()
+                // 网络 IO：MQI get 本体（MQGMO_NO_WAIT，单次立即返回）。
+                var t = System.currentTimeMillis()
                 try {
                     queue.get(message, options)
                 } catch (e: MQException) {
+                    ioMs += System.currentTimeMillis() - t
                     if (e.reasonCode == MQConstants.MQRC_NO_MSG_AVAILABLE) {
-                        ibmMqLog.debug(
-                            "browse end of queue: queue=$queueName fetched=${result.size} " +
-                                "duration=${System.currentTimeMillis() - start}ms",
+                        ibmMqLog.info(
+                            "[MQ-Perf][IBM MQ] browse done (队尾): queue=$queueName, ioMs=$ioMs, " +
+                                "parseMs=$parseMs, messages=${result.size}, totalMs=${System.currentTimeMillis() - start}ms",
                         )
                         return@withContext result
                     }
                     throw e
                 }
+                ioMs += System.currentTimeMillis() - t
                 firstBrowse = false
+                // 数据解析：MQMessage -> MessageSummary（DTO -> Domain）。
+                t = System.currentTimeMillis()
                 result += message.toSummary()
+                parseMs += System.currentTimeMillis() - t
             }
-            ibmMqLog.debug(
-                "browse done: queue=$queueName fetched=${result.size} " +
-                    "duration=${System.currentTimeMillis() - start}ms",
+            ibmMqLog.info(
+                "[MQ-Perf][IBM MQ] browse done: queue=$queueName, ioMs=$ioMs, parseMs=$parseMs, " +
+                    "messages=${result.size}, totalMs=${System.currentTimeMillis() - start}ms",
             )
             result
         } catch (cancellation: CancellationException) {
@@ -103,11 +112,15 @@ class MessageBrowseSession private constructor(
             throw cancellation
         } catch (e: MQException) {
             ibmMqLog.error(
-                "browse failed: queue=$queueName reason=MQRC ${e.reasonCode}: ${MqrcTranslator.translate(e.reasonCode)}",
+                "[MQ-Perf][IBM MQ] 拉取失败, 异常类型=MQException, 错误码=${e.reasonCode}, " +
+                    "详情=MQRC ${e.reasonCode}: ${MqrcTranslator.translate(e.reasonCode)}, 已耗时=${System.currentTimeMillis() - start}ms",
             )
             throw e
         } catch (e: Exception) {
-            ibmMqLog.error("browse failed: queue=$queueName error=${e.message ?: e::class.simpleName}")
+            ibmMqLog.error(
+                "[MQ-Perf][IBM MQ] 拉取失败, 异常类型=${e::class.simpleName}, " +
+                    "详情=${e.message ?: "unknown"}, 已耗时=${System.currentTimeMillis() - start}ms",
+            )
             throw e
         }
     }
@@ -157,7 +170,10 @@ class MessageBrowseSession private constructor(
                 throw cancellation
             }
             val session = MessageBrowseSession(queue, resolvedName, mqiLock)
-            ibmMqLog.debug("browse session opened: queue=$queueName duration=${System.currentTimeMillis() - start}ms")
+            ibmMqLog.info(
+                "[MQ-Perf][IBM MQ] 获取/初始化客户端实例耗时=${System.currentTimeMillis() - start}ms " +
+                    "(browse 会话建立, queue=$queueName)",
+            )
             session
         }
     }

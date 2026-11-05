@@ -62,6 +62,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.mqclient.core.log.Log
 import com.mqclient.kafka.KafkaModule
 import com.mqclient.kafka.KafkaMessageSummary
 import com.mqclient.kafka.KafkaReadStart
@@ -210,6 +211,11 @@ internal fun KafkaMessageBrowseTab(
      *  （poll 虽有 500ms 自限，但整段持共享 consumer 的锁，僵尸拉取会让后续读取排队）。 */
     LaunchedEffect(topicName, retryKey) {
         if (retryKey == 0) return@LaunchedEffect
+        val startedAt = System.currentTimeMillis()
+        Log.info(
+            "kafka-ui",
+            "[MQ-Perf][Kafka] 开始拉取，UI 进入 Loading, topic=$topicName, partition=${selectedPartition.takeIf { it >= 0 } ?: "all"}",
+        )
         uiState = BrowseUiState.Loading
         try {
             val service = KafkaModule.messageServiceOrNull()
@@ -221,10 +227,22 @@ internal fun KafkaMessageBrowseTab(
                 startFrom = startFrom(),
                 count = count(),
             )
+            Log.info(
+                "kafka-ui",
+                "[MQ-Perf][Kafka] 数据返回，开始渲染列表, 耗时=${System.currentTimeMillis() - startedAt}ms, messages=${page.messages.size}",
+            )
             uiState = BrowseUiState.Ready(page.messages, page.nextCursor)
+            Log.info(
+                "kafka-ui",
+                "[MQ-Perf][Kafka] 渲染完成，UI 退出 Loading, 总耗时=${System.currentTimeMillis() - startedAt}ms",
+            )
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            Log.warn(
+                "kafka-ui",
+                "[MQ-Perf][Kafka] 拉取失败, 异常类型=${e::class.simpleName}, 详情=${kafkaErrorText(e)}",
+            )
             uiState = BrowseUiState.Failed(kafkaErrorText(e))
         }
     }
@@ -307,7 +325,13 @@ internal fun KafkaMessageBrowseTab(
             onClearTime = { pickedTime = null },
             countText = countText,
             onCountChange = { countText = it.filter(Char::isDigit).take(4) },
-            onRead = { retryKey++ },
+            onRead = {
+                Log.info(
+                    "kafka-ui",
+                    "[MQ-Perf][Kafka] 用户触发拉取, topic=$topicName, partition=${selectedPartition.takeIf { it >= 0 } ?: "all"}",
+                )
+                retryKey++
+            },
             reading = uiState == BrowseUiState.Loading,
         )
         HorizontalDivider()

@@ -67,6 +67,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.mqclient.core.log.Log
 import com.mqclient.ibmmq.IbmMQModule
 import com.mqclient.ibmmq.messaging.MessageBrowseSession
 import com.mqclient.ibmmq.messaging.MessageOperationResult
@@ -180,8 +181,14 @@ internal fun MessageBrowseTab(
         // 打开对话框不自动拉取：openBrowseSession 整段持 mqiLock（与 PCF 扫描 / 发送
         // 串行），弹窗即建连正是「弹窗慢」的来源。只有用户点「读取」（retryKey++）才开。
         if (retryKey == 0) return@LaunchedEffect
+        val startedAt = System.currentTimeMillis()
+        Log.info(
+            "ibm-mq-ui",
+            "[MQ-Perf][IBM MQ] 用户触发拉取，UI 进入 Loading, queue=$queueName, retryKey=$retryKey",
+        )
         session?.close()
         session = null
+        uiState = BrowseUiState.Loading
         try {
             val service = IbmMQModule.serviceOrNull()
                 ?: throw IllegalStateException("服务未初始化")
@@ -189,10 +196,22 @@ internal fun MessageBrowseTab(
             session = opened
             val depth = service.getQueueDepth(connectionId, queueName)
             val messages = opened.browseNext(PAGE_SIZE)
+            Log.info(
+                "ibm-mq-ui",
+                "[MQ-Perf][IBM MQ] 数据返回，开始渲染列表, 耗时=${System.currentTimeMillis() - startedAt}ms, messages=${messages.size}, depth=$depth",
+            )
             uiState = BrowseUiState.Ready(messages, depth, exhausted = messages.size < PAGE_SIZE)
+            Log.info(
+                "ibm-mq-ui",
+                "[MQ-Perf][IBM MQ] 渲染完成，UI 退出 Loading, 总耗时=${System.currentTimeMillis() - startedAt}ms",
+            )
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            Log.warn(
+                "ibm-mq-ui",
+                "[MQ-Perf][IBM MQ] 拉取失败, 异常类型=${e::class.simpleName}, 详情=${browseErrorText(e)}",
+            )
             uiState = BrowseUiState.Failed(browseErrorText(e))
         }
     }
