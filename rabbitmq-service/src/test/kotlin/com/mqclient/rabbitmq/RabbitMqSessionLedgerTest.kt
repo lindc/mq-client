@@ -32,6 +32,8 @@ class RabbitMqSessionLedgerTest {
 
         override suspend fun heldCount(): Int = 0
 
+        override fun lastKnownConsumerCount(): Int? = null
+
         override suspend fun ack(deliveryTag: Long) = Unit
 
         override suspend fun requeueAll() = Unit

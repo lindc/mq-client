@@ -43,6 +43,9 @@ interface RabbitMqQueueSession {
     /** 当前手上未 ack 的条数。 */
     suspend fun heldCount(): Int
 
+    /** 最近一次 passive 声明看到的队列消费者数（「影子消费者」排查证据；未知为 null）。 */
+    fun lastKnownConsumerCount(): Int?
+
     /** 彻底消费一条（basicAck）。 */
     suspend fun ack(deliveryTag: Long)
 
@@ -179,6 +182,10 @@ class RabbitMqMessageSession private constructor(
     @Volatile
     private var channel: Channel? = initialChannel
 
+    /** 最近一次 passive 声明看到的队列消费者数（「影子消费者」排查证据）。 */
+    @Volatile
+    private var declaredConsumerCount: Int? = null
+
     @Volatile
     private var closed = false
 
@@ -303,6 +310,8 @@ class RabbitMqMessageSession private constructor(
      */
     override suspend fun heldCount(): Int = withState { heldTags.size }
 
+    override fun lastKnownConsumerCount(): Int? = declaredConsumerCount
+
     /* ------------------------------ 写操作 ------------------------------ */
 
     /** 彻底消费一条（用户点删除）：basicAck 从队列移除。 */
@@ -351,6 +360,16 @@ class RabbitMqMessageSession private constructor(
                 checkOpen()
                 val ch = ensureChannel()
                 try {
+                    // Default exchange 直发：routing key 就是队列名。队列不存在（被删 /
+                    // 从未声明）时 basicPublish **不会报错** —— unroutable 消息被 broker
+                    // 静默丢弃，UI 却显示「发送成功」（真机踩过：demo.chain.q1 已被删除，
+                    // 批量发送 2 个文件提示成功但消息凭空消失）。发布前 passive 声明一次，
+                    // 404 立刻抛出，让「队列不存在」成为显式错误。
+                    if (exchange.isEmpty()) {
+                        channelCall("rabbitmq_err_timeout_declare_queue", "Declare queue") {
+                            ch.queueDeclarePassive(routingKey)
+                        }
+                    }
                     channelCall("rabbitmq_err_timeout_publish", "Publish") {
                         ch.basicPublish(
                             exchange,
@@ -499,7 +518,12 @@ class RabbitMqMessageSession private constructor(
         val fresh = channelCall("rabbitmq_err_timeout_open_channel", "Open channel") { connection.createChannel() }
         try {
             // passive 声明：队列不存在立刻 404，而不是等第一次 basicGet 才发现。
-            channelCall("rabbitmq_err_timeout_declare_queue", "Declare queue") { fresh.queueDeclarePassive(queueName) }
+            // 返回值里的 consumerCount 是「影子消费者」排查的直接证据（>0 = 有别的
+            // 消费者挂在该队列上，消息发进去会被瞬间消费）。
+            val declared = channelCall("rabbitmq_err_timeout_declare_queue", "Declare queue") {
+                fresh.queueDeclarePassive(queueName)
+            }
+            declaredConsumerCount = declared?.consumerCount
         } catch (e: Exception) {
             // 半成品 channel 不能留在连接上（会占 channel 号）。**后台** abort：
             // 这里持着 channelOps，同步写 socket 会把整把锁一起卡死（见 abortInBackground）。

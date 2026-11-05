@@ -147,6 +147,8 @@ fun RabbitMqQueueMessagesDialog(
     // 会话的**所有者**：开会话只能经它（内部先关旧的），UI 侧的 `session` 只是镜像。
     val sessionSlot = remember(openSession) { QueueSessionSlot(openSession) }
     var session by remember { mutableStateOf<RabbitMqQueueSession?>(null) }
+    // 最近一次 passive 声明看到的队列消费者数：>0 = 有影子消费者在抢消息。
+    var consumerCount by remember { mutableStateOf<Int?>(null) }
     // Idle = **还没开过会话**（对话框刚开、用户还没点任何动作）。
     // 与「正在开」区分开是 P2-1 的前提：只有用户显式动作才会把它推进到 Loading。
     var sessionState by remember(queueName) { mutableStateOf<LoadState<Unit>>(LoadState.Idle) }
@@ -216,6 +218,7 @@ fun RabbitMqQueueMessagesDialog(
         return try {
             val opened = sessionSlot.open(connectionId, queueName)
             session = opened
+            consumerCount = opened.lastKnownConsumerCount()
             sessionState = LoadState.Success(Unit)
             opened
         } catch (e: RabbitMqOperationTimeoutException) {
@@ -494,6 +497,7 @@ fun RabbitMqQueueMessagesDialog(
                                     messages = messages,
                                     // 建会话与拉取都算 busy：按钮都该置灰，转圈都该转。
                                     fetching = fetching || sessionState is LoadState.Loading,
+                                    consumerCount = consumerCount,
                                     limit = limit,
                                     onLimitChange = { limit = it.filter(Char::isDigit).take(3) },
                                     exhausted = exhausted,
@@ -559,6 +563,7 @@ fun RabbitMqQueueMessagesDialog(
 private fun BrowsePane(
     messages: List<RabbitMqFetchedMessage>,
     fetching: Boolean,
+    consumerCount: Int?,
     limit: String,
     onLimitChange: (String) -> Unit,
     exhausted: Boolean,
@@ -683,6 +688,9 @@ private fun BrowsePane(
             text = buildString {
                 append(stringResource("rabbitmq_ui_msg_fetched_count").withArg(messages.size))
                 append(stringResource("rabbitmq_ui_msg_pending_count").withArg(held))
+                consumerCount?.let {
+                    append(stringResource("rabbitmq_ui_msg_consumers").withArg(it))
+                }
                 if (exhausted) append(stringResource("rabbitmq_ui_msg_exhausted"))
             },
             style = MaterialTheme.typography.bodySmall,

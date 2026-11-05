@@ -221,6 +221,7 @@
   "rabbitmq_ui_msg_transient": "瞬态",
   "rabbitmq_ui_msg_col_time": "时间",
   "rabbitmq_ui_msg_pending_count": "，其中 %1$d 条待处理（关闭后自动重入队）",
+  "rabbitmq_ui_msg_consumers": "，队列消费者 %1$d 个",
   "rabbitmq_ui_msg_fetch_limit": "拉取条数",
   "rabbitmq_ui_msg_detail_no_params": "该解释器无需参数",
   "rabbitmq_ui_msg_detail_copy_value": "复制值",

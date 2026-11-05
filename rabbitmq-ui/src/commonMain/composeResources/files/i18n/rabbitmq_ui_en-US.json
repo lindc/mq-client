@@ -221,6 +221,7 @@
   "rabbitmq_ui_msg_transient": "Transient",
   "rabbitmq_ui_msg_col_time": "Time",
   "rabbitmq_ui_msg_pending_count": ", %1$d pending (auto-requeued on close)",
+  "rabbitmq_ui_msg_consumers": ", %1$d consumer(s) on queue",
   "rabbitmq_ui_msg_fetch_limit": "Fetch count",
   "rabbitmq_ui_msg_detail_no_params": "This interpreter has no parameters",
   "rabbitmq_ui_msg_detail_copy_value": "Copy value",
