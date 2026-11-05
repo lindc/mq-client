@@ -1,6 +1,5 @@
 package com.mqclient.rabbitmq.ui
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,24 +8,19 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Cancel
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Send
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -46,8 +40,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -66,6 +58,7 @@ import com.mqclient.rabbitmq.RabbitMqSessionOpener
 import com.mqclient.uicommon.CompactTextField
 import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.ThemedSnackbarHost
+import com.mqclient.uicommon.dialog.DialogSizeClass
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.file.pickFiles
 import com.mqclient.uicommon.SecondaryButton
@@ -97,19 +90,13 @@ private const val FETCH_HARD_LIMIT = 100
  * UI 只认这一个类型 —— 不必知道 amqp-client 的异常体系。
  */
 
-private val SuccessGreen = Color(0xFF2E7D32)
-private val FailedRed = Color(0xFFD32F2F)
-
-/** 批量发送任务状态机：等待 → 发送中 → 成功 / 失败（失败可重试）。 */
-private enum class BatchStatus { WAITING, SENDING, SUCCESS, FAILED }
-
 /** 一个待发送文件的任务；[content] 选择时已读入，直发原始字节（AMQP 无需编码层）。 */
 private data class BatchTask(
     val id: String,
     val fileName: String,
     val fileSize: Long,
     val content: ByteArray,
-    val status: BatchStatus = BatchStatus.WAITING,
+    val status: SendFileStatus = SendFileStatus.WAITING,
     val errorMessage: String? = null,
 )
 
@@ -394,11 +381,11 @@ fun RabbitMqQueueMessagesDialog(
                 val s = ensureSession() ?: return@launch
                 val headers = sendHeaders.filter { it.first.isNotBlank() }.associate { it.first.trim() to it.second }
                 var sent = 0
-                for (task in batchTasks.filter { it.status == BatchStatus.WAITING }) {
-                    updateBatchTask(task.id) { it.copy(status = BatchStatus.SENDING, errorMessage = null) }
+                for (task in batchTasks.filter { it.status == SendFileStatus.WAITING }) {
+                    updateBatchTask(task.id) { it.copy(status = SendFileStatus.SENDING, errorMessage = null) }
                     val (ok, err) = sendOneDirect(task.content, headers, s)
                     updateBatchTask(task.id) {
-                        if (ok) it.copy(status = BatchStatus.SUCCESS) else it.copy(status = BatchStatus.FAILED, errorMessage = err)
+                        if (ok) it.copy(status = SendFileStatus.SUCCESS) else it.copy(status = SendFileStatus.FAILED, errorMessage = err)
                     }
                     if (ok) sent++
                 }
@@ -411,7 +398,7 @@ fun RabbitMqQueueMessagesDialog(
                     exhausted = messages.isEmpty()
                     held = s.heldCount()
                 }
-                val failed = batchTasks.count { it.status == BatchStatus.FAILED }
+                val failed = batchTasks.count { it.status == SendFileStatus.FAILED }
                 if (failed == 0) snackbar.showSnackbar(stringResource("rabbitmq_ui_msg_batch_done"))
             } catch (e: RabbitMqOperationTimeoutException) {
                 sendError = timeoutText
@@ -462,16 +449,19 @@ fun RabbitMqQueueMessagesDialog(
     fun retryBatchTask(task: BatchTask) {
         scope.launch {
             val s = ensureSession() ?: return@launch
-            updateBatchTask(task.id) { it.copy(status = BatchStatus.SENDING, errorMessage = null) }
+            updateBatchTask(task.id) { it.copy(status = SendFileStatus.SENDING, errorMessage = null) }
             val headers = sendHeaders.filter { it.first.isNotBlank() }.associate { it.first.trim() to it.second }
             val (ok, err) = sendOneDirect(task.content, headers, s)
             updateBatchTask(task.id) {
-                if (ok) it.copy(status = BatchStatus.SUCCESS) else it.copy(status = BatchStatus.FAILED, errorMessage = err)
+                if (ok) it.copy(status = SendFileStatus.SUCCESS) else it.copy(status = SendFileStatus.FAILED, errorMessage = err)
             }
         }
     }
 
     ObjectDetailDialog(
+        // 显式写死 CONTENT（外壳默认值也是它），与交换机发送对话框
+        // （RabbitMqSendMessageDialog）逐字一致：两个发送对话框的初始尺寸必须同档。
+        sizeClass = DialogSizeClass.CONTENT,
         title = stringResource("rabbitmq_ui_msg_title").withArg(queueName),
         onDismiss = onDismiss,
         footerActions = {
@@ -805,7 +795,7 @@ private fun SendPane(
             Spacer(Modifier.weight(1f))
             PrimaryButton(
                 onClick = onSendBatch,
-                enabled = !busy && batchTasks.any { it.status == BatchStatus.WAITING },
+                enabled = !busy && batchTasks.any { it.status == SendFileStatus.WAITING },
             ) {
                 Text(
                     text = if (busy) stringResource("rabbitmq_ui_send_sending")
@@ -814,93 +804,6 @@ private fun SendPane(
             }
         }
     }
-}
-/**
- * 批量发送文件行：等待 / 发送中 / 成功 / 失败 **四态共用同一布局与字号**。
- *
- * 字体规范（全部走 MaterialTheme，杜绝硬编码字号）：
- *  - 文件名 bodyMedium 主文字色（onSurface）
- *  - 大小 bodySmall 次要色（onSurfaceVariant）
- *  - 状态文字 bodySmall（失败态 error 色）
- *  - 操作按钮文字 labelMedium（覆盖 OutlinedButton 默认的 labelLarge ——
- *    它正是「按钮比文件名还大」的割裂来源）
- * 行高以 `heightIn(min = 48.dp)` 固定：SUCCESS 无按钮、FAILED 错误文案换行、
- * 等待时按钮出现/消失，都不会让行高跳动。
- */
-@Composable
-private fun FileListItem(
-    fileName: String,
-    fileSize: Long,
-    status: BatchStatus,
-    errorMessage: String?,
-    busy: Boolean,
-    onRemove: () -> Unit,
-    onRetry: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = 48.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = fileName,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-        Text(
-            text = formatSize(fileSize),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.width(72.dp),
-        )
-        Box(modifier = Modifier.width(160.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                when (status) {
-                    BatchStatus.WAITING -> {
-                        Box(Modifier.size(8.dp).clip(CircleShape).background(MaterialTheme.colorScheme.onSurfaceVariant))
-                        Text(stringResource("rabbitmq_ui_send_status_waiting"), style = MaterialTheme.typography.bodySmall, maxLines = 1)
-                    }
-                    BatchStatus.SENDING -> {
-                        CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
-                        Text(stringResource("rabbitmq_ui_send_status_sending"), style = MaterialTheme.typography.bodySmall, maxLines = 1)
-                    }
-                    BatchStatus.SUCCESS -> {
-                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = SuccessGreen, modifier = Modifier.size(16.dp))
-                        Text(stringResource("rabbitmq_ui_send_status_success"), style = MaterialTheme.typography.bodySmall, maxLines = 1)
-                    }
-                    BatchStatus.FAILED -> {
-                        Icon(Icons.Default.Cancel, contentDescription = null, tint = FailedRed, modifier = Modifier.size(16.dp))
-                        Text(
-                            text = errorMessage ?: stringResource("rabbitmq_ui_send_status_failed"),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
-            }
-        }
-        Box(modifier = Modifier.width(72.dp)) {
-            when {
-                status == BatchStatus.WAITING && !busy ->
-                    SecondaryButton(
-                        onClick = onRemove,
-                        standardMinWidth = false,
-                    ) { Text(stringResource("rabbitmq_ui_send_remove"), style = MaterialTheme.typography.labelMedium) }
-                status == BatchStatus.FAILED && !busy ->
-                    SecondaryButton(
-                        onClick = onRetry,
-                        standardMinWidth = false,
-                    ) { Text(stringResource("rabbitmq_ui_send_retry"), style = MaterialTheme.typography.labelMedium) }
-            }
-        }
-    }
-    HorizontalDivider(thickness = 0.5.dp)
 }
 
 /** 「重试」文本按钮（会话失败态）。 */

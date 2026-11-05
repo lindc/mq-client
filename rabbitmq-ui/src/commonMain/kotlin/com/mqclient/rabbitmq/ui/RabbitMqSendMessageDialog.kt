@@ -17,14 +17,10 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Cancel
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DeleteSweep
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -42,7 +38,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
@@ -61,7 +56,6 @@ import com.mqclient.uicommon.CompactTextField
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
-import com.mqclient.uicommon.table.formatSize
 import com.mqclient.uicommon.failureText
 import java.util.Base64
 import java.util.UUID
@@ -69,13 +63,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-
-private val SuccessGreen = Color(0xFF4CAF50)
-private val FailedRed = Color(0xFFF44336)
-private val WaitingGray = Color(0xFF9E9E9E)
-
-/** 批量任务状态机：等待 → 发送中 → 成功 / 失败（失败可重试，unrouted 也算失败）。 */
-private enum class SendStatus { WAITING, SENDING, SUCCESS, FAILED }
 
 /**
  * 一个待发送文件的任务；[content] 选择时已读入（读失败的文件不进列表），
@@ -86,7 +73,7 @@ private data class SendTask(
     val fileName: String,
     val fileSize: Long,
     val content: ByteArray,
-    val status: SendStatus = SendStatus.WAITING,
+    val status: SendFileStatus = SendFileStatus.WAITING,
     val unrouted: Boolean = false,
     val errorMessage: String? = null,
 )
@@ -176,14 +163,14 @@ private class RabbitMqSendState(
         tasks = tasks.filterNot { it.id == id }
     }
 
-    fun canRemove(task: SendTask): Boolean = !busy && task.status == SendStatus.WAITING
+    fun canRemove(task: SendTask): Boolean = !busy && task.status == SendFileStatus.WAITING
 
     /* ------------------------------ 发送 ------------------------------ */
 
     /** 「发送文件」：按列表顺序串行发 WAITING 项（base64 编码），完成后汇总。 */
     fun sendAll(routingKey: String) {
         if (busy) return
-        val targets = tasks.filter { it.status == SendStatus.WAITING }
+        val targets = tasks.filter { it.status == SendFileStatus.WAITING }
         if (targets.isEmpty()) return
         scope.launch {
             busy = true
@@ -197,7 +184,7 @@ private class RabbitMqSendState(
             var ok = 0
             var fail = 0
             for (target in targets) {
-                updateTask(target.id) { it.copy(status = SendStatus.SENDING, unrouted = false, errorMessage = null) }
+                updateTask(target.id) { it.copy(status = SendFileStatus.SENDING, unrouted = false, errorMessage = null) }
                 val outcome = publish(routingKey, b64(target.content), headerMap, "base64")
                 updateTask(target.id) { it.withOutcome(outcome) }
                 if (outcome.success) ok++ else fail++
@@ -212,9 +199,9 @@ private class RabbitMqSendState(
     fun retryTask(id: String, routingKey: String) {
         if (busy) return
         val task = tasks.firstOrNull { it.id == id } ?: return
-        if (task.status != SendStatus.FAILED) return
+        if (task.status != SendFileStatus.FAILED) return
         scope.launch {
-            updateTask(id) { it.copy(status = SendStatus.SENDING, unrouted = false, errorMessage = null) }
+            updateTask(id) { it.copy(status = SendFileStatus.SENDING, unrouted = false, errorMessage = null) }
             val headerMap = headers
                 .filter { it.first.isNotBlank() }
                 .associate { it.first.trim() to it.second }
@@ -256,9 +243,9 @@ private class RabbitMqSendState(
     }
 
     private fun SendTask.withOutcome(outcome: SingleOutcome): SendTask = if (outcome.success) {
-        copy(status = SendStatus.SUCCESS, unrouted = false, errorMessage = null)
+        copy(status = SendFileStatus.SUCCESS, unrouted = false, errorMessage = null)
     } else {
-        copy(status = SendStatus.FAILED, unrouted = outcome.unrouted, errorMessage = outcome.errorMessage)
+        copy(status = SendFileStatus.FAILED, unrouted = outcome.unrouted, errorMessage = outcome.errorMessage)
     }
 
     private fun b64(bytes: ByteArray): String = Base64.getEncoder().encodeToString(bytes)
@@ -317,7 +304,10 @@ fun RabbitMqSendMessageDialog(
     }
 
     ObjectDetailDialog(
-        sizeClass = DialogSizeClass.FORM,
+        // 与队列发送对话框（RabbitMqQueueMessagesDialog 用默认的 CONTENT 档）完全一致：
+        // 同一 0.85 屏幕比例、同一 900dp 内容区 / 最小窗口宽度钳制。此前这里是
+        // FORM（0.60），初始窗口比队列对话框小一圈，文件表被压得很窄。
+        sizeClass = DialogSizeClass.CONTENT,
         title = stringResource("rabbitmq_ui_send_title").withArg(displayName),
         onDismiss = onDismiss,
         footerActions = {
@@ -444,13 +434,13 @@ private fun SendPane(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     TableHeader(stringResource("rabbitmq_ui_send_col_file_name"), Modifier.weight(1f))
-                    TableHeader(stringResource("rabbitmq_ui_send_col_size"), Modifier.width(80.dp))
-                    TableHeader(stringResource("rabbitmq_ui_send_col_status"), Modifier.width(160.dp))
-                    TableHeader(stringResource("rabbitmq_ui_send_col_actions"), Modifier.width(72.dp))
+                    TableHeader(stringResource("rabbitmq_ui_send_col_size"), Modifier.width(SendFileColumns.SIZE))
+                    TableHeader(stringResource("rabbitmq_ui_send_col_status"), Modifier.width(SendFileColumns.STATUS))
+                    TableHeader(stringResource("rabbitmq_ui_send_col_actions"), Modifier.width(SendFileColumns.ACTIONS))
                 }
                 HorizontalDivider()
                 state.tasks.forEach { task ->
-                    SendTaskRow(
+                    SendFileRow(
                         task = task,
                         busy = state.busy,
                         onRemove = { state.removeTask(task.id) },
@@ -536,7 +526,7 @@ internal fun HeadersEditor(
 }
 
 @Composable
-private fun SendTaskRow(
+private fun SendFileRow(
     task: SendTask,
     busy: Boolean,
     onRemove: () -> Unit,
@@ -544,82 +534,21 @@ private fun SendTaskRow(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val hovered by interactionSource.collectIsHoveredAsState()
-    val background = if (hovered) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent
-    Row(
+    FileListItem(
+        fileName = task.fileName,
+        fileSize = task.fileSize,
+        status = task.status,
+        // unrouted 的专用文案在这里解析：共享组件只认 errorMessage，不认业务状态。
+        errorMessage = task.errorMessage
+            ?: if (task.unrouted) stringResource("rabbitmq_ui_send_unrouted") else null,
+        busy = busy,
+        onRemove = onRemove,
+        onRetry = onRetry,
+        // 水平内边距与表头一致（8dp），列才对得上；行高与字号由 FileListItem 统一。
         modifier = Modifier
-            .fillMaxWidth()
             .hoverable(interactionSource)
-            .background(background)
-            .padding(horizontal = 8.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = task.fileName,
-            style = MaterialTheme.typography.bodySmall,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-        Text(
-            text = formatSize(task.fileSize),
-            style = MaterialTheme.typography.bodySmall,
-            maxLines = 1,
-            modifier = Modifier.width(80.dp),
-        )
-        Box(modifier = Modifier.width(160.dp)) {
-            StatusCell(task)
-        }
-        Box(modifier = Modifier.width(72.dp)) {
-            when {
-                task.status == SendStatus.WAITING && !busy ->
-                    SmallSecondaryButton(stringResource("rabbitmq_ui_send_remove"), onClick = onRemove)
-                task.status == SendStatus.FAILED && !busy ->
-                    SmallSecondaryButton(stringResource("rabbitmq_ui_send_retry"), onClick = onRetry)
-            }
-        }
-    }
-}
-
-@Composable
-private fun StatusCell(task: SendTask) {
-    Row(
-        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        when (task.status) {
-            SendStatus.WAITING -> {
-                Box(Modifier.size(8.dp).clip(CircleShape).background(WaitingGray))
-                StatusText(stringResource("rabbitmq_ui_send_status_waiting"))
-            }
-            SendStatus.SENDING -> {
-                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
-                StatusText(stringResource("rabbitmq_ui_send_status_sending"))
-            }
-            SendStatus.SUCCESS -> {
-                Icon(imageVector = Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp), tint = SuccessGreen)
-                StatusText(stringResource("rabbitmq_ui_send_status_success"))
-            }
-            SendStatus.FAILED -> {
-                Icon(imageVector = Icons.Default.Cancel, contentDescription = null, modifier = Modifier.size(16.dp), tint = FailedRed)
-                // 失败列直出原因（unrouted 专用文案 / 其他异常），单行省略。
-                StatusText(
-                    text = task.errorMessage
-                        ?: stringResource(if (task.unrouted) "rabbitmq_ui_send_unrouted" else "rabbitmq_ui_send_status_failed"),
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun StatusText(text: String, color: Color = Color.Unspecified) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.bodySmall,
-        color = color,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
+            .background(if (hovered) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent)
+            .padding(horizontal = 8.dp),
     )
 }
 
@@ -658,7 +587,7 @@ private fun SendBottomBar(
             // 只看待发送文件：有 WAITING 项即可点，无文件/全发完则禁用。
             PrimaryButton(
                 onClick = onSubmit,
-                enabled = !state.busy && state.tasks.any { it.status == SendStatus.WAITING },
+                enabled = !state.busy && state.tasks.any { it.status == SendFileStatus.WAITING },
             ) {
                 Text(
                     text = when {
@@ -683,13 +612,5 @@ private fun TableHeader(text: String, modifier: Modifier = Modifier) {
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = modifier,
     )
-}
-
-@Composable
-private fun SmallSecondaryButton(text: String, onClick: () -> Unit) {
-    SecondaryButton(
-        onClick = onClick,
-        standardMinWidth = false,
-    ) { Text(text) }
 }
 
