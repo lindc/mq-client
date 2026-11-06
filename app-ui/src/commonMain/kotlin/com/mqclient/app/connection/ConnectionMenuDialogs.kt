@@ -205,7 +205,7 @@ private fun TestResultDialog(result: TestResultData, onDismiss: () -> Unit) {
             }
         },
         confirmButton = {
-            SecondaryButton(onClick = onDismiss) { Text(stringResource("common_close")) }
+            PrimaryButton(onClick = onDismiss) { Text(stringResource("common_close")) }
         },
     )
 }

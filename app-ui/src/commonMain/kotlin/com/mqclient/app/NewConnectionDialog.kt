@@ -52,7 +52,6 @@ import com.mqclient.uicommon.dialog.DialogSizeClass
 import com.mqclient.uicommon.dialog.DialogSizeSpec
 import com.mqclient.uicommon.dialog.rememberStandardDialogSize
 import com.mqclient.uicommon.PrimaryButton
-import com.mqclient.uicommon.AppSecondaryButton
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import dev.nucleusframework.application.DecoratedDialog
@@ -377,10 +376,10 @@ private fun DialogFooter(
     ) {
         when (step) {
             NewConnectionStep.SELECT ->
-                // 点卡片即进第二步，这里只需要一个出口。
-                AppSecondaryButton(
+                // 点卡片即进第二步，这里只需要一个出口（直接关闭整个新建连接弹窗）。
+                PrimaryButton(
                     onClick = onClose,
-                ) { Text(stringResource("common_cancel")) }
+                ) { Text(stringResource("common_close")) }
             NewConnectionStep.CREATE -> {
                 SecondaryButton(
                     onClick = onBack,

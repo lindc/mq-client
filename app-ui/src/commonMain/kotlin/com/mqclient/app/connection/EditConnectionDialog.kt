@@ -73,7 +73,7 @@ internal fun EditConnectionDialog(
             title = { Text(stringResource("menu_edit_connection")) },
             text = { Text(connection.name) },
             confirmButton = {
-                SecondaryButton(onClick = onDismiss) { Text(stringResource("common_close")) }
+                PrimaryButton(onClick = onDismiss) { Text(stringResource("common_close")) }
             },
         )
         return

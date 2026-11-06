@@ -35,6 +35,7 @@ import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.dialog.rememberMessageDetailUiState
 import com.mqclient.uicommon.file.saveFileBytes
 import com.mqclient.uicommon.SecondaryButton
+import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 import kotlinx.coroutines.CancellationException
@@ -236,7 +237,7 @@ internal fun MessageDetailDialog(
             } else {
                 // 加载 / 失败态没有可下载、可复制的东西，只给关闭（关闭永不被门禁拦）。
                 Spacer(Modifier.weight(1f))
-                SecondaryButton(onClick = onDismiss) { Text(stringResource("common_close")) }
+                PrimaryButton(onClick = onDismiss) { Text(stringResource("common_close")) }
             }
         },
     ) {

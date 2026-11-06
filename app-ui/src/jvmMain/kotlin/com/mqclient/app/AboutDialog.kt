@@ -360,7 +360,7 @@ private fun LicenseDialog(onDismiss: () -> Unit) {
         )
     AlertDialog(
         onDismissRequest = onDismiss,
-        confirmButton = { SecondaryButton(onClick = onDismiss) { Text(stringResource("common_close")) } },
+        confirmButton = { PrimaryButton(onClick = onDismiss) { Text(stringResource("common_close")) } },
         title = { Text(stringResource("license_title")) },
         text = {
             LicenseList(
@@ -867,7 +867,7 @@ private fun FullLicenseDialog(license: BundledLicense, onDismiss: () -> Unit) {
                 enabled = parts != null,
             ) { Text(stringResource("license_full_text_copy")) }
         },
-        confirmButton = { SecondaryButton(onClick = onDismiss) { Text(stringResource("common_close")) } },
+        confirmButton = { PrimaryButton(onClick = onDismiss) { Text(stringResource("common_close")) } },
         title = { Text(stringResource("license_full_text_title")) },
         text = {
             Box(Modifier.size(560.dp, 480.dp)) {
