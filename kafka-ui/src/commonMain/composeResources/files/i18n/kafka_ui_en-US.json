@@ -147,6 +147,7 @@
   "kafka_ui_broker_detail_role_follower": "Follower",
   "kafka_ui_broker_detail_search": "Search topics",
   "kafka_ui_broker_detail_no_partitions": "No partitions hosted on this broker",
+  "kafka_ui_broker_detail_show_internal": "Show internal topics",
   "kafka_ui_topic_create": "Create Topic",
   "kafka_ui_topic_create_title": "Create Topic",
   "kafka_ui_topic_create_field_name": "Topic name",

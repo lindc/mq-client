@@ -8,12 +8,15 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -22,6 +25,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -87,11 +91,16 @@ fun KafkaBrokerDetailDialog(
     onDismiss: () -> Unit,
 ) {
     var search by remember { mutableStateOf("") }
+    var showInternal by remember { mutableStateOf(false) }
     val rows = remember(broker.brokerId, topics) { brokerPartitionRows(broker.brokerId, topics) }
     val trimmed = search.trim()
-    val filtered =
+    val searchFiltered =
         if (trimmed.isBlank()) rows
         else rows.filter { it.topic.contains(trimmed, ignoreCase = true) }
+    // 在搜索过滤基础上叠加“隐藏内部主题”：默认隐藏以 __ 开头的系统内部 Topic。
+    val filtered =
+        if (showInternal) searchFiltered
+        else searchFiltered.filter { !it.topic.startsWith("__") }
     val leaderCount = rows.count { it.isLeader }
     val followerCount = rows.size - leaderCount
     val topicCount = rows.map { it.topic }.distinct().size
@@ -184,17 +193,29 @@ fun KafkaBrokerDetailDialog(
             }
             HorizontalDivider()
 
-            // ---- 搜索 + 分区表（可滚动）----
+            // ---- 搜索 + 隐藏内部主题开关 + 分区表（可滚动）----
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
                 CompactSearchField(
                     value = search,
                     onValueChange = { search = it },
                     placeholder = stringResource("kafka_ui_broker_detail_search"),
                     modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    text = stringResource("kafka_ui_broker_detail_show_internal"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Switch(
+                    checked = showInternal,
+                    onCheckedChange = { showInternal = it },
+                    modifier = Modifier.padding(start = 4.dp),
                 )
             }
             BrokerPartitionTable(filtered, Modifier.weight(1f).fillMaxSize())
@@ -222,11 +243,16 @@ private fun BrokerPartitionTable(rows: List<BrokerPartitionRow>, modifier: Modif
             DetailHeaderCell(stringResource("kafka_ui_broker_detail_col_role"), width = COL_P_ROLE)
             DetailHeaderCell(stringResource("kafka_ui_broker_detail_col_isr"), Modifier.weight(1f))
         }
-        HorizontalDivider()
         Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-            rows.forEach { row ->
+            rows.forEachIndexed { index, row ->
+                val zebra = index % 2 == 1
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 40.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(if (zebra) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f) else Color.Transparent)
+                        .padding(horizontal = 20.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     DetailDataCell(row.topic, Modifier.weight(1.2f), monospace = true)
@@ -237,12 +263,10 @@ private fun BrokerPartitionTable(rows: List<BrokerPartitionRow>, modifier: Modif
                             else "kafka_ui_broker_detail_role_follower",
                         ),
                         width = COL_P_ROLE,
-                        color = if (row.isLeader) GroupStatusStyle.STABLE else MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontWeight = if (row.isLeader) FontWeight.Medium else FontWeight.Normal,
+                        color = if (row.isLeader) GroupStatusStyle.STABLE else GroupStatusStyle.REBALANCE,
                     )
                     DetailDataCell(row.isrIds.joinToString(", "), Modifier.weight(1f), monospace = true)
                 }
-                HorizontalDivider(thickness = 0.5.dp)
             }
         }
     }
@@ -252,8 +276,9 @@ private fun BrokerPartitionTable(rows: List<BrokerPartitionRow>, modifier: Modif
 private fun DetailHeaderCell(text: String, modifier: Modifier = Modifier, width: Dp? = null) {
     Text(
         text = text,
-        style = MaterialTheme.typography.bodySmall,
+        style = MaterialTheme.typography.labelSmall,
         fontWeight = FontWeight.Medium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = if (width != null) modifier.width(width) else modifier,
     )
 }

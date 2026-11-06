@@ -147,6 +147,7 @@
   "kafka_ui_broker_detail_role_follower": "Follower",
   "kafka_ui_broker_detail_search": "搜索 Topic",
   "kafka_ui_broker_detail_no_partitions": "该 Broker 未承载任何分区",
+  "kafka_ui_broker_detail_show_internal": "显示内部主题",
   "kafka_ui_topic_create": "创建主题",
   "kafka_ui_topic_create_title": "创建主题",
   "kafka_ui_topic_create_field_name": "主题名",
