@@ -55,6 +55,7 @@ import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.failureText
 import com.mqclient.uicommon.i18n.stringResource
+import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.i18n.userMessage
 import com.mqclient.uicommon.i18n.withArg
 import kotlinx.coroutines.CancellationException
@@ -218,7 +219,7 @@ fun RabbitMqQueuePropertiesDialog(
                 Text(stringResource("rabbitmq_ui_queue_delete"))
             }
             Spacer(Modifier.weight(1f))
-            SecondaryButton(
+            PrimaryButton(
                 onClick = onDismiss,
             ) { Text(stringResource("common_close")) }
         },

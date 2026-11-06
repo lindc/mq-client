@@ -32,8 +32,8 @@ import com.mqclient.kafka.KafkaBrokerSnapshot
 import com.mqclient.kafka.KafkaTopicSnapshot
 import com.mqclient.mqui.common.CompactSearchField
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
-import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
+import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.i18n.withArg
 
 /**
@@ -100,7 +100,7 @@ fun KafkaBrokerDetailDialog(
         title = stringResource("kafka_ui_broker_detail_title").withArg(broker.brokerId),
         onDismiss = onDismiss,
         footerActions = {
-            SecondaryButton(
+            PrimaryButton(
                 onClick = onDismiss,
             ) { Text(stringResource("common_close")) }
         },

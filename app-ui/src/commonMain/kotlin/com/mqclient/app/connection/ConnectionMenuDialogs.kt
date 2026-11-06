@@ -167,7 +167,7 @@ private fun ConnectFailedDialog(failure: ConnectFailure, onRetry: () -> Unit, on
             PrimaryButton(onClick = onRetry) { Text(stringResource("common_retry")) }
         },
         dismissButton = {
-            SecondaryButton(
+            PrimaryButton(
                 onClick = onDismiss,
             ) { Text(stringResource("common_close")) }
         },
@@ -278,7 +278,7 @@ internal fun ConnectionPropertiesDialog(connection: ConnectionInfo, onDismiss: (
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Spacer(Modifier.weight(1f))
-                    SecondaryButton(
+                    PrimaryButton(
                         onClick = onDismiss,
                     ) { Text(stringResource("common_close")) }
                 }

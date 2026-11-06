@@ -152,7 +152,7 @@ fun KafkaGroupDetailDialog(
             }
             Spacer(Modifier.weight(1f))
             // 次级（surfaceVariant）：与各确认框取消键同款。
-            SecondaryButton(
+            PrimaryButton(
                 onClick = onDismiss,
             ) {
                 Text(stringResource("common_close"))

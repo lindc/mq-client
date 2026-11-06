@@ -311,7 +311,7 @@ fun RabbitMqSendMessageDialog(
         title = stringResource("rabbitmq_ui_send_title").withArg(displayName),
         onDismiss = onDismiss,
         footerActions = {
-            SecondaryButton(
+            PrimaryButton(
                 onClick = onDismiss,
             ) { Text(stringResource("common_close")) }
         },

@@ -35,8 +35,8 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.rememberDialogState
-import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
+import com.mqclient.uicommon.PrimaryButton
 import dev.nucleusframework.application.DecoratedDialog
 import dev.nucleusframework.application.LocalNucleusWindow
 import dev.nucleusframework.window.windowDragArea
@@ -201,7 +201,7 @@ fun ObjectDetailDialog(
                     if (footerActions != null) {
                         footerActions()
                     } else {
-                        SecondaryButton(
+                        PrimaryButton(
                             onClick = closeNow,
                         ) { Text(stringResource("common_close")) }
                     }

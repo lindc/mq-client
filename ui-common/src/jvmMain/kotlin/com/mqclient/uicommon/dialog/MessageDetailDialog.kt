@@ -552,7 +552,7 @@ fun RowScope.MessageDetailFooterActions(
     // 直接调 onClose 只会写一个状态，而「移除这个原生窗口」要等父组合重组 →
     // 重组要一帧 → 帧可能永远不来（现场：点关闭没反应，拖一下窗口才关）。
     val closeNow = rememberWindowDismiss(onClose)
-    SecondaryButton(
+    PrimaryButton(
         onClick = closeNow,
     ) { Text(stringResource("common_close")) }
 }

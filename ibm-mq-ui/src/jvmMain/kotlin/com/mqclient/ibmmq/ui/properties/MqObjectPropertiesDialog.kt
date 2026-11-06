@@ -18,6 +18,7 @@ import com.mqclient.ibmmq.ui.properties.content.MqObjectPropertiesContent
 import com.mqclient.ibmmq.ui.topology.isLocalQueue
 import com.mqclient.uicommon.LocalAiAsk
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
+import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 
@@ -52,7 +53,7 @@ fun MqObjectPropertiesDialog(
                 }
             }
             Spacer(Modifier.weight(1f))
-            FooterActionButton(label = stringResource("common_close")) { onDismiss() }
+            PrimaryButton(onClick = onDismiss) { Text(stringResource("common_close")) }
         },
     ) {
         when (state.objectType) {

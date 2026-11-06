@@ -466,7 +466,7 @@ fun RabbitMqQueueMessagesDialog(
         onDismiss = onDismiss,
         footerActions = {
             Spacer(Modifier.weight(1f))
-            SecondaryButton(
+            PrimaryButton(
                 onClick = onDismiss,
             ) { Text(stringResource("common_close")) }
         },

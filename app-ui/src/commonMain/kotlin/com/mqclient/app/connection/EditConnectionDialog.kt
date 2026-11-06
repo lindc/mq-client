@@ -145,7 +145,7 @@ internal fun EditConnectionDialog(
                 ) {
                     SecondaryButton(
                         onClick = onDismiss,
-                    ) { Text(stringResource("common_close")) }
+                    ) { Text(stringResource("common_cancel")) }
                     Spacer(Modifier.width(8.dp))
                     PrimaryButton(onClick = onFinish(formState, onConnectionUpdated, onDismiss), enabled = !formState.busy) {
                         Text(stringResource("common_save"))

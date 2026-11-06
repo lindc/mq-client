@@ -51,6 +51,7 @@ import com.mqclient.uicommon.PropertyTableSection
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
+import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.i18n.withArg
 import com.mqclient.uicommon.failureText
 import kotlinx.coroutines.CancellationException
@@ -160,7 +161,7 @@ fun KafkaTopicPropertiesDialog(
                 }
             }
             Spacer(Modifier.weight(1f))
-            SecondaryButton(
+            PrimaryButton(
                 onClick = onDismiss,
             ) { Text(stringResource("common_close")) }
         },
