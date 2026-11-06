@@ -106,7 +106,7 @@ internal fun NewConnectionDialog(
     }
 
     // 可缩放的真实窗口（Compose Dialog 不支持用户拖拽缩放）：初始尺寸走公共规范
-    // （FORM，屏幕 60%），用户自由调整大小 —— 页面填满窗口、只保留窗口最小尺寸
+    // （CONTENT，屏幕 85%），用户自由调整大小 —— 页面填满窗口、只保留窗口最小尺寸
     // 限制（见 setMinimumSize，统一 480×320）。
     // Esc 关闭走 onPreviewKeyEvent：对话框没有系统标题栏，键盘出口得自己接。
     DecoratedDialog(

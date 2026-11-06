@@ -94,7 +94,7 @@ import org.jetbrains.compose.resources.painterResource
  * （默认是内置的霞鹜文楷 Mono），在这里写死任何一个字族都会覆盖用户选择。
  *
  * 行数：6 行拆两段 = 4×40+3×8 + 2×40+8 = 272dp（[PropertyTableSection] 行高
- * `heightIn(min = 40.dp)` + 行距 8dp）。窗口尺寸走公共规范（FORM，屏幕 60%），
+ * `heightIn(min = 40.dp)` + 行距 8dp）。窗口尺寸走公共规范（CONTENT，屏幕 85%），
  * 不再写死 620×700 —— 内容用 `fillMaxSize` 跟随窗口自适应。
  */
 @Composable
