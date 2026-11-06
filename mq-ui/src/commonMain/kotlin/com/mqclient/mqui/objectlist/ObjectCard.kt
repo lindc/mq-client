@@ -1,6 +1,5 @@
 package com.mqclient.mqui.objectlist
 
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
@@ -37,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -88,24 +88,20 @@ fun ObjectCard(
         targetValue =
             when {
                 isPressed -> 0.dp
-                isHovered -> 4.dp
-                else -> 0.dp
+                isHovered -> 6.dp
+                else -> 2.dp
             },
         animationSpec = tween(HOVER_ANIM_MS),
         label = "objectCardElevation",
     )
-    // 边框颜色：按下实色 primary；悬停半透明 primary；默认 outlineVariant。
-    // alertTint 非空时覆盖默认与悬停两态（告警边框悬停保留，交互反馈靠阴影抬升）。
-    val borderColor by animateColorAsState(
-        targetValue =
-            when {
-                isPressed -> MaterialTheme.colorScheme.primary
-                isHovered -> data.alertTint ?: MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-                else -> data.alertTint ?: MaterialTheme.colorScheme.outlineVariant
-            },
-        animationSpec = tween(HOVER_ANIM_MS),
-        label = "objectCardBorder",
-    )
+    // 边框弱化：阴影承担层次，边框降到极低透明度避免「脏」感；告警卡片保留
+    // 中等透明的 tint 以便仍然能读出异常态（交互反馈改由阴影抬升提供）。
+    val border =
+        if (data.alertTint != null) {
+            BorderStroke(1.dp, data.alertTint.copy(alpha = 0.5f))
+        } else {
+            BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+        }
 
     Surface(
         modifier = modifier
@@ -134,7 +130,7 @@ fun ObjectCard(
             },
         shape = CardShape,
         color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, borderColor),
+        border = border,
     ) {
         Column(
             modifier = Modifier.padding(
@@ -169,6 +165,7 @@ fun ObjectCard(
                 Text(
                     text = data.title,
                     style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
@@ -239,7 +236,7 @@ fun ObjectCard(
                     Spacer(Modifier.width(8.dp))
                 }
                 data.actions.forEach { action ->
-                    ActionIconButton(action, executing = action.id in data.executingActionIds)
+                    ActionIconButton(action, cardHovered = isHovered, executing = action.id in data.executingActionIds)
                 }
             }
         }
@@ -248,7 +245,7 @@ fun ObjectCard(
 
 /** 操作按钮：24dp 点击区 + 16dp 图标，AppTooltip 悬停显示 i18n 提示。 */
 @Composable
-private fun ActionIconButton(action: CardAction, executing: Boolean) {
+private fun ActionIconButton(action: CardAction, cardHovered: Boolean, executing: Boolean) {
     AppTooltip(tooltip = { Text(text = stringResource(action.tooltip), style = MaterialTheme.typography.bodySmall) }) {
         AppIconButton(
             onClick = action.onClick,
@@ -269,6 +266,7 @@ private fun ActionIconButton(action: CardAction, executing: Boolean) {
                     tint = when {
                         !action.enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
                         action.isDangerous -> MaterialTheme.colorScheme.error
+                        cardHovered -> MaterialTheme.colorScheme.primary
                         else -> MaterialTheme.colorScheme.onSurfaceVariant
                     },
                 )
