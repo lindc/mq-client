@@ -51,8 +51,6 @@ import androidx.compose.ui.window.Dialog
 import com.mqclient.core.CoreModule
 import com.mqclient.core.ModuleRegistry
 import com.mqclient.uicommon.PrimaryButton
-import com.mqclient.uicommon.dialog.DialogSizeClass
-import com.mqclient.uicommon.dialog.rememberStandardDialogSize
 import com.mqclient.uicommon.PropertyItem
 import com.mqclient.uicommon.PropertyTableSection
 import com.mqclient.uicommon.AppSecondaryButton
@@ -101,7 +99,6 @@ import org.jetbrains.compose.resources.painterResource
 @Composable
 internal fun AboutDialog(onDismiss: () -> Unit) {
     var showLicense by remember { mutableStateOf(false) }
-    val dialogSize = rememberStandardDialogSize(DialogSizeClass.CONTENT)
     Dialog(
         onDismissRequest = onDismiss,
         properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
@@ -112,7 +109,10 @@ internal fun AboutDialog(onDismiss: () -> Unit) {
                 shape = MaterialTheme.shapes.medium,
                 color = MaterialTheme.colorScheme.surface,
                 tonalElevation = 6.dp,
-                modifier = Modifier.size(dialogSize.width, dialogSize.height),
+                // 紧凑尺寸：About 不是 ObjectDetailDialog，不套用「屏幕 85%」的公共档位
+                // （大屏下会拉到 1000dp+ 显得空旷）。固定 650×520，内容横向收敛、
+                // 纵向超出时中间区自带滚动，不会挤压变形。
+                modifier = Modifier.size(650.dp, 520.dp),
             ) {
                 Column(Modifier.fillMaxSize()) {
                     // 1. 标题栏：无彩色底，标题直接写「关于」。
