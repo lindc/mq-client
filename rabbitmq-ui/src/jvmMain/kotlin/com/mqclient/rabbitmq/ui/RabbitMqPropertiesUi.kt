@@ -10,14 +10,15 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -30,8 +31,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mqclient.core.ConnectionInfo
@@ -177,8 +176,8 @@ private fun ReadyPane(clusterInfo: RabbitMqClusterInfoSnapshot?, nodes: List<Rab
                 text = stringResource("rabbitmq_ui_conn_props_nodes").withArg(nodes.size),
             )
             Spacer(Modifier.height(4.dp))
-            nodes.forEach { node ->
-                NodeRow(node)
+            nodes.forEachIndexed { index, node ->
+                NodeRow(node, index)
             }
             if (nodes.isEmpty()) {
                 Text(
@@ -194,7 +193,7 @@ private fun ReadyPane(clusterInfo: RabbitMqClusterInfoSnapshot?, nodes: List<Rab
 
 /** 节点行：状态色点（未运行红 / 告警橙 / 健康绿）+ 名称 + 类型 · 状态 · 运行时长 · 内存。 */
 @Composable
-private fun NodeRow(node: RabbitMqNodeSnapshot) {
+private fun NodeRow(node: RabbitMqNodeSnapshot, index: Int) {
     val dotColor = when {
         !node.running -> RabbitMqDangerRed
         node.memAlarm || node.diskFreeAlarm -> RabbitMqWarningOrange
@@ -205,29 +204,37 @@ private fun NodeRow(node: RabbitMqNodeSnapshot) {
         node.memAlarm || node.diskFreeAlarm -> stringResource("rabbitmq_ui_overview_node_alarm")
         else -> stringResource("rabbitmq_ui_overview_node_status_ok")
     }
+    val zebra = index % 2 == 1
     Column {
-        Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 40.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .background(if (zebra) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f) else Color.Transparent)
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Box(Modifier.size(8.dp).clip(CircleShape).background(dotColor))
             Spacer(Modifier.width(8.dp))
             Text(
                 text = node.name,
-                style = MaterialTheme.typography.bodySmall,
-                fontWeight = FontWeight.Medium,
-                fontFamily = FontFamily.Monospace,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
             Text(
                 text = listOf(node.type, statusText, formatUptime(node.uptime), formatMem(node)).joinToString(" · "),
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.width(300.dp),
             )
         }
-        HorizontalDivider(modifier = Modifier.fillMaxWidth(), thickness = 0.5.dp)
+        Spacer(Modifier.height(8.dp))
     }
 }
 
