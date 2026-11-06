@@ -20,7 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material3.Icon
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.IconButton
+import com.mqclient.uicommon.AppIconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -172,14 +172,14 @@ fun PropertyTable(
                         )
                     }
                     if (item.copyable && !item.value.isNullOrBlank()) {
-                        IconButton(
+                        AppIconButton(
                             onClick = {
                                 clipboard.setText(AnnotatedString(item.value.orEmpty()))
                                 scope.launch {
                                     snackbarHostState.showSnackbar(stringResource("msg_detail_copied"))
                                 }
                             },
-                            modifier = Modifier.size(CopySlotWidth),
+                            size = CopySlotWidth,
                         ) {
                             Icon(
                                 imageVector = Icons.Default.ContentCopy,

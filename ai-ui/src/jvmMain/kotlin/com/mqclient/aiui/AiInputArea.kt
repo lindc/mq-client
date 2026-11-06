@@ -11,7 +11,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.IconButton
+import com.mqclient.uicommon.AppIconButton
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Stop
@@ -104,7 +104,7 @@ fun AiInputArea(
                 if (isStreaming) {
                     // 流式中换成「停止」：没有它用户只能等回复自然结束 —— 长回复、
                     // 卡住的服务端都下不来。
-                    IconButton(onClick = onCancel) {
+                    AppIconButton(onClick = onCancel) {
                         Icon(
                             imageVector = Icons.Default.Stop,
                             contentDescription = null,
@@ -113,7 +113,7 @@ fun AiInputArea(
                         )
                     }
                 } else {
-                    IconButton(
+                    AppIconButton(
                         onClick = {
                             val snapshot = text.trim()
                             if (snapshot.isNotEmpty()) {

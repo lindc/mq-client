@@ -26,7 +26,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.mqclient.uicommon.AppIconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -250,10 +250,10 @@ fun ObjectCard(
 @Composable
 private fun ActionIconButton(action: CardAction, executing: Boolean) {
     AppTooltip(tooltip = { Text(text = stringResource(action.tooltip), style = MaterialTheme.typography.bodySmall) }) {
-        IconButton(
+        AppIconButton(
             onClick = action.onClick,
             enabled = action.enabled && !executing,
-            modifier = Modifier.size(24.dp),
+            size = 24.dp,
         ) {
             if (executing) {
                 CircularProgressIndicator(

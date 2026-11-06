@@ -9,7 +9,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.mqclient.uicommon.AppIconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -71,7 +71,7 @@ fun TopologyNodeDetailCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+            AppIconButton(onClick = onDismiss, size = 28.dp) {
                 Icon(
                     imageVector = Icons.Filled.Close,
                     contentDescription = null,

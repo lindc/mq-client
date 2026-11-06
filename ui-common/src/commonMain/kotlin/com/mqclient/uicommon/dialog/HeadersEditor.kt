@@ -14,7 +14,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.mqclient.uicommon.AppIconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -64,9 +64,9 @@ fun HeadersEditor(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.weight(1f))
-            IconButton(
+            AppIconButton(
                 onClick = { onHeadersChange(headers + HeaderDraft()) },
-                modifier = Modifier.size(24.dp),
+                size = 24.dp,
             ) {
                 Icon(
                     imageVector = Icons.Default.Add,
@@ -109,10 +109,10 @@ fun HeadersEditor(
                         )
                     }
                 }
-                IconButton(
+                AppIconButton(
                     onClick = { onHeadersChange(headers.filterIndexed { i, _ -> i != index }) },
                     enabled = headers.size > 1,
-                    modifier = Modifier.size(28.dp),
+                    size = 28.dp,
                 ) {
                     Icon(
                         imageVector = Icons.Default.Delete,

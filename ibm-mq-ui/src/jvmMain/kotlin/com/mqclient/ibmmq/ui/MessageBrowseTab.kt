@@ -42,7 +42,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.mqclient.uicommon.AppIconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -554,7 +554,7 @@ private fun BrowseToolbar(
                 enabled = !importState.importing,
             )
         }
-        IconButton(onClick = onRefresh, enabled = !refreshing) {
+        AppIconButton(onClick = onRefresh, enabled = !refreshing) {
             if (refreshing) {
                 CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
             } else {
@@ -902,7 +902,7 @@ private fun TimeRangeRow(
             Text(value?.format(DISPLAY_TIME_FORMATTER) ?: stringResource("ibm_mq_msg_time_not_set"))
         }
         if (value != null) {
-            IconButton(onClick = onClear, modifier = Modifier.size(28.dp)) {
+            AppIconButton(onClick = onClear, size = 28.dp) {
                 Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(16.dp))
             }
         }

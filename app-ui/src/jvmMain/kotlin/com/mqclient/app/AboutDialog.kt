@@ -55,6 +55,7 @@ import com.mqclient.uicommon.dialog.DialogSizeClass
 import com.mqclient.uicommon.dialog.rememberStandardDialogSize
 import com.mqclient.uicommon.PropertyItem
 import com.mqclient.uicommon.PropertyTableSection
+import com.mqclient.uicommon.AppSecondaryButton
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.i18n.stringResource
@@ -179,7 +180,7 @@ internal fun AboutDialog(onDismiss: () -> Unit) {
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.Center,
                         ) {
-                            SecondaryButton(
+                            AppSecondaryButton(
                                 onClick = { showLicense = true },
                             ) { Text(stringResource("license_view")) }
                             Spacer(Modifier.width(8.dp))

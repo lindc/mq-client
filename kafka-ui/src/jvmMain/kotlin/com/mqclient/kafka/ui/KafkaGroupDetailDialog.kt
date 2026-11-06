@@ -21,7 +21,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.mqclient.uicommon.AppIconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.SnackbarHostState
@@ -272,9 +272,9 @@ fun KafkaGroupDetailDialog(
                                 }
                                 if (pickedTime != null) {
                                     Spacer(Modifier.width(4.dp))
-                                    IconButton(
+                                    AppIconButton(
                                         onClick = { pickedTime = null },
-                                        modifier = Modifier.size(28.dp),
+                                        size = 28.dp,
                                     ) {
                                         Icon(
                                             Icons.Default.Close,

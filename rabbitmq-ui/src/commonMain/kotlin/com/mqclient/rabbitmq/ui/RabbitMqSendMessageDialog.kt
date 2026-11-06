@@ -23,7 +23,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.mqclient.uicommon.AppIconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SnackbarHostState
@@ -498,10 +498,10 @@ internal fun HeadersEditor(
                 placeholder = stringResource("rabbitmq_ui_send_header_value"),
                 modifier = Modifier.weight(1.4f),
             )
-            IconButton(
+            AppIconButton(
                 onClick = { onChange(headers.filterIndexed { i, _ -> i != index }) },
                 enabled = enabled,
-                modifier = Modifier.size(24.dp),
+                size = 24.dp,
             ) {
                 Icon(
                     imageVector = Icons.Default.DeleteSweep,

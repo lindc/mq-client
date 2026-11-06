@@ -3,7 +3,7 @@ package com.mqclient.uicommon.table
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.mqclient.uicommon.AppIconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -54,10 +54,10 @@ fun TableRowActionIcon(
     onClick: () -> Unit = {},
 ) {
     AppTooltip(tooltip) {
-        IconButton(
+        AppIconButton(
             onClick = onClick,
             enabled = enabled && !executing,
-            modifier = Modifier.size(24.dp),
+            size = 24.dp,
         ) {
             if (executing) {
                 CircularProgressIndicator(

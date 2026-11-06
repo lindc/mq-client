@@ -23,7 +23,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.mqclient.uicommon.AppIconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -451,7 +451,7 @@ internal fun BindingsTable(
                     BindingDataCell(binding.argumentsText, Modifier.weight(1f))
                     if (onDelete != null) {
                         Box(modifier = Modifier.width(56.dp), contentAlignment = Alignment.CenterStart) {
-                            IconButton(onClick = { onDelete(binding) }, modifier = Modifier.size(24.dp)) {
+                            AppIconButton(onClick = { onDelete(binding) }, size = 24.dp) {
                                 Icon(
                                     imageVector = Icons.Default.DeleteSweep,
                                     contentDescription = stringResource("rabbitmq_ui_exchange_props_binding_delete"),

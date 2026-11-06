@@ -37,7 +37,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.mqclient.uicommon.AppIconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -493,7 +493,7 @@ internal fun StartSelectorRow(
                     Text(pickedTime?.format(DISPLAY_TIME_FORMATTER) ?: stringResource("kafka_ui_msg_browse_start_time_hint"))
                 }
                 if (pickedTime != null) {
-                    IconButton(onClick = onClearTime, modifier = Modifier.size(28.dp)) {
+                    AppIconButton(onClick = onClearTime, size = 28.dp) {
                         Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(16.dp))
                     }
                 }

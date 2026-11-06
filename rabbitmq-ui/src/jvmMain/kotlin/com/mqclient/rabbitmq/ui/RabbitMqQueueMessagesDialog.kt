@@ -23,7 +23,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.mqclient.uicommon.AppIconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.SnackbarHostState
@@ -677,17 +677,17 @@ private fun BrowsePane(
                         modifier = Modifier.width(90.dp),
                     )
                     Row(modifier = Modifier.width(116.dp)) {
-                        IconButton(onClick = { onDetail(msg) }, modifier = Modifier.size(28.dp)) {
+                        AppIconButton(onClick = { onDetail(msg) }, size = 28.dp) {
                             Icon(Icons.Default.Info, contentDescription = stringResource("rabbitmq_ui_msg_action_detail"), modifier = Modifier.size(18.dp))
                         }
-                        IconButton(onClick = { onForward(msg) }, modifier = Modifier.size(28.dp)) {
+                        AppIconButton(onClick = { onForward(msg) }, size = 28.dp) {
                             Icon(
                                 Icons.Default.Send,
                                 contentDescription = stringResource("rabbitmq_ui_msg_action_forward"),
                                 modifier = Modifier.size(18.dp),
                             )
                         }
-                        IconButton(onClick = { onDelete(msg) }, modifier = Modifier.size(28.dp)) {
+                        AppIconButton(onClick = { onDelete(msg) }, size = 28.dp) {
                             Icon(
                                 Icons.Default.DeleteSweep,
                                 contentDescription = stringResource("rabbitmq_ui_msg_action_delete"),

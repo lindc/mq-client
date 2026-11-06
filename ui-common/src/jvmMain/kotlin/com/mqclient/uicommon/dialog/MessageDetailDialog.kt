@@ -28,7 +28,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.mqclient.uicommon.AppIconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryTabRow
@@ -447,7 +447,7 @@ fun MessageDetailContent(
                         fontFamily = FontFamily.Monospace,
                         modifier = Modifier.weight(1f),
                     )
-                    IconButton(onClick = {
+                    AppIconButton(onClick = {
                         clipboard.setText(AnnotatedString(subtitleText))
                         showCopied()
                     }) {
@@ -1008,9 +1008,9 @@ fun MessageHeaderRow(key: String, value: String?, modifier: Modifier = Modifier)
                 fontFamily = FontFamily.Monospace,
                 modifier = Modifier.weight(1f),
             )
-            IconButton(
+            AppIconButton(
                 onClick = { clipboard.setText(AnnotatedString(value ?: "")) },
-                modifier = Modifier.height(20.dp),
+                size = 20.dp,
             ) {
                 Icon(
                     imageVector = Icons.Default.ContentCopy,
