@@ -4,6 +4,11 @@ package com.mqclient.uicommon.dialog
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +23,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.ContentCopy
@@ -25,7 +32,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Surface
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import com.mqclient.uicommon.AppIconButton
@@ -878,13 +885,13 @@ private fun InterpreterPane(
         Spacer(Modifier.height(8.dp))
         FlowRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             for (item in interpreters) {
-                FilterChip(
+                InterpreterButton(
+                    name = stringResource(item.displayName),
                     selected = item.id == selectedId,
                     onClick = { onSelect(item.id) },
-                    label = { Text(stringResource(item.displayName)) },
                 )
             }
         }
@@ -978,6 +985,61 @@ private fun InterpreterPane(
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * 解释器切换按钮：固定 110.dp 宽，等宽排列成整齐网格（外层 [FlowRow] 自动换行）。
+ *
+ *  - 选中：primaryContainer 浅绿底 + onPrimaryContainer 深绿字；
+ *  - 未选中：透明底 + onSurfaceVariant 字 + 极淡描边（outlineVariant@0.5）；
+ *  - 悬浮：surfaceVariant 柔和灰底（150ms 过渡），替代原本生硬的灰色 hover。
+ *
+ * 圆角 8.dp。仅改外观，切换逻辑仍由 [onClick] 透传给外层 [InterpreterPane]。
+ */
+@Composable
+private fun InterpreterButton(
+    name: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val hovered by interactionSource.collectIsHoveredAsState()
+    val containerColor by animateColorAsState(
+        targetValue =
+            when {
+                selected -> MaterialTheme.colorScheme.primaryContainer
+                hovered -> MaterialTheme.colorScheme.surfaceVariant
+                else -> Color.Transparent
+            },
+        animationSpec = tween(150),
+        label = "interpreterChipBg",
+    )
+    val contentColor =
+        if (selected) MaterialTheme.colorScheme.onPrimaryContainer
+        else MaterialTheme.colorScheme.onSurfaceVariant
+    Surface(
+        modifier = modifier
+            .width(110.dp)
+            .hoverable(interactionSource)
+            .clickable(interactionSource = interactionSource, onClick = onClick),
+        shape = RoundedCornerShape(8.dp),
+        color = containerColor,
+        border =
+            if (selected) null
+            else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+        ) {
+            Text(
+                text = name,
+                style = MaterialTheme.typography.labelMedium,
+                color = contentColor,
+            )
         }
     }
 }
