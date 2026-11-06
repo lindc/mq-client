@@ -111,7 +111,7 @@ internal fun NewConnectionDialog(
     // Esc 关闭走 onPreviewKeyEvent：对话框没有系统标题栏，键盘出口得自己接。
     DecoratedDialog(
         onCloseRequest = onDismiss,
-        state = rememberDialogState(size = rememberStandardDialogSize(DialogSizeClass.FORM)),
+        state = rememberDialogState(size = rememberStandardDialogSize(DialogSizeClass.CONTENT)),
         title = stringResource("menu_new_connection"),
         resizable = true,
         onPreviewKeyEvent = { event ->

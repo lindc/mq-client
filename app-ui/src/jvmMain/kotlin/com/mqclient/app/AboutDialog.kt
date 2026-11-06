@@ -100,7 +100,7 @@ import org.jetbrains.compose.resources.painterResource
 @Composable
 internal fun AboutDialog(onDismiss: () -> Unit) {
     var showLicense by remember { mutableStateOf(false) }
-    val dialogSize = rememberStandardDialogSize(DialogSizeClass.FORM)
+    val dialogSize = rememberStandardDialogSize(DialogSizeClass.CONTENT)
     Dialog(
         onDismissRequest = onDismiss,
         properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
