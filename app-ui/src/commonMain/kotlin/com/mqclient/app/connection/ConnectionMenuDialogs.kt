@@ -12,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -250,10 +251,14 @@ internal fun ConnectionPropertiesDialog(connection: ConnectionInfo, onDismiss: (
                         style = MaterialTheme.typography.titleLarge,
                         modifier = Modifier.weight(1f),
                     )
-                    SecondaryButton(
-                        onClick = onDismiss,
-                        standardMinWidth = false,
-                    ) { Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                    IconButton(onClick = onDismiss) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
                 }
                 HorizontalDivider()
                 Column(modifier = Modifier.fillMaxSize().weight(1f)) {

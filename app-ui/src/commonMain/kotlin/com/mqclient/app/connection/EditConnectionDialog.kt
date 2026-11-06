@@ -14,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -118,10 +119,14 @@ internal fun EditConnectionDialog(
                         style = MaterialTheme.typography.titleLarge,
                         modifier = Modifier.weight(1f),
                     )
-                    SecondaryButton(
-                        onClick = onDismiss,
-                        standardMinWidth = false, // ✕ 是图标按钮，不套「4 字宽」标准。
-                    ) { Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                    IconButton(onClick = onDismiss) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
                 }
                 HorizontalDivider()
                 // 面板内容：复用创建第二步的同一份 Composable（Content）。

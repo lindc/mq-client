@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -209,10 +210,14 @@ private fun HeaderBar(selectedTab: SettingsTab, onClose: () -> Unit) {
             style = MaterialTheme.typography.titleLarge,
             modifier = Modifier.weight(1f),
         )
-        SecondaryButton(
-            onClick = onClose,
-            standardMinWidth = false, // ✕ 是图标按钮，不套「4 字宽」标准。
-        ) { Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(18.dp)) }
+        IconButton(onClick = onClose) {
+            Icon(
+                imageVector = Icons.Default.Close,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp),
+            )
+        }
     }
 }
 
