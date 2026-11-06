@@ -5,6 +5,7 @@ import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
@@ -30,7 +31,7 @@ import androidx.compose.ui.unit.sp
  * - [PrimaryButton]：主操作（创建 / 保存 / 发送 / 确定 / 重试 / 关闭 / 下一步 / 提交）。
  *   `primary` 深绿底 + `onPrimary` 白字。
  * - [SecondaryButton]：次要操作（取消 / 返回 / 查看全文 / 查看开源许可证 / 复制全文 /
- *   上一步）。`surfaceVariant` 极浅灰绿底 + `onSurfaceVariant` 深灰字。
+ *   上一步）。`surfaceVariant` 浅灰绿底 + `primary` 深绿字 + 主色半透明细边（1dp@50%）。
  * - [DangerButton]：破坏性操作（删除 / 清空 / 重置）。`error` 底 + `onError` 字。
  *
  * 扁平化：elevation 全 0、无 `Modifier.shadow`。交互反馈改用**颜色变化**代替物理下沉——
@@ -65,6 +66,7 @@ private fun BaseActionButton(
     enabled: Boolean = true,
     contentPadding: PaddingValues = ButtonDefaults.TextButtonContentPadding,
     standardMinWidth: Boolean = true,
+    border: BorderStroke? = null,
     content: @Composable RowScope.() -> Unit,
 ) {
     val shape = RoundedCornerShape(8.dp)
@@ -103,6 +105,7 @@ private fun BaseActionButton(
             focusedElevation = 0.dp,
             disabledElevation = 0.dp,
         ),
+        border = border,
         interactionSource = interactionSource,
         contentPadding = contentPadding,
         content = content,
@@ -193,10 +196,11 @@ fun SecondaryButton(
 /**
  * 次级操作按钮的统一实现：与 [PrimaryButton] 共用 [BaseActionButton]，**除了颜色 100% 一样**。
  *
- *  - 背景 [MaterialTheme.colorScheme.surfaceVariant]（极浅灰绿实心底，作为无阴影下的底色区分）；
- *  - 文字 [MaterialTheme.colorScheme.onSurfaceVariant]（深灰，清晰可读）；
+ *  - 背景 [MaterialTheme.colorScheme.surfaceVariant]（浅灰绿实心底，作为无阴影下的底色区分）；
+ *  - 文字 [MaterialTheme.colorScheme.primary]（深绿，配合边框与主按钮呼应）；
+ *  - 边框 `BorderStroke(1.dp, primary@50%)`：极细主色半透明边，增强实体感而不抢眼；
  *  - 同样的 8.dp 圆角，和「关闭」等主按钮放在一起时高度 / 圆角完全一致；
- *  - 无边框、无阴影，扁平化；悬浮 / 按下时背景微微变深代替阴影反馈。
+ *  - 无阴影，扁平化；悬浮 / 按下时背景微微变深代替阴影反馈。
  *
  * 一律使用 [BaseActionButton]，禁止再用 `OutlinedButton` / `TextButton` / `BorderStroke` / 阴影。
  * 禁用态沿用 [BaseActionButton] 的灰色让位。
@@ -210,14 +214,22 @@ fun AppSecondaryButton(
     standardMinWidth: Boolean = true,
     content: @Composable RowScope.() -> Unit,
 ) {
+    // 次级按钮：浅灰绿底（surfaceVariant）保持无阴影，外加一圈主色半透明细边 +
+    // 主色文字，既和「关闭」主按钮呼应、又维持次级层级（不抢眼）。禁用时边框同步
+    // 降到极低透明度，避免出现「灰色按钮配亮绿边」的违和感。
+    val border = BorderStroke(
+        1.dp,
+        MaterialTheme.colorScheme.primary.copy(alpha = if (enabled) 0.5f else 0.12f),
+    )
     BaseActionButton(
         onClick = onClick,
         modifier = modifier,
         enabled = enabled,
         containerColor = MaterialTheme.colorScheme.surfaceVariant,
-        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        contentColor = MaterialTheme.colorScheme.primary,
         contentPadding = contentPadding,
         standardMinWidth = standardMinWidth,
+        border = border,
         content = content,
     )
 }
