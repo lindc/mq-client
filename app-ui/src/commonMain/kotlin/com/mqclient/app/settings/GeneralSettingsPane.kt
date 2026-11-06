@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -19,12 +18,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import com.mqclient.core.GeneralConfig
 import com.mqclient.core.Language
+import com.mqclient.uicommon.CompactTextField
 import com.mqclient.uicommon.SettingsDropdownRow
 import com.mqclient.uicommon.i18n.stringResource
 
@@ -115,7 +114,7 @@ internal fun NumberRow(
         )
         Spacer(Modifier.height(4.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
+            CompactTextField(
                 value = text,
                 onValueChange = { newValue ->
                     if (newValue.isEmpty() || newValue.all { it.isDigit() }) {
@@ -125,19 +124,17 @@ internal fun NumberRow(
                         newValue.toIntOrNull()?.takeIf { it in min..max }?.let(onChange)
                     }
                 },
-                modifier = Modifier
-                    .width(160.dp)
-                    .onFocusChanged { focusState ->
-                        hasFocus = focusState.isFocused
-                        if (!focusState.isFocused) {
-                            // 失焦即归一化：越界或空 → 落回最近提交过的合法值。
-                            val normalized = text.toIntOrNull()?.coerceIn(min, max) ?: value
-                            text = normalized.toString()
-                            onChange(normalized)
-                        }
-                    },
-                singleLine = true,
+                modifier = Modifier.width(100.dp),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                onFocusChange = { focused ->
+                    hasFocus = focused
+                    if (!focused) {
+                        // 失焦即归一化：越界或空 → 落回最近提交过的合法值。
+                        val normalized = text.toIntOrNull()?.coerceIn(min, max) ?: value
+                        text = normalized.toString()
+                        onChange(normalized)
+                    }
+                },
             )
             Spacer(Modifier.width(8.dp))
             Text(
