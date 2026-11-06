@@ -94,16 +94,13 @@ import org.jetbrains.compose.resources.painterResource
  * （默认是内置的霞鹜文楷 Mono），在这里写死任何一个字族都会覆盖用户选择。
  *
  * 行数：6 行拆两段 = 4×40+3×8 + 2×40+8 = 272dp（[PropertyTableSection] 行高
- * `heightIn(min = 40.dp)` + 行距 8dp）。窗口尺寸走公共规范：与消息详情 / 队列消息
- * 对话框同档（[DialogSizeClass.CONTENT]，屏幕 85%），不再用 FORM（60%）——
- * 原先 1080p 上只有 1152×648，品牌区 + 两张能力表 + 底部按钮挤在同一屏里；
- * 改用 CONTENT 后宽高同步放大，且仍受 95% 屏幕上限保护。内容用 `fillMaxSize`
- * 跟随窗口自适应。
+ * `heightIn(min = 40.dp)` + 行距 8dp）。窗口尺寸走公共规范（FORM，屏幕 60%），
+ * 不再写死 620×700 —— 内容用 `fillMaxSize` 跟随窗口自适应。
  */
 @Composable
 internal fun AboutDialog(onDismiss: () -> Unit) {
     var showLicense by remember { mutableStateOf(false) }
-    val dialogSize = rememberStandardDialogSize(DialogSizeClass.CONTENT)
+    val dialogSize = rememberStandardDialogSize(DialogSizeClass.FORM)
     Dialog(
         onDismissRequest = onDismiss,
         properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),

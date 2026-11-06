@@ -12,7 +12,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.isSpecified
 import androidx.compose.ui.unit.sp
 
@@ -31,39 +30,10 @@ import androidx.compose.ui.unit.sp
  * 形状沿用主题的 `shapes.small`（与项目其余控件一致）。内边距默认用
  * [ButtonDefaults.TextButtonContentPadding] 保持弹窗 / 工具栏的紧凑密度；
  * 需要 M3 默认宽松内边距的调用方显式传 [ButtonDefaults.ContentPadding]。
- *
- * 抬升（阴影）统一由本文件的 [physicalElevation] 决定，三个组件类型同一套数值：
- * 默认微浮起 2dp → 悬停浮起 4dp → 按下贴地 0dp → 禁用无阴影。**调用方不得传
- * `elevation`**：抬升是「实体按钮」这一类的共同物理属性，散落到各业务 UI 就会
- * 再次出现本组件存在之前的「各页阴影不一」。
  */
 
 private const val DISABLED_CONTAINER_ALPHA = 0.12f
 private const val DISABLED_CONTENT_ALPHA = 0.38f
-
-/**
- * 实体按钮的统一抬升：默认 2dp（微浮起）、悬停 4dp（浮起更高）、按下 0dp
- * （紧贴地面，产生按压感）、禁用 0dp。
- *
- * 为什么按下是**降到 0** 而不是再抬高：物理按压是「往桌面里按」，阴影收拢才
- * 读得出动作；M3 默认按下值是 1dp（与默认态几乎一样），悬停则完全不区分 ——
- * 这才是本组件存在之前各页面「按下去没反应」的根因。
- *
- * [SecondaryButton] 用的 `OutlinedButton` 默认抬升是 0dp，接上本规范后会第一次
- * 出现默认投影 —— 这是刻意的：描边按钮同样是实体按钮，应当与实心按钮有同一套
- * 手感。禁用态 0dp 与「禁用无边框」配套，禁用时完全不画阴影。
- *
- * 只给**实体按钮**（实心 / 描边）挂阴影。`TextButton`、`IconButton`、工具栏
- * [com.mqclient.uicommon.command.ToolbarButton] 保持扁平：它们在工具栏 / 菜单里
- * 成排出现，逐个投影会让整条工具栏发脏。
- */
-private val physicalElevation =
-    ButtonDefaults.buttonElevation(
-        defaultElevation = 2.dp,
-        hoveredElevation = 4.dp,
-        pressedElevation = 0.dp,
-        disabledElevation = 0.dp,
-    )
 
 /**
  * 主操作按钮：实心 [MaterialTheme.colorScheme.primary] 底 +
@@ -158,8 +128,6 @@ fun SecondaryButton(
         // 禁用态绝对无边框；不要用默认的 outlinedButtonBorder(enabled)，
         // 它在 disabled 时会返回 outline@12% 的可见轮廓。
         border = if (enabled) ButtonDefaults.outlinedButtonBorder(enabled = true) else null,
-        // 描边按钮默认 0dp，接上统一抬升后与实心按钮同一套按压手感（见 physicalElevation）。
-        elevation = physicalElevation,
         contentPadding = contentPadding,
         content = content,
     )
@@ -192,7 +160,6 @@ private fun FilledAppButton(
             disabledContainerColor = MaterialTheme.colorScheme.onSurface.copy(alpha = DISABLED_CONTAINER_ALPHA),
             disabledContentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = DISABLED_CONTENT_ALPHA),
         ),
-        elevation = physicalElevation,
         contentPadding = contentPadding,
         content = content,
     )

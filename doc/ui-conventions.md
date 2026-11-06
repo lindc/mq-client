@@ -67,8 +67,6 @@ DangerButton(onClick = ::delete, enabled = !busy) { Text(stringResource("common_
 - **禁用态绝对无边框**：`PrimaryButton` / `DangerButton` 本身无边框；`SecondaryButton` 禁用时必须显式 `border = null`，不能使用 `OutlinedButton` 默认的 `outline@12%` 禁用轮廓
 - 禁止在调用处传 `containerColor` / `contentColor` / `border` / `BorderStroke`；语义色由组件内部决定
 - 形状统一 `MaterialTheme.shapes.small`，内边距默认 `ButtonDefaults.TextButtonContentPadding`（紧凑弹窗密度）；纯图标按钮传 `standardMinWidth = false`
-- **抬升（阴影）统一内置在组件里**：`defaultElevation = 2.dp`（微浮起）→ `hoveredElevation = 4.dp`（悬停浮高）→ `pressedElevation = 0.dp`（按下贴地，产生按压感）→ `disabledElevation = 0.dp`（禁用无阴影）。调用方**禁止传 `elevation`**，也禁止直接用原生 `Button` / `OutlinedButton` 绕开这套手感
-- **扁平例外**：`TextButton` / `IconButton`、工具栏 `ToolbarButton`、标题栏菜单栏按钮保持无阴影 —— 它们在工具栏与菜单里成排出现，逐个投影会让整条工具栏发脏。只给实体按钮（实心 / 描边）加阴影
 - 工具栏动作仍用 `ToolbarButton`（见 `CLAUDE.md`），不属于这三个组件的范围
 
 ---
