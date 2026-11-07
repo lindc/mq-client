@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -86,7 +87,8 @@ fun SendTaskRow(
         AppTooltip(fileName, Modifier.weight(1f)) {
             Text(
                 text = fileName,
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -100,7 +102,13 @@ fun SendTaskRow(
         Box(modifier = Modifier.width(STATUS_COLUMN)) {
             SendStatusCell(status, statusText, errorMessage)
         }
-        Box(modifier = Modifier.width(ACTION_COLUMN)) {
+        // 操作列始终预留按钮的占位高度：等待态有「移除」按钮撑开行高，
+        // 成功态无按钮时若不留空，行高会塌缩 —— 正是「发送后间距消失」的根源。
+        // 这里给固定 min 高度 + 居中，按钮有无都不改变行高，发送前后完全一致。
+        Box(
+            modifier = Modifier.width(ACTION_COLUMN).heightIn(min = 40.dp),
+            contentAlignment = Alignment.Center,
+        ) {
             if (actionLabel != null && onAction != null) {
                 SmallSendButton(actionLabel, onAction)
             }
@@ -111,6 +119,13 @@ fun SendTaskRow(
 /** 状态列：图标 + 文案；失败项悬停显示原因。 */
 @Composable
 private fun SendStatusCell(status: SendTaskStatus, statusText: String, errorMessage: String?) {
+    // 状态文字色：成功绿、失败红，与图标同色；等待 / 发送中走默认文字色。
+    // 这样「等待 → 成功 / 失败」只换图标与颜色，字号与列宽不动，行高零跳动。
+    val textColor: Color = when (status) {
+        SendTaskStatus.SUCCESS -> SuccessGreen
+        SendTaskStatus.FAILED -> FailedRed
+        else -> Color.Unspecified
+    }
     val cell: @Composable () -> Unit = {
         Row(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -135,7 +150,12 @@ private fun SendStatusCell(status: SendTaskStatus, statusText: String, errorMess
                     tint = FailedRed,
                 )
             }
-            Text(text = statusText, style = MaterialTheme.typography.bodySmall, maxLines = 1)
+            Text(
+                text = statusText,
+                style = MaterialTheme.typography.bodySmall,
+                color = textColor,
+                maxLines = 1,
+            )
         }
     }
     if (status == SendTaskStatus.FAILED && errorMessage != null) {
