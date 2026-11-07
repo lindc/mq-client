@@ -2,6 +2,7 @@ package com.mqclient.kafka.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -9,6 +10,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -29,6 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -260,26 +263,39 @@ private fun BrokerTable(
             color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
         )
-        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-            BrokerCell(stringResource("kafka_ui_cluster_col_id"), width = COL_ID, bold = true)
-            BrokerCell(stringResource("kafka_ui_cluster_col_host"), Modifier.weight(1f), bold = true)
-            BrokerCell(stringResource("kafka_ui_cluster_col_port"), width = COL_PORT, bold = true)
-            BrokerCell(stringResource("kafka_ui_cluster_col_rack"), width = COL_RACK, bold = true)
-            BrokerCell(stringResource("kafka_ui_cluster_col_role"), width = COL_ROLE, bold = true)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            BrokerCell(stringResource("kafka_ui_cluster_col_id"), width = COL_ID, isHeader = true)
+            BrokerCell(stringResource("kafka_ui_cluster_col_host"), Modifier.weight(1f), isHeader = true)
+            BrokerCell(stringResource("kafka_ui_cluster_col_port"), width = COL_PORT, isHeader = true)
+            BrokerCell(stringResource("kafka_ui_cluster_col_rack"), width = COL_RACK, isHeader = true)
+            BrokerCell(stringResource("kafka_ui_cluster_col_role"), width = COL_ROLE, isHeader = true)
         }
-        HorizontalDivider()
-        Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-            snapshot.brokers.forEach { broker ->
+        Column(
+            modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            snapshot.brokers.forEachIndexed { index, broker ->
                 val selected = broker.brokerId == selectedId
                 val offline = broker.brokerId in offlineIds
+                val zebra = index % 2 == 1
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .heightIn(min = 40.dp)
+                        .clip(RoundedCornerShape(4.dp))
                         .background(
                             when {
+                                // 离线 / 选中是强语义态，优先于斑马纹（否则红字/高亮会丢）；
+                                // 其余行按奇偶交替：奇数浅底 + 圆角，偶数透明。
                                 offline -> MaterialTheme.colorScheme.error.copy(alpha = 0.06f)
                                 selected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
-                                else -> MaterialTheme.colorScheme.surface
+                                zebra -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                                else -> Color.Transparent
                             },
                         )
                         .clickable { onSelect(broker.brokerId) }
@@ -292,7 +308,6 @@ private fun BrokerTable(
                     BrokerCell(broker.rack ?: "-", width = COL_RACK, monospace = true)
                     BrokerRoleCell(broker = broker, offline = offline, width = COL_ROLE)
                 }
-                HorizontalDivider(thickness = 0.5.dp)
             }
         }
     }
@@ -344,15 +359,17 @@ private fun BrokerCell(
     bold: Boolean = false,
     monospace: Boolean = false,
     color: Color = MaterialTheme.colorScheme.onSurface,
+    /** 表头单元格：次要色 + 更小字号（labelSmall），与普通数据行拉开层级。 */
+    isHeader: Boolean = false,
 ) {
     Text(
         text = text,
-        style = MaterialTheme.typography.bodySmall,
-        fontWeight = if (bold) FontWeight.Medium else FontWeight.Normal,
-        fontFamily = if (monospace || bold) FontFamily.Monospace else FontFamily.Default,
+        style = if (isHeader) MaterialTheme.typography.labelSmall else MaterialTheme.typography.bodySmall,
+        fontWeight = if (isHeader || bold) FontWeight.Medium else FontWeight.Normal,
+        fontFamily = if ((monospace || bold) && !isHeader) FontFamily.Monospace else FontFamily.Default,
         maxLines = 1,
         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-        color = color,
+        color = if (isHeader) MaterialTheme.colorScheme.onSurfaceVariant else color,
         modifier = when {
             width != null -> modifier.width(width)
             else -> modifier
