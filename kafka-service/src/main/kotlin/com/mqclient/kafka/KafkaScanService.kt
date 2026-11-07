@@ -464,6 +464,15 @@ class KafkaScanService(
                 admin.deleteTopics(setOf(name)).all().get(timeoutMs, TimeUnit.MILLISECONDS)
             }
         }
+        // 即时可见：剪掉慢扫缓存里的该主题并广播 OBJECTS_SCANNED —— 列表立即消失，
+        // 不靠等整轮慢扫（与 createTopic 同一模式；RocketMQ / RabbitMQ 删除同思路）。
+        ctx.cache?.updateAs<List<KafkaTopicSnapshot>>(KEY_TOPICS, objectsTtlMs(ctx)) { current ->
+            current?.filter { it.name != name }
+        }
+        context.emit(
+            name = KafkaEvents.OBJECTS_SCANNED,
+            payload = mapOf("connectionId" to connectionId),
+        )
         kafkaLog.info("topic deleted: connection=$connectionId topic=$name")
     }
 
@@ -704,6 +713,9 @@ class KafkaScanService(
     /**
      * 删除消费组（admin.deleteConsumerGroups）：组内有成员 / 有活跃提交时 Kafka 侧
      * 拒绝（GroupNotEmpty 等），异常原样上抛由 UI 提示。
+     *
+     * 成功：剪掉慢扫缓存里的组与 Lag 并广播 OBJECTS_SCANNED —— 列表立即反映变化，
+     * 不靠等整轮慢扫（与 deleteTopic 同一模式）。Lag 随组一起剪除（组没了 Lag 无意义）。
      */
     suspend fun deleteGroup(connectionId: String, groupId: String) {
         val (ctx, admin) = targetOrThrow(connectionId)
@@ -715,6 +727,19 @@ class KafkaScanService(
                     .get(timeoutMs, TimeUnit.MILLISECONDS)
             }
         }
+        ctx.cache?.let { cache ->
+            cache.updateAs<List<KafkaGroupSnapshot>>(KEY_GROUPS, objectsTtlMs(ctx)) { current ->
+                current?.filter { it.groupId != groupId }
+            }
+            cache.updateAs<Map<String, KafkaGroupLagSnapshot>>(KEY_GROUP_LAGS, lagTtlMs(ctx)) { current ->
+                current?.filterKeys { it != groupId }
+            }
+        }
+        context.emit(
+            name = KafkaEvents.OBJECTS_SCANNED,
+            payload = mapOf("connectionId" to connectionId),
+        )
+        kafkaLog.info("group deleted: connection=$connectionId group=$groupId")
     }
 
     // ---------------------------------------------------------------- 内部：查询

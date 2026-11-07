@@ -117,7 +117,8 @@ fun KafkaTopicPropertiesDialog(
             try {
                 service.deleteTopic(connectionId, topicName)
                 deleting = false
-                onDeleted()
+                onDismiss()   // 删除成功立即关闭对话框
+                onDeleted()   // 宿主弹成功 Snackbar（列表刷新由 Service 的 OBJECTS_SCANNED 事件驱动）
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

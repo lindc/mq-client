@@ -120,8 +120,8 @@ fun KafkaGroupDetailDialog(
             runCatchingCancellable { service.deleteGroup(connectionId, groupId) }
                 .onSuccess {
                     snackbar.showSnackbar(stringResource("kafka_ui_group_detail_delete_done"))
-                    // 组已删除：关详情并触发一轮慢扫，让列表尽快反映变化。
-                    KafkaModule.scanNow(connectionId)
+                    // 组已删除：关详情即可；缓存剪除 + OBJECTS_SCANNED 事件（deleteGroup 内）
+                    // 已驱动列表即时刷新，无需再 scanNow 整轮重扫（与 deleteTopic 统一）。
                     onDismiss()
                 }
                 .onFailure { snackbar.showSnackbar(failureText(it)) }
