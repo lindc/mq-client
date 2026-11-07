@@ -67,7 +67,7 @@ fun TopicListPanel(
     var showCreate by remember(connectionId) { mutableStateOf(false) }
     // 属性对话框的 topic 名；null = 关闭。
     var propsTopic by remember(connectionId) { mutableStateOf<String?>(null) }
-    // 消息对话框的 topic 名（卡片 ✉ / 双击打开）；null = 关闭。
+    // 消息对话框的 topic 名（卡片 ✉ 图标打开）；null = 关闭。
     var messagesTopic by remember(connectionId) { mutableStateOf<String?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -156,7 +156,7 @@ fun TopicListPanel(
                                         },
                                     )
                                 }
-                                // 消息对话框（浏览 / 发送）—— 双击卡片同效。
+                                // 消息对话框（浏览 / 发送）—— 与卡片 ✉ 图标同效。
                                 add(
                                     CardAction(
                                         id = "messages",
@@ -176,8 +176,6 @@ fun TopicListPanel(
                             },
                         )
                     },
-                onCardClick = {},
-                onCardDoubleClick = { card -> messagesTopic = card.id },
                 modifier = Modifier.fillMaxSize(),
             )
         }
@@ -209,7 +207,7 @@ fun TopicListPanel(
         )
     }
 
-    // 消息对话框（卡片 ✉ / 双击）：分区数从列表状态传入，起点选择区的 Partition 下拉用。
+    // 消息对话框（卡片 ✉ 图标）：分区数从列表状态传入，起点选择区的 Partition 下拉用。
     messagesTopic?.let { topicName ->
         KafkaMessagesDialog(
             connectionId = connectionId,

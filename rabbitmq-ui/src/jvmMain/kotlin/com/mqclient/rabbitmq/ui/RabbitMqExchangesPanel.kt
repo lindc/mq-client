@@ -180,8 +180,6 @@ fun RabbitMqExchangesPanel(
                                     },
                             )
                         },
-                    onCardClick = {},
-                    onCardDoubleClick = {},
                     modifier = Modifier.fillMaxSize(),
                 )
             }

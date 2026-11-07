@@ -21,7 +21,7 @@ import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 
 /**
- * Topic 消息处理对话框（主题卡片 ✉ / 双击打开）：外框复用 [ObjectDetailDialog]
+ * Topic 消息处理对话框（主题卡片 ✉ 打开）：外框复用 [ObjectDetailDialog]
  * （自绘标题栏 + 底部关闭 + 可 resize），与 ibm-mq 的 QueueMessagesDialog 同构。
  *
  * 内容区两个 tab：浏览消息（[KafkaMessageBrowseTab]）/ 发送消息（[KafkaMessageSendTab]）。

@@ -66,7 +66,7 @@ fun ChannelListPanel(
     // 防抖：输入框立即回显，过滤用 300ms 后生效的值（通道多时逐键过滤会一直重建卡片）。
     val appliedSearch = rememberDebouncedValue(searchText)
     var showSystem by remember { mutableStateOf(false) }
-    // 对象属性对话框（双击卡片 / 属性按钮打开；统一入口持有状态与渲染）。
+    // 对象属性对话框（属性按钮打开；统一入口持有状态与渲染）。
     val propertiesController = rememberObjectPropertiesDialogController(connectionId)
     ObjectPropertiesDialogHost(propertiesController)
 
@@ -214,10 +214,6 @@ fun ChannelListPanel(
                         executingActionIds = executingIdsFor(channel.name),
                         executingTarget = executingActions[channel.name],
                     )
-                },
-                onCardClick = { card -> onOpenProperties(card.id) },
-                onCardDoubleClick = { card ->
-                    propertiesController.open(MqObjectType.CHANNEL, card.id)
                 },
                 toolbarContent = {
                     ObjectListToolbar(

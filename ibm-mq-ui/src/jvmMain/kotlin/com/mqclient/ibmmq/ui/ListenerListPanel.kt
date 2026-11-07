@@ -62,7 +62,7 @@ fun ListenerListPanel(
     var searchText by remember { mutableStateOf("") }
     val appliedSearch = rememberDebouncedValue(searchText)
     var showSystem by remember { mutableStateOf(false) }
-    // 对象属性对话框（双击卡片 / 属性按钮打开；统一入口持有状态与渲染）。
+    // 对象属性对话框（属性按钮打开；统一入口持有状态与渲染）。
     val propertiesController = rememberObjectPropertiesDialogController(connectionId)
     ObjectPropertiesDialogHost(propertiesController)
 
@@ -200,10 +200,6 @@ fun ListenerListPanel(
                         executingActionIds = executingIdsFor(listener.name),
                         executingTarget = executingActions[listener.name],
                     )
-                },
-                onCardClick = { card -> onOpenProperties(card.id) },
-                onCardDoubleClick = { card ->
-                    propertiesController.open(MqObjectType.LISTENER, card.id)
                 },
                 toolbarContent = {
                     ObjectListToolbar(

@@ -175,8 +175,6 @@ fun RocketMqGroupsPanel(
                             },
                         )
                     },
-                onCardClick = {},
-                onCardDoubleClick = {},
                 modifier = Modifier.fillMaxSize(),
             )
         }

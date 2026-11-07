@@ -20,15 +20,14 @@ import androidx.compose.ui.unit.dp
  * [minCardWidth] 计算，放得下几列放几列），窗口变化自动重排；列表虚拟化，
  * 大量对象也不掉帧。`items` 用 `id` 做稳定 key。
  *
- * 卡片宽度限制在 [maxCardWidth] 以内（与「新建连接」对话框的卡片一致）：
- * 列宽超过上限时（宽屏 + 少列）卡片不再被拉宽，在列内居中、两侧留白。
- * 操作按钮随 [ObjectCardData.actions] 内嵌在卡片上，网格不感知操作语义。
+ * 卡片**主体不可点击** —— 所有操作都内嵌在卡片右下角的图标按钮
+ * （[ObjectCardData.actions]，由各 MQ 模块注入）。卡片宽度限制在 [maxCardWidth]
+ * 以内（与「新建连接」对话框的卡片一致）：列宽超过上限时（宽屏 + 少列）卡片不再被
+ * 拉宽，在列内居中、两侧留白。
  */
 @Composable
 fun ObjectCardGrid(
     items: List<ObjectCardData>,
-    onCardClick: (ObjectCardData) -> Unit,
-    onCardDoubleClick: (ObjectCardData) -> Unit,
     modifier: Modifier = Modifier,
     minCardWidth: Dp = 240.dp,
     maxCardWidth: Dp = 280.dp,
@@ -52,8 +51,6 @@ fun ObjectCardGrid(
             ) {
                 ObjectCard(
                     data = item,
-                    onClick = { onCardClick(item) },
-                    onDoubleClick = { onCardDoubleClick(item) },
                     modifier = Modifier
                         .widthIn(max = maxCardWidth)
                         .fillMaxWidth(),

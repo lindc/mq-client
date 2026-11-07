@@ -40,7 +40,7 @@ import kotlinx.coroutines.launch
  *
  * 卡片摘要：状态色点（与 IBM MQ 通道卡片同一实现）+ 状态文字、右上角 Lag（千分位，
  * 超过连接设置的告警阈值换警示色，见 [GroupCardAdapter]）；成员数进详情对话框。
- * 单击 / 双击卡片或右下角 ⓘ 打开消费组详情（[KafkaGroupDetailDialog]）。
+ * 右下角 ⓘ 打开消费组详情（[KafkaGroupDetailDialog]）。
  */
 @Composable
 fun ConsumerGroupListPanel(
@@ -102,14 +102,12 @@ fun ConsumerGroupListPanel(
                 items = state.filtered.map { group ->
                     group.toCardData(state.lagWarningThreshold) { detailGroupId = group.name }
                 },
-                onCardClick = { detailGroupId = it.id },
-                onCardDoubleClick = { detailGroupId = it.id },
                 modifier = Modifier.fillMaxSize(),
             )
         }
     }
 
-    // 详情对话框：卡片单击 / 双击 / 右下角 ⓘ 都走这里。
+    // 详情对话框：右下角 ⓘ 打开。
     detailGroupId?.let { id ->
         KafkaGroupDetailDialog(
             connectionId = connectionId,

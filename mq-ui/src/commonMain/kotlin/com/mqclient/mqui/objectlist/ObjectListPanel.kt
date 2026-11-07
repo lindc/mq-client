@@ -24,8 +24,6 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun ObjectListPanel(
     items: List<ObjectCardData>,
-    onCardClick: (ObjectCardData) -> Unit,
-    onCardDoubleClick: (ObjectCardData) -> Unit,
     modifier: Modifier = Modifier,
     /** Slot：顶部工具栏（搜索 / 筛选 / 刷新等，各 MQ 模块自定义）；不提供则不显示这一行。 */
     toolbarContent: (@Composable () -> Unit)? = null,
@@ -64,8 +62,6 @@ fun ObjectListPanel(
 
                 else -> ObjectCardGrid(
                     items = items,
-                    onCardClick = onCardClick,
-                    onCardDoubleClick = onCardDoubleClick,
                     modifier = Modifier.fillMaxSize(),
                 )
             }

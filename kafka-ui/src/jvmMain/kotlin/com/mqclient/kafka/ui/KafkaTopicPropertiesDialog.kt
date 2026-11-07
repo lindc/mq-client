@@ -58,7 +58,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 /**
- * Topic 属性对话框（主题卡片 ⓘ / 双击打开）：概览 / 配置 / 分区三个 Tab + 底部删除。
+ * Topic 属性对话框（主题卡片 ⓘ 打开）：概览 / 配置 / 分区三个 Tab + 底部删除。
  *
  * 数据混合来源：概览与分区表读**慢扫缓存**（[KafkaTopicSnapshot]，零 RPC）；配置项
  * （describeConfigs）与分区位移（listOffsets earliest/latest）**打开时实时查询**——

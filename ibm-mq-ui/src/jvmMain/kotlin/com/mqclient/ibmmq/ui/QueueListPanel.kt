@@ -53,7 +53,7 @@ fun QueueListPanel(
             ?: IbmMQConfig.DEFAULT_QUEUE_DEPTH_WARNING_THRESHOLD
     }
 
-    // 对象属性对话框（双击卡片 / 属性按钮打开；统一入口持有状态与渲染）。
+    // 对象属性对话框（属性按钮打开；统一入口持有状态与渲染）。
     val propertiesController = rememberObjectPropertiesDialogController(connectionId)
     ObjectPropertiesDialogHost(propertiesController)
 
@@ -118,10 +118,6 @@ fun QueueListPanel(
 
             ObjectListPanel(
                 items = filtered,
-                onCardClick = { card -> onOpenProperties(card.id) },
-                onCardDoubleClick = { card ->
-                    propertiesController.open(MqObjectType.QUEUE, card.id)
-                },
                 toolbarContent = {
                     ObjectListToolbar(
                         searchText = searchText,

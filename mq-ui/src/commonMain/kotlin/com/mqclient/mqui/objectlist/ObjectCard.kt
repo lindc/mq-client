@@ -1,17 +1,7 @@
 package com.mqclient.mqui.objectlist
 
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.hoverable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.PressInteraction
-import androidx.compose.foundation.interaction.collectIsHoveredAsState
-import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,12 +20,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -43,7 +30,8 @@ import androidx.compose.ui.unit.sp
 import com.mqclient.uicommon.AppTooltip
 import com.mqclient.uicommon.i18n.stringResource
 
-private const val HOVER_ANIM_MS = 150
+/** 卡片固定阴影层数：任何时刻都一致，不随 hover / 点击等任何状态改变。 */
+private val CARD_ELEVATION = 2.dp
 
 /** 卡片圆角与阴影共用同一形状；12dp 与「新建连接」卡片一致（大圆角阴影更柔）。 */
 private val CardShape = RoundedCornerShape(12.dp)
@@ -61,42 +49,19 @@ private val CardPaddingVertical = 10.dp
  * 操作按钮（[ObjectCardData.actions]，图标 + Tooltip，
  * 由各 MQ 模块提供，右侧）。左读状态、右做操作，操作按钮不挤压对象名。
  *
- * 交互：单击 [onClick]、双击 [onDoubleClick]（整卡可点，操作按钮除外）；
- * 阴影随 **Hover** 抬升（与「新建连接」卡片一致）：默认 2dp、悬停 6dp、按下
- * 归零，150ms 过渡。**阴影只跟随鼠标 Hover/Press，不绑定点击选中态** —— 选中
- * 一个对象不会让卡片持续浮起，移开鼠标即恢复默认投影（桌面端直觉）。
- * 阴影用 [Modifier.shadow]（clip = false，避免被圆角裁掉），背景固定 surface ——
- * 由阴影做层次，不靠背景色变化。
+ * 交互：**卡片主体不可点击** —— 整卡是纯展示，没有任何点击 / 悬浮反馈（无 hover、
+ * 无抬升、无变色），避免此前动态阴影在弹窗开关后卡死的顽疾，也契合「极简克制」的
+ * 视觉规范。所有操作都收敛到右下角的图标按钮（[ObjectCardData.actions]，由各 MQ
+ * 模块注入），图标仅在按下时有 Compose 原生水波纹反馈，悬停时颜色与背景均不变化。
  *
- * 点击/双击走 [detectTapGestures]（Surface onClick 不支持双击），因此按下状态
- * 由单独的 pointerInput 手动 emit [PressInteraction] 到同一个 interactionSource，
- * 与 hoverable 共用一套交互源。
+ * 阴影固定为 [CARD_ELEVATION]（[Modifier.shadow]，clip = false 避免被圆角裁掉），任何
+ * 时刻都一致，不随任何状态改变。
  */
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ObjectCard(
     data: ObjectCardData,
-    onClick: () -> Unit,
-    onDoubleClick: () -> Unit = onClick,
     modifier: Modifier = Modifier,
 ) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isHovered by interactionSource.collectIsHoveredAsState()
-    val isPressed by interactionSource.collectIsPressedAsState()
-
-    // 阴影抬升：仅随 Hover / Press 变化，不绑定选中态 —— 点击选中对象不会让卡片
-    // 持续浮起。默认 2dp、悬停 6dp、按下归零（阴影颜色用默认值，柔和感来自大圆角
-    // + 适中的 elevation，不调 spotColor）。
-    val elevation by animateDpAsState(
-        targetValue =
-            when {
-                isPressed -> 0.dp
-                isHovered -> 6.dp
-                else -> 2.dp
-            },
-        animationSpec = tween(HOVER_ANIM_MS),
-        label = "objectCardElevation",
-    )
     // 边框弱化：阴影承担层次，边框降到极低透明度避免「脏」感；告警卡片保留
     // 中等透明的 tint 以便仍然能读出异常态（交互反馈改由阴影抬升提供）。
     val border =
@@ -108,29 +73,8 @@ fun ObjectCard(
 
     Surface(
         modifier = modifier
-            // 阴影在 Surface 之外画：clip = false，否则阴影被圆角裁剪。
-            .shadow(elevation = elevation, shape = CardShape, clip = false)
-            .hoverable(interactionSource)
-            // 按下状态：observe down/up 并 emit 到 interactionSource
-            //（detectTapGestures 不产生 PressInteraction）。
-            .pointerInput(interactionSource) {
-                awaitEachGesture {
-                    val down = awaitFirstDown(requireUnconsumed = false)
-                    val press = PressInteraction.Press(down.position)
-                    interactionSource.tryEmit(press)
-                    // 所有指针抬起（或被取消，同样表现为 pressed=false）即按下结束。
-                    do {
-                        val event = awaitPointerEvent()
-                    } while (event.changes.any { it.pressed })
-                    interactionSource.tryEmit(PressInteraction.Release(press))
-                }
-            }
-            .pointerInput(onClick, onDoubleClick) {
-                detectTapGestures(
-                    onTap = { onClick() },
-                    onDoubleTap = { onDoubleClick() },
-                )
-            },
+            // 固定阴影：任何时刻都一致，clip = false 避免被圆角裁剪。
+            .shadow(elevation = CARD_ELEVATION, shape = CardShape, clip = false),
         shape = CardShape,
         color = MaterialTheme.colorScheme.surface,
         border = border,
@@ -239,21 +183,36 @@ fun ObjectCard(
                     Spacer(Modifier.width(8.dp))
                 }
                 data.actions.forEach { action ->
-                    ActionIconButton(action, cardHovered = isHovered, executing = action.id in data.executingActionIds)
+                    ActionIconButton(action, executing = action.id in data.executingActionIds)
                 }
             }
         }
     }
 }
 
-/** 操作按钮：24dp 点击区 + 16dp 图标，AppTooltip 悬停显示 i18n 提示。 */
+/** 操作按钮：24dp 点击区 + 16dp 图标，AppTooltip 悬停显示 i18n 提示。
+ *
+ * 视觉极简：图标颜色固定（普通 = onSurfaceVariant、危险 = error、禁用 = onSurface
+ * 30%）—— 鼠标悬浮时颜色与背景**绝不变**。点击反馈用 `Modifier.clickable` 的
+ * 原生水波纹（仅按下时出现，且不含 hover state layer），不套
+ * [androidx.compose.material3.IconButton]，以免其自带 hover state layer 在悬停时
+ * 渲染出浅色圆形底色。
+ */
 @Composable
-private fun ActionIconButton(action: CardAction, cardHovered: Boolean, executing: Boolean) {
+private fun ActionIconButton(action: CardAction, executing: Boolean) {
+    val enabled = action.enabled && !executing
+    val tint = when {
+        !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
+        action.isDangerous -> MaterialTheme.colorScheme.error
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
     AppTooltip(tooltip = { Text(text = stringResource(action.tooltip), style = MaterialTheme.typography.bodySmall) }) {
-        AppIconButton(
-            onClick = action.onClick,
-            enabled = action.enabled && !executing,
-            size = 24.dp,
+        Box(
+            modifier = Modifier
+                .size(24.dp)
+                // clickable 默认只响应按下（水波纹），不带 hover：悬停时无任何视觉变化。
+                .clickable(enabled = enabled, onClick = action.onClick),
+            contentAlignment = Alignment.Center,
         ) {
             if (executing) {
                 CircularProgressIndicator(
@@ -266,12 +225,7 @@ private fun ActionIconButton(action: CardAction, cardHovered: Boolean, executing
                     imageVector = action.icon,
                     contentDescription = stringResource(action.tooltip),
                     modifier = Modifier.size(16.dp),
-                    tint = when {
-                        !action.enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
-                        action.isDangerous -> MaterialTheme.colorScheme.error
-                        cardHovered -> MaterialTheme.colorScheme.primary
-                        else -> MaterialTheme.colorScheme.onSurfaceVariant
-                    },
+                    tint = tint,
                 )
             }
         }

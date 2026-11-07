@@ -228,8 +228,6 @@ fun RabbitMqQueuesPanel(
                         ObjectListEmptyState(stringResource("rabbitmq_ui_queue_empty"))
                     },
                     items = cardItems,
-                    onCardClick = {},
-                    onCardDoubleClick = {},
                     modifier = Modifier.fillMaxSize(),
                 )
             }

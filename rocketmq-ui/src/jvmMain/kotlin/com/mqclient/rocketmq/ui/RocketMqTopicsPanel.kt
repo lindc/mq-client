@@ -167,8 +167,6 @@ fun RocketMqTopicsPanel(
                             },
                             )
                         },
-                    onCardClick = {},
-                    onCardDoubleClick = {},
                     modifier = Modifier.fillMaxSize(),
                 )
             }
