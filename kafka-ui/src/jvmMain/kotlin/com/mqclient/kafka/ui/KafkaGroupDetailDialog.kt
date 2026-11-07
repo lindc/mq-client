@@ -10,10 +10,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -39,6 +41,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -436,16 +439,27 @@ private fun MemberTable(snapshot: KafkaGroupDetailSnapshot, modifier: Modifier =
             return
         }
         Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)) {
-            DetailCell(stringResource("kafka_ui_group_detail_col_member_id"), Modifier.weight(1.2f), bold = true)
-            DetailCell(stringResource("kafka_ui_group_detail_col_client_id"), Modifier.weight(1f), bold = true)
-            DetailCell(stringResource("kafka_ui_group_detail_col_host"), Modifier.weight(1f), bold = true)
-            DetailCell(stringResource("kafka_ui_group_detail_col_partitions"), Modifier.weight(1.2f), bold = true)
+            DetailCell(stringResource("kafka_ui_group_detail_col_member_id"), Modifier.weight(1.2f), isHeader = true)
+            DetailCell(stringResource("kafka_ui_group_detail_col_client_id"), Modifier.weight(1f), isHeader = true)
+            DetailCell(stringResource("kafka_ui_group_detail_col_host"), Modifier.weight(1f), isHeader = true)
+            DetailCell(stringResource("kafka_ui_group_detail_col_partitions"), Modifier.weight(1.2f), isHeader = true)
         }
-        HorizontalDivider()
-        Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-            snapshot.members.forEach { member ->
+        Column(
+            modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            snapshot.members.forEachIndexed { index, member ->
+                val zebra = index % 2 == 1
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 40.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(
+                            if (zebra) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                            else Color.Transparent,
+                        )
+                        .padding(horizontal = 20.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     DetailCell(member.memberId, Modifier.weight(1.2f), monospace = true)
@@ -458,7 +472,6 @@ private fun MemberTable(snapshot: KafkaGroupDetailSnapshot, modifier: Modifier =
                         monospace = true,
                     )
                 }
-                HorizontalDivider(thickness = 0.5.dp)
             }
         }
     }
@@ -479,59 +492,77 @@ private fun OffsetTable(snapshot: KafkaGroupDetailSnapshot, modifier: Modifier =
             return
         }
         Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)) {
-            DetailCell(stringResource("kafka_ui_group_detail_col_topic"), Modifier.weight(1.1f), bold = true)
-            DetailCell(stringResource("kafka_ui_group_detail_col_partition"), width = COL_PARTITION, bold = true)
-            DetailCell(stringResource("kafka_ui_group_detail_col_current"), width = COL_OFFSET, bold = true)
-            DetailCell(stringResource("kafka_ui_group_detail_col_latest"), width = COL_OFFSET, bold = true)
-            DetailCell(stringResource("kafka_ui_group_detail_col_lag"), width = COL_LAG, bold = true)
-            DetailCell(stringResource("kafka_ui_group_detail_col_owner"), Modifier.weight(1f), bold = true)
+            DetailCell(stringResource("kafka_ui_group_detail_col_topic"), Modifier.weight(1.1f), isHeader = true)
+            DetailCell(stringResource("kafka_ui_group_detail_col_partition"), width = COL_PARTITION, isHeader = true, align = Alignment.CenterEnd)
+            DetailCell(stringResource("kafka_ui_group_detail_col_current"), width = COL_OFFSET, isHeader = true, align = Alignment.CenterEnd)
+            DetailCell(stringResource("kafka_ui_group_detail_col_latest"), width = COL_OFFSET, isHeader = true, align = Alignment.CenterEnd)
+            DetailCell(stringResource("kafka_ui_group_detail_col_lag"), width = COL_LAG, isHeader = true, align = Alignment.CenterEnd)
+            DetailCell(stringResource("kafka_ui_group_detail_col_owner"), Modifier.weight(1f), isHeader = true)
         }
-        HorizontalDivider()
-        Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-            snapshot.offsets.forEach { row ->
+        Column(
+            modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            snapshot.offsets.forEachIndexed { index, row ->
+                val zebra = index % 2 == 1
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 40.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(
+                            if (zebra) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                            else Color.Transparent,
+                        )
+                        .padding(horizontal = 20.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     DetailCell(row.topic, Modifier.weight(1.1f), monospace = true)
-                    DetailCell(row.partition.toString(), width = COL_PARTITION, monospace = true)
-                    DetailCell(row.currentOffset?.let(::formatLag) ?: "-", width = COL_OFFSET, monospace = true)
-                    DetailCell(formatLag(row.latestOffset), width = COL_OFFSET, monospace = true)
+                    DetailCell(row.partition.toString(), width = COL_PARTITION, monospace = true, align = Alignment.CenterEnd)
+                    DetailCell(row.currentOffset?.let(::formatLag) ?: "-", width = COL_OFFSET, monospace = true, align = Alignment.CenterEnd)
+                    DetailCell(formatLag(row.latestOffset), width = COL_OFFSET, monospace = true, align = Alignment.CenterEnd)
                     // Lag 染色：0 次要色，非 0 警示橙（详情页没有阈值上下文，非 0 即突出）。
                     DetailCell(
                         formatLag(row.lag),
                         width = COL_LAG,
                         monospace = true,
+                        align = Alignment.CenterEnd,
                         color = if (row.lag > 0L) GroupStatusStyle.REBALANCE else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     DetailCell(row.ownerId ?: "-", Modifier.weight(1f), monospace = true)
                 }
-                HorizontalDivider(thickness = 0.5.dp)
             }
         }
     }
 }
 
-/** 表格单元格（同 MQ MemberTable 风格）。 */
+/** 表格单元格（对齐 PropertyTable 视觉规范：表头 labelSmall + 次要色，数据行 bodyMedium + 主色）。 */
 @Composable
 private fun DetailCell(
     text: String,
     modifier: Modifier = Modifier,
     width: androidx.compose.ui.unit.Dp? = null,
-    bold: Boolean = false,
+    isHeader: Boolean = false,
     monospace: Boolean = false,
+    align: Alignment = Alignment.CenterStart,
     color: Color = MaterialTheme.colorScheme.onSurface,
 ) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.bodySmall,
-        fontWeight = if (bold) FontWeight.Medium else FontWeight.Normal,
-        fontFamily = if (monospace) FontFamily.Monospace else FontFamily.Default,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-        color = color,
+    val cellStyle = if (isHeader) MaterialTheme.typography.labelSmall else MaterialTheme.typography.bodyMedium
+    val cellColor = if (isHeader) MaterialTheme.colorScheme.onSurfaceVariant else color
+    Box(
         modifier = if (width != null) modifier.width(width) else modifier,
-    )
+        contentAlignment = align,
+    ) {
+        Text(
+            text = text,
+            style = cellStyle,
+            fontWeight = if (isHeader) FontWeight.Medium else FontWeight.Normal,
+            fontFamily = if (monospace) FontFamily.Monospace else FontFamily.Default,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            color = cellColor,
+        )
+    }
 }
 
 /** 重置档位的单选行。 */
