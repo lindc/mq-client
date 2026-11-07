@@ -8,7 +8,7 @@
   "about_title": "About",
   "about_app_name": "MQClient",
   "about_logo_description": "MQClient icon",
-  "about_version": "Version 1.0.0",
+  "about_version": "Version 0.1.0",
   "about_description_line1": "A cross-platform message queue and AI diagnostics workbench",
   "about_section_mq": "MQ Middleware",
   "about_section_ai": "AI Model Services",
