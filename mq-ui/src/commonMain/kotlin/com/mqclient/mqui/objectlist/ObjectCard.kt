@@ -62,9 +62,11 @@ private val CardPaddingVertical = 10.dp
  * 由各 MQ 模块提供，右侧）。左读状态、右做操作，操作按钮不挤压对象名。
  *
  * 交互：单击 [onClick]、双击 [onDoubleClick]（整卡可点，操作按钮除外）；
- * 悬停阴影抬升 + 边框变色（与「新建连接」卡片一致）：默认 0dp、悬停 4dp、
- * 按下 0dp，150ms 过渡。阴影用 [Modifier.shadow]（clip = false，避免被圆角裁掉），
- * 背景固定 surface —— 由阴影做层次，不靠背景色变化。
+ * 阴影随 **Hover** 抬升（与「新建连接」卡片一致）：默认 2dp、悬停 6dp、按下
+ * 归零，150ms 过渡。**阴影只跟随鼠标 Hover/Press，不绑定点击选中态** —— 选中
+ * 一个对象不会让卡片持续浮起，移开鼠标即恢复默认投影（桌面端直觉）。
+ * 阴影用 [Modifier.shadow]（clip = false，避免被圆角裁掉），背景固定 surface ——
+ * 由阴影做层次，不靠背景色变化。
  *
  * 点击/双击走 [detectTapGestures]（Surface onClick 不支持双击），因此按下状态
  * 由单独的 pointerInput 手动 emit [PressInteraction] 到同一个 interactionSource，
@@ -82,8 +84,9 @@ fun ObjectCard(
     val isHovered by interactionSource.collectIsHoveredAsState()
     val isPressed by interactionSource.collectIsPressedAsState()
 
-    // 阴影抬升：与「新建连接」卡片完全一致 —— 默认 0dp、悬停 4dp、按下归零
-    //（阴影颜色用默认值，柔和感来自大圆角 + 适中的 elevation，不调 spotColor）。
+    // 阴影抬升：仅随 Hover / Press 变化，不绑定选中态 —— 点击选中对象不会让卡片
+    // 持续浮起。默认 2dp、悬停 6dp、按下归零（阴影颜色用默认值，柔和感来自大圆角
+    // + 适中的 elevation，不调 spotColor）。
     val elevation by animateDpAsState(
         targetValue =
             when {
