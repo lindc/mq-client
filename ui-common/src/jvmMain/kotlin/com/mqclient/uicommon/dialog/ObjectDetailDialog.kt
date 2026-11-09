@@ -69,6 +69,8 @@ fun ObjectDetailDialog(
     onDismiss: () -> Unit,
     onCloseRequest: (() -> Unit)? = null,
     sizeClass: DialogSizeClass = DialogSizeClass.CONTENT,
+    /** 内容区是否套用公共限宽居中；false = 填满窗口（对齐 QMGR 属性外壳）。 */
+    capContentWidth: Boolean = true,
     /**
      * 底部操作区内容；null（默认）保留单一「关闭」按钮，由调用方（如消息详情的
      * 「下载 | 删除 | 关闭」）提供时原样渲染、布局间隔自理。放在 [RowScope] 里，
@@ -176,7 +178,7 @@ fun ObjectDetailDialog(
                 // 再夹到 W，小屏上不会因 widthIn(min=900dp) 撑出窗口被裁掉右侧。
                 Box(modifier = Modifier.weight(1f).fillMaxWidth().clipToBounds()) {
                     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-                        val contentWidth = computeContentWidth(maxWidth)
+                        val contentWidth = if (capContentWidth) computeContentWidth(maxWidth) else maxWidth
                         Box(
                             modifier = Modifier.fillMaxSize(),
                             contentAlignment = Alignment.TopCenter,

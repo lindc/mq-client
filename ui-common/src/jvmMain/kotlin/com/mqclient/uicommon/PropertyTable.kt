@@ -152,7 +152,7 @@ fun PropertyTable(
                         if (!item.description.isNullOrBlank()) {
                             Text(
                                 text = item.description,
-                                style = MaterialTheme.typography.labelSmall,
+                                style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
@@ -164,7 +164,7 @@ fun PropertyTable(
                         modifier = Modifier.weight(ValueWeight),
                     ) {
                         Text(
-                            text = item.value ?: "-",
+                            text = item.value?.takeIf { it.isNotBlank() } ?: "-",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurface,
                             maxLines = 2,

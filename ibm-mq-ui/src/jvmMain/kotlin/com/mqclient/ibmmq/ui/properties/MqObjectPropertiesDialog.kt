@@ -45,6 +45,7 @@ fun MqObjectPropertiesDialog(
     ObjectDetailDialog(
         title = state.objectName,
         onDismiss = onDismiss,
+        capContentWidth = false,
         footerActions = {
             if (askAiVisible) {
                 FooterActionButton(label = stringResource("ibm_mq_mq_action_ask_ai")) {
