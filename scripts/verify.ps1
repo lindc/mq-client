@@ -37,13 +37,13 @@ if ($I18nOnly) {
     exit 0
 }
 
-Write-Host '--- assemble + jvmTest ---'
+Write-Host '--- assemble + test + jvmTest ---'
 # Windows 上必须调 gradlew.bat —— 无扩展名的 `gradlew` 是给 bash 用的，PowerShell 会报
 # 「无法将“./gradlew”项识别为 cmdlet」。
 $gradlew = if (Test-Path 'gradlew.bat') { '.\gradlew.bat' } else { '.\gradlew' }
-& $gradlew assemble jvmTest --console=plain
+& $gradlew assemble test jvmTest --console=plain
 if ($LASTEXITCODE -ne 0) { throw '构建或单元测试失败' }
 
 Invoke-I18nCheck
 
-Write-Host 'OK: 全部通过（assemble + jvmTest + i18n）'
+Write-Host 'OK: 全部通过（assemble + test + jvmTest + i18n）'

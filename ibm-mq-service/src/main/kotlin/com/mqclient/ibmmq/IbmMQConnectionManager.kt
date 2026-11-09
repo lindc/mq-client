@@ -124,6 +124,20 @@ class IbmMQConnectionManager(
      */
     override suspend fun closeResources(ctx: IbmMQConnectionContext) {
         val manager = ctx.mqConnection ?: return
+        // 与在飞的 MQI 串行：扫描 / 浏览 / 发送 / MQSC 都持这把锁，它们与
+        // `disconnect()` 同时作用于同一个 `MQQueueManager` 是未定义行为（实测会冒
+        // MQRC 2009 / 连接被意外拆断）。[onBeforeDisconnect] 只取消定时任务，取消
+        // 打不断 worker 上已开始的阻塞 MQI 调用。
+        //
+        // 有界等待，不能无限等：一条卡在 socket 上的 MQI 会让 disconnect 永远排队，
+        // 而断开是用户明确要求的动作，必须完成。拿不到锁就记一笔，然后照常断开。
+        val serialized = awaitMqiQuiescence(ctx.mqiLock, DISCONNECT_LOCK_WAIT_MS)
+        if (!serialized) {
+            log.warn(
+                "disconnect proceeding without MQI lock after ${DISCONNECT_LOCK_WAIT_MS}ms: " +
+                    "connection=${ctx.connectionId} (an in-flight MQI call is still running)",
+            )
+        }
         ctx.mqConnection = null
         try {
             withContext(NonCancellable + Dispatchers.IO) { manager.disconnect() }
@@ -134,5 +148,15 @@ class IbmMQConnectionManager(
         } catch (error: Throwable) {
             log.warn("mq disconnect failed: connection=${ctx.connectionId} error=$error")
         }
+    }
+
+    private companion object {
+        /**
+         * 断开前等 `mqiLock` 的上限。
+         *
+         * 只用于「让在飞的 MQI 调用先收尾」，不用于无限期串行：拿不到就断开，
+         * 比把退出/删除路径一起拖死更诚实。10s 远大于任何正常 MQI 往返。
+         */
+        const val DISCONNECT_LOCK_WAIT_MS = 10_000L
     }
 }

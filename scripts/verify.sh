@@ -85,19 +85,27 @@ run_arch_check
 
 # ---------- 编译 + 全部单元测试 ----------
 #
-# `assemble` 保证所有模块的产物都能构建（含资源处理 / SQLDelight 生成），
-# `jvmTest` 跑全仓全部用例。真机测试（*LiveTest）在没有 config.toml 时自行 SKIP，
-# 所以这条在干净环境里也能过 —— 不会因为 CI 没有 broker 而红。
-echo "--- assemble + jvmTest ---"
+# `assemble` 保证所有模块的产物都能构建（含资源处理 / SQLDelight 生成）。
+#
+# **必须同时跑 `test` 与 `jvmTest`**：去 KMP 之后（be0076fb），18 个纯 kotlin-jvm
+# 模块（ibm-mq-service / kafka-service / rabbitmq-service / rocketmq-service /
+# mq-base / message-interpreter-* …）的测试任务是 `test`，只有 Compose 模块才有
+# `jvmTest`。只跑 `jvmTest` 时这些模块的用例**一个都不会执行**，而输出仍然是
+# BUILD SUCCESSFUL —— 门禁看起来是绿的，实际漏了三分之一以上的用例。
+# Gradle 对没有该任务的项目会跳过，所以两条一起写是安全的。
+#
+# 真机测试（*LiveTest / *DiagTest）在没有 config.toml 时自行 SKIP，所以这条在
+# 干净环境里也能过 —— 不会因为 CI 没有 broker 而红。
+echo "--- assemble + test + jvmTest ---"
 # GRADLE_CMD overrides the wrapper, for CI images that pre-install Gradle:
 #   GRADLE_CMD=gradle ./scripts/verify.sh
 # It must stay one executable (a name or a path), no arguments. Keep the version
 # in sync with gradle/wrapper/gradle-wrapper.properties.
 GRADLE_CMD="${GRADLE_CMD:-./gradlew}"
 echo "gradle: $GRADLE_CMD"
-"$GRADLE_CMD" assemble jvmTest --console=plain
+"$GRADLE_CMD" assemble test jvmTest --console=plain
 
 # ---------- i18n ----------
 run_i18n_check
 
-echo "OK: 全部通过（architecture + assemble + jvmTest + i18n）"
+echo "OK: 全部通过（architecture + assemble + test + jvmTest + i18n）"

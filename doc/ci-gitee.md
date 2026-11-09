@@ -95,7 +95,7 @@ Gitee 流水线（官方文档 `/enterprise/pipeline`）是 *控制台即配置*
 
 现象：`!! 找不到 python3 / python，跳过 i18n 检查` 之后脚本以非 0 退出。
 出路：第 4 步的构建命令已经带 `apt-get install -y python3`；若镜像是无 apt 的精简发行版，
-退而求其次改成 `./gradlew assemble jvmTest --console=plain` 先上编译+单测，i18n 检查留本地。
+退而求其次改成 `./gradlew assemble test jvmTest --console=plain` 先上编译+单测（`test` 覆盖纯 kotlin-jvm 模块，`jvmTest` 覆盖 Compose 模块，缺一不可），i18n 检查留本地。
 
 ### 4. Compose UI 测试在无显示环境
 

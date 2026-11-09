@@ -74,6 +74,8 @@ import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /** 拉取条数上限：basicGet 逐条循环，防大队列一次拉爆内存。 */
@@ -138,6 +140,8 @@ fun RabbitMqQueueMessagesDialog(
     val snackbar = remember { SnackbarHostState() }
     // 会话的**所有者**：开会话只能经它（内部先关旧的），UI 侧的 `session` 只是镜像。
     val sessionSlot = remember(openSession) { QueueSessionSlot(openSession) }
+    // 开会话的单飞锁：拉取 / 发送可能同时触发，`session` 镜像看不到「正在开」。
+    val sessionOpenMutex = remember(sessionSlot) { Mutex() }
     var session by remember { mutableStateOf<RabbitMqQueueSession?>(null) }
     // 最近一次 passive 声明看到的队列消费者数：>0 = 有影子消费者在抢消息。
     var consumerCount by remember { mutableStateOf<Int?>(null) }
@@ -203,24 +207,39 @@ fun RabbitMqQueueMessagesDialog(
      * 建会话（共享连接的懒建 + createChannel + passive 声明）的超时由底层
      * `channelRpcTimeout` / `handshakeTimeout` 负责，到点抛
      * [RabbitMqOperationTimeoutException]。取消仍单独放行，不写状态。
+     *
+     * ## 单飞
+     *
+     * `session?.let { return it }` 这一句**看不见「已经在开」的那个调用**：拉取与发送
+     * 同时触发、或用户连点两下时，两个调用者会一起走到 [QueueSessionSlot.open]，
+     * 各自建一条 AMQP 连接；后入槽的那条把先入槽的直接覆盖掉，前者既不在槽里
+     * 也没人关闭（见 [QueueSessionSlot.openMutex]）—— 一条未 ack 消息也一并卡在
+     * 死 channel 上的泄漏。
+     *
+     * 用互斥锁把「检查 + 建连 + 入槽」包成一段；拿到锁之后**再查一次**，让后到者
+     * 直接复用先到者建好的会话。
      */
     suspend fun ensureSession(): RabbitMqQueueSession? {
         session?.let { return it }
-        sessionState = LoadState.Loading
-        return try {
-            val opened = sessionSlot.open(connectionId, queueName)
-            session = opened
-            consumerCount = opened.lastKnownConsumerCount()
-            sessionState = LoadState.Success(Unit)
-            opened
-        } catch (e: RabbitMqOperationTimeoutException) {
-            sessionState = LoadState.Error(timeoutText)
-            null
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            sessionState = LoadState.Error(e.userMessage())
-            null
+        return sessionOpenMutex.withLock {
+            // 双检：等锁期间别人可能已经建好了。
+            session?.let { return@withLock it }
+            sessionState = LoadState.Loading
+            try {
+                val opened = sessionSlot.open(connectionId, queueName)
+                session = opened
+                consumerCount = opened.lastKnownConsumerCount()
+                sessionState = LoadState.Success(Unit)
+                opened
+            } catch (e: RabbitMqOperationTimeoutException) {
+                sessionState = LoadState.Error(timeoutText)
+                null
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                sessionState = LoadState.Error(e.userMessage())
+                null
+            }
         }
     }
 
@@ -843,8 +862,22 @@ internal class QueueSessionSlot(private val opener: RabbitMqSessionOpener) {
      */
     private var disposed = false
 
+    /**
+     * 开/关的单飞锁。
+     *
+     * 没有它时「两个调用者同时 open」会各自建一条连接：两边都在取旧会话那一步看到
+     * `null`，然后各自建连、各自入槽 —— 后入槽的直接**覆盖**前一条，而覆盖不会关闭
+     * 它（关闭只发生在 open 开头的「取旧」那一步，那时还没有它）。结果就是一条既不在
+     * 槽里、也没人关闭的连接，外加上面卡着的未 ack 消息。
+     * 串行化之后，第二个调用者总能看到第一个的结果：先把前者当旧会话关掉，再建新的。
+     */
+    private val openMutex = Mutex()
+
     /** 关掉旧会话（如果有）再开新的。返回新会话。 */
-    suspend fun open(connectionId: String, queueName: String): RabbitMqQueueSession {
+    suspend fun open(connectionId: String, queueName: String): RabbitMqQueueSession =
+        openMutex.withLock { openLocked(connectionId, queueName) }
+
+    private suspend fun openLocked(connectionId: String, queueName: String): RabbitMqQueueSession {
         // 先把旧会话从槽里摘走再关：关闭是挂起调用，不能占着监视器。
         val previous = synchronized(lock) { current.also { current = null } }
         // 关闭失败不拦重开：旧连接已不可用时，能开新的比卡在旧的上更有用。

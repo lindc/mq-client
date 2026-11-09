@@ -6,9 +6,12 @@ import com.ibm.mq.constants.MQConstants
 import com.ibm.mq.pcf.PCFException
 import com.ibm.mq.pcf.PCFMessage
 import com.ibm.mq.pcf.PCFMessageAgent
+import com.mqclient.core.concurrent.BlockingCallTimeoutException
+import com.mqclient.core.concurrent.BlockingCalls
 import com.mqclient.ibmmq.IbmMQModule
 import com.mqclient.ibmmq.ibmMqLog
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
@@ -34,6 +37,23 @@ import kotlinx.coroutines.withContext
  */
 class MqscPcfSender : PcfExecutor {
 
+    private companion object {
+        /**
+         * MQSC 命令的执行预算。
+         *
+         * 与扫描同口径（60s）：命令服务器正常情况下一条命令是毫秒级，60s 没能回
+         * 就说明连接已经坏了。区别在于扫描到点后拒绝发起下一条 INQUIRE，而这里
+         * 只能放弃等待 —— `agent.send` 是纯阻塞调用，没有协作式取消点。
+         */
+        const val MQSC_BUDGET_MS = 60_000L
+
+        /** 留给「最后一次在飞的 send」自己结束的宽限（agent 默认 waitInterval 30s）。 */
+        const val MQSC_GRACE_MS = 40_000L
+
+        /** 日志里截断命令的长度（MQSC 可能很长，且含用户数据）。 */
+        const val MAX_LOGGED_COMMAND = 200
+    }
+
     override suspend fun executeMqsc(connectionId: String, command: String): List<String> {
         val ctx = IbmMQModule.connectionOrNull(connectionId)
             ?: throw ServiceException(
@@ -41,7 +61,35 @@ class MqscPcfSender : PcfExecutor {
                 args = listOf(connectionId),
                 fallbackMessage = "Connection %1\$s is not established",
             )
-        return ctx.mqiLock.withLock { executeMqscLocked(connectionId, command) }
+        return ctx.mqiLock.withLock {
+            // 命令服务器卡住时 agent.send 不返回，而它握着该连接的 mqiLock ——
+            // 之后的浏览 / 发送 / 深度查询 / 心跳会全部无限期排队。扫描有
+            // ScanBudget + BlockingCalls，浏览 / 下载有 OP_SCAN_BUDGET_MS，
+            // 唯独 MQSC 曾什么超时都没有。这里用同一套兜底。
+            try {
+                BlockingCalls.withDeadline(
+                    timeoutMs = MQSC_BUDGET_MS + MQSC_GRACE_MS,
+                    label = "MQSC command (connection=$connectionId)",
+                ) {
+                    // 在 worker 线程上把挂起的锁内实现桥接成同步体（同 PcfObjectScanner.withAgent）。
+                    runBlocking { executeMqscLocked(connectionId, command) }
+                }
+            } catch (timeout: BlockingCallTimeoutException) {
+                ibmMqLog.error(
+                    "mqsc command stuck: connection=$connectionId " +
+                        "waited=${(MQSC_BUDGET_MS + MQSC_GRACE_MS) / 1000}s command=${command.take(MAX_LOGGED_COMMAND)}",
+                )
+                throw ServiceException(
+                    "ibm_mq_err_mqsc_timeout",
+                    // 命令控制台直接展示 errorMessage（不查 i18n 键），所以这段文案
+                    // 要自己说清楚「是连接坏了」而不只是「超时」。
+                    fallbackMessage = "MQSC command timed out after " +
+                        "${(MQSC_BUDGET_MS + MQSC_GRACE_MS) / 1000}s — the connection may be broken; " +
+                        "reconnect and retry",
+                    cause = timeout,
+                )
+            }
+        }
     }
 
     /** [executeMqsc] 的锁内实现：调用方必须已持有该连接的 `mqiLock`。 */
@@ -100,7 +148,20 @@ class MqscPcfSender : PcfExecutor {
     suspend fun diagnose(connectionId: String, queueName: String = "DEV.QUEUE.1"): String {
         val ctx = IbmMQModule.connectionOrNull(connectionId)
             ?: return "Diagnosis failed: connection $connectionId is not established"
-        return ctx.mqiLock.withLock { diagnoseLocked(connectionId, queueName) }
+        return ctx.mqiLock.withLock {
+            // 诊断路径同样握 mqiLock，同样要给上限（它是排障工具，不能反过来把连接拖死）。
+            try {
+                BlockingCalls.withDeadline(
+                    timeoutMs = MQSC_BUDGET_MS + MQSC_GRACE_MS,
+                    label = "MQSC diagnosis (connection=$connectionId)",
+                ) {
+                    runBlocking { diagnoseLocked(connectionId, queueName) }
+                }
+            } catch (timeout: BlockingCallTimeoutException) {
+                "Diagnosis timed out after ${(MQSC_BUDGET_MS + MQSC_GRACE_MS) / 1000}s — " +
+                    "the connection looks broken (no MQI reply at all)."
+            }
+        }
     }
 
     /** [diagnose] 的锁内实现：调用方必须已持有该连接的 `mqiLock`。 */

@@ -9,6 +9,8 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 
 /**
@@ -173,6 +175,51 @@ class QueueSessionSlotTest {
         assertTrue(first.isClosed.not(), "detach 不负责关句柄（调用方接手）")
     }
 
+    /**
+     * 并发 open 不能把任何一条连接漏在槽外。
+     *
+     * 修的是重入：`ensureSession()` 的 `session?.let { return it }` 看不见「已经在开」
+     * 的那个调用，拉取与发送同时触发就会并发走到这里。旧实现让两个调用者各自建连、
+     * 后者的 open 把前者关掉 —— 前者手里的句柄已失效，拿去做 basicGet 必然失败。
+     *
+     * 现在 open 串行化：后到者一定看到先到者的结果，两条连接要么在槽里、要么已被关闭，
+     * 不存在「既不在槽里也没关」的那一条。
+     */
+    @Test
+    fun `concurrent opens never leak a session`() {
+        val events = java.util.Collections.synchronizedList(mutableListOf<String>())
+        val created = java.util.concurrent.CopyOnWriteArrayList<RecordingSession>()
+        val start = java.util.concurrent.CountDownLatch(1)
+        val slot = QueueSessionSlot(
+            opener = object : RabbitMqSessionOpener {
+                override suspend fun open(
+                    connectionId: String,
+                    queueName: String,
+                ): RabbitMqQueueSession {
+                    events += "open:$queueName"
+                    // 让两个调用者真的重叠：都在栅栏上等，然后一起进来。
+                    start.await()
+                    return RecordingSession("s${created.size}", events).also { created += it }
+                }
+            },
+        )
+
+        runBlocking(Dispatchers.Default) {
+            val a = async { slot.open(connectionId = "c1", queueName = "q1") }
+            val b = async { slot.open(connectionId = "c1", queueName = "q1") }
+            start.countDown()
+            a.await()
+            b.await()
+        }
+
+        val retained = slot.detach() as RecordingSession
+        val leaked = created.filter { it !== retained && !it.isClosed }
+        assertTrue(
+            leaked.isEmpty(),
+            "并发 open 留下了既不在槽里、也没关闭的会话（泄漏）：${leaked.map { it.describe() }}",
+        )
+    }
+
     /** 每次 open 依序返回 [sessions] 里的会话（用完后重复最后一个）。 */
     private fun sequenceOpener(
         events: MutableList<String>,
@@ -198,6 +245,9 @@ private class RecordingSession(
 
     var closeCount = 0
         private set
+
+    /** 断言失败信息里用，便于看出是哪一条会话漏了。 */
+    fun describe(): String = "$label(closed=$isClosed)"
 
     val isClosed: Boolean get() = closeCount > 0
 
