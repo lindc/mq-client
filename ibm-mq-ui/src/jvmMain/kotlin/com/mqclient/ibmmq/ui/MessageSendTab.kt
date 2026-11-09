@@ -157,6 +157,9 @@ internal class SendMessagesState(
     /** 过期秒数；<= 0 = 不过期。 */
     var expirySeconds by mutableStateOf("0")
 
+    /** CCSID（字符集）；留空 = 不指定，走队列管理器默认值。 */
+    var ccsid by mutableStateOf("")
+
     val singleTask: SendTask? get() = tasks.singleOrNull()
 
     /**
@@ -286,6 +289,7 @@ internal class SendMessagesState(
             persistence = persistence,
             priority = priority,
             expiryTenths = expiryTenths,
+            characterSet = ccsid.trim().toIntOrNull(),
         ) ?: SendResult.failure(null, "服务未初始化")
     }
 
@@ -364,7 +368,10 @@ internal fun MessageSendTab(
 
         HorizontalDivider()
 
-        // ---- 3. 底部：结果 / 汇总 + 发送按钮 ----
+        // ---- 3. 高级属性（默认收起）：Tab 级渲染，空态 / 单文件 / 多文件都能设置 ----
+        AdvancedPropsSection(state)
+
+        // ---- 4. 底部：结果 / 汇总 + 发送按钮 ----
         SendBottomBar(
             state = state,
             onEmptyBodyWarning = {
@@ -403,11 +410,10 @@ private fun SingleSendPane(state: SendMessagesState) {
                 modifier = Modifier.padding(horizontal = ROW_HPADDING, vertical = 4.dp),
             )
         }
-        AdvancedPropsSection(state)
     }
 }
 
-/** 高级属性（默认收起）：CorrelationId / ReplyToQueue / 持久化 / 优先级 / 过期时间。 */
+/** 高级属性（默认收起）：CorrelationId / ReplyToQueue / 持久化 / 优先级 / 过期时间 / CCSID。 */
 @Composable
 private fun AdvancedPropsSection(state: SendMessagesState) {
     var expanded by remember { mutableStateOf(false) }
@@ -492,6 +498,22 @@ private fun AdvancedPropsSection(state: SendMessagesState) {
                     )
                     Text(
                         text = stringResource("ibm_mq_msg_send_expiry_hint"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    PropLabel(stringResource("ibm_mq_msg_send_ccsid"))
+                    CompactTextField(
+                        value = state.ccsid,
+                        onValueChange = { state.ccsid = it.filter(Char::isDigit).take(5) },
+                        modifier = Modifier.width(120.dp),
+                    )
+                    Text(
+                        text = stringResource("ibm_mq_msg_send_ccsid_hint"),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

@@ -369,8 +369,10 @@ internal fun MessageBrowseTab(
     } ?: emptyList()
 
     Column(modifier = modifier.fillMaxSize()) {
-        // ---- 1. 工具栏：搜索（左）+ 时间范围（中）+ 总数 / 刷新（右）----
+        // ---- 1. 工具栏：搜索 + 时间范围 + 读取 + 总数 / 导入 / 刷新 ----
         BrowseToolbar(
+            onRead = { retryKey++ },
+            reading = uiState is BrowseUiState.Loading,
             rawSearch = rawSearch,
             onSearchChange = { rawSearch = it },
             timeRange = timeRange,
@@ -495,6 +497,8 @@ private fun ConfirmDeleteMessageDialog(
 
 @Composable
 private fun BrowseToolbar(
+    onRead: () -> Unit,
+    reading: Boolean,
     rawSearch: String,
     onSearchChange: (String) -> Unit,
     timeRange: BrowseTimeRange,
@@ -536,6 +540,11 @@ private fun BrowseToolbar(
                     )
                 }
             }
+        }
+        // 核心「读取」入口：固定宽度排在时间范围下拉右侧，weight 搜索框只会收缩自己，
+        // 不会挤掉这个按钮。Idle 态 refresh() 直接 return，只有这里会开 browse 会话。
+        PrimaryButton(onClick = onRead, enabled = !reading) {
+            Text(stringResource("ibm_mq_msg_browse_read"))
         }
         if (totalText.isNotEmpty()) {
             Text(
