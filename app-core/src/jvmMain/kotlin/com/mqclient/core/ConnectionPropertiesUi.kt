@@ -23,6 +23,14 @@ interface ConnectionPropertiesUi {
     val serviceId: String
 
     /**
+     * 宿主内容区是否套用标准夹宽（`min(W, max(0.8W, 900dp))` 并水平居中）。
+     * 默认 true —— 属性表类内容在宽屏聚拢更好读；采用 MQ Explorer 式
+     * 「左导航 + 右属性表」布局的面板（IBM MQ）覆写为 false，满窗铺满，
+     * 让导航背景与斑马纹直达对话框左右边缘。
+     */
+    val capContentWidth: Boolean get() = true
+
+    /**
      * 属性面板内容。尺寸与滚动由面板自己负责（`fillMaxSize` + `verticalScroll`，
      * 参考 [ConnectionFormUi] 的约定）—— app-core 只有 compose runtime +
      * ui-graphics，签名刻意不引 `Modifier`（那要多拖一个 compose.ui 构件进来）。

@@ -24,6 +24,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.mqclient.ibmmq.ui.properties.ObjectPropertyGroup
 import com.mqclient.ibmmq.ui.properties.ResolvedObjectProperty
@@ -72,12 +73,13 @@ internal fun PropertyGroupsPane(
         }
 
         // 右：所选分组的内容（滚动）——自定义面板优先，否则渲染属性行。
+        // 右侧不留边距：斑马纹背景贴到对话框最右缘（行内自带 10dp 内边距，文字不顶边）。
         Column(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxHeight()
                 .verticalScroll(rememberScrollState())
-                .padding(20.dp),
+                .padding(start = 20.dp, top = 20.dp, bottom = 20.dp),
         ) {
             val customPane = customEntries[selected] ?: customPanes[selected]
             if (customPane != null) {
@@ -97,6 +99,9 @@ internal fun PropertyGroupsPane(
             }
             // 叶子行统一走 ui-common PropertyTable（斑马纹 + 左对齐 + 行尾复制）：
             // 名称 / 说明 / 值的 i18n 解析在组合期完成（缺失回落英文名 / 原始值）。
+            // maxWidth = Infinity：面板走满窗铺满布局，表格要填满整个右列（右列已由
+            // Row 的 weight(1f) 吃掉剩余宽度）—— 默认 900dp 上限会让表格停在列中间，
+            // 右侧留出一大片空白（斑马纹断在半路）。
             PropertyTable(
                 items = rows.map { row ->
                     val name = stringResource(row.nameKey).let { if (it == row.nameKey) row.labelEn else it }
@@ -108,6 +113,7 @@ internal fun PropertyGroupsPane(
                         ?: row.rawValue
                     PropertyItem(key = name, value = value, description = desc)
                 },
+                maxWidth = Dp.Infinity,
             )
         }
     }

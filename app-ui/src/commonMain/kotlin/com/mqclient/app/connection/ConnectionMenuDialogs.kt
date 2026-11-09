@@ -267,11 +267,15 @@ internal fun ConnectionPropertiesDialog(connection: ConnectionInfo, onDismiss: (
                 HorizontalDivider()
                 Column(modifier = Modifier.fillMaxSize().weight(1f)) {
                     if (propertiesUi != null) {
-                        // 内容区宽度与 ObjectDetailDialog 同一规范：min(W, max(0.8W, 900dp))
-                        // 并水平居中 —— 宽屏下内容聚拢，各模块贡献的面板不再拉满整窗
-                        // （此前只有模块自己夹宽，口径不一，RabbitMQ 面板横向散漫）。
+                        // 内容区宽度默认走 ObjectDetailDialog 同一规范：min(W, max(0.8W, 900dp))
+                        // 并水平居中。模块可通过 [ConnectionPropertiesUi.capContentWidth] 声明
+                        // 满窗铺满（IBM MQ 的 Explorer 式「左导航 + 右表格」布局需要贴边）。
                         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-                            val contentWidth = computeContentWidth(maxWidth)
+                            val contentWidth = if (propertiesUi.capContentWidth) {
+                                computeContentWidth(maxWidth)
+                            } else {
+                                maxWidth
+                            }
                             Box(
                                 modifier = Modifier.fillMaxSize(),
                                 contentAlignment = Alignment.TopCenter,

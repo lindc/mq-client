@@ -44,6 +44,10 @@ import kotlinx.coroutines.CancellationException
 class IbmMqPropertiesUi : ConnectionPropertiesUi {
     override val serviceId = "ibm-mq"
 
+    // MQ Explorer 式「左导航 + 右属性表」布局：满窗铺满（不夹宽居中），导航背景与
+    // 斑马纹直达对话框左右边缘。
+    override val capContentWidth = false
+
     @Composable
     override fun Content(connection: ConnectionInfo) {
         QmgrPropertiesPanel(connectionId = connection.id)

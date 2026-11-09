@@ -42,6 +42,8 @@ fun MqObjectPropertiesDialog(
     // 「询问 AI」按钮可见性：只给本地队列 / SENDER 通道 / 监听器三类入口对象显示。
     // 快照从慢扫缓存按名取（与 MqObjectPropertiesContent 同源），缓存未就绪时按钮隐藏。
     val askAiVisible = aiStarter != null && isAiAskTarget(state)
+    // MQ Explorer 式导航布局：内容区满窗铺满（capContentWidth = false），左侧导航背景
+    // 与右侧斑马纹直达对话框左右边缘；PropertyGroupsPane 内部已 fillMaxSize。
     ObjectDetailDialog(
         title = state.objectName,
         onDismiss = onDismiss,
