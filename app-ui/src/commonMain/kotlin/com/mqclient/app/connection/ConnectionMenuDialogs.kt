@@ -1,9 +1,12 @@
 package com.mqclient.app.connection
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -36,6 +39,7 @@ import com.mqclient.core.ModuleRegistry
 import com.mqclient.uicommon.i18n.userMessage
 import com.mqclient.uicommon.DangerButton
 import com.mqclient.uicommon.PrimaryButton
+import com.mqclient.uicommon.dialog.computeContentWidth
 import com.mqclient.uicommon.dialog.rememberStandardDialogSize
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
@@ -263,7 +267,20 @@ internal fun ConnectionPropertiesDialog(connection: ConnectionInfo, onDismiss: (
                 HorizontalDivider()
                 Column(modifier = Modifier.fillMaxSize().weight(1f)) {
                     if (propertiesUi != null) {
-                        propertiesUi.Content(connection)
+                        // 内容区宽度与 ObjectDetailDialog 同一规范：min(W, max(0.8W, 900dp))
+                        // 并水平居中 —— 宽屏下内容聚拢，各模块贡献的面板不再拉满整窗
+                        // （此前只有模块自己夹宽，口径不一，RabbitMQ 面板横向散漫）。
+                        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                            val contentWidth = computeContentWidth(maxWidth)
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.TopCenter,
+                            ) {
+                                Box(modifier = Modifier.width(contentWidth).fillMaxHeight()) {
+                                    propertiesUi.Content(connection)
+                                }
+                            }
+                        }
                     } else {
                         Text(
                             text = stringResource("qmgr_properties_missing_ui"),

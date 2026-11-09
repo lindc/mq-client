@@ -32,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.mqclient.core.ConnectionInfo
 import com.mqclient.core.ConnectionPropertiesUi
@@ -43,7 +44,6 @@ import com.mqclient.rabbitmq.RabbitMqEvents
 import com.mqclient.uicommon.dialog.MessageDetailSectionTitle
 import com.mqclient.uicommon.PropertyItem
 import com.mqclient.uicommon.PropertyTableSection
-import com.mqclient.uicommon.WidthCappedColumn
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 import kotlinx.coroutines.CancellationException
@@ -153,16 +153,19 @@ internal fun RabbitMqConnectionPropertiesPanel(connectionId: String) {
 
 @Composable
 private fun ReadyPane(clusterInfo: RabbitMqClusterInfoSnapshot?, nodes: List<RabbitMqNodeSnapshot>) {
-    // 滚动容器保持满宽（滚动条 / 命中区域），内容夹到 PropertyTable 同一个宽度并居中 ——
-    // 节点行是自绘的满宽块，不一起夹就会比上面的属性表宽出一截。
+    // 宽度由宿主（ConnectionPropertiesDialog）统一夹到 min(W, max(0.8W, 900dp)) 并居中，
+    // 与队列属性对话框（ObjectDetailDialog）同一规范 —— 面板内**不再二次限宽**（否则
+    // 会被夹到 900dp，比宿主内容区窄出一截），Broker 表与集群节点行天然同宽。
+    // 滚动容器保持满宽（滚动条 / 命中区域）；左右 20dp 边距与队列属性对话框一致。
     Box(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(vertical = 8.dp),
+            .padding(horizontal = 20.dp, vertical = 8.dp),
     ) {
-        WidthCappedColumn {
+        Column {
             PropertyTableSection(
+                maxWidth = Dp.Infinity,
                 title = stringResource("rabbitmq_ui_conn_props_broker"),
                 items = listOf(
                     PropertyItem(stringResource("rabbitmq_ui_conn_props_version"), clusterInfo?.rabbitmqVersion),
