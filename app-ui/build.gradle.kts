@@ -1,3 +1,6 @@
+// TargetFormat 只有在显式配置 targetFormats(...) 时才需要（见文件末尾注释）。
+//import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+
 plugins {
     id("mq.kotlin-jvm")
     id("mq.compose")
@@ -71,5 +74,84 @@ kotlin {
 compose.desktop {
     application {
         mainClass = "com.mqclient.app.MainKt"
+
+        nativeDistributions {
+            // 只产「免安装可运行文件夹」，不打 msi/deb/rpm 等安装包：
+            //
+            //   ./gradlew :app-ui:createDistributable
+            //   → build/compose/binaries/main/app/MQClient/
+            //       Windows: MQClient.exe + runtime\     双击即可运行
+            //       Linux  : bin/MQClient + lib/runtime  ./bin/MQClient 即可运行
+            //
+            // 因此这里故意不调用 targetFormats(...)。原因有两个：
+            //  1. 文件夹（app-image）由 createDistributable 生成，和 targetFormats 无关；
+            //  2. compose 插件会在配置阶段拒绝「与当前系统不兼容」的格式
+            //     （在 Linux 上写 Dmg 会直接 IllegalStateException），所以不能写死一份列表。
+            // 以后需要安装包时再按宿主系统显式加，例如：
+            //   targetFormats(TargetFormat.Deb, TargetFormat.AppImage)
+            // Windows 上想再加安装器时用 TargetFormat.Exe（不要 Msi）。
+            //
+            // ⚠️ jpackage 只能打「当前系统」的包：Windows 的文件夹必须在 Windows 上构建，
+            //    Linux 的必须在 Linux 上构建，不能交叉打包。
+
+            packageName = "MQClient"
+
+            // 版本号只影响包元数据（Linux 的 .desktop、Windows 的 exe 属性）。
+            // 若以后要打 MSI，MSI 要求第一段不能是 0，那时再改成 "1.0.0"。
+            packageVersion = "0.1.0"
+
+            // 不用 includeAllModules = true，改用显式清单：把 jdk.compiler / jdk.javadoc /
+            // jdk.jshell / jdk.jlink / jdk.jpackage 这些开发工具模块打进交付镜像没有意义。
+            // 实测（JDK 25.0.5，jmods 齐全）：全部模块 174M，下面这份清单 132M。
+            // 另外显式清单也更可预测：镜像里到底有什么，看这一页就知道。
+            modules(
+                // 聚合模块：一次性带上全部 java.*（java.base/sql/desktop/net.http/naming…）。
+                "java.se",
+                // TLS/ECC（OpenAI、Anthropic、Kafka SASL_SSL 几乎都会用到）
+                "jdk.crypto.ec",
+                "jdk.crypto.cryptoki",
+                // 很多第三方库（Netty / Kryo / 部分 Kafka client）反射用到 Unsafe
+                "jdk.unsupported",
+                // GBK/GB18030/ISO-8859-1 等非 UTF-8 字符集：MQ 报文编码换算是刚需，
+                // 缺了它 charset 查找会抛 UnsupportedCharsetException。
+                "jdk.charsets",
+                // 完整 locale 数据：中文日期/数字/排序规则，缺了只剩 en + root。
+                "jdk.localedata",
+                "jdk.naming.dns",
+                "jdk.naming.rmi",
+                "jdk.security.auth",
+                "jdk.security.jgss",
+                "jdk.net",
+                "jdk.nio.mapmode",
+                "jdk.sctp",
+                "jdk.xml.dom",
+                "jdk.unsupported.desktop",
+                "jdk.accessibility",
+                "jdk.management",
+                "jdk.management.jfr",
+                "jdk.jfr",
+                "jdk.zipfs",
+                // 部分库（jdk.jdi 同理）通过反射探测；留着以免运行时 NoClassDefFoundError。
+                "jdk.httpserver",
+                "jdk.jdi",
+                "jdk.dynalink",
+                "jdk.jsobject",
+            )
+
+            // 安装图标放在 packaging/ 而不是 composeResources/drawable/：
+            // 同一个 drawable 目录下 logo.png/.ico/.icns 会被 Compose 资源系统当成
+            // 同一个 ID `drawable:logo` 的多个候选文件，运行时 painterResource(Res.drawable.logo)
+            // 直接抛 "Resource with ID='drawable:logo' has more than one file"。
+            windows {
+                iconFile.set(project.file("packaging/logo.ico"))
+            }
+            macOS {
+                iconFile.set(project.file("packaging/logo.icns"))
+                bundleID = "com.mqclient.app"
+            }
+            linux {
+                iconFile.set(project.file("src/commonMain/composeResources/drawable/logo.png"))
+            }
+        }
     }
 }
