@@ -15,6 +15,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -35,6 +36,8 @@ object CompactControlSpec {
     val Height: Dp = 32.dp
     val ContentPadding: PaddingValues = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
     val IconSize: Dp = 16.dp
+    /** 表格行内动作按钮（移除 / 重试）的高度，比工具栏再矮一档。 */
+    val RowActionHeight: Dp = 28.dp
 }
 
 /** 工具栏主操作（如「读取」「拉取」「选择文件」）：32dp 实心 primary 底，不投影。 */
@@ -86,6 +89,33 @@ fun CompactSecondaryButton(
         contentPadding = CompactControlSpec.ContentPadding,
     ) {
         ProvideTextStyle(MaterialTheme.typography.bodySmall) { content() }
+    }
+}
+
+/**
+ * 表格行内动作按钮（「移除」「重试」）：28dp、透明底、bodySmall、primary 字色、
+ * 零垂直内边距、无边框。刻意不用实心 / 描边按钮 —— 行内动作不该跟工具栏或 footer
+ * 抢视觉焦点，密集列表里应当像一段可点文字。
+ */
+@Composable
+fun CompactRowActionButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    TextButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier.height(CompactControlSpec.RowActionHeight),
+        shape = MaterialTheme.shapes.small,
+        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+        colors = ButtonDefaults.textButtonColors(
+            contentColor = MaterialTheme.colorScheme.primary,
+            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
+        ),
+    ) {
+        Text(text, style = MaterialTheme.typography.bodySmall, maxLines = 1)
     }
 }
 

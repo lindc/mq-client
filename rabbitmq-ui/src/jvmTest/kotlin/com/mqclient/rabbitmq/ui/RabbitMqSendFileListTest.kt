@@ -12,6 +12,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.runComposeUiTest
 import androidx.compose.ui.unit.dp
+import com.mqclient.uicommon.CompactControlSpec
 import com.mqclient.uicommon.i18n.LanguageResources
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
@@ -67,8 +68,8 @@ class RabbitMqSendFileListTest {
 
         val waitingRow = onNodeWithTag(WAITING_ROW_TAG)
         val successRow = onNodeWithTag(SUCCESS_ROW_TAG)
-        waitingRow.assertHeightIsAtLeast(48.dp)
-        successRow.assertHeightIsAtLeast(48.dp)
+        waitingRow.assertHeightIsAtLeast(CompactControlSpec.Height)
+        successRow.assertHeightIsAtLeast(CompactControlSpec.Height)
 
         val waitingRowHeight = waitingRow.fetchSemanticsNode().size.height
         val successRowHeight = successRow.fetchSemanticsNode().size.height

@@ -30,6 +30,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mqclient.uicommon.AppTooltip
+import com.mqclient.uicommon.CompactControlSpec
+import com.mqclient.uicommon.CompactRowActionButton
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.table.formatSize
 
@@ -81,7 +83,7 @@ fun SendTaskRow(
             .fillMaxWidth()
             .hoverable(interactionSource)
             .background(background)
-            .padding(horizontal = ROW_HPADDING.dp, vertical = 8.dp),
+            .padding(horizontal = ROW_HPADDING.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         AppTooltip(fileName, Modifier.weight(1f)) {
@@ -104,13 +106,14 @@ fun SendTaskRow(
         }
         // 操作列始终预留按钮的占位高度：等待态有「移除」按钮撑开行高，
         // 成功态无按钮时若不留空，行高会塌缩 —— 正是「发送后间距消失」的根源。
-        // 这里给固定 min 高度 + 居中，按钮有无都不改变行高，发送前后完全一致。
+        // 占位降到 32dp（行内按钮 28dp），配合行的 4dp 上下 padding，
+        // 使整行约 36dp，按钮有无仍然不改变行高。
         Box(
-            modifier = Modifier.width(ACTION_COLUMN).heightIn(min = 40.dp),
+            modifier = Modifier.width(ACTION_COLUMN).heightIn(min = CompactControlSpec.Height),
             contentAlignment = Alignment.Center,
         ) {
             if (actionLabel != null && onAction != null) {
-                SmallSendButton(actionLabel, onAction)
+                CompactRowActionButton(actionLabel, onAction)
             }
         }
     }

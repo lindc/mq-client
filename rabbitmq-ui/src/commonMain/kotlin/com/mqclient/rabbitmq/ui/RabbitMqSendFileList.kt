@@ -24,7 +24,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.mqclient.uicommon.SecondaryButton
+import com.mqclient.uicommon.CompactControlSpec
+import com.mqclient.uicommon.CompactRowActionButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.table.formatSize
 
@@ -56,11 +57,12 @@ private val FailedRed = Color(0xFFD32F2F)
  *  - 文件名 bodyMedium + onSurface 主文字色
  *  - 大小 bodySmall + onSurfaceVariant 次要色
  *  - 状态文字 bodySmall（失败态 error 色）
- *  - 操作按钮文字 labelMedium（覆盖 OutlinedButton 默认的 labelLarge ——
- *    它正是「按钮比文件名还大」的割裂来源）
+ *  - 操作按钮为 28dp 透明文字按钮（bodySmall / primary 色，无实心底、无边框），
+ *    像电子表格里的行内动作，不与工具栏 / footer 抢焦点
  *
- * 行高以 `heightIn(min = 48.dp)` 固定：SUCCESS 无按钮、FAILED 错误文案换行、
- * 等待时按钮出现/消失，都不会让行高跳动 —— 发送前后列表的视觉基线因此完全一致。
+ * 行高以 `heightIn(min = CompactControlSpec.Height)`（32dp）固定：SUCCESS 无按钮、
+ * FAILED 错误文案换行、等待时按钮出现/消失，都不会让行高跳动 —— 发送前后列表的
+ * 视觉基线因此完全一致。占位比旧 48dp 更紧凑，但「按钮有无不改行高」的语义不变。
  *
  * [modifier] 留给调用方做背景 / 悬浮态；行自身的尺寸与内边距语义由本组件决定。
  */
@@ -76,7 +78,7 @@ internal fun FileListItem(
     modifier: Modifier = Modifier,
 ) {
     Row(
-        modifier = modifier.fillMaxWidth().heightIn(min = 48.dp),
+        modifier = modifier.fillMaxWidth().heightIn(min = CompactControlSpec.Height),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -152,15 +154,9 @@ internal fun FileListItem(
         Box(modifier = Modifier.width(SendFileColumns.ACTIONS)) {
             when {
                 status == SendFileStatus.WAITING && !busy ->
-                    SecondaryButton(
-                        onClick = onRemove,
-                        standardMinWidth = false,
-                    ) { Text(stringResource("rabbitmq_ui_send_remove"), style = MaterialTheme.typography.labelMedium) }
+                    CompactRowActionButton(stringResource("rabbitmq_ui_send_remove"), onRemove)
                 status == SendFileStatus.FAILED && !busy ->
-                    SecondaryButton(
-                        onClick = onRetry,
-                        standardMinWidth = false,
-                    ) { Text(stringResource("rabbitmq_ui_send_retry"), style = MaterialTheme.typography.labelMedium) }
+                    CompactRowActionButton(stringResource("rabbitmq_ui_send_retry"), onRetry)
             }
         }
     }
