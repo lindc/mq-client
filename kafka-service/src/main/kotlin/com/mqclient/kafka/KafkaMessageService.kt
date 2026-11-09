@@ -56,12 +56,6 @@ class KafkaMessageService {
 
         /** 临时 consumer / producer 的 close 等待。 */
         val CLOSE_TIMEOUT: Duration = Duration.ofSeconds(5)
-
-        /** 发送 `.get()` 的额外余量（覆盖 delivery.timeout.ms 的 retry 全程）。 */
-        const val SEND_EXTRA_WAIT_MS = 10_000L
-
-        /** 发送的 delivery 超时（ConfigDef 要求 32 位 Int，别传 Long）。 */
-        const val DELIVERY_TIMEOUT_MS = 60_000
     }
 
     // ---------------------------------------------------------------- 浏览（读）
@@ -330,15 +324,14 @@ class KafkaMessageService {
         headers: List<KafkaMessageHeader> = emptyList(),
         ctx: KafkaConnectionContext? = null,
     ): KafkaSendResult {
-        val timeoutMs = config.connectionTimeout * 1_000L
         return withContext(Dispatchers.IO) {
             // 共享 producer 线程安全，可直接并发发送；临时句柄（diag）用完即关。
             if (ctx != null) {
-                sendBlocking(ctx.clients().producer(), topic, value, key, partition, headers, timeoutMs)
+                sendBlocking(ctx.clients().producer(), topic, value, key, partition, headers, config)
             } else {
                 val producer = newProducer(config)
                 try {
-                    sendBlocking(producer, topic, value, key, partition, headers, timeoutMs)
+                    sendBlocking(producer, topic, value, key, partition, headers, config)
                 } finally {
                     runCatching { producer.close(CLOSE_TIMEOUT) }
                 }
@@ -346,7 +339,13 @@ class KafkaMessageService {
         }
     }
 
-    /** 发送主体（同步等 ack）；共享 / 临时两条路径共用。 */
+    /**
+     * 发送主体（同步等 ack）；共享 / 临时两条路径共用。
+     *
+     * 等待上限用 [KafkaMessageClients.sendWaitMs]（= max.block.ms + delivery.timeout.ms
+     * + 余量），**不再**用 `connectionTimeout + 10s`：后者比 `delivery.timeout.ms` 短，
+     * 会在 40–60s 窗口里报“失败”而消息其实可能已投递，用户重试就是重复消息。
+     */
     private fun sendBlocking(
         producer: KafkaProducer<ByteArray, ByteArray>,
         topic: String,
@@ -354,12 +353,12 @@ class KafkaMessageService {
         key: ByteArray?,
         partition: Int?,
         headers: List<KafkaMessageHeader>,
-        timeoutMs: Long,
+        config: KafkaConfig,
     ): KafkaSendResult =
         try {
             val record = ProducerRecord<ByteArray, ByteArray>(topic, partition, key, value)
             headers.forEach { record.headers().add(it.key, it.value) }
-            val meta = producer.send(record).get(timeoutMs + SEND_EXTRA_WAIT_MS, TimeUnit.MILLISECONDS)
+            val meta = producer.send(record).get(KafkaMessageClients.sendWaitMs(config), TimeUnit.MILLISECONDS)
             kafkaLog.info(
                 "message sent: topic=${meta.topic()} " +
                     "partition=${meta.partition()} offset=${meta.offset()} size=${value.size}",

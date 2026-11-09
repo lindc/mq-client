@@ -59,6 +59,14 @@ class IdocInterpreter : MessageInterpreter {
         const val PARAM_EXPAND = "expandNested"
 
         /**
+         * 缩进层级上限。
+         *
+         * IDoc 数据段的 HLEVEL 正常只有个小位数（段层级），这里给一个远大于真实
+         * 报文但能阻断内存放大的上限；超过就按上限缩进，`level=` 仍显示原始值。
+         */
+        const val MAX_NESTING_LEVEL = 32
+
+        /**
          * EDI_DC40 平面文件控制记录的已知字段序（高置信前缀）：按 TAB / 多空格
          * 分隔后逐位命名，超出的字段以 #序号 显示。表不完整时解析照常降级。
          */
@@ -168,7 +176,16 @@ class IdocInterpreter : MessageInterpreter {
         val psgnum = numbers.getOrNull(2) ?: "-"
         val hlevel = numbers.getOrNull(3)?.toIntOrNull()
         // 展开嵌套：按 HLEVEL 缩进（2 空格 / 级）；无层级数字则平铺。
-        val indent = if (expand && hlevel != null && hlevel > 1) "  ".repeat(hlevel - 1) else ""
+        //
+        // **必须限幅**：hlevel 直接来自消息体，`"  ".repeat(hlevel - 1)` 在
+        // hlevel=1_999_999_999 时要一次分配 ~4GB，小值（10^6）也会让每行多出 2MB，
+        // 一条 1MB 的消息能放大成几个 GB。`OutOfMemoryError` 是 Error，
+        // `catch (Exception)` 接不住，会穿出 LaunchedEffect 把界面弄死。
+        val indent = if (expand && hlevel != null && hlevel > 1) {
+            "  ".repeat((hlevel - 1).coerceAtMost(MAX_NESTING_LEVEL))
+        } else {
+            ""
+        }
         sb.append(indent).append("[").append(segnum).append("] ").append(name)
             .append("  (doc=").append(docnum).append(", parent=").append(psgnum)
             .append(", level=").append(hlevel?.toString() ?: "-").append(")\n")

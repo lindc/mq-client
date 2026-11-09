@@ -84,6 +84,16 @@ object MqConnectionSnapshotRepository {
      * 探测旧结构看 `connection_id` 列是否存在 —— 新结构没有这一列，所以天然幂等
      * （迁移过 / 全新库都直接跳过）。迁移必须在 [CoreDatabase.Schema.create] 之前做：
      * 旧表占着 mq_connection 名字，`IF NOT EXISTS` 的建表语句会被它挡掉。
+     *
+     * ## 为什么必须在一个事务里
+     *
+     * 四步（RENAME → CREATE → INSERT…SELECT → DROP）旧实现是裸 `driver.execute`，
+     * 任意一步崩溃（掉电 / 磁盘满 / 进程被杀）都会留下半完成状态：`mq_connection`
+     * 不存在而 `mq_connection_legacy` 变成孤儿。下次启动探测 `connection_id` 列返回
+     * false，迁移被**永久跳过**，`Schema.create` 建出一张空表 —— 用户的历史快照
+     * 就无声地没了。
+     *
+     * SQLite 的 DDL 是事务性的（只要没有中途 commit），所以整段包进一个事务就够了。
      */
     private fun migrateLegacySchemaIfNeeded(driver: SqlDriver) {
         val hasLegacyColumn = driver.executeQuery(
@@ -97,20 +107,24 @@ object MqConnectionSnapshotRepository {
         ).value
         if (!hasLegacyColumn) return
 
-        driver.execute(null, "ALTER TABLE mq_connection RENAME TO mq_connection_legacy", 0)
-        // 建新结构（.sq 的全部 DDL，IF NOT EXISTS 幂等；此刻只有迁移出来的 legacy 表）。
-        CoreDatabase.Schema.create(driver)
-        driver.execute(
-            null,
-            """
-            INSERT INTO mq_connection(id, name, type, host, port, target, user_name, created_at)
-            SELECT connection_id, COALESCE(name, ''), type, COALESCE(host, ''),
-                   COALESCE(port, 0), target, user_name, created_time
-            FROM mq_connection_legacy
-            """.trimIndent(),
-            0,
-        )
-        driver.execute(null, "DROP TABLE mq_connection_legacy", 0)
+        // 用 Transacter.transaction：它会把驱动的事务上下文设好，块内的 driver.execute
+        // 都隶属同一个事务；抛异常自动回滚（`newTransaction()` + endTransaction 是
+        // protected 的，不能用）。
+        CoreDatabase(driver).transaction {
+            driver.execute(null, "ALTER TABLE mq_connection RENAME TO mq_connection_legacy", 0)
+            CoreDatabase.Schema.create(driver)
+            driver.execute(
+                null,
+                """
+                INSERT INTO mq_connection(id, name, type, host, port, target, user_name, created_at)
+                SELECT connection_id, COALESCE(name, ''), type, COALESCE(host, ''),
+                       COALESCE(port, 0), target, user_name, created_time
+                FROM mq_connection_legacy
+                """.trimIndent(),
+                0,
+            )
+            driver.execute(null, "DROP TABLE mq_connection_legacy", 0)
+        }
         // 旧表索引随 DROP 消失；新索引已由上面的 Schema.create 建好。
     }
 

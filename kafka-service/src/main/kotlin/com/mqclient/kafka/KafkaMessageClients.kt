@@ -93,6 +93,30 @@ class KafkaMessageClients(private val config: KafkaConfig) {
         /** 发送的 delivery 超时（ConfigDef 要求 32 位 Int）。 */
         const val DELIVERY_TIMEOUT_MS = 60_000
 
+        /**
+         * 等 ack 的额外余量：send() 返回之后 delivery 计时才开始，留一点收尾时间。
+         */
+        const val SEND_MARGIN_MS = 5_000L
+
+        /**
+         * 发送要等多久才算“确定失败”（毫秒）。
+         *
+         * ## 为什么不能拍一个固定值
+         *
+         * 旧实现是 `.get(connectionTimeout + 10s)`（默认 40s），而 producer 的
+         * `delivery.timeout.ms = 60s`。`Future.get` 超时**不会取消**发送：sender 线程
+         * 还会继续重试到 delivery 截止。于是 40–60s 这个窗口里，UI 已经报“发送失败”，
+         * 消息却可能已被 broker 收下 —— 用户一点重试就是真实重复消息。
+         *
+         * 现在的上界按 Kafka 的语义逐项相加：
+         *  - `max.block.ms`（= `connectionTimeout`）—— `send()` 等待元数据的上限；
+         *  - `delivery.timeout.ms` —— `send()` 返回后到给出成功/失败的上限。
+         *
+         * 等满这两段 + [SEND_MARGIN_MS]，我们报的失败才与 Kafka 的结论一致。
+         */
+        fun sendWaitMs(config: KafkaConfig): Long =
+            config.connectionTimeout * 1_000L + DELIVERY_TIMEOUT_MS + SEND_MARGIN_MS
+
         /** close 的等待上限。 */
         val CLOSE_TIMEOUT: Duration = Duration.ofSeconds(5)
 

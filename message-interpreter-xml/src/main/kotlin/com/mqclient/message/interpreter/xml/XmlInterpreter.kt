@@ -7,6 +7,7 @@ import com.mqclient.message.interpreter.ParamDef
 import com.mqclient.message.interpreter.ParamKind
 import java.io.StringReader
 import javax.xml.XMLConstants
+import javax.xml.parsers.DocumentBuilder
 import javax.xml.parsers.DocumentBuilderFactory
 import org.w3c.dom.Document
 import org.w3c.dom.Node
@@ -62,31 +63,110 @@ class XmlInterpreter : MessageInterpreter {
         /** 片段重试用的包装根：名字带 `mqclient` 前缀，正常文档里不可能撞上。 */
         const val FRAGMENT_ROOT = "mqclient-fragment-root"
 
+        /**
+         * 序列化深度上限。
+         *
+         * 旧实现无上限递归 [writeNode]：一条 `<a><a><a>…` 十 万层嵌套的消息体
+         * 直接把栈打爆，`StackOverflowError` 是 `Error`，`catch (Exception)` 接不住，
+         * 会穿出 LaunchedEffect 把整个组合作用域取消掉（界面从此不响应）。
+         * 正常报文远达不到这个深度。
+         */
+        const val MAX_DEPTH = 256
+
+        /** 输出长度上限（字符）：防「小输入→大输出」的放大。超限报 Failure，不返回半截。 */
+        const val MAX_OUTPUT_CHARS = 8 * 1024 * 1024
+
         /** 片段重试前剥离的 XML 声明（包装后它不再位于文档开头，解析器会直接报错）。 */
         val XML_DECLARATION = Regex("""^\s*<\?xml\b[^>]*\?>""")
 
         /**
-         * 解析器特征。逐条 `runCatching`：不同实现（Xerces / Android / 第三方）对个别
-         * 特征名可能不支持，某条设不上不该让整个解释器失效 —— 但这几条里
-         * `FEATURE_SECURE_PROCESSING` 与 entity 两条是安全前提，设不上时记录日志、
-         * 仍然继续（宁可格式化失败，也不要静默联网取实体）。
+         * 解析器特征。**实体展开上限是硬前提（fail-closed）**。
+         *
+         * 旧实现把五条安全特性全包在 `runCatching` 里静默吞掉，KDoc 声称「设不上时
+         * 记录日志」而实际什么都没记 —— 一旦某个实现拒绝 `FEATURE_SECURE_PROCESSING`，
+         * 实体展开的防护就悄悄消失了。
+         *
+         * 实测（JDK 25）：
+         *  - 默认 `jdk.xml.entityExpansionLimit` 已是 2500，billion-laughs 默认就会被
+         *    拒；但那是**实现默认值**，不能当保证；
+         *  - 工厂级属性 `…/entityExpansionLimit` 确实生效（设 500 后第 500 次展开抛
+         *    SAXParseException）。
+         *
+         * 所以现在显式下上限，不依赖 JDK 默认；外部实体 / 外部 DTD / Schema 仍然全关。
+         * 保留 `isExpandEntityReferences = true`：普通文档里的内部实体（`&who;`）应当
+         * 展开成文本（既有行为，有测试锁定）；放大风险由上限阻断。
          */
-        fun newDocumentBuilder() =
-            DocumentBuilderFactory.newInstance().apply {
+        const val ENTITY_EXPANSION_LIMIT = "10000"
+
+        /** 实体展开总字节上限（同一组 JAXP 属性）。 */
+        const val TOTAL_ENTITY_SIZE_LIMIT = "5000000"
+
+        /**
+         * 解析器层面的元素深度上限。
+         *
+         * 显式写死而不是吃 JDK 默认：JDK 25 的 `jdk.xml.maxElementDepth` 默认是
+         * **100**（实测 101 层就报 JAXP00010006），这个值随 JDK 版本会变，会变成一个
+         * 隐形的行为差异 —— 「昨天能格式化的报文今天不行」。设成比下面的序列化上限
+         * 高的值，让超过 [MAX_DEPTH] 的文档先由我们自己的检查拦住、报出可读文案。
+         */
+        const val PARSER_MAX_ELEMENT_DEPTH = "512"
+
+        fun newDocumentBuilder(): DocumentBuilder {
+            val factory = DocumentBuilderFactory.newInstance().apply {
                 // 不按命名空间处理：序列化时直接取限定名，前缀原样保留（格式化工具
                 // 不该擅自改写 `soap:` / `ns1:` 这类前缀）。
                 isNamespaceAware = false
                 isXIncludeAware = false
                 isExpandEntityReferences = true
-                runCatching { setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true) }
-                runCatching { setFeature("http://xml.org/sax/features/external-general-entities", false) }
-                runCatching { setFeature("http://xml.org/sax/features/external-parameter-entities", false) }
-                runCatching {
-                    setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false)
+            }
+            val secureProcessing = attempt {
+                factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true)
+            }
+            val expansionLimited =
+                attempt {
+                    factory.setAttribute(
+                        "http://www.oracle.com/xml/jaxp/properties/entityExpansionLimit",
+                        ENTITY_EXPANSION_LIMIT,
+                    )
                 }
-                runCatching { setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "") }
-                runCatching { setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "") }
-            }.newDocumentBuilder()
+            attempt {
+                factory.setAttribute(
+                    "http://www.oracle.com/xml/jaxp/properties/totalEntitySizeLimit",
+                    TOTAL_ENTITY_SIZE_LIMIT,
+                )
+            }
+            attempt {
+                factory.setAttribute(
+                    "http://www.oracle.com/xml/jaxp/properties/maxElementDepth",
+                    PARSER_MAX_ELEMENT_DEPTH,
+                )
+            }
+            // 外部实体 / 外部 DTD / Schema：一律不取外部资源（XXE）。
+            attempt { factory.setFeature("http://xml.org/sax/features/external-general-entities", false) }
+            attempt { factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false) }
+            attempt {
+                factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false)
+            }
+            attempt { factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "") }
+            attempt { factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "") }
+            // 实体放大必须有实际护栏：要么安全模式，要么显式上限。两者都没有就不解析。
+            if (!secureProcessing && !expansionLimited) {
+                throw IllegalStateException(
+                    "XML parser accepted neither secure processing nor an entity expansion limit; " +
+                        "refusing to parse untrusted content",
+                )
+            }
+            return factory.newDocumentBuilder()
+        }
+
+        /** 设一条解析器特性，返回是否成功（硬前提由 [newDocumentBuilder] 单独把关）。 */
+        private inline fun attempt(block: () -> Unit): Boolean =
+            try {
+                block()
+                true
+            } catch (t: Throwable) {
+                false
+            }
     }
 
     override fun canInterpret(content: ByteArray, encoding: Int, codedCharSetId: Int): Boolean =
@@ -168,6 +248,12 @@ class XmlInterpreter : MessageInterpreter {
     }
 
     private fun writeNode(node: Node, depth: Int, sb: StringBuilder) {
+        if (depth > MAX_DEPTH) {
+            throw XmlFormatException("XML nesting is deeper than $MAX_DEPTH levels; refusing to format it")
+        }
+        if (sb.length > MAX_OUTPUT_CHARS) {
+            throw XmlFormatException("Formatted XML would exceed $MAX_OUTPUT_CHARS characters; refusing to format it")
+        }
         when (node.nodeType) {
             Node.ELEMENT_NODE -> writeElement(node, depth, sb)
             Node.TEXT_NODE -> {

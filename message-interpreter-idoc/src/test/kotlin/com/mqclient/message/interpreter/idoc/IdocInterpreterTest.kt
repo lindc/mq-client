@@ -142,3 +142,42 @@ class IdocInterpreterTest {
         assertTrue(flat.contains("\n[000000003]"), "flat: $flat")
     }
 }
+
+/**
+ * 消息体是**外部可控输入**：HLEVEL 直接来自报文字节，旧实现 `"  ".repeat(hlevel - 1)`
+ * 在 hlevel=1_999_999_999 时一次要 ~4GB，小值（10^6）也会让每行多出 2MB ——
+ * 一条 1MB 的消息能放大成几个 GB。`OutOfMemoryError` 是 Error，`catch (Exception)`
+ * 接不住，会穿出 Compose 组合作用域把界面弄死。
+ */
+class IdocInterpreterMemoryBoundTest {
+
+    private val interpreter = IdocInterpreter()
+
+    private fun interpret(text: String): InterpreterResult =
+        interpreter.interpret(text.toByteArray(Charsets.UTF_8), 0, 1208, emptyMap())
+
+    /** 首行当控制记录（EDI_DC*），数据段跟在后面。 */
+    private val control = "EDI_DC40\t80\t0000000000123456\t731\t53"
+
+    @Test
+    fun `huge HLEVEL does not explode memory`() {
+        val line = "E2EDP01001 0000000000123456 000000002 000000001 1999999999 item data"
+        val result = interpret("$control\n$line")
+
+        assertTrue(result is InterpreterResult.Success, "actual: $result")
+        val out = (result as InterpreterResult.Success).formatted
+        // 每行缩进被压到上限（2 空格 × 31），输出量与输入同阶而不是 GB 级。
+        assertTrue(out.length < 100_000, "输出不应被放大，实际 ${out.length} 字符")
+        assertTrue(out.contains("level=1999999999"), "原始层级值仍应如实展示：\n$out")
+        assertTrue(out.contains("item data"), out)
+    }
+
+    @Test
+    fun `moderate HLEVEL still indents`() {
+        val line = "E2EDP01001 0000000000123456 000000002 000000001 3 item data"
+        val out = (interpret("$control\n$line") as InterpreterResult.Success).formatted
+
+        // level=3 → 2 级缩进（4 空格），与既有行为一致。
+        assertTrue(out.lineSequence().any { it.startsWith("    [000000002]") }, out)
+    }
+}

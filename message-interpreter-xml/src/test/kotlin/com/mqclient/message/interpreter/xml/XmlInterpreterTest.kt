@@ -157,3 +157,67 @@ class XmlInterpreterTest {
         assertFalse(interpreter.canInterpret("hello".toByteArray(), 0, 1208))
     }
 }
+
+/**
+ * 消息体是**外部可控输入**，XML 解释器必须对放大与深嵌套有硬上限。
+ *
+ * 旧实现把五条安全特性全包在 `runCatching` 里静默吞掉，且序列化递归无深度上限：
+ * 深嵌套会把栈打爆、`StackOverflowError` / `OutOfMemoryError` 都是 `Error`，
+ * `catch (Exception)` 接不住，会穿出 Compose 组合作用域把界面弄死。
+ */
+class XmlInterpreterHardeningTest {
+
+    private val interpreter = XmlInterpreter()
+
+    private fun interpret(xml: String): InterpreterResult =
+        interpreter.interpret(xml.toByteArray(Charsets.UTF_8), 0, 1208, emptyMap())
+
+    /** billion-laughs：实体展开必须被上限拦住（而不是把堆吃光）。 */
+    @Test
+    fun `entity expansion bomb is rejected`() {
+        val sb = StringBuilder("""<?xml version="1.0"?><!DOCTYPE lolz [""")
+        sb.append("""<!ENTITY lol0 "lol">""")
+        for (i in 1..9) {
+            sb.append("<!ENTITY lol").append(i).append(" \"")
+            repeat(10) { sb.append("&lol").append(i - 1).append(';') }
+            sb.append("\">")
+        }
+        sb.append("]><lolz>&lol9;</lolz>")
+
+        val result = interpret(sb.toString())
+
+        assertTrue(result is InterpreterResult.Failure, "实体炸弹应被拒绝，实际：$result")
+    }
+
+    /** 超过深度上限的嵌套报 Failure，不把栈打爆。 */
+    @Test
+    fun `excessively deep nesting fails instead of overflowing the stack`() {
+        val depth = 400
+        val xml = buildString {
+            repeat(depth) { append("<a>") }
+            append("x")
+            repeat(depth) { append("</a>") }
+        }
+
+        val result = interpret(xml)
+
+        assertTrue(result is InterpreterResult.Failure, "超深嵌套应报失败，实际：$result")
+        assertTrue(
+            result.message.orEmpty().contains("deeper than"),
+            "错误文案应说明深度超限：${result.message}",
+        )
+    }
+
+    /** 正常深度仍然可用（上限不能误伤常规报文）。 */
+    @Test
+    fun `nesting below the cap still formats`() {
+        val depth = 50
+        val xml = buildString {
+            repeat(depth) { append("<a>") }
+            append("x")
+            repeat(depth) { append("</a>") }
+        }
+
+        assertTrue(interpret(xml) is InterpreterResult.Success)
+    }
+}

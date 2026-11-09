@@ -365,12 +365,9 @@ class RabbitMqMessageSession private constructor(
             channelOps.withLock {
                 checkOpen()
                 val ch = ensureChannel()
-                try {
-                    requeueHeldOn(ch)
-                } catch (e: Exception) {
-                    discardChannel(ch, e)
-                    throw e
-                }
+                // 失败时 [requeueHeldOn] 自己已经报废 channel 并清账，这里只负责上抛
+                // （重复 discard 会对同一条 channel 再 abort 一次，纯属浪费）。
+                requeueHeldOn(ch)
             }
         }
 
@@ -626,22 +623,70 @@ class RabbitMqMessageSession private constructor(
      * 挪到后台后，最坏只损失后台一条工人线程与一个 channel 号（心跳 / 重连会回收）。
      */
     private fun discardChannel(dead: Channel, cause: Throwable? = null) {
-        synchronized(stateLock) { if (channel === dead) channel = null }
+        // 只处理「被丢弃的正是当前 channel」的情况：withOperationChannel 的发布句柄
+        // 不在账上，它的失败不该连累当前 browse channel 的 tag。
+        val wasCurrent = synchronized(stateLock) {
+            val current = channel === dead
+            if (current) channel = null
+            current
+        }
+        // 账上这些 tag 都属于这条将要被 abort 的 channel：broker 关闭它时会把这些
+        // 未 ack 的消息自动重入队，所以必须同时从账上清掉。不清的话，下次
+        // [ensureChannel] 新建的 channel 从 tag=1 重新计数，后续 ack/requeue 会拿
+        // 死 channel 的 tag 去操作新 channel —— 406 PRECONDITION_FAILED，把刚建好的
+        // channel 再打死一轮。
+        val droppedTags = if (wasCurrent) withState { heldTags.size.also { heldTags.clear() } } else 0
         val number = runCatching { dead.channelNumber }.getOrDefault(-1)
         sessionLog.warn(
             "channel discarded: queue=$queueName channel=$number " +
+                "heldTagsDropped=$droppedTags " +
                 "cause=${cause?.let { it::class.simpleName } ?: "unknown"} " +
                 "detail=${cause?.message ?: "-"}",
         )
         abortInBackground(dead, "discarded after failure")
     }
 
-    /** 已持 [channelOps] 调用。先把 tag 摘出来再 nack，避免 nack 期间占着状态监视器。 */
+    /**
+     * 已持 [channelOps] 调用。先把 tag 摘出来再 nack，避免 nack 期间占着状态监视器。
+     *
+     * ## 不再吞错
+     *
+     * 旧实现先把 `heldTags` 整个清空，再对每个 tag 做 `runCatching { basicNack }` ——
+     * 失败被丢掉，所以 `requeueAll()` 在调用方看来永远是成功的，而消息其实还卡在
+     * unacked（对其它消费者不可见），对话框却把列表清空、`held` 归零。
+     *
+     * 现在：成功一条才从账上减一条；失败则**报废 channel 后上抛**。报废本身也不是
+     * 白丢 —— broker 在 channel 关闭时会把该 channel 上所有未 ack 的消息自动重入队，
+     * 所以数据仍然是安全的，但调用方必须知道「这次 requeue 没走成、channel 已重建」。
+     */
     private fun requeueHeldOn(ch: Channel) {
-        val tags = withState { heldTags.toList().also { heldTags.clear() } }
+        val tags = withState { heldTags.toList() }
+        if (tags.isEmpty()) return
+        val failed = ArrayList<Long>()
         for (tag in tags) {
-            // 单条 nack 失败不中断（channel 断开时 broker 会整体重入队）。
-            runCatching { channelCall("rabbitmq_err_timeout_nack", "Requeue") { ch.basicNack(tag, false, true) } }
+            try {
+                channelCall("rabbitmq_err_timeout_nack", "Requeue") { ch.basicNack(tag, false, true) }
+                withState { heldTags.remove(tag) }
+            } catch (e: Exception) {
+                failed += tag
+            }
+        }
+        if (failed.isNotEmpty()) {
+            // channel 已经不能用了：报废它，让 broker 把这些未 ack 消息整体重入队
+            // （[discardChannel] 同时清掉账上的 tag）。
+            discardChannel(
+                ch,
+                ServiceException(
+                    "rabbitmq_err_requeue_incomplete",
+                    fallbackMessage = "Requeue failed for some messages; the channel was reset",
+                ),
+            )
+            throw ServiceException(
+                "rabbitmq_err_requeue_incomplete",
+                args = listOf(failed.size, tags.size),
+                fallbackMessage = "Only ${tags.size - failed.size} of ${tags.size} messages could be requeued; " +
+                    "the channel was reset and the rest were returned to the queue by the broker",
+            )
         }
     }
 
