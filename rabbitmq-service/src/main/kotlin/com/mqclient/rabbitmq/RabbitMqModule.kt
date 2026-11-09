@@ -321,7 +321,7 @@ object RabbitMqModule {
             val connection = connectionManager.amqpConnection(ctx)
             channel = withContext(Dispatchers.IO) { connection.createChannel() }
             // passive 声明：队列不存在立刻 404，而不是等第一次 basicGet。
-            // 与 createChannel 一样受 channelRpcTimeout（5s）约束。
+            // 与 createChannel 一样受 channelRpcTimeout 约束。
             withContext(Dispatchers.IO) { channel.queueDeclarePassive(queueName) }
             val session = RabbitMqMessageSession.onSharedConnection(
                 queueName, connection, channel,

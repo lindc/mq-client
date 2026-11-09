@@ -119,7 +119,7 @@ class RabbitMqConnectionManager(
      *     权限配置里有一项是错的。
      *  3. **双检锁**：两个对话框同时首开只建一条物理连接。
      *  4. 超时全部由 [rabbitMqConnectionFactory] 提供（握手 10s、shutdown 3s、
-     *     channel RPC 5s），这里不再叠协程层 `withTimeout`。
+     *     channel RPC 30s），这里不再叠协程层 `withTimeout`。
      *  5. **死连接必须关掉再覆盖**（见 `stale`）：`ctx.amqp` 可能指向一条 `isOpen == false`
      *     的连接。直接覆盖会让旧连接**永远失去引用** —— socket、心跳线程、SSL 上下文
      *     再也没人能释放，反复重连就是稳定泄漏。

@@ -41,7 +41,9 @@ class RabbitMqHeartbeatLiveTest {
         println("  factory.channelRpcTimeout = ${factory.channelRpcTimeout}")
         println("  factory.shutdownTimeout   = ${factory.shutdownTimeout}")
         println("  factory.handshakeTimeout  = ${factory.handshakeTimeout}")
-        assertEquals(5_000, factory.channelRpcTimeout)
+        // 30s：basicGet 的返回包含整个消息体，真机实测公网约 700KB/s，
+        // 5s 会让 3.5MB 以上的消息必然超时（见 AMQP_CHANNEL_RPC_TIMEOUT_MS 的说明）。
+        assertEquals(30_000, factory.channelRpcTimeout)
         assertEquals(3_000, factory.shutdownTimeout)
 
         val connection = withContext(Dispatchers.IO) { factory.newConnection() }

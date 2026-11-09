@@ -121,7 +121,7 @@ data class RabbitMqFetchedMessage(
  *
  * ## 与上一版的三个本质差异
  *
- *  1. **channel 是一次性的**：`basicGet` 一旦抛错（含 5s RPC 超时），当前 channel
+ *  1. **channel 是一次性的**：`basicGet` 一旦抛错（含 RPC 超时），当前 channel
  *     立即 [discardChannel] 报废，绝不复用。坏掉的 channel 会污染后续所有调用，
  *     复用它是「越用越慢」的推手之一。
  *  2. **不存在「关不掉的锁」**：持锁期间唯一的阻塞调用有
@@ -232,7 +232,7 @@ class RabbitMqMessageSession private constructor(
             }
         } catch (e: RabbitMqOperationTimeoutException) {
             // 超时是「会话可能已坏」的第一信号，必须留下记录。RabbitMQ 无 UI 侧
-            // withTimeout（见对话框 KDoc），这是底层 channelRpcTimeout=5s 到点抛出。
+            // withTimeout（见对话框 KDoc），这是底层 channelRpcTimeout 到点抛出。
             sessionLog.warn(
                 "[MQ-Perf][RabbitMQ] 拉取超时, 耗时达到=${System.currentTimeMillis() - startedAt}ms, " +
                     "已被底层 RPC 超时强制取消: queue=$queueName, 异常类型=${e::class.simpleName}, 详情=${e.message}",
@@ -246,7 +246,7 @@ class RabbitMqMessageSession private constructor(
     /**
      * 已持 [channelOps]、已在 IO 上。任一 `basicGet` 抛错 → 当前 channel 立刻报废。
      *
-     * 不做「失败重试」：超时说明这条 channel 的 RPC 队列已经乱了，重试只会再等 5s。
+     * 不做「失败重试」：超时说明这条 channel 的 RPC 队列已经乱了，重试只会再等一轮。
      * 报废后下次点击由 [ensureChannel] 从共享连接上开一条新的 —— 自愈但可控。
      */
     private fun drain(limit: Int): List<RabbitMqFetchedMessage> {
@@ -257,7 +257,7 @@ class RabbitMqMessageSession private constructor(
         var parseMs = 0L
         try {
             while (out.size < limit) {
-                // channelRpcTimeout 到这里生效：broker 不应答时 5s 抛
+                // channelRpcTimeout 到这里生效：broker 不应答（或大消息传不完）时抛
                 // ChannelContinuationTimeoutException，而不是挂 10 分钟。
                 // 网络 IO：basicGet 本体。
                 var t = System.currentTimeMillis()
@@ -463,7 +463,7 @@ class RabbitMqMessageSession private constructor(
      *
      * 与 kafka / ibm-mq 的 `closeResources` 同一口径（那两个也把关闭包在
      * `NonCancellable` 里）。代价可控：本方法只做 best-effort requeue + abort，
-     * 没有任何 `await` 式的无限等待，底层 RPC 一律受 `channelRpcTimeout`（5s）约束。
+     * 没有任何 `await` 式的无限等待，底层 RPC 一律受 `channelRpcTimeout` 约束。
      */
     override suspend fun close(): Unit =
         withContext(NonCancellable + Dispatchers.IO) {

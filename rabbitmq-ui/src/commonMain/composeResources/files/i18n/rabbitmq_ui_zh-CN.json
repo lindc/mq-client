@@ -286,7 +286,7 @@
   "rabbitmq_err_queue_not_found": "队列不存在（404）：检查队列名与 vhost",
   "rabbitmq_err_fetch_in_progress": "上一次拉取尚未完成，请稍候",
   "rabbitmq_err_session_closed": "消息会话已关闭",
-  "rabbitmq_err_timeout_fetch": "拉取消息超时：broker 未在设定时间内应答",
+  "rabbitmq_err_timeout_fetch": "拉取消息超时：30 秒内没传完（消息过大或链路慢时会发生，不一定是 broker 故障）",
   "rabbitmq_err_stream_browse_unsupported": "当前队列为 Stream 队列，不支持单条预览拉取（basic.get）",
   "rabbitmq_err_timeout_ack": "确认消息超时：broker 未在设定时间内应答",
   "rabbitmq_err_timeout_publish": "发布消息超时：broker 未在设定时间内应答",

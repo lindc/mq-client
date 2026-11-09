@@ -10,8 +10,10 @@ import java.util.concurrent.ThreadFactory
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 
-/**
+/*
  * AMQP 客户端的三个超时（毫秒）。**这是本次重构的承重墙**，不能省。
+ *
+ * （本段是文件级说明，不是某个声明的 KDoc —— 每个常量各自带说明。）
  *
  * 为什么要显式设：amqp-client 5.22.0 的默认值对交互式界面完全不可接受 ——
  *
@@ -29,7 +31,31 @@ import java.util.concurrent.TimeUnit
  * 或 `TimeoutException`，调用栈正常返回、锁正常释放。这与协程层 `withTimeout` 有本质
  * 区别 —— 后者只让等待方放弃，杀不掉阻塞在 socket 上的调用，被留下的锁就成了死锁。
  */
-internal const val AMQP_CHANNEL_RPC_TIMEOUT_MS = 5_000
+
+/**
+ * 单次 channel RPC 的上限。**它同时也是「拉取一条消息」的上限**，因为
+ * `basicGet` 的返回包含整个消息体 —— 这个事实决定了取值。
+ *
+ * 真机实测（chillbear，公网，2026-11-09）的传输速率约 **700 KB/s**：
+ *
+ * | body | basicGet 耗时 |
+ * |------|---------------|
+ * | 128 KB | 168 ms |
+ * | 1 MB | 1.4 s |
+ * | 2 MB | 2.6 s |
+ * | 4 MB | **5.97 s** |
+ * | 8 MB | 11.6 s |
+ *
+ * 原来取 5s，于是**约 3.5 MB 以上的消息根本浏览不了**，而且报「broker 未及时响应」——
+ * 把「链路慢」冤枉成了「broker 死了」，还会顺带把 channel 报废。
+ *
+ * 30s 在实测带宽下覆盖到 ~20 MB，能包住常见的 16 MB 上限；同时仍比 amqp-client
+ * 默认的 10 分钟快 20 倍 —— 真卡死时用户最多等 30s，而不是十分钟。
+ *
+ * 死连接的**主要**检测手段是心跳（[AMQP_REQUESTED_HEARTBEAT_S]），不是这个值：
+ * 心跳发现对端不说话后 `isOpen` 翻假，下一次取用直接重建连接。
+ */
+internal const val AMQP_CHANNEL_RPC_TIMEOUT_MS = 30_000
 internal const val AMQP_SHUTDOWN_TIMEOUT_MS = 3_000
 internal const val AMQP_HANDSHAKE_TIMEOUT_MS = 10_000
 
@@ -42,7 +68,7 @@ internal const val AMQP_HANDSHAKE_TIMEOUT_MS = 10_000
  *  - 断网 / 休眠 / 中间设备静默丢包时，TCP 不会主动告知，`Connection.isOpen` 仍为
  *    `true`；
  *  - 于是 [RabbitMqConnectionManager.amqpConnection] 认为连接可用、不会重建，每次
- *    `basicGet` 都要硬等满 `channelRpcTimeout`（5s）才报超时 —— 界面重现「每次点
+ *    `basicGet` 都要硬等满 `channelRpcTimeout` 才报超时 —— 界面重现「每次点
  *    都转 5 秒」的卡顿。
  *
  * 开启心跳后，服务端或客户端在 1–2 个周期（60–120s）内发现对方不应答，主动关闭
@@ -85,11 +111,11 @@ internal fun rabbitMqConnectionFactory(config: RabbitMqConfig): ConnectionFactor
         connectionTimeout = config.connectionTimeout * 1_000
         handshakeTimeout = AMQP_HANDSHAKE_TIMEOUT_MS
         shutdownTimeout = AMQP_SHUTDOWN_TIMEOUT_MS
-        // ← 让 basicGet / basicAck / basicPublish / channel.close 自己在 5s 后抛，
+        // ← 让 basicGet / basicAck / basicPublish / channel.close 自己在上限后抛，
         //   而不是靠协程 withTimeout 放弃等待。
         channelRpcTimeout = AMQP_CHANNEL_RPC_TIMEOUT_MS
         // 心跳：探测静默死连接（断网 / 休眠 / 中间设备丢包），详见 [AMQP_REQUESTED_HEARTBEAT_S]。
-        // 不开心跳时，这种连接的 isOpen 永远是 true，每次 basicGet 都硬等满 5s。
+        // 不开心跳时，这种连接的 isOpen 永远是 true，每次 basicGet 都硬等满上限。
         requestedHeartbeat = AMQP_REQUESTED_HEARTBEAT_S
         // 会话生命周期由对话框 / 连接上下文显式管理，不走自动恢复
         // （自动重连会让 close 语义变得不可预测）。
@@ -119,7 +145,7 @@ internal fun rabbitMqConnectionFactory(config: RabbitMqConfig): ConnectionFactor
  * 于是旧写法（在 `channelOps.withLock { ... }` 里调 abort）会造成：
  *
  * ```
- * basicGet 等不到回复 → 5s 超时（用户看到「超时」）
+ * basicGet 等不到回复 → RPC 超时（用户看到「超时」）
  *   → discardChannel() → abort() 阻塞在 socket 写上
  *   → channelOps（Mutex）永不释放
  *   → 此后每次拉取 / ack / 发布都挤在同一把锁上 → 「超时一次，之后彻底不动」
