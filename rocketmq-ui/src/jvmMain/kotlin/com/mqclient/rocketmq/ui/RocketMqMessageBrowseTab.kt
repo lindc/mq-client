@@ -65,6 +65,9 @@ import com.mqclient.rocketmq.RocketMqModule
 import com.mqclient.rocketmq.RocketMqReadStart
 import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.ThemedSnackbarHost
+import com.mqclient.uicommon.CompactControlSpec
+import com.mqclient.uicommon.CompactPrimaryButton
+import com.mqclient.uicommon.CompactSecondaryButton
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
@@ -316,7 +319,7 @@ internal fun RocketMqMessageBrowseTab(
                 onValueChange = { countText = it.filter(Char::isDigit).take(4) },
                 width = 84.dp,
             )
-            PrimaryButton(
+            CompactPrimaryButton(
                 onClick = {
                     Log.info(
                         "rocketmq-ui",
@@ -454,7 +457,7 @@ private fun CompactNumberField(
         cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
         modifier = Modifier
             .width(width)
-            .height(36.dp)
+            .height(CompactControlSpec.Height)
             .clip(RoundedCornerShape(6.dp))
             .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(6.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
@@ -490,7 +493,7 @@ private fun StartModeDropdown(
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box {
-        SecondaryButton(onClick = { expanded = true }, standardMinWidth = false) {
+        CompactSecondaryButton(onClick = { expanded = true }) {
             Text(stringResource(startMode.labelKey))
             Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp))
         }
@@ -514,9 +517,8 @@ private fun QueueDropdown(
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box {
-        SecondaryButton(
+        CompactSecondaryButton(
             onClick = { expanded = true },
-            standardMinWidth = false,
         ) {
             Text(
                 if (selected == null) {

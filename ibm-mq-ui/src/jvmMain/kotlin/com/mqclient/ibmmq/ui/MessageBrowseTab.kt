@@ -76,6 +76,8 @@ import com.mqclient.ibmmq.messaging.browseErrorText
 import com.mqclient.mqui.common.CompactSearchField
 import com.mqclient.mqui.objectlist.ObjectListEmptyState
 import com.mqclient.mqui.common.rememberDebouncedValue
+import com.mqclient.uicommon.CompactDropdown
+import com.mqclient.uicommon.CompactPrimaryButton
 import com.mqclient.uicommon.DangerButton
 import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.AppTooltip
@@ -508,7 +510,6 @@ private fun BrowseToolbar(
     onRefresh: () -> Unit,
     importState: DmpmqmsgImportState?,
 ) {
-    var menuExpanded by remember { mutableStateOf(false) }
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = ROW_HPADDING, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -520,30 +521,15 @@ private fun BrowseToolbar(
             placeholder = stringResource("ibm_mq_msg_browse_search_hint"),
             modifier = Modifier.weight(1f),
         )
-        // 时间范围下拉（对已加载消息做本地过滤）。
-        Box {
-            SecondaryButton(
-                onClick = { menuExpanded = true },
-                standardMinWidth = false,
-            ) {
-                Text(stringResource(timeRange.labelKey))
-                Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp))
-            }
-            DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
-                BrowseTimeRange.entries.forEach { range ->
-                    DropdownMenuItem(
-                        text = { Text(stringResource(range.labelKey)) },
-                        onClick = {
-                            menuExpanded = false
-                            onRangeChange(range)
-                        },
-                    )
-                }
-            }
-        }
+        // 时间范围下拉（对已加载消息做本地过滤）：32dp 紧凑控件。
+        CompactDropdown(
+            selected = stringResource(timeRange.labelKey),
+            options = BrowseTimeRange.entries.map { stringResource(it.labelKey) to it },
+            onSelect = onRangeChange,
+        )
         // 核心「读取」入口：固定宽度排在时间范围下拉右侧，weight 搜索框只会收缩自己，
         // 不会挤掉这个按钮。Idle 态 refresh() 直接 return，只有这里会开 browse 会话。
-        PrimaryButton(onClick = onRead, enabled = !reading) {
+        CompactPrimaryButton(onClick = onRead, enabled = !reading) {
             Text(stringResource("ibm_mq_msg_browse_read"))
         }
         if (totalText.isNotEmpty()) {

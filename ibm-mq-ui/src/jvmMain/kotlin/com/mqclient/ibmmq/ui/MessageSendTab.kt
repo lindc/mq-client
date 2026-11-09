@@ -58,6 +58,10 @@ import com.mqclient.mqui.file.readMessageBytes
 import com.mqclient.mqui.objectlist.ObjectListEmptyState
 import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.AppTooltip
+import com.mqclient.uicommon.CompactControlSpec
+import com.mqclient.uicommon.CompactDropdown
+import com.mqclient.uicommon.CompactPrimaryButton
+import com.mqclient.uicommon.CompactSecondaryButton
 import com.mqclient.uicommon.CompactTextField
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.file.pickFiles
@@ -339,7 +343,7 @@ internal fun MessageSendTab(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            PrimaryButton(onClick = ::pickAndLoad) { Text(stringResource("ibm_mq_msg_send_pick_file")) }
+            CompactPrimaryButton(onClick = ::pickAndLoad) { Text(stringResource("ibm_mq_msg_send_pick_file")) }
             if (state.tasks.isNotEmpty()) {
                 Text(
                     text = stringResource("ibm_mq_msg_send_files_selected").withArg(state.tasks.size),
@@ -348,7 +352,7 @@ internal fun MessageSendTab(
                 )
             }
             Spacer(Modifier.weight(1f))
-            SecondaryButton(
+            CompactSecondaryButton(
                 onClick = state::clear,
                 enabled = state.tasks.isNotEmpty(),
             ) { Text(stringResource("ibm_mq_msg_send_clear")) }
@@ -448,19 +452,21 @@ private fun AdvancedPropsSection(state: SendMessagesState) {
                     onValueChange = { state.correlationId = it },
                     label = stringResource("ibm_mq_msg_send_correlation_id"),
                     modifier = Modifier.fillMaxWidth(),
+                    height = CompactControlSpec.Height,
                 )
                 CompactTextField(
                     value = state.replyToQueue,
                     onValueChange = { state.replyToQueue = it },
                     label = stringResource("ibm_mq_msg_send_reply_to_queue"),
                     modifier = Modifier.fillMaxWidth(),
+                    height = CompactControlSpec.Height,
                 )
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     PropLabel(stringResource("ibm_mq_msg_send_persistence"))
-                    DropdownSelector(
+                    CompactDropdown(
                         selected = stringResource(
                             if (state.persistence == SendDefaults.PERSISTENCE_PERSISTENT) {
                                 "ibm_mq_msg_persistence_persistent"
@@ -480,7 +486,7 @@ private fun AdvancedPropsSection(state: SendMessagesState) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     PropLabel(stringResource("ibm_mq_msg_send_priority"))
-                    DropdownSelector(
+                    CompactDropdown(
                         selected = state.priority.toString(),
                         options = (0..9).map { it.toString() to it },
                         onSelect = { state.priority = it },
@@ -495,6 +501,7 @@ private fun AdvancedPropsSection(state: SendMessagesState) {
                         value = state.expirySeconds,
                         onValueChange = { state.expirySeconds = it.filter(Char::isDigit).take(9) },
                         modifier = Modifier.width(120.dp),
+                        height = CompactControlSpec.Height,
                     )
                     Text(
                         text = stringResource("ibm_mq_msg_send_expiry_hint"),
@@ -511,6 +518,7 @@ private fun AdvancedPropsSection(state: SendMessagesState) {
                         value = state.ccsid,
                         onValueChange = { state.ccsid = it.filter(Char::isDigit).take(5) },
                         modifier = Modifier.width(120.dp),
+                        height = CompactControlSpec.Height,
                     )
                     Text(
                         text = stringResource("ibm_mq_msg_send_ccsid_hint"),
@@ -531,35 +539,6 @@ private fun PropLabel(text: String) {
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.width(110.dp),
     )
-}
-
-@Composable
-private fun DropdownSelector(
-    selected: String,
-    options: List<Pair<String, Int>>,
-    onSelect: (Int) -> Unit,
-) {
-    var expanded by remember { mutableStateOf(false) }
-    Box {
-        SecondaryButton(
-            onClick = { expanded = true },
-            standardMinWidth = false,
-        ) {
-            Text(selected)
-            Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp))
-        }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            options.forEach { (label, value) ->
-                DropdownMenuItem(
-                    text = { Text(label) },
-                    onClick = {
-                        expanded = false
-                        onSelect(value)
-                    },
-                )
-            }
-        }
-    }
 }
 
 /* --------------------------- 多文件模式 --------------------------- */

@@ -74,6 +74,10 @@ import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.dialog.DateTimePickerDialog
 import com.mqclient.uicommon.file.saveFileBytes
+import com.mqclient.uicommon.CompactControlSpec
+import com.mqclient.uicommon.CompactDropdown
+import com.mqclient.uicommon.CompactPrimaryButton
+import com.mqclient.uicommon.CompactSecondaryButton
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
@@ -457,7 +461,7 @@ internal fun StartSelectorRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // Partition 下拉：-1 = 全部分区。
-        DropdownButton(
+        CompactDropdown(
             selected = if (selectedPartition < 0) {
                 stringResource("kafka_ui_msg_browse_partition_all")
             } else {
@@ -472,7 +476,7 @@ internal fun StartSelectorRow(
             onSelect = onPartitionChange,
         )
         // 起点四选一。
-        DropdownButton(
+        CompactDropdown(
             selected = stringResource(startMode.labelKey),
             options = StartMode.entries.map { stringResource(it.labelKey) to it },
             onSelect = onStartModeChange,
@@ -484,12 +488,10 @@ internal fun StartSelectorRow(
                 // offset 是分区内概念：全部分区模式下禁用并提示。
                 enabled = selectedPartition >= 0,
                 modifier = Modifier.width(140.dp).testTag(BROWSE_OFFSET_FIELD_TAG),
+                height = CompactControlSpec.Height,
             )
             StartMode.TIMESTAMP -> {
-                SecondaryButton(
-                    onClick = onPickTime,
-                    standardMinWidth = false,
-                ) {
+                CompactSecondaryButton(onClick = onPickTime) {
                     Text(pickedTime?.format(DISPLAY_TIME_FORMATTER) ?: stringResource("kafka_ui_msg_browse_start_time_hint"))
                 }
                 if (pickedTime != null) {
@@ -500,49 +502,19 @@ internal fun StartSelectorRow(
             }
             else -> Unit
         }
-        // 拉取条数：ui-common 的 CompactTextField（无 label 时 40dp，与右侧 PrimaryButton
-        // 严格等高）—— 原 OutlinedTextField 是 M3 默认 56dp，与 40dp 按钮并排失衡。
+        // 拉取条数：紧凑输入框与 32dp 工具栏按钮同高。
         CompactTextField(
             value = countText,
             onValueChange = onCountChange,
             modifier = Modifier.width(80.dp).testTag(BROWSE_COUNT_FIELD_TAG),
+            height = CompactControlSpec.Height,
         )
-        PrimaryButton(onClick = onRead, enabled = !reading) {
+        CompactPrimaryButton(onClick = onRead, enabled = !reading) {
             Text(
                 stringResource(
                     if (reading) "kafka_ui_msg_browse_loading" else "kafka_ui_msg_browse_read",
                 ),
             )
-        }
-    }
-}
-
-/** 选择区通用下拉（PrimaryButton + DropdownMenu，与 MQ 的 DropdownSelector 同款）。 */
-@Composable
-private fun <T> DropdownButton(
-    selected: String,
-    options: List<Pair<String, T>>,
-    onSelect: (T) -> Unit,
-) {
-    var expanded by remember { mutableStateOf(false) }
-    Box {
-        SecondaryButton(
-            onClick = { expanded = true },
-            standardMinWidth = false,
-        ) {
-            Text(selected)
-            Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp))
-        }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            options.forEach { (label, value) ->
-                DropdownMenuItem(
-                    text = { Text(label) },
-                    onClick = {
-                        expanded = false
-                        onSelect(value)
-                    },
-                )
-            }
         }
     }
 }

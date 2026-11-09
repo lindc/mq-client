@@ -61,6 +61,9 @@ import com.mqclient.uicommon.dialog.HeaderDraft
 import com.mqclient.uicommon.dialog.HeadersEditor
 import com.mqclient.uicommon.file.pickFile
 import com.mqclient.uicommon.file.pickFiles
+import com.mqclient.uicommon.CompactControlSpec
+import com.mqclient.uicommon.CompactPrimaryButton
+import com.mqclient.uicommon.CompactSecondaryButton
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
@@ -354,7 +357,7 @@ internal fun KafkaMessageSendTab(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            PrimaryButton(onClick = ::pickAndLoad) { Text(stringResource("kafka_ui_send_files_pick")) }
+            CompactPrimaryButton(onClick = ::pickAndLoad) { Text(stringResource("kafka_ui_send_files_pick")) }
             if (state.tasks.isNotEmpty()) {
                 Text(
                     text = stringResource("kafka_ui_send_files_selected").withArg(state.tasks.size),
@@ -363,7 +366,7 @@ internal fun KafkaMessageSendTab(
                 )
             }
             Spacer(Modifier.weight(1f))
-            SecondaryButton(
+            CompactSecondaryButton(
                 onClick = state::clear,
                 enabled = state.tasks.isNotEmpty(),
             ) { Text(stringResource("kafka_ui_send_clear")) }
@@ -425,6 +428,7 @@ private fun TargetRow(state: KafkaSendMessagesState) {
                 onValueChange = { state.targetTopic = it },
                 label = stringResource("kafka_ui_send_topic"),
                 modifier = Modifier.weight(1.4f),
+                height = CompactControlSpec.Height,
             )
             CompactTextField(
                 value = state.targetPartition,
@@ -432,12 +436,14 @@ private fun TargetRow(state: KafkaSendMessagesState) {
                 label = stringResource("kafka_ui_send_partition"),
                 placeholder = stringResource("kafka_ui_send_partition_hint"),
                 modifier = Modifier.weight(0.6f),
+                height = CompactControlSpec.Height,
             )
             CompactTextField(
                 value = state.keyText,
                 onValueChange = { state.keyText = it },
                 label = stringResource("kafka_ui_send_key"),
                 modifier = Modifier.weight(1f),
+                height = CompactControlSpec.Height,
             )
         }
         // Headers 编辑器（可增删键值行，value 可勾 hex）—— ui-common 公共组件，
@@ -485,7 +491,7 @@ private fun SingleSendPane(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.weight(1f))
-            SecondaryButton(
+            CompactSecondaryButton(
                 onClick = {
                     // 「从文件加载」：选文件读字节进编辑缓冲（大文件同样截断预览）。
                     scope.launch {
@@ -501,7 +507,6 @@ private fun SingleSendPane(
                             .onFailure { onLoadFailed(MessageFileFailure.of(file.name, it)) }
                     }
                 },
-                standardMinWidth = false,
             ) { Text(stringResource("kafka_ui_send_load_file")) }
         }
         OutlinedTextField(

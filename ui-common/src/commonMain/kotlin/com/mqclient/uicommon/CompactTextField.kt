@@ -26,6 +26,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
@@ -56,6 +57,8 @@ fun CompactTextField(
     readOnly: Boolean = false,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     onFocusChange: ((Boolean) -> Unit)? = null,
+    /** 工具栏传 [CompactControlSpec.Height]（32dp）；默认 40dp，其它界面行为不变。 */
+    height: Dp = 40.dp,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
@@ -93,7 +96,7 @@ fun CompactTextField(
             interactionSource = interaction,
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 40.dp)
+                .heightIn(min = height)
                 .clip(RoundedCornerShape(6.dp))
                 .background(MaterialTheme.colorScheme.surface)
                 .border(
@@ -101,7 +104,9 @@ fun CompactTextField(
                     color = borderColor,
                     shape = RoundedCornerShape(6.dp),
                 )
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+                // 32dp 时收掉上下 padding，靠 decorationBox 的 CenterStart 垂直居中；
+                // 默认 40dp 仍用 10dp，保持原有观感。
+                .padding(horizontal = 12.dp, vertical = if (height <= 32.dp) 4.dp else 10.dp),
             decorationBox = { inner ->
                 Box(contentAlignment = Alignment.CenterStart) {
                     if (value.isEmpty() && !placeholder.isNullOrBlank()) {

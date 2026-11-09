@@ -6,6 +6,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.runComposeUiTest
+import com.mqclient.uicommon.CompactControlSpec
 import com.mqclient.uicommon.i18n.LanguageResources
 import kotlinx.coroutines.runBlocking
 import kotlin.math.abs
@@ -15,15 +16,16 @@ import kotlin.test.assertTrue
 /**
  * 消息浏览页「起点选择区」的尺寸守卫。
  *
- * 现场问题：拉取条数是 m3 `OutlinedTextField`（默认 56dp），紧挨着 40dp 的「读取」
- * 按钮 —— 一行里两个控件差 16dp，视觉上像贴歪了。现在换成 `ui-common` 的
- * `CompactTextField`（无 label 时 40dp）。
+ * 现场问题：拉取条数是 m3 `OutlinedTextField`（默认 56dp），与旁边的「读取」按钮
+ * 差一大截。现在统一为 `ui-common` 的 `CompactTextField` + `CompactPrimaryButton`，
+ * 两者高度都取 [CompactControlSpec.Height]（32dp）。
  *
  * 这条测试不查「用了哪个组件」（源码看一眼就知道），而是量**渲染后的实际高度**：
- * 条数框与「读取」按钮的高度差必须 < 1dp。降级回 `OutlinedTextField` 会立刻红。
+ * 条数框必须是 32dp 紧凑档，且与「读取」按钮的高度差 < 1dp。
+ * 降级回 `OutlinedTextField` 会立刻红。
  *
  * 量的是框体（`CompactTextField` 的 Column）而不是框内文字节点：`hasSetTextAction()`
- * 命中的是 20dp 的行内节点，量不到 40dp 的边框 —— 所以两处调用点带了 testTag。
+ * 命中的是行内节点，量不到边框 —— 所以两处调用点带了 testTag。
  */
 class KafkaMessageBrowseToolbarTest {
 
@@ -60,8 +62,8 @@ class KafkaMessageBrowseToolbarTest {
         val buttonHeight = onNodeWithText("读取").fetchSemanticsNode().boundsInRoot.height
 
         assertTrue(
-            abs(fieldHeight - 40f) < 1f,
-            "条数输入框必须是 40dp 紧凑档（实测 ${fieldHeight}dp）—— " +
+            abs(fieldHeight - CompactControlSpec.Height.value) < 1f,
+            "条数输入框必须是 ${CompactControlSpec.Height.value}dp 紧凑档（实测 ${fieldHeight}dp）—— " +
                 "回退到 OutlinedTextField 会是 56dp。",
         )
         assertTrue(

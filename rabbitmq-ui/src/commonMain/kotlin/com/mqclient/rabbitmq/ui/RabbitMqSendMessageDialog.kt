@@ -53,6 +53,9 @@ import com.mqclient.uicommon.dialog.DialogSizeClass
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.file.pickFiles
 import com.mqclient.uicommon.CompactTextField
+import com.mqclient.uicommon.CompactControlSpec
+import com.mqclient.uicommon.CompactPrimaryButton
+import com.mqclient.uicommon.CompactSecondaryButton
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
@@ -342,6 +345,7 @@ fun RabbitMqSendMessageDialog(
                 supportingText = routingKeyError,
                 enabled = !state.busy,
                 modifier = Modifier.fillMaxWidth(),
+                height = CompactControlSpec.Height,
             )
             Spacer(Modifier.height(8.dp))
 
@@ -394,7 +398,7 @@ private fun SendPane(
                 horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                PrimaryButton(onClick = onPickFiles, enabled = !state.busy) {
+                CompactPrimaryButton(onClick = onPickFiles, enabled = !state.busy) {
                     Text(stringResource("rabbitmq_ui_send_pick_file"))
                 }
                 if (state.tasks.isNotEmpty()) {
@@ -413,7 +417,7 @@ private fun SendPane(
                     textAlign = androidx.compose.ui.text.style.TextAlign.End,
                     modifier = Modifier.weight(1f),
                 )
-                SecondaryButton(
+                CompactSecondaryButton(
                     onClick = state::clearBatch,
                     enabled = !state.busy && state.tasks.isNotEmpty(),
                 ) { Text(stringResource("rabbitmq_ui_send_clear")) }
@@ -489,6 +493,7 @@ internal fun HeadersEditor(
                 enabled = enabled,
                 placeholder = stringResource("rabbitmq_ui_send_header_name"),
                 modifier = Modifier.weight(1f),
+                height = CompactControlSpec.Height,
             )
             Spacer(Modifier.width(8.dp))
             CompactTextField(
@@ -497,6 +502,7 @@ internal fun HeadersEditor(
                 enabled = enabled,
                 placeholder = stringResource("rabbitmq_ui_send_header_value"),
                 modifier = Modifier.weight(1.4f),
+                height = CompactControlSpec.Height,
             )
             AppIconButton(
                 onClick = { onChange(headers.filterIndexed { i, _ -> i != index }) },

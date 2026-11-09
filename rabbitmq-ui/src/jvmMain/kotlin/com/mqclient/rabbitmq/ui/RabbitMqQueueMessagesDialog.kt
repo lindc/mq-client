@@ -61,6 +61,9 @@ import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.dialog.DialogSizeClass
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.file.pickFiles
+import com.mqclient.uicommon.CompactControlSpec
+import com.mqclient.uicommon.CompactPrimaryButton
+import com.mqclient.uicommon.CompactSecondaryButton
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.userMessage
@@ -597,14 +600,14 @@ private fun BrowsePane(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            PrimaryButton(onClick = onFetch, enabled = !fetching) {
+            CompactPrimaryButton(onClick = onFetch, enabled = !fetching) {
                 Text(stringResource("rabbitmq_ui_msg_fetch"))
             }
-            SecondaryButton(
+            CompactSecondaryButton(
                 onClick = onRefresh,
                 enabled = !fetching,
             ) { Text(stringResource("rabbitmq_ui_msg_refetch")) }
-            SecondaryButton(
+            CompactSecondaryButton(
                 onClick = onForwardAll,
                 enabled = !fetching && messages.isNotEmpty(),
             ) { Text(stringResource("rabbitmq_ui_msg_forward_all")) }
@@ -619,8 +622,8 @@ private fun BrowsePane(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             // 80dp：两侧各 12dp 内边距后还剩 56dp，够放三位数字（上限就是 3 位）。
-            // 不传 modifier.height —— 组件自己是 heightIn(min = 40.dp)，与 M3 Button 同高，
-            // 这也正是原来 height(52.dp) 该去掉的原因（52 既不是 56 也不是 40）。
+            // 传 CompactControlSpec.Height(32dp) 与工具栏紧凑按钮同高 —— 底部主按钮
+            // 仍是 40dp，两者刻意不齐，形成主次对比。
             // 数字限制仍是双保险：KeyboardOptions 在桌面端没有软键盘可作用，真正的
             // 关卡在调用方的 filter(Char::isDigit).take(3) 与 effectiveLimit 的 coerceIn。
             CompactTextField(
@@ -628,6 +631,7 @@ private fun BrowsePane(
                 onValueChange = onLimitChange,
                 enabled = !fetching,
                 modifier = Modifier.width(80.dp),
+                height = CompactControlSpec.Height,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             )
 
