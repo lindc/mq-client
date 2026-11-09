@@ -69,8 +69,7 @@ Kafka 容器在跑，未实测。）
 集群行为请走管理 API（三个端口都通）。
 
 上面四条客户端用例（heartbeat / session 泄漏 / 共享连接 / 部分扫描）都直接复用
-config.toml 的这条连接；**其中两条在 broker 不在时会 FAIL 而不是 SKIP**，
-详见文末「门禁与真机测试的关系」。
+config.toml 的这条连接，环境未就绪时一律 SKIP（见文末「门禁与真机测试的关系」）。
 
 ### IBM MQ
 
@@ -102,15 +101,24 @@ config.toml 的这条连接；**其中两条在 broker 不在时会 FAIL 而不�
 
 ### 门禁与真机测试的关系
 
-`scripts/verify.sh` 跑全仓单测（`test` + `jvmTest`）。真机用例分两类，**行为不一致**：
+`scripts/verify.sh` 跑全仓单测（`test` + `jvmTest`）。**真机用例一律「环境未就绪 → SKIP」**，
+不因环境问题把门禁弄红 —— 门禁只反映代码问题。
 
-- **无环境即 SKIP**（`assumeLive`）：IBM MQ / Kafka / RocketMQ / Anthropic 的全部 LiveTest，
-  以及 RabbitMQ 的 `RabbitMqScanPartialLiveTest`、`RabbitMqSessionLeakLiveTest` 中走管理
-  API 的那条、`RabbitMqSharedConnectionLiveTest`；
-- **连不上就 FAIL**（直接 `factory.newConnection()`，没有兜底）：
-  `RabbitMqHeartbeatLiveTest`、`AmqpThreadNamingProbeTest`，以及
-  `RabbitMqSessionLeakLiveTest` 的 `liveSharedConnectionReleasesChannelsAndUnackedMessages` /
-  `liveCloseDuringChannelOpenMustNotLeakChannel`。
+统一靠 `test-support` 里的三个函数（`com.mqclient.testing`）：
 
-所以 **RabbitMQ 停机时全量门禁会红**（实测 4 条失败），而 IBM MQ / Kafka / RocketMQ 停机
-只是 SKIP。这是已知不一致，尚未统一——建议真机能力验证一律改成 SKIP，让门禁只反映代码问题。
+- `assumeNotNull(msg, value)`：没有配置好的连接（`config.toml` 里没有该模块的条目）→ SKIP；
+- `assumeConnected(target) { ... }`：**建立连接**这一步失败 → SKIP。连上之后的断言失败
+  仍然是 FAIL（那些才是真缺陷）；
+- `assumeLive(msg, cond)`：其余前置条件（管理 API 不可用、队列不存在、账号无权限）。
+
+`assumeConnected` 的 KDoc 里记了反面教材：本项目曾有 4 条 RabbitMQ 用例直接
+`factory.newConnection()`，broker 一停就把全量门禁弄红，而同一批文件里的其它用例都在
+SKIP —— 同一语义两种行为，读代码的人无从判断哪个是约定。现在四个调用点（
+`RabbitMqHeartbeatLiveTest`、`AmqpThreadNamingProbeTest`、
+`RabbitMqSharedConnectionLiveTest`、`RabbitMqSessionLeakLiveTest` 的两条）全部走它。
+
+回归自检：`AssumeConnectedSelfTest` 用一定连不上的端口（`127.0.0.1:1`）断言结果是
+**skipped 而非 failed**。它挂了就说明兜底失效。
+
+确认过的行为（2026-11-09）：RabbitMQ 在线时 diag 用例 12/12 全跑 0 skip；
+把端口换成未监听值时同一批用例 4/4 skipped、0 failed。

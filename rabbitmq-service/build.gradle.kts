@@ -30,7 +30,10 @@ dependencies {
 tasks.withType<Test>().configureEach {
     systemProperties(
         System.getProperties().stringPropertyNames()
-            .filter { it.startsWith("rabbitmqdiag.") }
+            // `mqclient.config.dir` 是 ConfigManager 的测试钩子：指向一份改过端口的
+            // config.toml 即可验证「环境未就绪时真机用例会 SKIP 而不是 FAIL」，
+            // 不必停掉共享 broker。app-core 的 DatabaseManagerTest 也用它。
+            .filter { it.startsWith("rabbitmqdiag.") || it == "mqclient.config.dir" }
             .associateWith { System.getProperty(it) },
     )
 }

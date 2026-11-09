@@ -10,6 +10,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import com.mqclient.testing.assumeNotNull
+import com.mqclient.testing.assumeConnected
 
 /**
  * 真机验证：心跳与超时配置真的落到了连接上。
@@ -46,7 +47,10 @@ class RabbitMqHeartbeatLiveTest {
         assertEquals(30_000, factory.channelRpcTimeout)
         assertEquals(3_000, factory.shutdownTimeout)
 
-        val connection = withContext(Dispatchers.IO) { factory.newConnection() }
+        // 环境未就绪 = SKIP（不是 FAIL）：门禁只该反映代码问题。
+        val connection = assumeConnected("RabbitMQ") {
+            runBlocking(Dispatchers.IO) { factory.newConnection() }
+        }
         try {
             val negotiated = connection.getHeartbeat()
             println("  连接协商出的心跳（getHeartbeat）= $negotiated 秒")

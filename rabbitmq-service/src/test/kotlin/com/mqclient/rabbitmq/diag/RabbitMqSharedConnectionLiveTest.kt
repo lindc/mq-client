@@ -15,6 +15,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import com.mqclient.testing.assumeNotNull
 import com.mqclient.testing.assumeLive
+import com.mqclient.testing.assumeConnected
 
 /**
  * 真机验证：**共享连接**被多个会话复用，且单个会话关闭不影响其它会话。
@@ -64,8 +65,9 @@ class RabbitMqSharedConnectionLiveTest {
         }
 
         // 模拟 ConnectionManager.amqpConnection 的懒建：整个进程只建这一条。
-        val shared = withContext(Dispatchers.IO) {
-            rabbitMqConnectionFactory(config).newConnection()
+        // 管理 API 通但 AMQP 不通也算环境未就绪：SKIP 而不是 FAIL。
+        val shared = assumeConnected("RabbitMQ") {
+            runBlocking(Dispatchers.IO) { rabbitMqConnectionFactory(config).newConnection() }
         }
         println("  共享连接已建立: isOpen=${shared.isOpen}")
 

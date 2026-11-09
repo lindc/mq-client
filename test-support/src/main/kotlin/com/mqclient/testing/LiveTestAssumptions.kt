@@ -38,3 +38,47 @@ fun <T : Any> assumeNotNull(message: String, value: T?): T {
     // assumption 已保证非空；这里的兜底只为满足编译器（不会被执行）。
     return value ?: throw AssertionError("unreachable: assumption passed but value was null")
 }
+
+/**
+ * 建立了连接才算「有测试环境」：**连不上就 SKIP，而不是 FAIL**。
+ *
+ * 真机用例的职责是验证「这条链路在真实环境下的行为」，不是验证「环境本身活着」。
+ * 环境没起来（容器停了 / 端口没发布 / 防火墙挡了）属于前置条件不满足，报告里应该
+ * 显示 skipped —— 否则 `scripts/verify.sh` 会红，而代码一行没错，门禁就失去了
+ * 「只反映代码问题」这个唯一的可信度。
+ *
+ * ## 为什么必须抽出来
+ *
+ * 项目里原来有 4 处直接 `factory.newConnection()`（RabbitMQ 心跳 / 线程命名 /
+ * 会话泄漏两条），broker 一停就把全量门禁弄红，而同一批文件里的其它用例都会 SKIP。
+ * 同一个语义散落成两种行为，读代码的人无从判断哪个才是约定。
+ *
+ * ## 用法与纪律
+ *
+ * ```kotlin
+ * val connection = assumeConnected("RabbitMQ") { factory.newConnection() }
+ * ```
+ *
+ * - `AssumptionViolatedException` 会原样穿出（不被兜住）—— 否则 assumption 又变成
+ *   PASSED，正是 [assumeLive] 的 KDoc 里警告的那种失败；
+ * - 只吞掉**建立连接**这一步的异常。连上之后的断言失败仍然是 FAIL：那些才是真缺陷。
+ * - [block] 里的阻塞调用请在 IO 上执行（本函数不切换调度器，不替调用方猜）。
+ */
+inline fun <T : Any> assumeConnected(
+    target: String,
+    block: () -> T,
+): T =
+    try {
+        block()
+    } catch (assumption: org.junit.internal.AssumptionViolatedException) {
+        // 兜底里如果又调用了一个 assumption，必须让它穿出去，不能吞。
+        throw assumption
+    } catch (error: Throwable) {
+        assumeLive(
+            "LIVE SKIP: $target 连接失败（环境未就绪）：" +
+                "${error::class.simpleName}: ${error.message ?: "-"}",
+            false,
+        )
+        // assumption 已经抛过异常；这行只为满足类型推断（不会执行）。
+        throw error
+    }

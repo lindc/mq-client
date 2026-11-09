@@ -21,6 +21,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import com.mqclient.testing.assumeNotNull
 import com.mqclient.testing.assumeLive
+import com.mqclient.testing.assumeConnected
 
 /**
  * 真机验证：消息会话的 open / fetch / close 循环**不泄漏连接**。
@@ -79,9 +80,11 @@ class RabbitMqSessionLeakLiveTest {
         }
 
         // ---- 基线：先跑一次让 amqp-client 的线程池建起来，再记基线 ----
-        withTimeout(30_000) {
-            RabbitMqMessageSession.open(config, queueName).close()
-        }
+        // 这一步同时是「AMQP 是否可达」的探针：连不上 = 环境未就绪 → SKIP。
+        // （管理 API 通但 AMQP 不通是真实存在的情形：端口没发布 / 防火墙只放了管理面。）
+        assumeConnected("RabbitMQ") {
+            runBlocking { withTimeout(30_000) { RabbitMqMessageSession.open(config, queueName) } }
+        }.close()
         settle()
         val baseline = amqpThreads()
         val baselineServerConns = serverConnectionCount(config)
@@ -219,7 +222,10 @@ class RabbitMqSessionLeakLiveTest {
         println("  target     = ${config.host}:${config.amqpPort} vhost=${config.vhost}")
 
         // 一条共享连接跑完全部轮次 —— 与 ConnectionManager.amqpConnection 的形状一致。
-        val shared = withContext(Dispatchers.IO) { rabbitMqConnectionFactory(config).newConnection() }
+        // 环境未就绪 = SKIP（不是 FAIL）：门禁只该反映代码问题。
+        val shared = assumeConnected("RabbitMQ") {
+            runBlocking(Dispatchers.IO) { rabbitMqConnectionFactory(config).newConnection() }
+        }
         println("  共享连接已建立: isOpen=${shared.isOpen}")
 
         // 自己的诊断队列：不受别人 unacked / 别的消费者干扰，断言才能是硬的。
@@ -363,7 +369,9 @@ class RabbitMqSessionLeakLiveTest {
         println("=========== RABBITMQ CLOSE-DURING-OPEN DIAG ===========")
         println("  target = ${config.host}:${config.amqpPort} vhost=${config.vhost}")
 
-        val shared = withContext(Dispatchers.IO) { rabbitMqConnectionFactory(config).newConnection() }
+        val shared = assumeConnected("RabbitMQ") {
+            runBlocking(Dispatchers.IO) { rabbitMqConnectionFactory(config).newConnection() }
+        }
         val queueName = "mq-client-diag-race-" + java.util.UUID.randomUUID().toString().take(8)
         val messageCount = 2
         val setup = withContext(Dispatchers.IO) { shared.createChannel() }

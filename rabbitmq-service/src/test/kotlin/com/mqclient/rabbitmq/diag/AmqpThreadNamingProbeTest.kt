@@ -10,6 +10,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import com.mqclient.testing.assumeConnected
 
 /**
  * 探针：确认 amqp-client 连接到底创建了哪些线程（名字长什么样）。
@@ -36,7 +37,10 @@ class AmqpThreadNamingProbeTest {
         }
 
         assertEquals(0, snapshot("before"), "开始前不应有 AMQP 连接线程")
-        val conn = withContext(Dispatchers.IO) { rabbitMqConnectionFactory(config).newConnection() }
+        // 环境未就绪 = SKIP（不是 FAIL）：门禁只该反映代码问题。
+        val conn = assumeConnected("RabbitMQ") {
+            runBlocking(Dispatchers.IO) { rabbitMqConnectionFactory(config).newConnection() }
+        }
         delay(1_200)
         assertEquals(
             1,
