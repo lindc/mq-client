@@ -359,10 +359,19 @@ fun RabbitMqSendMessageDialog(
                 ThemedSnackbarHost(snackbar, modifier = Modifier.align(Alignment.BottomCenter))
             }
 
+            // ---- 紧凑发送按钮：紧贴内容区底部右侧，移出底部全局按钮栏 ----
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                SendActionButton(state, ::submit)
+            }
+
             HorizontalDivider()
 
-            // ---- 底部：结果 / 进度 / 汇总 + 发送按钮 ----
-            SendBottomBar(state = state, onSubmit = ::submit)
+            // ---- 底部：结果 / 进度 / 汇总（提交动作已移到上一行）----
+            SendBottomBar(state = state)
         }
     }
 }
@@ -561,10 +570,7 @@ private fun SendFileRow(
 /* ------------------------------- 底部操作条 ------------------------------- */
 
 @Composable
-private fun SendBottomBar(
-    state: RabbitMqSendState,
-    onSubmit: () -> Unit,
-) {
+private fun SendBottomBar(state: RabbitMqSendState) {
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
         // 发送中进度 + 一轮完成后的汇总。
         if (state.busy && state.batchTotal > 0) {
@@ -584,27 +590,27 @@ private fun SendBottomBar(
                 modifier = Modifier.padding(bottom = 6.dp),
             )
         }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Spacer(Modifier.weight(1f))
-            // 只看待发送文件：有 WAITING 项即可点，无文件/全发完则禁用。
-            PrimaryButton(
-                onClick = onSubmit,
-                enabled = !state.busy && state.tasks.any { it.status == SendFileStatus.WAITING },
-            ) {
-                Text(
-                    text = when {
-                        state.busy && state.batchTotal > 0 ->
-                            stringResource("rabbitmq_ui_send_progress").withArg(state.processedCount, state.batchTotal)
-                        state.busy -> stringResource("rabbitmq_ui_send_sending")
-                        else -> stringResource("rabbitmq_ui_send_send_files")
-                    },
-                )
-            }
-        }
+    }
+}
+
+/**
+ * 紧凑发送按钮：32dp 次级样式，紧贴内容区底部，与 footer 的 40dp 深绿实心「关闭」
+ * 拉开主次。onClick / enabled / 文案分支与原先 SendBottomBar 里的完全一致。
+ */
+@Composable
+private fun SendActionButton(state: RabbitMqSendState, onSubmit: () -> Unit) {
+    CompactSecondaryButton(
+        onClick = onSubmit,
+        enabled = !state.busy && state.tasks.any { it.status == SendFileStatus.WAITING },
+    ) {
+        Text(
+            text = when {
+                state.busy && state.batchTotal > 0 ->
+                    stringResource("rabbitmq_ui_send_progress").withArg(state.processedCount, state.batchTotal)
+                state.busy -> stringResource("rabbitmq_ui_send_sending")
+                else -> stringResource("rabbitmq_ui_send_send_files")
+            },
+        )
     }
 }
 

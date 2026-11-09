@@ -350,6 +350,11 @@ internal fun KafkaMessageSendTab(
         }
     }
 
+    // 空消息体提示：紧凑发送按钮与结果行重试按钮共用。
+    val onEmptyBodyWarning: () -> Unit = {
+        pickScope.launch { snackbarHostState.showSnackbar(stringResource("kafka_ui_send_empty_body")) }
+    }
+
     Column(modifier = modifier.fillMaxSize()) {
         // ---- 1. 工具栏 ----
         Row(
@@ -401,16 +406,21 @@ internal fun KafkaMessageSendTab(
             ThemedSnackbarHost(snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter))
         }
 
+        // ---- 3.5 紧凑发送按钮：紧贴内容区底部右侧，移出底部全局按钮栏 ----
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = ROW_HPADDING, vertical = 4.dp),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            SendActionButton(state, onEmptyBodyWarning)
+        }
+
         HorizontalDivider()
 
-        // ---- 4. 底部：结果 / 汇总 + 发送按钮 ----
+        // ---- 4. 底部：结果 / 汇总（提交动作已移到上一行）----
         SendBottomBar(
             state = state,
-            onEmptyBodyWarning = {
-                pickScope.launch {
-                    snackbarHostState.showSnackbar(stringResource("kafka_ui_send_empty_body"))
-                }
-            },
+            onEmptyBodyWarning = onEmptyBodyWarning,
         )
     }
 }
@@ -617,7 +627,6 @@ private fun SendBottomBar(
     state: KafkaSendMessagesState,
     onEmptyBodyWarning: () -> Unit,
 ) {
-    val single = state.tasks.size == 1
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = ROW_HPADDING, vertical = 8.dp)) {
         // 单文件：最近一次发送结果（成功带 partition/offset + 时间，失败带原因 + 重试）。
         state.singleOutcome?.let { outcome ->
@@ -682,31 +691,33 @@ private fun SendBottomBar(
                 modifier = Modifier.padding(bottom = 6.dp),
             )
         }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Spacer(Modifier.weight(1f))
-            val noWaiting = !single && state.tasks.none { it.status == SendStatus.WAITING }
-            PrimaryButton(
-                onClick = {
-                    if (single) state.sendSingle(onEmptyBodyWarning) else state.sendAll()
-                },
-                enabled = !state.busy && state.tasks.isNotEmpty() && !noWaiting &&
-                    state.targetTopic.isNotBlank(),
-            ) {
-                Text(
-                    text = when {
-                        state.busy && !single ->
-                            stringResource("kafka_ui_send_sending_progress")
-                                .withArg(state.processedCount, state.batchTotal)
-                        state.busy -> stringResource("kafka_ui_send_btn_sending")
-                        single -> stringResource("kafka_ui_send_btn_send")
-                        else -> stringResource("kafka_ui_send_btn_send_all")
-                    },
-                )
-            }
-        }
+    }
+}
+
+/**
+ * 紧凑发送按钮：32dp 次级样式，紧贴内容区底部，与 footer 的 40dp 深绿实心「关闭」
+ * 拉开主次。onClick / enabled / 文案分支与原先 SendBottomBar 里的完全一致。
+ */
+@Composable
+private fun SendActionButton(state: KafkaSendMessagesState, onEmptyBodyWarning: () -> Unit) {
+    val single = state.tasks.size == 1
+    val noWaiting = !single && state.tasks.none { it.status == SendStatus.WAITING }
+    CompactSecondaryButton(
+        onClick = {
+            if (single) state.sendSingle(onEmptyBodyWarning) else state.sendAll()
+        },
+        enabled = !state.busy && state.tasks.isNotEmpty() && !noWaiting &&
+            state.targetTopic.isNotBlank(),
+    ) {
+        Text(
+            text = when {
+                state.busy && !single ->
+                    stringResource("kafka_ui_send_sending_progress")
+                        .withArg(state.processedCount, state.batchTotal)
+                state.busy -> stringResource("kafka_ui_send_btn_sending")
+                single -> stringResource("kafka_ui_send_btn_send")
+                else -> stringResource("kafka_ui_send_btn_send_all")
+            },
+        )
     }
 }

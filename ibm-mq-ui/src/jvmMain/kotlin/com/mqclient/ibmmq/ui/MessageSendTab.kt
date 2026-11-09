@@ -336,6 +336,11 @@ internal fun MessageSendTab(
         }
     }
 
+    // 空消息体提示的单一出口：高级属性行的发送按钮与结果行的重试按钮共用。
+    val onEmptyBodyWarning: () -> Unit = {
+        pickScope.launch { snackbarHostState.showSnackbar(stringResource("ibm_mq_msg_send_empty_body")) }
+    }
+
     Column(modifier = modifier.fillMaxSize()) {
         // ---- 1. 工具栏 ----
         Row(
@@ -372,15 +377,15 @@ internal fun MessageSendTab(
 
         HorizontalDivider()
 
-        // ---- 3. 高级属性（默认收起）：Tab 级渲染，空态 / 单文件 / 多文件都能设置 ----
-        AdvancedPropsSection(state)
+        // ---- 3. 高级属性 + 紧凑发送按钮（同一行：左展开 / 右提交）----
+        AdvancedPropsSection(state) {
+            SendActionButton(state, onEmptyBodyWarning)
+        }
 
-        // ---- 4. 底部：结果 / 汇总 + 发送按钮 ----
+        // ---- 4. 底部：结果 / 汇总（提交动作已移到上一行，不与 footer「关闭」打架）----
         SendBottomBar(
             state = state,
-            onEmptyBodyWarning = {
-                pickScope.launch { snackbarHostState.showSnackbar(stringResource("ibm_mq_msg_send_empty_body")) }
-            },
+            onEmptyBodyWarning = onEmptyBodyWarning,
         )
     }
 }
@@ -417,30 +422,38 @@ private fun SingleSendPane(state: SendMessagesState) {
     }
 }
 
-/** 高级属性（默认收起）：CorrelationId / ReplyToQueue / 持久化 / 优先级 / 过期时间 / CCSID。 */
+/** 高级属性（默认收起）：CorrelationId / ReplyToQueue / 持久化 / 优先级 / 过期时间 / CCSID。
+ *  [trailing] 放同一行右侧的紧凑发送按钮：左「展开」/ 右「提交」对齐，不再和 footer
+ *  的「关闭」上下堆成两颗主按钮。 */
 @Composable
-private fun AdvancedPropsSection(state: SendMessagesState) {
+private fun AdvancedPropsSection(
+    state: SendMessagesState,
+    trailing: @Composable () -> Unit,
+) {
     var expanded by remember { mutableStateOf(false) }
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = ROW_HPADDING, vertical = 4.dp)) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { expanded = !expanded }
-                .padding(vertical = 4.dp),
+            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(
-                imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                contentDescription = null,
-                modifier = Modifier.size(18.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.width(4.dp))
-            Text(
-                text = stringResource("ibm_mq_msg_send_advanced"),
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Row(
+                modifier = Modifier.weight(1f).clickable { expanded = !expanded },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    text = stringResource("ibm_mq_msg_send_advanced"),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            trailing()
         }
         AnimatedVisibility(visible = expanded) {
             Column(
@@ -614,7 +627,6 @@ private fun SendBottomBar(
     state: SendMessagesState,
     onEmptyBodyWarning: () -> Unit,
 ) {
-    val single = state.tasks.size == 1
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = ROW_HPADDING, vertical = 8.dp)) {
         // 单文件：最近一次发送结果（成功带 MessageId + 时间，失败带原因 + 重试）。
         state.singleOutcome?.let { outcome ->
@@ -664,30 +676,33 @@ private fun SendBottomBar(
                 modifier = Modifier.padding(bottom = 6.dp),
             )
         }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Spacer(Modifier.weight(1f))
-            val noWaiting = !single && state.tasks.none { it.status == SendStatus.WAITING }
-            PrimaryButton(
-                onClick = {
-                    if (single) state.sendSingle(onEmptyBodyWarning) else state.sendAll()
-                },
-                enabled = !state.busy && state.tasks.isNotEmpty() && !noWaiting,
-            ) {
-                Text(
-                    text = when {
-                        state.busy && !single ->
-                            stringResource("ibm_mq_msg_send_sending_progress").withArg(state.processedCount, state.batchTotal)
-                        state.busy -> stringResource("ibm_mq_msg_send_sending")
-                        single -> stringResource("ibm_mq_msg_send_send")
-                        else -> stringResource("ibm_mq_msg_send_send_all")
-                    },
-                )
-            }
-        }
+    }
+}
+
+/**
+ * 紧凑发送按钮：与「高级属性」标题同一行（左展开 / 右提交），32dp 次级样式，
+ * 与 footer 的 40dp 深绿实心「关闭」拉开主次。
+ * onClick / enabled / 文案分支与原先 SendBottomBar 里的完全一致。
+ */
+@Composable
+private fun SendActionButton(state: SendMessagesState, onEmptyBodyWarning: () -> Unit) {
+    val single = state.tasks.size == 1
+    val noWaiting = !single && state.tasks.none { it.status == SendStatus.WAITING }
+    CompactSecondaryButton(
+        onClick = {
+            if (single) state.sendSingle(onEmptyBodyWarning) else state.sendAll()
+        },
+        enabled = !state.busy && state.tasks.isNotEmpty() && !noWaiting,
+    ) {
+        Text(
+            text = when {
+                state.busy && !single ->
+                    stringResource("ibm_mq_msg_send_sending_progress").withArg(state.processedCount, state.batchTotal)
+                state.busy -> stringResource("ibm_mq_msg_send_sending")
+                single -> stringResource("ibm_mq_msg_send_send")
+                else -> stringResource("ibm_mq_msg_send_send_all")
+            },
+        )
     }
 }
 
