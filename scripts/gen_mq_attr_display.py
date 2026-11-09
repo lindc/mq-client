@@ -13,7 +13,7 @@ Outputs (checked in, do not edit by hand):
   - ibm-mq-ui/src/commonMain/composeResources/files/i18n/ibm_mq_attrs_en-US.json
   - ibm-mq-ui/src/commonMain/composeResources/files/i18n/ibm_mq_attrs_zh-CN.json
     (module i18n table base `ibm_mq_attrs`, keys are the raw `MQXXX.title`)
-  - ibm-mq-service/src/jvmMain/kotlin/com/mqclient/ibmmq/pcf/MqQueueAttrEnums.kt
+  - ibm-mq-service/src/main/kotlin/com/mqclient/ibmmq/pcf/MqQueueAttrEnums.kt
     (attr -> legal enum constant names, used to disambiguate int values)
 
 Usage: python3 scripts/gen_mq_attr_display.py [--plugins /opt/software/IDE/eclipse/plugins]
@@ -200,7 +200,7 @@ def main() -> None:
     enums = extract_queue_enums(core_jar)
     write_enum_kt(
         enums,
-        REPO / "ibm-mq-service/src/jvmMain/kotlin/com/mqclient/ibmmq/pcf/MqQueueAttrEnums.kt",
+        REPO / "ibm-mq-service/src/main/kotlin/com/mqclient/ibmmq/pcf/MqQueueAttrEnums.kt",
         "MqQueueAttrEnums",
         "xml/DmQueue.xml",
         "队列属性",
@@ -209,7 +209,7 @@ def main() -> None:
     qmgr_enums = extract_queue_enums(core_jar, "xml/DmQueueManager.xml")
     write_enum_kt(
         qmgr_enums,
-        REPO / "ibm-mq-service/src/jvmMain/kotlin/com/mqclient/ibmmq/pcf/MqQMgrAttrEnums.kt",
+        REPO / "ibm-mq-service/src/main/kotlin/com/mqclient/ibmmq/pcf/MqQMgrAttrEnums.kt",
         "MqQMgrAttrEnums",
         "xml/DmQueueManager.xml",
         "队列管理器属性",

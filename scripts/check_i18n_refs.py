@@ -76,12 +76,18 @@ KEY_SHAPE = re.compile(r"^[a-z0-9][a-z0-9_.]*$")
 # 测试源集不复扫：测试**故意**引用不存在的键（验证回落语义），
 # 例如 ModuleI18nMergeTest 的 nav_not_a_real_key / LanguageResourcesTest 的
 # some_missing_key。把它们算进覆盖率只会逼着往表里加假键。
-TEST_DIR_NAMES = {"jvmTest", "commonTest", "jvmMainTest"}
+#
+# `test` 是纯 kotlin-jvm 模块的测试源集（be0076fb 去 KMP 后的布局，18 个模块
+# 都不用 jvmTest 了）；漏掉它会让这些测试源重新进入扫描面。
+TEST_DIR_NAMES = {"test", "jvmTest", "commonTest", "jvmMainTest"}
 
 
 def is_test_source(path, root):
+    # root 恒为 `<module>/src`，所以首段就是源集名。只看首段而不是任意一段：
+    # 否则 `main/kotlin/com/.../test/Foo.kt` 这种叫 test 的**包名**会被误当测试源
+    # 跳过 —— 少扫一个生产文件，比多扫一个测试文件危险得多。
     parts = os.path.relpath(path, root).split(os.sep)
-    return any(part in TEST_DIR_NAMES for part in parts)
+    return bool(parts) and parts[0] in TEST_DIR_NAMES
 
 module = set()
 for table_file in BASE_TABLE_FILES + TABLE_FILES:
@@ -183,11 +189,21 @@ if unresolved or unresolved_consts:
 # `<CONST>.title`。两张表的常量集**完整可枚举**（就是 constNameFor 的全部值域），
 # 所以这里是全量校验，没有近似。
 ENUM_TABLES = [
-    "ibm-mq-service/src/jvmMain/kotlin/com/mqclient/ibmmq/pcf/MqQueueAttrEnums.kt",
-    "ibm-mq-service/src/jvmMain/kotlin/com/mqclient/ibmmq/pcf/MqQMgrAttrEnums.kt",
+    "ibm-mq-service/src/main/kotlin/com/mqclient/ibmmq/pcf/MqQueueAttrEnums.kt",
+    "ibm-mq-service/src/main/kotlin/com/mqclient/ibmmq/pcf/MqQMgrAttrEnums.kt",
 ]
 ENUM_ENTRY = re.compile(r'"(MQ[A-Z0-9_]+)"\s+to\s+listOf\(([^)]*)\)', re.S)
 CONST_LITERAL = re.compile(r'"(MQ[A-Z0-9_]+)"')
+
+# 声明的表必须真的在。这几条路径曾经跟着模块去 KMP（`src/jvmMain` → `src/main`）
+# 一起失效，而脚本只抛一个裸 FileNotFoundError —— 看不出 是「路径写错了」还是
+# 「脚本坏了」。变成一条能直接行动的报错。
+_missing_tables = [p for p in ENUM_TABLES if not os.path.isfile(os.path.join(REPO, p))]
+if _missing_tables:
+    print("!! DM 枚举表声明了但文件不存在（源集目录被移动了？）：")
+    for _path in _missing_tables:
+        print("   ", _path)
+    sys.exit(1)
 
 enum_by_attr = {}
 for enum_path in ENUM_TABLES:
