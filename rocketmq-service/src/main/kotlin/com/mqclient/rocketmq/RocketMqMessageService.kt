@@ -5,8 +5,8 @@ import com.mqclient.message.interpreter.isProbablyBinary
 import com.mqclient.message.interpreter.previewTextOf
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.currentCoroutineContext
@@ -263,8 +263,12 @@ open class RocketMqMessageService {
                 // 均分队列，每分片一个临时实例（并行创建 start）。
                 val chunkSize = ceil(queues.size / parallelism.toDouble()).toInt().coerceAtLeast(1)
                 val chunks = queues.chunked(chunkSize)
-                val consumers = chunks.map { async { clients.tempPullConsumer() } }.awaitAll()
+                val deferred = chunks.map { async { clients.tempPullConsumer() } }
+                val consumers = ArrayList<DefaultMQPullConsumer>(deferred.size)
                 try {
+                    // 顺序 await，不用 awaitAll：后者任一分片失败就整个抛出，
+                    // `consumers` 从未赋值，已启动的兄弟实例再也没人关。
+                    for (d in deferred) consumers += d.await()
                     coroutineScope {
                         chunks.forEachIndexed { index, chunk ->
                             launch {
@@ -273,7 +277,11 @@ open class RocketMqMessageService {
                         }
                     }
                 } finally {
-                    consumers.forEach { consumer -> runCatching { consumer.shutdown() } }
+                    // 取消 / 超时下 finally 仍必须完成收尾。
+                    withContext(NonCancellable) {
+                        deferred.forEach { it.cancel() }
+                        consumers.forEach { consumer -> clients.shutdownTemp(consumer) }
+                    }
                 }
             }
 

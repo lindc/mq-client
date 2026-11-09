@@ -11,6 +11,7 @@ import kotlin.test.assertTrue
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 
@@ -135,6 +136,28 @@ class BlockingCallsTest {
             delay(20)
         }
         assertEquals("会话", released.get(), "取消后迟到的产出也要释放")
+    }
+
+    @Test
+    fun `runs more than four blocking calls at the same time`() = runBlocking(Dispatchers.Default) {
+        // 「核心 4 + LinkedBlockingQueue(256)」的旧池只会真正并发 4 个：队列不满就永不扩容。
+        // 六路调用必须能同时拿到执行槽 —— 只要还有一路拿不到，栅栏就永远等不齐。
+        val concurrency = 6
+        val barrier = CountDownLatch(concurrency)
+
+        val results = (1..concurrency).map { index ->
+            async {
+                BlockingCalls.withDeadline(timeoutMs = 20_000, label = "并发 $index") {
+                    barrier.countDown()
+                    if (!barrier.await(10, TimeUnit.SECONDS)) {
+                        throw AssertionError("只有 4 个 worker：第 5/6 路阻塞调用拿不到执行槽")
+                    }
+                    index
+                }
+            }
+        }.awaitAll()
+
+        assertEquals((1..concurrency).toList(), results.sorted(), "六路并发都该正常返回")
     }
 
     @Test

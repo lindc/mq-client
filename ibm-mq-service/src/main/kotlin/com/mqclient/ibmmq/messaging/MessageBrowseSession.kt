@@ -40,9 +40,10 @@ fun browseErrorText(e: Throwable): String = when (e) {
  * ## 光标语义的等价实现
  *
  * MQQueue 的 browse 光标是**句柄级**的，换句柄即丢失。为保持「加载更多」翻页，
- * 会话维护 [browsedCount]（已交付给 UI 的条数）：每次新建句柄后从队首
- * `BROWSE_FIRST` + `BROWSE_NEXT` 跳过这些条目再继续读（一律 `MQGMO_NO_WAIT`，
- * 单次立即返回）。代价是每页多一次 O(browsedCount) 的跳过扫描，但换来故障隔离。
+ * 会话维护一个身份化游标 [BrowseCursor]（已交付给 UI 的 MessageId 多重集）：每次新建
+ * 句柄后从队首扫 `BROWSE_FIRST` + `BROWSE_NEXT`，跳过已交付的 Id 再继续读（一律
+ * `MQGMO_NO_WAIT`，单次立即返回）。代价是每页多一次 O(已交付) 的跳过扫描，但换来
+ * 故障隔离，而且**删除 / 插入不会漏交付或重复交付**（用条数就会，见 [BrowseCursor]）。
  *
  * 并发：每次 `get` 都持所属连接的 [mqiLock]（与 PCF 扫描 / 发送共用）—— 共享
  * `MQQueueManager` 上的 MQI 请求/应答是串行的。
@@ -55,8 +56,12 @@ class MessageBrowseSession private constructor(
     private val mqiLock: Mutex,
 ) {
 
-    /** 已交付给 UI 的条数；独立句柄无光标，靠它恢复「加载更多」位置。 */
-    private var browsedCount = 0
+    /**
+     * 身份化游标（见 [BrowseCursor]）：独立句柄没有光标，靠「已交付过哪些 MessageId」
+     * 恢复「加载更多」的位置。用条数的话，用户删掉一条之后翻页会多跳一条，
+     * 把一条从未展示过的消息默默吞掉。
+     */
+    private val cursor = BrowseCursor()
 
     /**
      * 浏览下一条（内部按 [count] 循环逐条 get，串行）。队列读空（MQRC 2033）时
@@ -66,6 +71,16 @@ class MessageBrowseSession private constructor(
      * 查询会交替压在同一条 MQ 通道上。
      */
     suspend fun browseNext(count: Int): List<MessageSummary> = mqiLock.withLock { browsePage(count) }
+
+    /**
+     * 用户消费（删除）了一条已经展示的消息：游标账上减一。
+     *
+     * 不把这一步放进 [browseNext] 自动做，是因为删除走的是另一条链路（按 MessageId
+     * 破坏性 get），会话无从得知。UI 删除成功后调用本方法。
+     */
+    fun onMessageRemoved(messageId: String) {
+        cursor.onMessageRemoved(messageId)
+    }
 
     private suspend fun browsePage(count: Int): List<MessageSummary> = withContext(Dispatchers.IO) {
         val start = System.currentTimeMillis()
@@ -81,43 +96,15 @@ class MessageBrowseSession private constructor(
             var parseMs = 0L
             val options = MQGetMessageOptions()
 
-            // 独立句柄没有 cursor：从队首跳过已浏览的 browsedCount 条，
+            // 独立句柄没有 cursor：从队首扫，跳过**已经交付过**的 MessageId，
             // 让本页从上次结束的位置继续（NO_WAIT，逐条立即返回）。
-            var skipped = 0
-            while (skipped < browsedCount) {
+            val scan = cursor.startScan()
+            var first = true
+            while (result.size < count) {
                 // 对话框关掉 / 切队列时，重复的阻塞 get 必须停在这一圈。
                 currentCoroutineContext().ensureActive()
                 options.options =
-                    (if (skipped == 0) MQConstants.MQGMO_BROWSE_FIRST else MQConstants.MQGMO_BROWSE_NEXT) or
-                        MQConstants.MQGMO_NO_WAIT or MQConstants.MQGMO_FAIL_IF_QUIESCING
-                val skippedMessage = MQMessage()
-                var t = System.currentTimeMillis()
-                try {
-                    queue.get(skippedMessage, options)
-                } catch (e: MQException) {
-                    ioMs += System.currentTimeMillis() - t
-                    if (e.reasonCode == MQConstants.MQRC_NO_MSG_AVAILABLE) {
-                        // 队列变短（消息被消费/清理）：已浏览位置收敛到实际存在的条目。
-                        browsedCount = skipped
-                        ibmMqLog.info(
-                            "[MQ-Perf][IBM MQ] browse done (队尾/条目减少): queue=$queueName, ioMs=$ioMs, " +
-                                "messages=0, totalMs=${System.currentTimeMillis() - start}ms",
-                        )
-                        return@withContext emptyList()
-                    }
-                    throw e
-                }
-                ioMs += System.currentTimeMillis() - t
-                skipped++
-            }
-
-            repeat(count) { index ->
-                currentCoroutineContext().ensureActive()
-                // 未跳过（browsedCount==0）时首条必须 BROWSE_FIRST 定位光标；
-                // 跳过过则光标已指向下一条，一律 BROWSE_NEXT。
-                val useFirst = browsedCount == 0 && index == 0
-                options.options =
-                    (if (useFirst) MQConstants.MQGMO_BROWSE_FIRST else MQConstants.MQGMO_BROWSE_NEXT) or
+                    (if (first) MQConstants.MQGMO_BROWSE_FIRST else MQConstants.MQGMO_BROWSE_NEXT) or
                         MQConstants.MQGMO_NO_WAIT or MQConstants.MQGMO_FAIL_IF_QUIESCING
                 val message = MQMessage()
                 var t = System.currentTimeMillis()
@@ -125,26 +112,25 @@ class MessageBrowseSession private constructor(
                     queue.get(message, options)
                 } catch (e: MQException) {
                     ioMs += System.currentTimeMillis() - t
-                    if (e.reasonCode == MQConstants.MQRC_NO_MSG_AVAILABLE) {
-                        browsedCount += result.size
-                        ibmMqLog.info(
-                            "[MQ-Perf][IBM MQ] browse done (队尾): queue=$queueName, ioMs=$ioMs, " +
-                                "parseMs=$parseMs, messages=${result.size}, totalMs=${System.currentTimeMillis() - start}ms",
-                        )
-                        return@withContext result
-                    }
+                    // 队尾：已交付的条数已由 recordDelivered 实时记账，这里无需补记。
+                    if (e.reasonCode == MQConstants.MQRC_NO_MSG_AVAILABLE) break
                     throw e
                 }
                 ioMs += System.currentTimeMillis() - t
+                first = false
+                val messageId = message.messageId.toMqIdHex()
+                if (scan.shouldSkip(messageId)) continue
                 // 数据解析：MQMessage -> MessageSummary（DTO -> Domain）。
                 t = System.currentTimeMillis()
                 result += message.toSummary()
+                // 解析成功之后才记账：一条没交出去的消息不能被算成已交付。
+                cursor.recordDelivered(messageId)
                 parseMs += System.currentTimeMillis() - t
             }
-            browsedCount += result.size
             ibmMqLog.info(
                 "[MQ-Perf][IBM MQ] browse done: queue=$queueName, ioMs=$ioMs, parseMs=$parseMs, " +
-                    "messages=${result.size}, totalMs=${System.currentTimeMillis() - start}ms",
+                    "messages=${result.size}, tracked=${cursor.trackedCount()}, " +
+                    "totalMs=${System.currentTimeMillis() - start}ms",
             )
             result
         } catch (cancellation: CancellationException) {
@@ -173,7 +159,7 @@ class MessageBrowseSession private constructor(
     /** 光标重置：下一次 [browseNext] 从队首重新开始（刷新用）。 */
     fun reset() {
         ibmMqLog.debug("browse cursor reset: queue=$queueName")
-        browsedCount = 0
+        cursor.reset()
     }
 
     /** 关闭会话；队列句柄已改为每操作新建即关，这里只标记，重复调用安全。 */

@@ -7,9 +7,13 @@ import java.time.Duration
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.apache.kafka.clients.consumer.ConsumerRecord
+import org.apache.kafka.clients.consumer.ConsumerRecords
 import org.apache.kafka.clients.consumer.KafkaConsumer
 import org.apache.kafka.clients.producer.KafkaProducer
 import org.apache.kafka.clients.producer.ProducerRecord
@@ -211,7 +215,9 @@ class KafkaMessageService {
                 val deadline = System.currentTimeMillis() + timeoutMs
                 var record: ConsumerRecord<ByteArray, ByteArray>? = null
                 while (record == null && System.currentTimeMillis() < deadline) {
-                    record = consumer.poll(Duration.ofMillis(POLL_INTERVAL_MS))
+                    // 同 collectPage：对话框关掉时要能立刻停下，不能等满 connectionTimeout。
+                    currentCoroutineContext().ensureActive()
+                    record = runInterruptible { consumer.poll(Duration.ofMillis(POLL_INTERVAL_MS)) }
                         .records(tp)
                         .firstOrNull { it.offset() >= offset }
                 }
@@ -225,21 +231,46 @@ class KafkaMessageService {
         }
     }
 
-    /** poll 循环 + 排序截断 + 游标组装（readMessages / readMoreMessages 共用）。 */
-    private fun collectPage(
+    /**
+     * poll 循环 + 排序截断 + 游标组装（readMessages / readMoreMessages 共用）。
+     *
+     * `poll` 是**阻塞**调用，不响应协程取消；必须：
+     *  1. 每次 poll 都经 [runInterruptible]（KafkaConsumer 文档明确 `interrupt()` 是
+     *     唤醒 poll 的方式，RocketMQ 侧已是同一做法）；
+     *  2. 循环头查一次取消，避免「刚好空闲时还在转」。
+     * 只靠 `now < deadline` 的话，关掉对话框后 IO 线程会一直被钉到 `connectionTimeout`
+     * （默认 30s），期间同一台机器上其它浏览请求一起变慢。
+     */
+    private suspend fun collectPage(
         consumer: KafkaConsumer<ByteArray, ByteArray>,
         topic: String,
         count: Int,
         timeoutMs: Long,
         previousCursor: Map<Int, Long>?,
+    ): KafkaMessagePage = collectPageWithPoll(topic, count, timeoutMs, previousCursor) {
+        runInterruptible { consumer.poll(Duration.ofMillis(POLL_INTERVAL_MS)) }
+    }
+
+    /**
+     * [collectPage] 的可测内核：poll 抽成 lambda，便于在无 broker 的环境下断言
+     * 「循环响应取消」。生产调用方见 [collectPage]。
+     */
+    internal suspend fun collectPageWithPoll(
+        topic: String,
+        count: Int,
+        timeoutMs: Long,
+        previousCursor: Map<Int, Long>?,
+        pollOnce: suspend () -> ConsumerRecords<ByteArray, ByteArray>,
     ): KafkaMessagePage {
         val deadline = System.currentTimeMillis() + timeoutMs
         val collected = mutableListOf<ConsumerRecord<ByteArray, ByteArray>>()
         var ioMs = 0L
         while (collected.size < count && System.currentTimeMillis() < deadline) {
+            // 取消检查：poll 之间必须能停下来（runInterruptible 负责打断在飞的那一次）。
+            currentCoroutineContext().ensureActive()
             // 网络 IO：poll 本体（每轮上限 POLL_INTERVAL_MS=500ms）。
             val t0 = System.currentTimeMillis()
-            val records = consumer.poll(Duration.ofMillis(POLL_INTERVAL_MS))
+            val records = pollOnce()
             ioMs += System.currentTimeMillis() - t0
             if (records.isEmpty) {
                 // 到货后一轮空 poll = 尾部已到，收手（不白等满 deadline）；

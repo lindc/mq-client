@@ -257,8 +257,20 @@ internal fun MessageBrowseTab(
             try {
                 val more = opened.browseNext(PAGE_SIZE)
                 val ready = uiState as? BrowseUiState.Ready ?: return@launch
+                // 按 MessageId 去重：重复 key 会让 Compose 的 LazyColumn 直接抛
+                // 「Key was already used」把对话框弄崩。游标已保证不重复交付，这里
+                // 是最后一道防线；真去掉了东西必须留痕，不能静默吞。
+                val merged = ready.messages + more
+                val deduped = merged.distinctBy { it.messageId }
+                if (deduped.size != merged.size) {
+                    Log.warn(
+                        "ibm-mq-ui",
+                        "[MQ-Perf][IBM MQ] 翻页出现重复 MessageId: queue=$queueName, " +
+                            "dropped=${merged.size - deduped.size}",
+                    )
+                }
                 uiState = ready.copy(
-                    messages = ready.messages + more,
+                    messages = deduped,
                     exhausted = more.size < PAGE_SIZE,
                     loadingMore = false,
                 )
@@ -344,6 +356,9 @@ internal fun MessageBrowseTab(
                 ?.deleteMessage(connectionId, queueName, message.messageId)
                 ?: MessageOperationResult.failure(null, stringResource("ibm_mq_err_module_not_initialized"))
             if (result.success) {
+                // 游标记账：告诉会话这条已经不在队列里了，否则下一页会多跳一条
+                // （用条数模拟光标的老实现就是这样静默漏消息的）。
+                session?.onMessageRemoved(message.messageId)
                 // 先更新列表（showSnackbar 挂起会阻塞本协程，提示与刷新互不等待）。
                 (uiState as? BrowseUiState.Ready)?.let { ready ->
                     uiState = ready.copy(

@@ -1,9 +1,12 @@
 package com.mqclient.rocketmq
 
+import com.mqclient.core.ServiceException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicBoolean
 import org.apache.rocketmq.client.consumer.DefaultMQPullConsumer
 import org.apache.rocketmq.client.producer.DefaultMQProducer
 
@@ -74,55 +77,140 @@ class RocketMqMessageClients(private val config: RocketMqConfig) {
     /** 创建 / 取用两个客户端的串行点（首次创建只发生一次）。 */
     private val createLock = Mutex()
 
+    /**
+     * 已经 [shutdown] 过。
+     *
+     * 必须在**创建路径**上检查，不能只把字段置 null：`clients()` 拿到本对象与
+     * [shutdown] 并发时，创建方可能在字段清空之后新建一个客户端并赋给已报废的持有者 ——
+     * 槽位不再引用它，谁也不会调 `shutdown()`，那是个永久 Netty 客户端 + 心跳线程（TLS
+     * 连接下还会拿已被 [RocketMqTlsStart.close] 删掉的 PEM 做握手）。
+     */
+    private val closed = AtomicBoolean(false)
+
+    /**
+     * 仍活着的临时 PullConsumer（浏览并行分片用）。
+     *
+     * 记在连接级对象上而不是只靠调用方 finally：分片创建时任一 `async` 失败，
+     * `awaitAll()` 会直接抛，拿到一半的实例就再也没人关。登记后 [shutdown] 能兜底。
+     */
+    private val tempConsumers: MutableSet<DefaultMQPullConsumer> =
+        java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+    private fun closedException() = ServiceException(
+        "rocketmq_err_clients_closed",
+        fallbackMessage = "RocketMQ message clients are already shut down; reconnect the connection first",
+    )
+
+    private fun ensureOpen() {
+        if (closed.get()) throw closedException()
+    }
+
+    /**
+     * 创建并 start 一个客户端，**启动失败时就地关掉它**。
+     *
+     * `DefaultMQProducer.start()` / `DefaultMQPullConsumer.start()` 会先建 Netty 客户端、
+     * 调度执行器与心跳，再去做可能失败的握手 / 路由请求 —— 中途抛异常时实例已经是
+     * 「半启动」的，不 shutdown 就是线程与 broker 侧组注册的泄漏。
+     *
+     * 调用方必须已持 [createLock]。
+     */
+    private suspend fun <T> startGuarded(
+        label: String,
+        create: () -> T,
+        start: (T) -> Unit,
+        shutdown: (T) -> Unit,
+    ): T {
+        ensureOpen()
+        val created = withContext(Dispatchers.IO) { create() }
+        try {
+            // start 必须在 TLS 窗口内（证书是全局静态字段，见 RocketMqTlsStart）。
+            withContext(Dispatchers.IO) { tls.start { start(created) } }
+        } catch (error: Throwable) {
+            // 半启动的句柄不能留：关它本身也不受调用方取消影响。
+            withContext(NonCancellable + Dispatchers.IO) { runCatching { shutdown(created) } }
+            throw error
+        }
+        // 创建期间连接被断开：这个新句柄从未登记，必须就地关掉。
+        if (closed.get()) {
+            withContext(NonCancellable + Dispatchers.IO) { runCatching { shutdown(created) } }
+            throw closedException()
+        }
+        rocketMqLog.debug("$label started: namesrv=${config.namesrvAddr}")
+        return created
+    }
+
     /** 共享 PullConsumer；首次调用时创建并 start。 */
     suspend fun pullConsumer(): DefaultMQPullConsumer {
+        ensureOpen()
         pullConsumer?.let { return it }
         return createLock.withLock {
             pullConsumer?.let { return@withLock it }
-            val created = withContext(Dispatchers.IO) {
-                DefaultMQPullConsumer(PULL_GROUP, tls.rpcHook).apply {
-                    setNamesrvAddr(config.namesrvAddr.trim())
-                    // 开关显式传入：ClientConfig.useTLS 在构造时固化，start 时再写全局来不及。
-                    setUseTLS(config.tlsEnabled)
-                }
-            }
-            // start 必须在 TLS 窗口内（证书是全局静态字段，见 RocketMqTlsStart）。
-            withContext(Dispatchers.IO) { tls.start { created.start() } }
+            val created = startGuarded(
+                label = "shared pull consumer",
+                create = {
+                    DefaultMQPullConsumer(PULL_GROUP, tls.rpcHook).apply {
+                        setNamesrvAddr(config.namesrvAddr.trim())
+                        // 开关显式传入：ClientConfig.useTLS 在构造时固化，start 时再写全局来不及。
+                        setUseTLS(config.tlsEnabled)
+                    }
+                },
+                start = { it.start() },
+                shutdown = { it.shutdown() },
+            )
             pullConsumer = created
-            rocketMqLog.debug("shared pull consumer started: namesrv=${config.namesrvAddr}")
             created
         }
     }
 
     /**
      * 一次性临时 PullConsumer（消息浏览「全部 Queue」并行分片用）：与共享实例同 group
-     * 同配置，但**不登记**——调用方负责 [DefaultMQPullConsumer.shutdown]。pull 全程
-     * 手动 begin / 不提交位点，实例间无共享状态，可安全并发。
+     * 同配置，但**不登记到连接**——调用方用完调 [shutdownTemp]；忘记调或被取消时，
+     * [shutdown] 会兜底收掉。pull 全程手动 begin / 不提交位点，实例间无共享状态，
+     * 可安全并发。
      */
-    suspend fun tempPullConsumer(): DefaultMQPullConsumer = withContext(Dispatchers.IO) {
-        val created = DefaultMQPullConsumer(PULL_GROUP, tls.rpcHook).apply {
-            setNamesrvAddr(config.namesrvAddr.trim())
-            setUseTLS(config.tlsEnabled)
-        }
-        withContext(Dispatchers.IO) { tls.start { created.start() } }
-        rocketMqLog.debug("temp pull consumer started: namesrv=${config.namesrvAddr}")
+    suspend fun tempPullConsumer(): DefaultMQPullConsumer = createLock.withLock {
+        val created = startGuarded(
+            label = "temp pull consumer",
+            create = {
+                DefaultMQPullConsumer(PULL_GROUP, tls.rpcHook).apply {
+                    setNamesrvAddr(config.namesrvAddr.trim())
+                    setUseTLS(config.tlsEnabled)
+                }
+            },
+            start = { it.start() },
+            shutdown = { it.shutdown() },
+        )
+        tempConsumers += created
         created
+    }
+
+    /** 关掉一个临时 PullConsumer（调用方 finally）；重复调用安全。 */
+    suspend fun shutdownTemp(consumer: DefaultMQPullConsumer) {
+        tempConsumers.remove(consumer)
+        withContext(NonCancellable + Dispatchers.IO) {
+            runCatching { consumer.shutdown() }
+                .onFailure { e -> rocketMqLog.warn("temp pull consumer shutdown failed: $e") }
+        }
     }
 
     /** 共享 Producer；首次调用时创建并 start。 */
     suspend fun producer(): DefaultMQProducer {
+        ensureOpen()
         producer?.let { return it }
         return createLock.withLock {
             producer?.let { return@withLock it }
-            val created = withContext(Dispatchers.IO) {
-                DefaultMQProducer(PRODUCE_GROUP, tls.rpcHook).apply {
-                    setNamesrvAddr(config.namesrvAddr.trim())
-                    setUseTLS(config.tlsEnabled)
-                }
-            }
-            withContext(Dispatchers.IO) { tls.start { created.start() } }
+            val created = startGuarded(
+                label = "shared producer",
+                create = {
+                    DefaultMQProducer(PRODUCE_GROUP, tls.rpcHook).apply {
+                        setNamesrvAddr(config.namesrvAddr.trim())
+                        setUseTLS(config.tlsEnabled)
+                    }
+                },
+                start = { it.start() },
+                shutdown = { it.shutdown() },
+            )
             producer = created
-            rocketMqLog.debug("shared producer started: namesrv=${config.namesrvAddr}")
             created
         }
     }
@@ -135,17 +223,28 @@ class RocketMqMessageClients(private val config: RocketMqConfig) {
      * 与 broker 的连接被拆掉后返回；这比无限期等一个卡住的 pull 更好 —— 断开是
      * 用户明确要求的动作，它必须立刻生效。
      */
-    suspend fun shutdown() = withContext(Dispatchers.IO) {
-        val consumer = pullConsumer.also { pullConsumer = null }
-        val prod = producer.also { producer = null }
-        consumer?.let {
-            runCatching { it.shutdown() }.onFailure { e -> rocketMqLog.warn("pull consumer shutdown failed: $e") }
+    suspend fun shutdown() = withContext(NonCancellable + Dispatchers.IO) {
+        // 取 [createLock]：与正在进行的创建串行。创建方在 start 之后会重新检查
+        // [closed]，要么自己关掉新句柄并抛异常，要么把它登记到字段上让本轮关掉。
+        createLock.withLock {
+            closed.set(true)
+            val consumer = pullConsumer.also { pullConsumer = null }
+            val prod = producer.also { producer = null }
+            val temps = tempConsumers.toList().also { tempConsumers.clear() }
+            consumer?.let {
+                runCatching { it.shutdown() }.onFailure { e -> rocketMqLog.warn("pull consumer shutdown failed: $e") }
+            }
+            prod?.let {
+                runCatching { it.shutdown() }.onFailure { e -> rocketMqLog.warn("producer shutdown failed: $e") }
+            }
+            // 分片临时实例的兜底：调用方漏关 / 创建一半失败留下的都在这里。
+            temps.forEach { temp ->
+                runCatching { temp.shutdown() }
+                    .onFailure { e -> rocketMqLog.warn("temp pull consumer shutdown failed: $e") }
+            }
+            // 临时 PEM 必须删（含未加密私钥），放在最后：上面 shutdown 可能还要读它们。
+            runCatching { tls.close() }
         }
-        prod?.let {
-            runCatching { it.shutdown() }.onFailure { e -> rocketMqLog.warn("producer shutdown failed: $e") }
-        }
-        // 临时 PEM 必须删（含未加密私钥），放在最后：上面 shutdown 可能还要读它们。
-        runCatching { tls.close() }
         rocketMqLog.debug("shared message clients shut down")
     }
 

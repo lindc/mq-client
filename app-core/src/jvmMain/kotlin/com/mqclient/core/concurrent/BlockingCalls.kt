@@ -8,6 +8,7 @@ import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -97,17 +98,25 @@ object BlockingCalls {
     /**
      * 执行阻塞调用的有界线程池。
      *
-     * 核心 4 / 上限 32 + 有界队列 256：正常使用（连一两条 MQ、偶尔扫描）永远碰不到
-     * 上限；真的撞上了，那说明有调用在集体卡死，此时**快速失败比默默堆线程更诚实**。
+     * **核心 = 上限 = [MAX_WORKERS]**，并开 [ThreadPoolExecutor.allowCoreThreadTimeOut]：
+     * 空闲 60s 后线程真正回收，所以「不用时缩回」依然成立，但并发能真达到 32。
+     *
+     * 为什么不能写成「核心 4 / 上限 32 + LinkedBlockingQueue」：ThreadPoolExecutor
+     * 只在**队列满**时才把线程数涨过 core，而队列有 256 个槽位——实际并发永远是 4，
+     * maximumPoolSize 等于摆设。`PcfObjectScanner.scanAll` 一轮就发 11 路并发，于是
+     * 扫描期间新建连接 / 心跳只能排队（详见 [awaitWithin] 的超时口径）。
      */
     private val workers = ThreadPoolExecutor(
-        4,
+        MAX_WORKERS,
         MAX_WORKERS,
         KEEP_ALIVE_SECONDS,
         TimeUnit.SECONDS,
         LinkedBlockingQueue(MAX_PENDING),
         threadFactory,
-    )
+    ).apply {
+        // 核心线程也受保活：不使用时线程数真正降到 0，不靠「核心线程永不回收」。
+        allowCoreThreadTimeOut(true)
+    }
 
     /**
      * 收尾线程池：等被放弃的调用真正结束，再把它的产出交给 `onAbandoned`。
@@ -116,12 +125,13 @@ object BlockingCalls {
      * 「正在跑的阻塞调用」这个观测量失真（也会无谓占用 worker 名额）。
      */
     private val reapers = ThreadPoolExecutor(
-        1,
+        MAX_REAPERS,
         MAX_REAPERS,
         KEEP_ALIVE_SECONDS,
         TimeUnit.SECONDS,
         LinkedBlockingQueue(MAX_PENDING),
     ) { runnable -> Thread(runnable, "blocking-call-reaper").apply { isDaemon = true } }
+        .apply { allowCoreThreadTimeOut(true) }
 
     /**
      * 在 [timeoutMs] 内等待 [block] 的结果。
@@ -141,8 +151,17 @@ object BlockingCalls {
         block: () -> T,
     ): T {
         require(timeoutMs > 0) { "timeoutMs must be positive: $timeoutMs" }
+        // 执行起点由 worker 线程自己记录：排队等待不是这次操作的时间。
+        // 见 [awaitWithin] 对两段预算的说明。
+        val startedAt = AtomicLong(0L)
+        val submittedAt = System.currentTimeMillis()
         val future = try {
-            workers.submit(Callable { block() })
+            workers.submit(
+                Callable {
+                    startedAt.set(System.currentTimeMillis())
+                    block()
+                },
+            )
         } catch (rejected: RejectedExecutionException) {
             // 有界池饱和是**可预期的**上限，不是 bug：转成同一套超时异常，调用方的
             // 既有 catch（扫描 / 连接路径都在 catch BlockingCallTimeoutException）无需改。
@@ -152,7 +171,7 @@ object BlockingCalls {
             )
         }
         try {
-            return awaitWithin(future, timeoutMs, label)
+            return awaitWithin(future, submittedAt, startedAt, timeoutMs, label)
         } catch (timeout: BlockingCallTimeoutException) {
             // 放弃等待：迟到的产出交给收尾线程收拾。
             reap(future, onAbandoned)
@@ -169,20 +188,46 @@ object BlockingCalls {
      *
      * 分段等待而不是一次 `get(timeoutMs)`：后者在协程被取消时不会返回（阻塞调用不响应
      * 取消），模块关闭时就要白等到超时上限。
+     *
+     * ## 两段预算（为什么不从提交时刻起算）
+     *
+     * [timeoutMs] 表达的是「这次阻塞操作本身最多允许多久」，而不是「用户最多等多久」：
+     *  - **排队段**：从提交到 worker 真正开始执行，另有同额上限（超过说明池饱和，
+     *    快速失败）；
+     *  - **执行段**：从 worker 实际开始执行算起，才是 [timeoutMs]。
+     *
+     * 旧实现从提交时刻起算，于是池一忙（例如 `scanAll` 一次发 11 路）排队的调用会在
+     * 队列里空坐到超时 —— 新建连接报「连接超时」、心跳报超时后把**健康连接**置为
+     * Failed，网络其实没问题。
      */
-    private suspend fun <T> awaitWithin(future: Future<T>, timeoutMs: Long, label: String): T =
+    private suspend fun <T> awaitWithin(
+        future: Future<T>,
+        submittedAt: Long,
+        startedAt: AtomicLong,
+        timeoutMs: Long,
+        label: String,
+    ): T =
         withContext(Dispatchers.IO) {
-            val deadline = System.currentTimeMillis() + timeoutMs
             while (true) {
                 coroutineContext.ensureActive()
-                val remaining = deadline - System.currentTimeMillis()
-                if (remaining <= 0L) {
+                // 先看结果：刚好在边界上完成的任务不该被判超时。
+                // 必须走 getUnwrapped：`future.get()` 会把业务异常包成 ExecutionException。
+                if (future.isDone) return@withContext future.getUnwrapped()
+                val now = System.currentTimeMillis()
+                val began = startedAt.get()
+                if (began == 0L) {
+                    if (now - submittedAt >= timeoutMs) {
+                        throw BlockingCallTimeoutException(
+                            "$label timed out while waiting for a worker (${timeoutMs / 1000}s)",
+                        )
+                    }
+                } else if (now - began >= timeoutMs) {
                     throw BlockingCallTimeoutException("$label timed out (${timeoutMs / 1000}s)")
                 }
                 try {
-                    return@withContext future.get(minOf(remaining, POLL_SLICE_MS), TimeUnit.MILLISECONDS)
+                    return@withContext future.get(POLL_SLICE_MS, TimeUnit.MILLISECONDS)
                 } catch (sliceTimeout: TimeoutException) {
-                    // 这一小片没等到，继续 —— 总超时由上面的 deadline 判定。
+                    // 这一小片没等到，继续 —— 总超时由上面的两段预算判定。
                 } catch (failed: ExecutionException) {
                     // 解掉 Future 的包装：调用方要看到 MQException 这些原始类型。
                     throw failed.cause ?: failed
@@ -193,6 +238,14 @@ object BlockingCalls {
             }
             @Suppress("UNREACHABLE_CODE")
             throw IllegalStateException("unreachable")
+        }
+
+    /** [Future.get] 的拆包版：业务异常原样抛出，不包成 ExecutionException。 */
+    private fun <T> Future<T>.getUnwrapped(): T =
+        try {
+            get()
+        } catch (failed: ExecutionException) {
+            throw failed.cause ?: failed
         }
 
     /**
