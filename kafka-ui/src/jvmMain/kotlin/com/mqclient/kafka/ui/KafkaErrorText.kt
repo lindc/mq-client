@@ -1,6 +1,6 @@
 package com.mqclient.kafka.ui
 
-import com.mqclient.uicommon.failureText
+import com.mqclient.uicommon.i18n.userMessage
 import com.mqclient.uicommon.i18n.stringResource
 import java.util.concurrent.CompletionException
 import java.util.concurrent.ExecutionException
@@ -35,7 +35,7 @@ import org.apache.kafka.common.errors.UnsupportedVersionException
  *     抛的就是它们；
  *  2. 命中已知类型 → i18n 文案（+ 原文关键片段，保留「哪个 topic / 哪个 broker」这类
  *     可操作细节）；
- *  3. 未命中 → [failureText]（service 层已经写过中文可读文案的异常原样透出）。
+ *  3. 未命中 → [userMessage]（service 层已经写过中文可读文案的异常原样透出）。
  *
  * 注意顺序：`TopicAuthorizationException` 继承 `AuthorizationException`，
  * `SaslAuthenticationException` / `SslAuthenticationException` 继承
@@ -43,7 +43,7 @@ import org.apache.kafka.common.errors.UnsupportedVersionException
  */
 fun kafkaErrorText(error: Throwable): String {
     val root = unwrapCompletion(error)
-    val mapped = kafkaErrorKeyFor(root) ?: return failureText(root)
+    val mapped = kafkaErrorKeyFor(root) ?: return root.userMessage()
 
     val base = stringResource(mapped)
     // 命中分类后仍附上原文片段：分类说明「哪一类问题」，原文说明「哪个对象」。
@@ -52,7 +52,7 @@ fun kafkaErrorText(error: Throwable): String {
 }
 
 /**
- * 分类本身：异常 → i18n key；未命中返回 null（调用方回退 [failureText]）。
+ * 分类本身：异常 → i18n key；未命中返回 null（调用方回退 [userMessage]）。
  *
  * 拆出来是**为了可测**：`kafkaErrorText` 的返回值依赖语言表是否加载（缺键时返回
  * key 本身，加载后返回中文），而 `LanguageResources` 是进程级单例 —— 一旦有别的

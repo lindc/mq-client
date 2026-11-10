@@ -60,7 +60,7 @@ import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
-import com.mqclient.uicommon.failureText
+import com.mqclient.uicommon.i18n.userMessage
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -95,7 +95,7 @@ fun KafkaGroupDetailDialog(
             detail = runCatchingCancellable {
                 val service = KafkaModule.serviceOrNull() ?: error("服务未初始化")
                 LoadState.Success(service.getGroupDetail(connectionId, groupId))
-            }.getOrElse { LoadState.Error(failureText(it)) }
+            }.getOrElse { LoadState.Error(it.userMessage()) }
         }
     }
     LaunchedEffect(connectionId, groupId) { load() }
@@ -113,7 +113,7 @@ fun KafkaGroupDetailDialog(
                     snackbar.showSnackbar(stringResource(doneKey).withArg(count))
                     load()
                 }
-                .onFailure { snackbar.showSnackbar(failureText(it)) }
+                .onFailure { snackbar.showSnackbar(it.userMessage()) }
         }
     }
 
@@ -127,7 +127,7 @@ fun KafkaGroupDetailDialog(
                     // 已驱动列表即时刷新，无需再 scanNow 整轮重扫（与 deleteTopic 统一）。
                     onDismiss()
                 }
-                .onFailure { snackbar.showSnackbar(failureText(it)) }
+                .onFailure { snackbar.showSnackbar(it.userMessage()) }
         }
     }
 

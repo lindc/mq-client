@@ -53,7 +53,7 @@ import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.i18n.withArg
-import com.mqclient.uicommon.failureText
+import com.mqclient.uicommon.i18n.userMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -128,7 +128,7 @@ fun RocketMqTopicPropertiesDialog(
                 throw e
             } catch (e: Exception) {
                 deleting = false
-                deleteError = failureText(e)
+                deleteError = e.userMessage()
             }
         }
     }

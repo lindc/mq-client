@@ -68,8 +68,9 @@ import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.userMessage
 import com.mqclient.uicommon.i18n.withArg
+import com.mqclient.uicommon.error.FetchOutcome
+import com.mqclient.uicommon.error.runGuardedFetch
 import com.mqclient.uicommon.table.formatSize
-import com.mqclient.uicommon.failureText
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -263,39 +264,55 @@ fun RabbitMqQueueMessagesDialog(
                 return@launch
             }
             fetching = true
-            try {
-                val s = ensureSession() ?: return@launch
-                val batch = s.fetchNext(effectiveLimit(limit))
-                Log.info(
-                    "rabbitmq-ui",
-                    "[MQ-Perf][RabbitMQ] 数据返回，开始渲染列表, 耗时=${System.currentTimeMillis() - startedAt}ms, messages=${batch.size}",
-                )
-                messages = messages + batch
-                exhausted = batch.isEmpty()
-                held = s.heldCount()
-                Log.info(
-                    "rabbitmq-ui",
-                    "[MQ-Perf][RabbitMQ] 渲染完成，UI 退出 Loading, 总耗时=${System.currentTimeMillis() - startedAt}ms",
-                )
-            } catch (e: RabbitMqOperationTimeoutException) {
-                Log.warn(
-                    "rabbitmq-ui",
-                    "[MQ-Perf][RabbitMQ] 拉取超时, 耗时达到=${System.currentTimeMillis() - startedAt}ms, 已被底层 RPC 超时强制取消",
-                )
-                snackbar.showSnackbar(timeoutText)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                // ServiceException 的中文文案在展示时点按 errorKey 翻译（userMessage），
-                // failureText 只取英文 message —— Stream 队列的 540 会变成一坨底层报错。
-                Log.warn(
-                    "rabbitmq-ui",
-                    "[MQ-Perf][RabbitMQ] 拉取失败, 异常类型=${e::class.simpleName}, 详情=${e.userMessage()}",
-                )
-                snackbar.showSnackbar(e.userMessage())
-            } finally {
-                fetching = false
+            when (val outcome = runGuardedFetch {
+                val s = ensureSession()
+                s?.fetchNext(effectiveLimit(limit))
+            }) {
+                is FetchOutcome.Success -> {
+                    val batch = outcome.value
+                    if (batch != null) {
+                        Log.info(
+                            "rabbitmq-ui",
+                            "[MQ-Perf][RabbitMQ] 数据返回，开始渲染列表, 耗时=${System.currentTimeMillis() - startedAt}ms, messages=${batch.size}",
+                        )
+                        messages = messages + batch
+                        exhausted = batch.isEmpty()
+                        held = session?.heldCount() ?: held
+                        Log.info(
+                            "rabbitmq-ui",
+                            "[MQ-Perf][RabbitMQ] 渲染完成，UI 退出 Loading, 总耗时=${System.currentTimeMillis() - startedAt}ms",
+                        )
+                    }
+                    // batch == null：ensureSession 已把建连错误放进 sessionState（对话框
+                    // 主体显示错误态）—— 这里不再动 exhausted / 列表。
+                }
+                is FetchOutcome.Timeout -> {
+                    Log.warn(
+                        "rabbitmq-ui",
+                        "[MQ-Perf][RabbitMQ] 拉取超时, 耗时达到=${System.currentTimeMillis() - startedAt}ms, 已被强制取消",
+                    )
+                    snackbar.showSnackbar(timeoutText)
+                }
+                is FetchOutcome.Failure -> {
+                    val cause = outcome.cause
+                    // 底层 channel RPC 超时（RabbitMqOperationTimeoutException）按超时
+                    // 口径呈现；其余走 userMessage 的错误键翻译。
+                    if (cause is RabbitMqOperationTimeoutException) {
+                        Log.warn(
+                            "rabbitmq-ui",
+                            "[MQ-Perf][RabbitMQ] 拉取超时, 耗时达到=${System.currentTimeMillis() - startedAt}ms, 已被底层 RPC 超时强制取消",
+                        )
+                        snackbar.showSnackbar(timeoutText)
+                    } else {
+                        Log.warn(
+                            "rabbitmq-ui",
+                            "[MQ-Perf][RabbitMQ] 拉取失败, 异常类型=${cause::class.simpleName}, 详情=${cause.userMessage()}",
+                        )
+                        snackbar.showSnackbar(cause.userMessage())
+                    }
+                }
             }
+            fetching = false
         }
     }
 
@@ -371,7 +388,7 @@ fun RabbitMqQueueMessagesDialog(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                snackbar.showSnackbar(failureText(e))
+                snackbar.showSnackbar(e.userMessage())
             }
         }
     }
@@ -390,7 +407,7 @@ fun RabbitMqQueueMessagesDialog(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            false to failureText(e)
+            false to e.userMessage()
         }
     }
 
@@ -427,7 +444,7 @@ fun RabbitMqQueueMessagesDialog(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                sendError = failureText(e)
+                sendError = e.userMessage()
             } finally {
                 sending = false
             }

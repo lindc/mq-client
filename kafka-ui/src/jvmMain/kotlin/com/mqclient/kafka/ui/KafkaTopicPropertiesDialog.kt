@@ -53,7 +53,7 @@ import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.i18n.withArg
-import com.mqclient.uicommon.failureText
+import com.mqclient.uicommon.i18n.userMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -100,12 +100,12 @@ fun KafkaTopicPropertiesDialog(
             configs = LoadState.Loading
             configs = runCatchingCancellable {
                 LoadState.Success(service.getTopicConfigs(connectionId, topicName))
-            }.getOrElse { LoadState.Error(failureText(it)) }
+            }.getOrElse { LoadState.Error(it.userMessage()) }
             offsets = LoadState.Loading
             val partitions = snapshot?.partitions?.map { it.id } ?: emptyList()
             offsets = runCatchingCancellable {
                 LoadState.Success(service.getTopicOffsets(connectionId, topicName, partitions))
-            }.getOrElse { LoadState.Error(failureText(it)) }
+            }.getOrElse { LoadState.Error(it.userMessage()) }
         }
     }
     LaunchedEffect(connectionId, topicName) { load() }
@@ -123,7 +123,7 @@ fun KafkaTopicPropertiesDialog(
                 throw e
             } catch (e: Exception) {
                 deleting = false
-                snackbar.showSnackbar(stringResource("kafka_ui_topic_props_delete_failed").withArg(failureText(e)))
+                snackbar.showSnackbar(stringResource("kafka_ui_topic_props_delete_failed").withArg(e.userMessage()))
             }
         }
     }

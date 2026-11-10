@@ -311,21 +311,6 @@ class RabbitMqMessageSession private constructor(
         }
     }
 
-    /** Stream 队列的 basic.get 被 broker 以 540 NOT_IMPLEMENTED 拒绝（含 cause 链）。 */
-    private fun isStreamUnsupported(error: Throwable): Boolean {
-        val text = buildString {
-            var current: Throwable? = error
-            while (current != null) {
-                append(current.message.orEmpty())
-                append(' ')
-                current = current.cause
-            }
-        }
-        return text.contains("540") ||
-            text.contains("NOT_IMPLEMENTED", ignoreCase = true) ||
-            text.contains("basic.get not supported", ignoreCase = true)
-    }
-
     /* ------------------------------ 计数 ------------------------------ */
 
     /**

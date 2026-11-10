@@ -56,7 +56,7 @@ import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.i18n.withArg
-import com.mqclient.uicommon.failureText
+import com.mqclient.uicommon.i18n.userMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -137,7 +137,7 @@ fun RabbitMqExchangePropertiesDialog(
             } catch (e: Exception) {
                 deleting = false
                 snackbar.showSnackbar(
-                    stringResource("rabbitmq_ui_exchange_delete_failed").withArg(failureText(e)),
+                    stringResource("rabbitmq_ui_exchange_delete_failed").withArg(e.userMessage()),
                 )
             }
         }
@@ -158,7 +158,7 @@ fun RabbitMqExchangePropertiesDialog(
             } catch (e: Exception) {
                 deleting = false
                 snackbar.showSnackbar(
-                    stringResource("rabbitmq_ui_exchange_delete_failed").withArg(failureText(e)),
+                    stringResource("rabbitmq_ui_exchange_delete_failed").withArg(e.userMessage()),
                 )
             }
         }
@@ -169,7 +169,7 @@ fun RabbitMqExchangePropertiesDialog(
         bindingsState = runCatchingCancellable {
             val service = RabbitMqModule.serviceOrNull() ?: error("服务未初始化")
             LoadState.Success(service.exchangeBindings(connectionId, exchangeName))
-        }.getOrElse { LoadState.Error(failureText(it)) }
+        }.getOrElse { LoadState.Error(it.userMessage()) }
     }
 
     // 时序兜底：连接落定成 Connected 而绑定仍在错误态时自动重拉（与队列属性对话框同口径）。

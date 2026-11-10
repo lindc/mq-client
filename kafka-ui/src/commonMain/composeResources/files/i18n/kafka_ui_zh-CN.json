@@ -208,6 +208,7 @@
   "kafka_ui_msg_browse_start_timestamp": "指定时间戳",
   "kafka_ui_msg_browse_start_time_hint": "选择时间",
   "kafka_ui_msg_browse_read": "读取",
+  "kafka_ui_msg_browse_timeout": "拉取被中断（超时或取消），请重试",
   "kafka_ui_msg_browse_no_commit_hint": "本次读取不提交 offset，不影响消费进度",
   "kafka_ui_msg_browse_col_offset": "Offset",
   "kafka_ui_msg_browse_col_key": "Key",

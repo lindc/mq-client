@@ -350,20 +350,6 @@ object RabbitMqModule {
         }
     }
 
-    /** 区分「连接级故障」与 404 等业务错误：只有前者才值得作废共享 Connection。 */
-    private fun isAmqpConnectionFailure(error: Throwable): Boolean {
-        var current: Throwable? = error
-        while (current != null) {
-            val text = current.message.orEmpty()
-            if (text.contains("connection", ignoreCase = true) ||
-                text.contains("already closed", ignoreCase = true) ||
-                text.contains("socket", ignoreCase = true)
-            ) return true
-            current = current.cause
-        }
-        return error is com.rabbitmq.client.AlreadyClosedException
-    }
-
     /**
      * 会话关闭的异步兜底（对话框 onDispose 是同步回调，挂起 close 另起协程跑）。
      *

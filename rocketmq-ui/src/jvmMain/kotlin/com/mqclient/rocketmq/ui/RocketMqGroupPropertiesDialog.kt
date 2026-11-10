@@ -62,7 +62,7 @@ import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.i18n.withArg
-import com.mqclient.uicommon.failureText
+import com.mqclient.uicommon.i18n.userMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -184,7 +184,7 @@ fun RocketMqGroupPropertiesDialog(
                     "waitedMs=${System.currentTimeMillis() - startedAt} error=${e.message}",
             )
             if (myKey == retryKey) detail = LoadState.Error(
-                message = failureText(e),
+                message = e.userMessage(),
                 cause = e.cause,
             )
         } finally {
@@ -210,7 +210,7 @@ fun RocketMqGroupPropertiesDialog(
                 throw e
             } catch (e: Exception) {
                 deleting = false
-                deleteError = failureText(e)
+                deleteError = e.userMessage()
             }
         }
     }

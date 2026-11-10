@@ -208,6 +208,7 @@
   "kafka_ui_msg_browse_start_timestamp": "By timestamp",
   "kafka_ui_msg_browse_start_time_hint": "Pick a time",
   "kafka_ui_msg_browse_read": "Read",
+  "kafka_ui_msg_browse_timeout": "Fetch was interrupted (timeout or cancellation), please retry",
   "kafka_ui_msg_browse_no_commit_hint": "Reads never commit offsets — consumer progress is unaffected",
   "kafka_ui_msg_browse_col_offset": "Offset",
   "kafka_ui_msg_browse_col_key": "Key",

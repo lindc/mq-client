@@ -26,6 +26,8 @@
   "ibm_mq_msg_browse_search_hint": "搜索 MessageId / CorrelationId",
   "ibm_mq_msg_browse_refresh": "刷新",
   "ibm_mq_msg_browse_read": "读取",
+  "ibm_mq_msg_browse_timeout": "拉取被中断（超时或取消），请重试",
+  "ibm_mq_msg_service_not_ready": "MQ 服务未初始化，请重试",
   "ibm_mq_msg_browse_total": "共 %s 条",
   "ibm_mq_msg_browse_total_loaded": "共 %s 条（已加载 %s 条）",
   "ibm_mq_msg_browse_loaded_of": "已加载 %s / 共 %s 条",

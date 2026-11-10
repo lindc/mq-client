@@ -71,6 +71,9 @@ import com.mqclient.uicommon.CompactSecondaryButton
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
+import com.mqclient.uicommon.error.FetchOutcome
+import com.mqclient.uicommon.error.runGuardedFetch
+import com.mqclient.uicommon.i18n.userMessage
 import com.mqclient.uicommon.table.TableHeaderText
 import com.mqclient.uicommon.table.TableRowActionIcon
 import com.mqclient.uicommon.table.formatSize
@@ -79,8 +82,6 @@ import kotlin.comparisons.compareByDescending
 import kotlin.comparisons.thenBy
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 
 /** 消息表格的固定列宽：Queue / Offset / MsgId / Tags / Keys / Timestamp / Size / 操作（Value 弹性）。 */
@@ -188,43 +189,46 @@ internal fun RocketMqMessageBrowseTab(
             "[MQ-Perf][RocketMQ] 开始拉取，UI 进入 Loading, topic=$topicName, queue=${selectedQueue ?: "all"}",
         )
         uiState = BrowseUiState.Loading
-        try {
+        when (val outcome = runGuardedFetch {
             val service = RocketMqModule.messageServiceOrNull()
                 ?: throw IllegalStateException(stringResource("rocketmq_ui_send_service_not_ready"))
-            val page = service.readMessages(
+            service.readMessages(
                 connectionId = connectionId,
                 topic = topicName,
                 queueId = selectedQueue,
                 start = buildStart(),
                 count = count(),
             )
-            Log.info(
-                "rocketmq-ui",
-                "[MQ-Perf][RocketMQ] 数据返回，开始渲染列表, 耗时=${System.currentTimeMillis() - startedAt}ms, messages=${page.messages.size}",
-            )
-            uiState = BrowseUiState.Ready(page.messages, page.nextBeginOffset)
-            Log.info(
-                "rocketmq-ui",
-                "[MQ-Perf][RocketMQ] 渲染完成，UI 退出 Loading, 总耗时=${System.currentTimeMillis() - startedAt}ms",
-            )
-        } catch (e: CancellationException) {
-            // service 层整体超时（readMessages 的 withTimeout 15s）抛的
-            // TimeoutCancellationException 也是 CancellationException 子类，但它不是
-            // 本协程的取消 —— 直接 rethrow 会静默结束 effect，UI 永远停在 Loading。
-            // ensureActive 区分：本协程真被取消（关对话框）→ 在此抛出走正常取消路径。
-            currentCoroutineContext().ensureActive()
-            Log.warn(
-                "rocketmq-ui",
-                "[MQ-Perf][RocketMQ] 拉取超时, 耗时达到=${System.currentTimeMillis() - startedAt}ms, " +
-                    "已被强制取消: 异常类型=${e::class.simpleName}, 详情=${e.message}",
-            )
-            uiState = BrowseUiState.Failed(stringResource("rocketmq_ui_msg_browse_timeout"))
-        } catch (e: Exception) {
-            Log.warn(
-                "rocketmq-ui",
-                "[MQ-Perf][RocketMQ] 拉取失败, 异常类型=${e::class.simpleName}, 详情=${e.message}",
-            )
-            uiState = BrowseUiState.Failed(e.message ?: e::class.simpleName ?: "unknown")
+        }) {
+            is FetchOutcome.Success -> {
+                val page = outcome.value
+                Log.info(
+                    "rocketmq-ui",
+                    "[MQ-Perf][RocketMQ] 数据返回，开始渲染列表, 耗时=${System.currentTimeMillis() - startedAt}ms, messages=${page.messages.size}",
+                )
+                uiState = BrowseUiState.Ready(page.messages, page.nextBeginOffset)
+                Log.info(
+                    "rocketmq-ui",
+                    "[MQ-Perf][RocketMQ] 渲染完成，UI 退出 Loading, 总耗时=${System.currentTimeMillis() - startedAt}ms",
+                )
+            }
+            is FetchOutcome.Timeout -> {
+                // 存活的 CancellationException = service 层整体超时（readMessages 的
+                // withTimeout 15s 到点），不是本协程取消 —— 分类逻辑见 runGuardedFetch。
+                Log.warn(
+                    "rocketmq-ui",
+                    "[MQ-Perf][RocketMQ] 拉取超时, 耗时达到=${System.currentTimeMillis() - startedAt}ms, " +
+                        "已被强制取消: 异常类型=${outcome.cause::class.simpleName}, 详情=${outcome.cause.message}",
+                )
+                uiState = BrowseUiState.Failed(stringResource("rocketmq_ui_msg_browse_timeout"))
+            }
+            is FetchOutcome.Failure -> {
+                Log.warn(
+                    "rocketmq-ui",
+                    "[MQ-Perf][RocketMQ] 拉取失败, 异常类型=${outcome.cause::class.simpleName}, 详情=${outcome.cause.userMessage()}",
+                )
+                uiState = BrowseUiState.Failed(outcome.cause.userMessage())
+            }
         }
     }
 

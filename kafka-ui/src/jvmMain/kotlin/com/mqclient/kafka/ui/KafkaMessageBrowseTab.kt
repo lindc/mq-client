@@ -81,6 +81,8 @@ import com.mqclient.uicommon.CompactSecondaryButton
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
+import com.mqclient.uicommon.error.FetchOutcome
+import com.mqclient.uicommon.error.runGuardedFetch
 import com.mqclient.uicommon.table.TableHeaderText
 import com.mqclient.uicommon.table.TableRowActionIcon
 import com.mqclient.uicommon.table.formatSize
@@ -221,33 +223,46 @@ internal fun KafkaMessageBrowseTab(
             "[MQ-Perf][Kafka] 开始拉取，UI 进入 Loading, topic=$topicName, partition=${selectedPartition.takeIf { it >= 0 } ?: "all"}",
         )
         uiState = BrowseUiState.Loading
-        try {
+        when (val outcome = runGuardedFetch {
             val service = KafkaModule.messageServiceOrNull()
                 ?: throw IllegalStateException(stringResource("kafka_ui_send_service_not_ready"))
-            val page = service.readMessages(
+            service.readMessages(
                 connectionId = connectionId,
                 topic = topicName,
                 partition = selectedPartition.takeIf { it >= 0 },
                 startFrom = startFrom(),
                 count = count(),
             )
-            Log.info(
-                "kafka-ui",
-                "[MQ-Perf][Kafka] 数据返回，开始渲染列表, 耗时=${System.currentTimeMillis() - startedAt}ms, messages=${page.messages.size}",
-            )
-            uiState = BrowseUiState.Ready(page.messages, page.nextCursor)
-            Log.info(
-                "kafka-ui",
-                "[MQ-Perf][Kafka] 渲染完成，UI 退出 Loading, 总耗时=${System.currentTimeMillis() - startedAt}ms",
-            )
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            Log.warn(
-                "kafka-ui",
-                "[MQ-Perf][Kafka] 拉取失败, 异常类型=${e::class.simpleName}, 详情=${kafkaErrorText(e)}",
-            )
-            uiState = BrowseUiState.Failed(kafkaErrorText(e))
+        }) {
+            is FetchOutcome.Success -> {
+                val page = outcome.value
+                Log.info(
+                    "kafka-ui",
+                    "[MQ-Perf][Kafka] 数据返回，开始渲染列表, 耗时=${System.currentTimeMillis() - startedAt}ms, messages=${page.messages.size}",
+                )
+                uiState = BrowseUiState.Ready(page.messages, page.nextCursor)
+                Log.info(
+                    "kafka-ui",
+                    "[MQ-Perf][Kafka] 渲染完成，UI 退出 Loading, 总耗时=${System.currentTimeMillis() - startedAt}ms",
+                )
+            }
+            is FetchOutcome.Timeout -> {
+                // 存活的 CancellationException = service 层的取消型信号（超时/打断），
+                // 不是本协程取消 —— 分类逻辑见 runGuardedFetch。
+                Log.warn(
+                    "kafka-ui",
+                    "[MQ-Perf][Kafka] 拉取超时, 耗时达到=${System.currentTimeMillis() - startedAt}ms, " +
+                        "已被强制取消: 异常类型=${outcome.cause::class.simpleName}, 详情=${outcome.cause.message}",
+                )
+                uiState = BrowseUiState.Failed(stringResource("kafka_ui_msg_browse_timeout"))
+            }
+            is FetchOutcome.Failure -> {
+                Log.warn(
+                    "kafka-ui",
+                    "[MQ-Perf][Kafka] 拉取失败, 异常类型=${outcome.cause::class.simpleName}, 详情=${kafkaErrorText(outcome.cause)}",
+                )
+                uiState = BrowseUiState.Failed(kafkaErrorText(outcome.cause))
+            }
         }
     }
 

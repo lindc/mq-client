@@ -59,7 +59,7 @@ import com.mqclient.uicommon.CompactSecondaryButton
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
-import com.mqclient.uicommon.failureText
+import com.mqclient.uicommon.i18n.userMessage
 import java.util.Base64
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
@@ -241,7 +241,7 @@ private class RabbitMqSendState(
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
-            SingleOutcome(errorMessage = failureText(e))
+            SingleOutcome(errorMessage = e.userMessage())
         }
     }
 

@@ -35,7 +35,7 @@ import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 import com.mqclient.uicommon.table.formatSize
-import com.mqclient.uicommon.failureText
+import com.mqclient.uicommon.i18n.userMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -124,7 +124,7 @@ fun RabbitMqForwardMessageDialog(
                 throw e
             } catch (e: Exception) {
                 forwarding = false
-                submitError = failureText(e)
+                submitError = e.userMessage()
             }
         }
     }

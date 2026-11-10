@@ -53,7 +53,7 @@ import com.mqclient.uicommon.PropertyTableSection
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
-import com.mqclient.uicommon.failureText
+import com.mqclient.uicommon.i18n.userMessage
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.PrimaryButton
 import com.mqclient.uicommon.i18n.userMessage
@@ -183,7 +183,7 @@ fun RabbitMqQueuePropertiesDialog(
             } catch (e: Exception) {
                 operating = false
                 purgeConfirm = false
-                snackbar.showSnackbar(failureText(e))
+                snackbar.showSnackbar(e.userMessage())
             }
         }
     }
@@ -202,7 +202,7 @@ fun RabbitMqQueuePropertiesDialog(
             } catch (e: Exception) {
                 operating = false
                 deleteConfirm = false
-                snackbar.showSnackbar(failureText(e))
+                snackbar.showSnackbar(e.userMessage())
             }
         }
     }

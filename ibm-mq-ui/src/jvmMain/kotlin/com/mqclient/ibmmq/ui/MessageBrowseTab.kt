@@ -90,6 +90,8 @@ import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.command.ToolbarButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
+import com.mqclient.uicommon.error.FetchOutcome
+import com.mqclient.uicommon.error.runGuardedFetch
 import com.mqclient.uicommon.table.TableHeaderText
 import com.mqclient.uicommon.table.TableRowActionIcon
 import com.mqclient.uicommon.table.formatSize
@@ -191,30 +193,45 @@ internal fun MessageBrowseTab(
         session?.close()
         session = null
         uiState = BrowseUiState.Loading
-        try {
+        when (val outcome = runGuardedFetch {
             val service = IbmMQModule.serviceOrNull()
-                ?: throw IllegalStateException("服务未初始化")
+                ?: throw IllegalStateException(stringResource("ibm_mq_msg_service_not_ready"))
             val opened = service.openBrowseSession(connectionId, queueName)
+            // 尽早登记：失败 / 取消路径上 onDispose 也能关到它（close 只置标志，零开销）。
             session = opened
             val depth = service.getQueueDepth(connectionId, queueName)
             val messages = opened.browseNext(PAGE_SIZE)
-            Log.info(
-                "ibm-mq-ui",
-                "[MQ-Perf][IBM MQ] 数据返回，开始渲染列表, 耗时=${System.currentTimeMillis() - startedAt}ms, messages=${messages.size}, depth=$depth",
-            )
-            uiState = BrowseUiState.Ready(messages, depth, exhausted = messages.size < PAGE_SIZE)
-            Log.info(
-                "ibm-mq-ui",
-                "[MQ-Perf][IBM MQ] 渲染完成，UI 退出 Loading, 总耗时=${System.currentTimeMillis() - startedAt}ms",
-            )
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            Log.warn(
-                "ibm-mq-ui",
-                "[MQ-Perf][IBM MQ] 拉取失败, 异常类型=${e::class.simpleName}, 详情=${browseErrorText(e)}",
-            )
-            uiState = BrowseUiState.Failed(browseErrorText(e))
+            messages to depth
+        }) {
+            is FetchOutcome.Success -> {
+                val (messages, depth) = outcome.value
+                Log.info(
+                    "ibm-mq-ui",
+                    "[MQ-Perf][IBM MQ] 数据返回，开始渲染列表, 耗时=${System.currentTimeMillis() - startedAt}ms, messages=${messages.size}, depth=$depth",
+                )
+                uiState = BrowseUiState.Ready(messages, depth, exhausted = messages.size < PAGE_SIZE)
+                Log.info(
+                    "ibm-mq-ui",
+                    "[MQ-Perf][IBM MQ] 渲染完成，UI 退出 Loading, 总耗时=${System.currentTimeMillis() - startedAt}ms",
+                )
+            }
+            is FetchOutcome.Timeout -> {
+                // 存活的 CancellationException = service 层的取消型信号（MQI 打断等），
+                // 不是本协程取消 —— 分类逻辑见 runGuardedFetch。
+                Log.warn(
+                    "ibm-mq-ui",
+                    "[MQ-Perf][IBM MQ] 拉取超时, 耗时达到=${System.currentTimeMillis() - startedAt}ms, " +
+                        "已被强制取消: 异常类型=${outcome.cause::class.simpleName}, 详情=${outcome.cause.message}",
+                )
+                uiState = BrowseUiState.Failed(stringResource("ibm_mq_msg_browse_timeout"))
+            }
+            is FetchOutcome.Failure -> {
+                Log.warn(
+                    "ibm-mq-ui",
+                    "[MQ-Perf][IBM MQ] 拉取失败, 异常类型=${outcome.cause::class.simpleName}, 详情=${browseErrorText(outcome.cause)}",
+                )
+                uiState = BrowseUiState.Failed(browseErrorText(outcome.cause))
+            }
         }
     }
     DisposableEffect(queueName) {

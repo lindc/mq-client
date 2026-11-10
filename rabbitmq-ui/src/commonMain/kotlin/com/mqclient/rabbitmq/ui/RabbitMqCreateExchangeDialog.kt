@@ -30,7 +30,7 @@ import com.mqclient.uicommon.dialog.DialogSizeClass
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
-import com.mqclient.uicommon.failureText
+import com.mqclient.uicommon.i18n.userMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -106,7 +106,7 @@ fun RabbitMqCreateExchangeDialog(
                 throw e
             } catch (e: Exception) {
                 submitting = false
-                submitError = failureText(e)
+                submitError = e.userMessage()
             }
         }
     }

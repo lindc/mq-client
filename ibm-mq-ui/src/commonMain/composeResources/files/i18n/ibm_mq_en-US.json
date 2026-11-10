@@ -26,6 +26,8 @@
   "ibm_mq_msg_browse_search_hint": "Search MessageId / CorrelationId",
   "ibm_mq_msg_browse_refresh": "Refresh",
   "ibm_mq_msg_browse_read": "Read",
+  "ibm_mq_msg_browse_timeout": "Fetch was interrupted (timeout or cancellation), please retry",
+  "ibm_mq_msg_service_not_ready": "MQ service is not ready, please retry",
   "ibm_mq_msg_browse_total": "%s messages",
   "ibm_mq_msg_browse_total_loaded": "%s messages (%s loaded)",
   "ibm_mq_msg_browse_loaded_of": "Loaded %s of %s",
