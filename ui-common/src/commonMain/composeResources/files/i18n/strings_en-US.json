@@ -205,6 +205,7 @@
   "ai_clear_chat_failed": "Failed to clear AI conversation",
   "olap.starrocks.placeholder_title": "StarRocks support coming soon",
   "olap.starrocks.placeholder_body": "This version ships the module skeleton only; connection, catalog scan and query execution are not implemented yet.",
+  "olap.starrocks.description": "StarRocks connection and analytics",
   "ai_panel_clear_chat": "Clear conversation",
   "olap_err_connection_failed": "Connection to the analytics engine failed",
   "olap_err_permission_denied": "Permission denied by the analytics engine",

@@ -205,6 +205,7 @@
   "ai_clear_chat_failed": "清空 AI 对话失败",
   "olap.starrocks.placeholder_title": "StarRocks 支持即将上线",
   "olap.starrocks.placeholder_body": "当前版本仅提供模块骨架，协议连接、目录扫描与查询执行尚未实现。",
+  "olap.starrocks.description": "StarRocks 连接与分析",
   "ai_panel_clear_chat": "清空对话",
   "olap_err_connection_failed": "连接分析引擎失败",
   "olap_err_permission_denied": "分析引擎拒绝访问（权限不足）",

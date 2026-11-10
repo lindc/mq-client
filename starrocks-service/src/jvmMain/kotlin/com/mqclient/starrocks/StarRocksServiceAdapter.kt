@@ -20,11 +20,17 @@ import kotlinx.coroutines.flow.emptyFlow
  * commonMain 编译期看不到它（mq-base 的 `MQServiceAdapter` KDoc 有同样说明）。
  * 因此本类落在 jvmMain；纯模型 / 常量留在 commonMain。
  *
- * ## 刻意未注册 SPI
+ * ## SPI 注册
  *
- * 宿主通过 `META-INF/services/com.mqclient.core.ServiceAdapter` 发现模块。
- * 本模块**不提供**该注册文件：`initialize` / `dispose` 仍是 TODO，注册会让
- * 宿主启动时崩溃。填肉并接入 app-ui 依赖清单时再补（见【风险与待确认】）。
+ * 已通过 `src/jvmMain/resources/META-INF/services/com.mqclient.core.ServiceAdapter`
+ * 注册，宿主 `ModuleRegistry` 用 ServiceLoader 发现它。新建连接弹窗的
+ * **"OLAP" 分类就来自本类的 `category`**（`ModuleRegistry.groupByCategory`
+ * 按 `ServiceAdapter.category` 分组，与 AdapterUI 无关）。分类值严格引用
+ * [StarRocksConstants.CATEGORY] → `OlapCategory.CATEGORY`（"OLAP"），
+ * 本类不硬编码分类字符串。
+ *
+ * 注册前必须保证 `description` / `initialize` / `dispose` 不会抛：宿主在
+ * 渲染卡片时读 description，启动时调 initialize，退出时调 dispose。
  *
  * ## olap-base 接入点
  *
@@ -41,9 +47,8 @@ class StarRocksServiceAdapter : ServiceAdapter {
     /** 模块展示名。 */
     override val name: String = StarRocksConstants.PROTOCOL_NAME
 
-    /** 描述文案待协议实现后补齐（占位抛 NotImplementedError）。 */
-    override val description: String
-        get() = TODO("StarRocks protocol not implemented yet")
+    /** 描述文案的 i18n 键（展示时由宿主 `stringResource` 查表，见 MiddlewareType）。 */
+    override val description: String = StarRocksConstants.I18N_KEY_PREFIX + "description"
 
     /** 协议名。 */
     override val protocol: String = StarRocksConstants.PROTOCOL_NAME
@@ -51,9 +56,8 @@ class StarRocksServiceAdapter : ServiceAdapter {
     /** 类目取 olap-base 的 [com.mqclient.olap.base.OlapCategory.CATEGORY]。 */
     override val category: String = StarRocksConstants.CATEGORY
 
-    /** 事件订阅 / 连接管理器初始化：协议逻辑待实现。 */
-    override fun initialize(context: ServiceContext): Unit =
-        TODO("StarRocks protocol not implemented yet")
+    /** S1 只有连接探针，没有事件订阅 / 定时任务；留空实现供 S2 接线。 */
+    override fun initialize(context: ServiceContext) = Unit
 
     /** 空骨架不贡献导航项（返回空集合，不抛异常）。 */
     override fun navigationItems(connection: ConnectionInfo): List<NavigationItem> = emptyList()
@@ -61,6 +65,6 @@ class StarRocksServiceAdapter : ServiceAdapter {
     /** 空骨架不贡献徽章。 */
     override fun badgeCounts(connectionId: String): Flow<Map<String, Int>> = emptyFlow()
 
-    /** 资源释放：协议逻辑待实现。 */
-    override fun dispose(): Unit = TODO("StarRocks protocol not implemented yet")
+    /** S1 无长期持有的资源；`StarRocksConnectionManager.shutdown()` 待 S2 接线。 */
+    override fun dispose() = Unit
 }

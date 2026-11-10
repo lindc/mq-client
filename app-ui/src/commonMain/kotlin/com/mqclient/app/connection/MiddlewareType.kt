@@ -1,6 +1,7 @@
 package com.mqclient.app.connection
 
 import com.mqclient.core.ServiceAdapter
+import com.mqclient.uicommon.i18n.stringResource
 
 /**
  * 「添加连接」第一步类型选择卡片的 UI 模型。
@@ -18,6 +19,13 @@ data class MiddlewareType(
     val description: String,
 )
 
-/** SPI 描述模块 → 卡片 UI 模型。 */
+/**
+ * SPI 描述模块 → 卡片 UI 模型。
+ *
+ * [ServiceAdapter.description] 允许是 i18n 键（新模块如 StarRocks 用
+ * `olap.starrocks.description`）；`stringResource` 缺键时**原样返回 key**，
+ * 所以现有 MQ / AI 模块直接返回英文句子的适配器显示完全不变 —— 一次改动
+ * 同时兼容「字面量」与「翻译键」两种形态，不需要改任何现有模块。
+ */
 fun ServiceAdapter.toMiddlewareType(): MiddlewareType =
-    MiddlewareType(id = id, name = name, description = description)
+    MiddlewareType(id = id, name = name, description = stringResource(description))

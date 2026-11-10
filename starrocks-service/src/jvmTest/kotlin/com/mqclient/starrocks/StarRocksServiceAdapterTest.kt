@@ -2,12 +2,14 @@ package com.mqclient.starrocks
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 /**
- * service 侧 SPI 空骨架的**契约冒烟测试**：只验证身份 / 分类常量与「占位方法
- * 确实抛 NotImplemented」，不依赖真实数据库、不触网、不验证任何协议逻辑。
+ * service 侧 SPI 的**装配合约冒烟测试**：验证身份 / 分类常量与「注册后宿主会
+ * 调用的三个入口不会抛」，不依赖真实数据库、不触网、不验证任何协议逻辑。
+ *
+ * 注册到 `META-INF/services` 之后，`description`（渲染卡片）、`initialize`
+ * （启动时）、`dispose`（退出时）都会被宿主直接调用，不能留 TODO()。
  */
 class StarRocksServiceAdapterTest {
 
@@ -23,9 +25,15 @@ class StarRocksServiceAdapterTest {
     }
 
     @Test
-    fun `protocol lifecycle methods remain unimplemented placeholders`() {
-        assertFailsWith<NotImplementedError> { adapter.description }
-        assertFailsWith<NotImplementedError> { adapter.dispose() }
+    fun `registered entry points are safe for the host to call`() {
+        // description 是 i18n 键（宿主 toMiddlewareType 查表翻译），不能是裸英文或 TODO。
+        assertEquals(
+            StarRocksConstants.I18N_KEY_PREFIX + "description",
+            adapter.description,
+        )
+        // 启动 / 退出时宿主直接调用，不能抛。
+        adapter.dispose()
+        assertTrue(adapter.navigationItems(dummyConnection()).isEmpty())
     }
 
     @Test

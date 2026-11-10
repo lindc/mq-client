@@ -51,6 +51,12 @@ kotlin {
             implementation(projects.rabbitmqUi)
             implementation(projects.rocketmqService)
             implementation(projects.rocketmqUi)
+            // OLAP 协议族（S1 骨架）：host 必须显式依赖 service + ui 两个模块，
+            // 它们的 META-INF/services 注册文件才会进运行时 classpath 被
+            // ModuleRegistry 的 ServiceLoader 扫到（新建连接弹窗的 OLAP 分类
+            // 与 StarRocks 卡片由 SPI 动态合并，宿主不硬编码分类）。
+            implementation(projects.starrocksService)
+            implementation(projects.starrocksUi)
             // 解释器注册表：Main.kt 启动 / 换语言时把解释器的私有 i18n 表合进全局表
             // （ibmMqUi/kafkaUi 的 implementation 依赖不传递，宿主自己声明一份）。
             implementation(projects.messageInterpreterRegistry)

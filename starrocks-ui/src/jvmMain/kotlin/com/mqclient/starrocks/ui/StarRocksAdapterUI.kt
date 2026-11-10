@@ -16,16 +16,21 @@ import com.mqclient.starrocks.StarRocksConstants
  * 看不到它，KafkaUI / IbmMqUI 同款位置）。纯 Composable 占位页放在
  * commonMain，SPI 装配类放 jvmMain。
  *
- * ## i18n
+ * ## 分类与卡片元数据的归属（契约事实）
  *
- * 占位文案键 `olap.starrocks.*` 放在 ui-common 的全局语言表（本模块不注册
- * `i18nTables`）—— 空骨架没有 `META-INF/services` 注册文件，模块私有表
- * 不会被加载，全局表是唯一能正确渲染的落点。
+ * [AdapterUI] 只声明 `serviceId` / `title` / `i18nTables` / `content` /
+ * `contentFor` —— **没有 `category` / `name` / `description`**。新建连接弹窗的
+ * "OLAP" 分类由配对的 `StarRocksServiceAdapter.category` 提供（值严格引用
+ * `StarRocksConstants.CATEGORY` → `OlapCategory.CATEGORY`，不硬编码），
+ * 卡片名称 / 描述同样来自 `ServiceAdapter.name` / `description`（描述是
+ * i18n 键，宿主 `toMiddlewareType` 查表翻译）。
+ * 本类通过 [serviceId] 与它配对（`ModuleRegistry` 按 id 校验）。
  *
- * ## 刻意未注册 SPI
+ * ## SPI 注册
  *
- * 宿主通过 `META-INF/services/com.mqclient.core.AdapterUI` 发现 UI 模块。
- * 本模块不提供该注册文件，也不改 app-ui 的依赖 / 注册逻辑（超出空模块边界）。
+ * 已通过 `src/jvmMain/resources/META-INF/services/com.mqclient.core.AdapterUI`
+ * 注册；宿主还需在 `app-ui/build.gradle.kts` 声明 `implementation` 依赖，
+ * 注册文件才会进入运行时 classpath 被 ServiceLoader 发现。
  */
 class StarRocksAdapterUI : AdapterUI {
 
@@ -34,6 +39,13 @@ class StarRocksAdapterUI : AdapterUI {
 
     /** 标题为协议专有名词（与 KafkaUI.title 同口径，非可翻译文案）。 */
     override val title: String = StarRocksConstants.PROTOCOL_NAME
+
+    /**
+     * 分类（**配对契约自证**）：宿主分组实际读取 `ServiceAdapter.category`，
+     * 本属性供装配测试断言 UI 与 service 两侧分类一致（防漂移），值严格引用
+     * [StarRocksConstants.CATEGORY] → `OlapCategory.CATEGORY`，不硬编码。
+     */
+    val category: String = StarRocksConstants.CATEGORY
 
     /** 主内容 = 占位页。 */
     override val content: @Composable () -> Unit = { StarRocksPlaceholder() }
