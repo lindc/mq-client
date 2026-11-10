@@ -200,12 +200,18 @@ afterEvaluate {
         dependsOn(tasks.named("createDistributable"))
 
         // 产物名与 compose DSL 的 packageName / packageVersion 保持单一来源。
+        // 局部变量避开 Zip 任务自带的 name 属性（CopySpec 闭包内会歧义解析）；
+        // compose DSL 的两个属性声明为可空，上面已显式赋值，此处断言非空。
         val dist = compose.desktop.application.nativeDistributions
-        val name = dist.packageName
-        val version = dist.packageVersion
-        archiveFileName.set("$name-$version-windows-x64.zip")
+        val pkgName = dist.packageName ?: error("nativeDistributions.packageName is not set")
+        val pkgVersion = dist.packageVersion ?: error("nativeDistributions.packageVersion is not set")
+        archiveFileName.set("$pkgName-$pkgVersion-windows-x64.zip")
         destinationDirectory.set(layout.buildDirectory.dir("compose/binaries/main"))
 
-        from(layout.buildDirectory.dir("compose/binaries/main/app/$name"))
+        // 包一层顶层文件夹：解压后是 MQClient/MQClient.exe，不会把 exe / runtime
+        // 散落进解压目标目录。
+        from(layout.buildDirectory.dir("compose/binaries/main/app/$pkgName")) {
+            into(pkgName)
+        }
     }
 }
