@@ -155,3 +155,57 @@ compose.desktop {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Windows 免安装 zip 导出（app-image → zip，非 MSI）：
+//
+//   ./gradlew :app-ui:zipDistributable
+//   → app-ui/build/compose/binaries/main/MQClient-0.1.0-windows-x64.zip
+//     解压后 MQClient/MQClient.exe 双击即用（自带精简 runtime，无需装 JDK）。
+//
+// 为什么需要下面两步修复：WiX 工具集只服务于 msi/exe 安装器，本工程用不到；
+// 但 compose 插件在 Windows 上仍会注册 downloadWix / unzipWix（要从 GitHub 下载，
+// 内网环境必超时），并把 wixToolsetDir（<root>/build/wix311）注册成 jpackage
+// 任务的输入校验 —— 目录不存在直接配置失败。
+//
+//  1) 禁用 downloadWix / unzipWix（app-image 不调 WiX；以后真要打 MSI 时删掉
+//     这段，让 WiX 正常下载）。
+//  2) ensureWixToolsetDir 在 jpackage 之前建空目录占位，绕过输入校验。
+// ---------------------------------------------------------------------------
+
+// 注意：compose 插件自带 wixToolsetDir 扩展属性，本变量刻意避开同名。
+val wixDirPlaceholder = rootProject.layout.buildDirectory.dir("wix311")
+
+// WiX 任务注册在根项目（:downloadWix / :unzipWix），必须用 rootProject.tasks 匹配。
+rootProject.tasks.matching { it.name == "downloadWix" || it.name == "unzipWix" }.configureEach {
+    enabled = false
+}
+
+// compose 插件在 afterEvaluate 才注册 createDistributable / WiX 任务，
+// 所以全部接线必须包在 afterEvaluate 里（直接 tasks.named 会报 task not found）。
+afterEvaluate {
+    val ensureWixToolsetDir = tasks.register("ensureWixToolsetDir") {
+        val dir = wixDirPlaceholder
+        doLast { dir.get().asFile.mkdirs() }
+    }
+
+    tasks.named("createDistributable") {
+        dependsOn(ensureWixToolsetDir)
+    }
+
+    tasks.register<Zip>("zipDistributable") {
+        group = "distribution"
+        description =
+            "把 createDistributable 的免安装 app-image 压成 zip（Windows 解压即用，非 MSI）。"
+        dependsOn(tasks.named("createDistributable"))
+
+        // 产物名与 compose DSL 的 packageName / packageVersion 保持单一来源。
+        val dist = compose.desktop.application.nativeDistributions
+        val name = dist.packageName
+        val version = dist.packageVersion
+        archiveFileName.set("$name-$version-windows-x64.zip")
+        destinationDirectory.set(layout.buildDirectory.dir("compose/binaries/main"))
+
+        from(layout.buildDirectory.dir("compose/binaries/main/app/$name"))
+    }
+}
