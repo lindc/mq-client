@@ -149,11 +149,19 @@ cd mq-client
 **Packaging** (portable zip, no MSI installer):
 
 ```bash
+# one-liner per platform (auto-detects JDK 25, auto-names the zip by host OS):
+./build.bat            # Windows
+./build.sh             # Linux / macOS
+# or via gradle directly:
 ./gradlew :app-ui:zipDistributable
-# → app-ui/build/compose/binaries/main/MQClient-0.1.0-windows-x64.zip
-# Unzip and run MQClient/MQClient.exe — ships with a trimmed JRE
-# (jpackage with an explicit module list), no JDK installation needed
 ```
+
+Artifacts land in `app-ui/build/compose/binaries/main/` —
+`MQClient-0.1.0-windows-x64.zip` / `-linux-x64.zip` / `-macos-x64.zip` / `-macos-arm64.zip`
+(jpackage only packages the **current** OS — build each platform on that platform).
+Unzip and run `MQClient/MQClient.exe` (Windows) or `./MQClient/bin/MQClient`
+(Linux/macOS) — ships with a trimmed JRE (jpackage with an explicit module list),
+no JDK installation needed.
 
 **Data directory**: everything lives under `~/.mqclient/`:
 

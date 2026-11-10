@@ -150,10 +150,18 @@ cd mq-client
 **打包分发**（免安装 zip，非 MSI）：
 
 ```bash
+# 一条命令出当前平台的 zip（自动探测 JDK 25，产物名按宿主 OS 自动标注）：
+build.bat              # Windows
+./build.sh             # Linux / macOS
+# 或直接走 gradle：
 ./gradlew :app-ui:zipDistributable
-# → app-ui/build/compose/binaries/main/MQClient-0.1.0-windows-x64.zip
-# 解压后 MQClient/MQClient.exe 双击即用，自带精简 JRE（jpackage 显式模块清单）
 ```
+
+产物在 `app-ui/build/compose/binaries/main/` ——
+`MQClient-0.1.0-windows-x64.zip` / `-linux-x64.zip` / `-macos-x64.zip` / `-macos-arm64.zip`
+（jpackage 只能打包**当前**系统——各平台的 zip 须在各平台构建）。
+解压后运行 `MQClient/MQClient.exe`（Windows）或 `./MQClient/bin/MQClient`
+（Linux/macOS），自带精简 JRE（jpackage 显式模块清单），无需安装 JDK。
 
 **数据目录**：所有本地数据统一存储于 `~/.mqclient/`：
 
