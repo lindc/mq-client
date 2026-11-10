@@ -53,6 +53,7 @@ include(
     ":anthropic-ui",
     ":ibm-mq-service", ":ibm-mq-ui",
     ":mq-base",
+    ":olap-base",
     ":mq-ui",
     ":kafka-service", ":kafka-ui",
     ":rabbitmq-service", ":rabbitmq-ui",

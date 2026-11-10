@@ -57,6 +57,7 @@ okio = { module = "com.squareup.okio:okio-jvm", version.ref = "okio" }
 # Coroutines — app-core 的事件总线把 CoroutineScope / Job / SharedFlow 放在公开 API
 # 上, 所以由 app-core 用 api 暴露 (见 app-core/build.gradle.kts).
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinxCoroutines" }
+kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinxCoroutines" }
 
 # Ktor Client — HTTP + SSE for the AI adapter module (:openai-service). Multiplatform
 # artifacts (CIO engine included), so the adapter layer lives in commonMain.
