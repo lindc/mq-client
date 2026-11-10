@@ -123,6 +123,7 @@
   "rabbitmq_ui_exchange_props_field_type": "类型",
   "rabbitmq_ui_send_action": "发送消息",
   "rabbitmq_ui_send_title": "发送消息：%1$s",
+  "rabbitmq_ui_send_service_not_ready": "服务未初始化",
   "rabbitmq_ui_send_target": "目标交换机",
   "rabbitmq_ui_send_routing_key": "Routing Key",
   "rabbitmq_ui_send_routing_key_required": "Routing Key 不能为空",

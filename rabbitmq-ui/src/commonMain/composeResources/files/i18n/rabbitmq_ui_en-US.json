@@ -123,6 +123,7 @@
   "rabbitmq_ui_exchange_props_field_type": "Type",
   "rabbitmq_ui_send_action": "Send message",
   "rabbitmq_ui_send_title": "Send message: %1$s",
+  "rabbitmq_ui_send_service_not_ready": "Service not initialized",
   "rabbitmq_ui_send_target": "Target exchange",
   "rabbitmq_ui_send_routing_key": "Routing Key",
   "rabbitmq_ui_send_routing_key_required": "Routing key is required",

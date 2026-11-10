@@ -83,7 +83,7 @@ fun RabbitMqCreateExchangeDialog(
         }
 
         val service = RabbitMqModule.serviceOrNull() ?: run {
-            submitError = "服务未初始化"
+            submitError = stringResource("rabbitmq_ui_send_service_not_ready")
             return
         }
         submitting = true

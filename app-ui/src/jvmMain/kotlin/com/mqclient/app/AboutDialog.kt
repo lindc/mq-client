@@ -57,6 +57,7 @@ import com.mqclient.uicommon.AppSecondaryButton
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.i18n.stringResource
+import com.mqclient.uicommon.i18n.withArg
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
@@ -491,9 +492,9 @@ private data class BundledLicense(
 
 /** 找不到就把原因报到错误通道：界面不显示路径，但打包侧能从这里发现 `legal/` 被裁了。 */
 private fun reportMissingLicense(javaHome: String) {
-    val homeText = javaHome.ifEmpty { "缺失" }
+    val homeText = javaHome.ifEmpty { "-" }
     CoreModule.reportError(
-        message = "内置运行时的完整许可证文件未找到（java.home=$homeText）",
+        message = stringResource("app_license_runtime_file_missing").withArg(homeText),
         source = "app-ui",
     )
 }
@@ -521,7 +522,7 @@ private suspend fun loadThirdPartyComponents(): List<ThirdPartyComponent> =
     } catch (error: Exception) {
         // 读不出来 = 对话框空白，用户只会当成程序坏了 —— 报到错误通道上去。
         CoreModule.reportError(
-            message = "第三方组件清单读取失败，许可证列表暂时为空",
+            message = stringResource("app_license_third_party_list_failed"),
             source = "app-ui",
             error = error,
         )
@@ -843,7 +844,7 @@ private fun FullLicenseDialog(license: BundledLicense, onDismiss: () -> Unit) {
             runCatching { readLicenseParts(license) }
                 .onFailure { error ->
                     CoreModule.reportError(
-                        message = "完整许可证文本读取失败",
+                        message = stringResource("app_license_text_read_failed"),
                         source = "app-ui",
                         error = error,
                     )

@@ -952,7 +952,6 @@
   "ibm_mq_msg_import_executing": "Importing…",
   "ibm_mq_msg_import_failed": "Import failed: %s",
   "ibm_mq_msg_import_read_failed": "Failed to read file: %s",
-  "ibm_mq_msg_service_not_ready": "Service not ready",
   "ibm_mq_msg_import_fallback_title": "File is not dmpmqmsg format",
   "ibm_mq_msg_import_fallback_message": "No dmpmqmsg message could be parsed from “%s”.\n\nYou can cancel, or send the file content as a single message body to queue “%s”.",
   "ibm_mq_msg_import_fallback_send": "Send as plain file",

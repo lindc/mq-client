@@ -1094,7 +1094,6 @@
   "ibm_mq_msg_import_executing": "导入中…",
   "ibm_mq_msg_import_failed": "导入失败：%s",
   "ibm_mq_msg_import_read_failed": "读取文件失败：%s",
-  "ibm_mq_msg_service_not_ready": "服务未初始化",
   "ibm_mq_msg_import_fallback_title": "文件不是 dmpmqmsg 格式",
   "ibm_mq_msg_import_fallback_message": "无法从“%s”解析出 dmpmqmsg 消息。\n\n可以取消导入，或把文件内容直接作为消息体发送到队列「%s」。",
   "ibm_mq_msg_import_fallback_send": "按普通文件发送",

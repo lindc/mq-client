@@ -80,7 +80,7 @@ fun KafkaCreateTopicDialog(
         if (!ok) return
 
         val service = KafkaModule.serviceOrNull() ?: run {
-            submitError = "服务未初始化"
+            submitError = stringResource("kafka_ui_send_service_not_ready")
             return
         }
         submitting = true

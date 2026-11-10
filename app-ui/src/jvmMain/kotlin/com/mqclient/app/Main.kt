@@ -52,6 +52,7 @@ import com.mqclient.rocketmq.RocketMqLogging
 import com.mqclient.uicommon.i18n.userMessage
 import com.mqclient.uicommon.i18n.LanguageResources
 import com.mqclient.uicommon.i18n.stringResource
+import com.mqclient.uicommon.i18n.withArg
 import com.mqclient.uicommon.LocalSnackbarHostState
 import com.mqclient.uicommon.ThemedSnackbarHost
 import dev.nucleusframework.application.DecoratedWindow
@@ -464,7 +465,7 @@ private fun bootstrapEvents() {
     runCatching { DatabaseManager.initialize(DriverFactory(), Dispatchers.IO.limitedParallelism(1)) }
         .onFailure { error ->
             CoreModule.reportError(
-                message = "数据库初始化失败，依赖历史数据的功能不可用：${error.message ?: error::class.simpleName}",
+                message = stringResource("app_db_init_failed").withArg(error.message ?: error::class.simpleName ?: "unknown"),
                 source = "core.database",
                 error = error,
             )

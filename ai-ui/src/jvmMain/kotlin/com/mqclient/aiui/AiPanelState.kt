@@ -17,6 +17,8 @@ import com.mqclient.aiservice.db.ChatHistoryRepository
 import com.mqclient.core.AiConfig
 import com.mqclient.core.AiConnection
 import com.mqclient.core.ConfigStore
+import com.mqclient.uicommon.i18n.stringResource
+import com.mqclient.uicommon.i18n.withArg
 import com.mqclient.core.CoreModule
 import com.mqclient.core.log.Log
 import java.util.UUID
@@ -129,7 +131,7 @@ class AiPanelState internal constructor(
         config = next
         ConfigStore.editConfig { current -> Result.success(current.copy(ai = next)) }
             .onFailure { error ->
-                panelError = "设置保存失败：${error.message ?: error.javaClass.simpleName}"
+                panelError = stringResource("ai_settings_save_failed").withArg(error.message ?: error.javaClass.simpleName)
             }
     }
 
@@ -385,7 +387,7 @@ class AiPanelState internal constructor(
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (error: Throwable) {
-                CoreModule.reportError(message = "清空 AI 对话失败", source = SOURCE_TAG, error = error)
+                CoreModule.reportError(message = stringResource("ai_clear_chat_failed"), source = SOURCE_TAG, error = error)
             }
         }
     }
