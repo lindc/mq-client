@@ -73,15 +73,6 @@ object QueueIconResolver {
     /** 从快照直接解析图标（[QueueListPanel] 的卡片转换入口）。 */
     fun resolveIcon(snapshot: MqObjectSnapshot): ImageVector = resolveIcon(resolveType(snapshot))
 
-    /** 类型的 i18n 键（Tooltip / 无障碍文案用）。 */
-    fun typeNameKey(type: QueueType): String = when (type) {
-        QueueType.LOCAL -> "ibm_mq_queue_type_local"
-        QueueType.TRANSMISSION -> "ibm_mq_queue_type_transmission"
-        QueueType.REMOTE -> "ibm_mq_queue_type_remote"
-        QueueType.ALIAS -> "ibm_mq_queue_type_alias"
-        QueueType.MODEL -> "ibm_mq_queue_type_model"
-        QueueType.UNKNOWN -> "ibm_mq_queue_type_unknown"
-    }
 
     /**
      * USAGE 是否为传输用途。PCF 正常给 Int（MQUS_TRANSMISSION=1）；字符串形态

@@ -71,6 +71,7 @@ fun AiPanel(
                     activeConnectionId = state.activeConnection?.id,
                     context = currentContext,
                     onConnectionSelected = { picked -> state.updateConfig { it.copy(activeConnectionId = picked.id) } },
+                    onClearHistory = { state.clearHistory() },
                     onDismiss = onDismiss,
                 )
                 // 忽略 SSL = 该连接的证书校验被关掉（可能被中间人劫持）。开关在设置页，

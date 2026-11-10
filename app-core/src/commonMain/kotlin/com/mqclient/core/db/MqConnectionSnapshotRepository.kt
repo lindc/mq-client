@@ -49,16 +49,6 @@ object MqConnectionSnapshotRepository {
         db.mq_connectionQueries.selectAll().executeAsList().map { it.toModel() }
     }
 
-    /** 按连接 id（UUIDv7）精确取一条 —— 一个 id 只对应一份记录，没有则 null。 */
-    suspend fun getById(id: String): MqConnectionSnapshot? = withDb { db ->
-        db.mq_connectionQueries.selectById(id).executeAsOneOrNull()?.toModel()
-    }
-
-    /** 某 MQ 类型的全部快照（按创建时间倒序）；type = serviceId。 */
-    suspend fun getByType(type: String): List<MqConnectionSnapshot> = withDb { db ->
-        db.mq_connectionQueries.selectByType(type).executeAsList().map { it.toModel() }
-    }
-
     /** 当前时刻（commonMain 没有 System.currentTimeMillis，走 app-core 唯一的墙上时钟）。 */
     fun now(): Long = systemTimeMillis()
 

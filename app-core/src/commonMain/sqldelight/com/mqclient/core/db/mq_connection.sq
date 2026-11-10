@@ -27,12 +27,3 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?);
 selectAll:
 SELECT * FROM mq_connection
 ORDER BY created_at DESC;
-
-selectById:
-SELECT * FROM mq_connection
-WHERE id = ?;
-
-selectByType:
-SELECT * FROM mq_connection
-WHERE type = ?
-ORDER BY created_at DESC;

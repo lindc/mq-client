@@ -84,15 +84,6 @@ object ChatHistoryRepository {
         db.chat_historyQueries.selectByModel(connection_id = connectionId, model_name = modelName).executeAsList()
     }
 
-    /**
-     * 某个连接的全部对话，经 snapshot_id 连出所属快照的 serviceUrl（createdTime 倒序）。
-     * 生成类型 [SelectWithSnapshot] = Chat_history 全字段 + `snapshotServiceUrl: String?`
-     * （LEFT JOIN —— FAILED / 无快照的行 url 为 null，不丢行）。
-     */
-    suspend fun getWithSnapshot(connectionId: String): List<SelectWithSnapshot> = withDatabase { db ->
-        db.chat_historyQueries.selectWithSnapshot(connectionId).executeAsList()
-    }
-
     /** 某个连接在 [fromTime, toTime] 闭区间内的对话（created_time 倒序）。 */
     suspend fun getByTimeRange(connectionId: String, fromTime: Long, toTime: Long): List<Chat_history> =
         withDatabase { db ->

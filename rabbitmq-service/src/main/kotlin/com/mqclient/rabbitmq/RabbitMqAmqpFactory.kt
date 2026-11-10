@@ -89,7 +89,7 @@ internal const val AMQP_REQUESTED_HEARTBEAT_S = 60
  * 翻译一次：底层超时 → 本类型，UI 只认这一个。
  *
  * 继承 `IllegalStateException`：调用点本来就用「普通异常」表达失败，这样既有的
- * `failureText` / `catch (Exception)` 收尾逻辑无需分支。
+ * `catch (Exception)` + userMessage 收尾逻辑无需分支。
  */
 class RabbitMqOperationTimeoutException(
     errorKey: String,

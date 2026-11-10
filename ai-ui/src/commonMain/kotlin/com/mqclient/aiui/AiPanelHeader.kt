@@ -16,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -56,6 +57,7 @@ fun AiPanelHeader(
     activeConnectionId: String?,
     context: AiContext?,
     onConnectionSelected: (AiConnection) -> Unit,
+    onClearHistory: () -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -87,6 +89,16 @@ fun AiPanelHeader(
                 activeConnectionId = activeConnectionId,
                 onConnectionSelected = onConnectionSelected,
             )
+            // 清空对话（删当前连接的 chat_history 记录 + 内存列表）：此前实现一直存在
+            // 但没有 UI 入口（死代码盘点发现），按钮挂在 header 关闭按钮左侧。
+            IconButton(onClick = onClearHistory) {
+                Icon(
+                    imageVector = Icons.Default.Delete,
+                    contentDescription = stringResource("ai_panel_clear_chat"),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
             IconButton(onClick = onDismiss) {
                 Icon(
                     imageVector = Icons.Default.Close,

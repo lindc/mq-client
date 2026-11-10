@@ -149,6 +149,4 @@ class JsonInterpreter : MessageInterpreter {
     private fun isClosingPair(open: Char, close: Char): Boolean =
         (open == '{' && close == '}') || (open == '[' && close == ']')
 
-    /** 供测试与诊断：判断一段文本是否为合法 JSON（严格模式）。 */
-    internal fun isValidJson(text: String): Boolean = runCatching { strict.parseToJsonElement(text) }.isSuccess
 }

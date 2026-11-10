@@ -147,5 +147,4 @@ class RocketMqConnectionManager(
     }
 
     /** 供扫描服务判定「连不连得上」时复用（保持原有调用面）。 */
-    internal fun contextFor(connectionId: String): RocketMqConnectionContext? = contextOrNull(connectionId)
 }
