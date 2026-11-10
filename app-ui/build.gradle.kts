@@ -205,7 +205,20 @@ afterEvaluate {
         val dist = compose.desktop.application.nativeDistributions
         val pkgName = dist.packageName ?: error("nativeDistributions.packageName is not set")
         val pkgVersion = dist.packageVersion ?: error("nativeDistributions.packageVersion is not set")
-        archiveFileName.set("$pkgName-$pkgVersion-windows-x64.zip")
+
+        // 按**当前宿主** OS/架构打标签：jpackage 只能打包当前系统（不能交叉），
+        // 同一任务在 Linux/macOS 上运行时自动得到对应平台的 zip 名。
+        val hostOs = providers.systemProperty("os.name").get().lowercase()
+        val osTag = when {
+            hostOs.contains("win") -> "windows"
+            hostOs.contains("mac") || hostOs.contains("darwin") -> "macos"
+            else -> "linux"
+        }
+        val archTag = when (providers.systemProperty("os.arch").get().lowercase()) {
+            "aarch64", "arm64" -> "arm64"
+            else -> "x64"
+        }
+        archiveFileName.set("$pkgName-$pkgVersion-$osTag-$archTag.zip")
         destinationDirectory.set(layout.buildDirectory.dir("compose/binaries/main"))
 
         // 包一层顶层文件夹：解压后是 MQClient/MQClient.exe，不会把 exe / runtime
