@@ -74,6 +74,10 @@ class StarRocksSpiTest {
             StarRocksAdapterUI().category,
             "UI 与 service 的分类必须一致（引用同一常量）",
         )
+        assertTrue(
+            ModuleRegistry.forms.any { it.serviceId == "starrocks" },
+            "ConnectionFormUi 未注册 —— 新建连接第二步会回落「将在后续版本提供」占位",
+        )
     }
 
     @Test

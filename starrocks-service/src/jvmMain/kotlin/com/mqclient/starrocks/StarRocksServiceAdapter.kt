@@ -56,8 +56,8 @@ class StarRocksServiceAdapter : ServiceAdapter {
     /** 类目取 olap-base 的 [com.mqclient.olap.base.OlapCategory.CATEGORY]。 */
     override val category: String = StarRocksConstants.CATEGORY
 
-    /** S1 只有连接探针，没有事件订阅 / 定时任务；留空实现供 S2 接线。 */
-    override fun initialize(context: ServiceContext) = Unit
+    /** 注入宿主上下文，建立可向 UI 提供 `testConnection` 的模块门面。 */
+    override fun initialize(context: ServiceContext) = StarRocksModule.initialize(context)
 
     /** 空骨架不贡献导航项（返回空集合，不抛异常）。 */
     override fun navigationItems(connection: ConnectionInfo): List<NavigationItem> = emptyList()
@@ -65,6 +65,6 @@ class StarRocksServiceAdapter : ServiceAdapter {
     /** 空骨架不贡献徽章。 */
     override fun badgeCounts(connectionId: String): Flow<Map<String, Int>> = emptyFlow()
 
-    /** S1 无长期持有的资源；`StarRocksConnectionManager.shutdown()` 待 S2 接线。 */
-    override fun dispose() = Unit
+    /** 退出时摘掉模块门面引用。 */
+    override fun dispose() = StarRocksModule.dispose()
 }

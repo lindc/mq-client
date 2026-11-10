@@ -26,6 +26,16 @@ import com.mqclient.starrocks.StarRocksConstants
  * i18n 键，宿主 `toMiddlewareType` 查表翻译）。
  * 本类通过 [serviceId] 与它配对（`ModuleRegistry` 按 id 校验）。
  *
+ * ## 创建表单（S2）
+ *
+ * 「新建连接」第二步的创建面板**不是** [AdapterUI] 的方法，而是独立的
+ * `ConnectionFormUi` SPI：[StarRocksConnectionForm] 经
+ * `META-INF/services/com.mqclient.core.ConnectionFormUi` 注册后，宿主
+ * `NewConnectionDialog` 按 [serviceId] 装配它，原先的
+ * 「该类型的创建表单将在后续版本提供」占位提示随之消失。
+ * [content] / [contentFor] 仍返回 [StarRocksPlaceholder] —— 那是**主内容区**
+ * （连接建好后的 Tab 页面），与创建表单是两条不同的路径。
+ *
  * ## SPI 注册
  *
  * 已通过 `src/jvmMain/resources/META-INF/services/com.mqclient.core.AdapterUI`

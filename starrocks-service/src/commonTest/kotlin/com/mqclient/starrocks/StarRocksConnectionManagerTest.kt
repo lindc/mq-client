@@ -32,11 +32,9 @@ class StarRocksConnectionManagerTest {
     private fun config(): StarRocksConnectionConfig = StarRocksConnectionConfig(
         connectionId = "test-conn",
         displayName = "test",
-        options = mapOf(
-            StarRocksConnectionConfig.KEY_HOST to "localhost",
-            StarRocksConnectionConfig.KEY_PORT to "9030",
-            StarRocksConnectionConfig.KEY_USER to "root",
-        ),
+        host = "localhost",
+        port = 9030,
+        user = "root",
     )
 
     private fun manager(connector: FakeJdbcConnector): StarRocksConnectionManager =
