@@ -2,14 +2,17 @@ package com.mqclient.starrocks
 
 import com.mqclient.core.event.EventBus
 import com.mqclient.core.scheduler.JobScheduler
+import com.mqclient.core.ServiceException
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.olap.base.error.OlapErrorCode
 import com.mqclient.starrocks.jdbc.FakeJdbcConnector
 import com.mqclient.starrocks.jdbc.JdbcFailure
+import com.mqclient.starrocks.jdbc.JdbcQueryBatch
 import com.mqclient.starrocks.jdbc.StarRocksErrorDetail
 import com.mqclient.starrocks.jdbc.StarRocksSqlDialect
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -150,5 +153,55 @@ class StarRocksConnectionManagerTest {
         assertEquals(1, connector.connectionCloseCalls)
         assertEquals(1, connector.connectorCloseCalls, "shutdown 应释放连接器")
         assertFalse(manager.isAlive())
+    }
+
+    // ---------------- executeQuery（S3 查询闭环） ----------------
+
+    @Test
+    fun `executeQuery streams batches with schema and passes sql to connector`() = runTest {
+        val connector = FakeJdbcConnector(FakeJdbcConnector.Behavior.Success)
+        connector.scriptedQueryBatches = listOf(
+            JdbcQueryBatch(
+                columns = listOf("id", "name"),
+                rows = listOf(listOf(1L, "a"), listOf(2L, null)),
+                isLast = false,
+            ),
+            JdbcQueryBatch(columns = listOf("id", "name"), rows = emptyList(), isLast = true),
+        )
+        val manager = manager(connector)
+        assertTrue(manager.connect(config()).isSuccess)
+
+        val batches = manager.executeQuery("SELECT id, name FROM t").toList()
+        assertEquals(2, batches.size)
+        assertEquals(listOf("id", "name"), batches[0].columns.map { it.name })
+        assertEquals(listOf<Any?>(1L, "a"), batches[0].rows[0])
+        assertEquals(null, batches[0].rows[1][1], "原生 NULL 应保持 null")
+        assertFalse(batches[0].lastBatch)
+        assertTrue(batches[1].lastBatch)
+        assertEquals("SELECT id, name FROM t", connector.lastExecutedSql)
+
+        manager.shutdown()
+    }
+
+    @Test
+    fun `executeQuery surfaces update count for DML and NOT_CONNECTED without session`() = runTest {
+        val connector = FakeJdbcConnector(FakeJdbcConnector.Behavior.Success)
+        val manager = manager(connector)
+
+        // 未连接：withSession 抛 NOT_CONNECTED 的 ServiceException。
+        val error = runCatching { manager.executeQuery("SELECT 1").toList() }.exceptionOrNull()
+        assertTrue(error is ServiceException, "未连接应抛 ServiceException")
+        assertEquals(OlapErrorCode.NOT_CONNECTED.errorKey, (error as ServiceException).errorKey)
+
+        // 已连接 + DML：单个 updateCount 批次，无列 schema。
+        assertTrue(manager.connect(config()).isSuccess)
+        connector.scriptedQueryBatches = listOf(JdbcQueryBatch(updateCount = 5L, isLast = true))
+        val batches = manager.executeQuery("UPDATE t SET x = 1").toList()
+        assertEquals(1, batches.size)
+        assertEquals(5L, batches[0].updateCount)
+        assertTrue(batches[0].columns.isEmpty())
+        assertTrue(batches[0].rows.isEmpty())
+
+        manager.shutdown()
     }
 }

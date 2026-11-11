@@ -214,7 +214,6 @@
   "olap.starrocks.menu.developing": "%1$s module is under development",
   "olap.starrocks.console.query_tab": "Query %1$s",
   "olap.starrocks.console.new_tab": "New query tab",
-  "olap.starrocks.console.editor_placeholder": "SQL editor under development",
   "olap.starrocks.form.name": "Connection name",
   "olap.starrocks.form.name_placeholder": "Enter a connection name",
   "olap.starrocks.form.test_running": "Testing connection...",
@@ -272,5 +271,16 @@
   "err_conn_already_exists": "Connection id '%1$s' already exists — edit it instead",
   "err_conn_service_id_immutable": "The protocol of connection '%1$s' cannot change (%2$s → %3$s); delete and re-create it",
   "ai_err_conn_exists": "AI connection id '%1$s' already exists — edit it instead",
-  "ai_err_conn_not_found": "AI connection '%1$s' does not exist"
+  "ai_err_conn_not_found": "AI connection '%1$s' does not exist",
+  "olap.starrocks.console.run": "Run",
+  "olap.starrocks.console.running": "Running...",
+  "olap.starrocks.console.idle_hint": "Enter SQL and click Run",
+  "olap.starrocks.console.sql_placeholder": "Type SQL here (Ctrl+Enter to run)",
+  "olap.starrocks.console.empty_result": "OK (%1$s ms), empty result set",
+  "olap.starrocks.console.affected_rows": "OK, affected rows: %1$s (%2$s ms)",
+  "olap.starrocks.console.row_count": "%1$s rows, %2$s ms",
+  "olap.starrocks.console.error_prefix": "Execution failed: ",
+  "olap.starrocks.console.connecting": "Connecting...",
+  "olap.starrocks.console.connect_failed": "Auto-connect failed: %1$s",
+  "err_conn_not_found": "Connection '%1$s' not found"
 }

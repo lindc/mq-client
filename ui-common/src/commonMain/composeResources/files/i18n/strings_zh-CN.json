@@ -214,7 +214,6 @@
   "olap.starrocks.menu.developing": "「%1$s」模块开发中",
   "olap.starrocks.console.query_tab": "查询 %1$s",
   "olap.starrocks.console.new_tab": "新建查询标签页",
-  "olap.starrocks.console.editor_placeholder": "SQL 编辑器开发中",
   "olap.starrocks.form.name": "连接名称",
   "olap.starrocks.form.name_placeholder": "请输入连接名称",
   "olap.starrocks.form.test_running": "正在测试连接...",
@@ -272,5 +271,16 @@
   "err_conn_already_exists": "连接 id '%1$s' 已存在，请改用编辑",
   "err_conn_service_id_immutable": "不允许修改连接 '%1$s' 的协议类型（%2$s → %3$s）；请先删除再新建",
   "ai_err_conn_exists": "AI 连接 id '%1$s' 已存在，请改用编辑",
-  "ai_err_conn_not_found": "AI 连接 '%1$s' 不存在"
+  "ai_err_conn_not_found": "AI 连接 '%1$s' 不存在",
+  "olap.starrocks.console.run": "执行",
+  "olap.starrocks.console.running": "执行中...",
+  "olap.starrocks.console.idle_hint": "请输入 SQL 并点击执行",
+  "olap.starrocks.console.sql_placeholder": "输入 SQL 语句（Ctrl+Enter 执行）",
+  "olap.starrocks.console.empty_result": "执行成功（%1$s ms），空结果集",
+  "olap.starrocks.console.affected_rows": "执行成功，受影响行数：%1$s（%2$s ms）",
+  "olap.starrocks.console.row_count": "%1$s 行，耗时 %2$s ms",
+  "olap.starrocks.console.error_prefix": "执行失败：",
+  "olap.starrocks.console.connecting": "正在建立连接...",
+  "olap.starrocks.console.connect_failed": "自动连接失败：%1$s",
+  "err_conn_not_found": "连接 '%1$s' 不存在"
 }

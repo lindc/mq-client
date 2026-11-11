@@ -71,12 +71,16 @@ data class ResultColumn(
  * @param rows 行数据。
  * @param lastBatch 是否末页。
  * @param batchIndex 批次序号（从 0 起）。
+ * @param updateCount DML / DDL 的受影响行数（仅非查询语句；SELECT 流为 null）。
+ *   携带在批次上而不是单独的类型：协议侧一条语句要么返回结果集流、要么返回
+ *   单个受影响行数，UI 按此字段分流渲染。
  */
 data class ResultBatch(
     val columns: List<ResultColumn>,
     val rows: List<List<Any?>>,
     val lastBatch: Boolean,
     val batchIndex: Int,
+    val updateCount: Long? = null,
 )
 
 /**

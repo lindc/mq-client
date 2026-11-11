@@ -5,6 +5,9 @@ import java.sql.SQLException
 import java.sql.SQLTimeoutException
 import java.sql.Statement
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -54,6 +57,57 @@ class MysqlJdbcConnector : JdbcConnector {
             } catch (error: SQLException) {
                 throw JdbcFailure(error.message, error.sqlState, error.errorCode, error)
             }
+        }
+
+        /**
+         * 流式执行：阻塞的 ResultSet 迭代在 `Dispatchers.IO` 协程里推进，批次经
+         * [Channel] 交还调用方协程回调 —— [onBatch] 不在 IO 上下文执行，满足
+         * `flow {}` 的 emit 上下文不变量（契约见 [JdbcConnection.executeQuery]）。
+         *
+         * 非查询语句（`execute` 返回 false）回调单个 `updateCount` 批次；
+         * 空结果集回调单个空 schema 的末批。
+         */
+        override suspend fun executeQuery(
+            sql: String,
+            batchSize: Int,
+            onBatch: suspend (JdbcQueryBatch) -> Unit,
+        ) = coroutineScope {
+            val batches = Channel<JdbcQueryBatch>(Channel.UNLIMITED)
+            launch(Dispatchers.IO) {
+                try {
+                    raw.createStatement().use { statement: Statement ->
+                        if (!statement.execute(sql)) {
+                            batches.send(
+                                JdbcQueryBatch(updateCount = statement.updateCount.toLong(), isLast = true),
+                            )
+                            return@use
+                        }
+                        statement.resultSet.use { resultSet ->
+                            val meta = resultSet.metaData
+                            val columnCount = meta.columnCount
+                            val columns = (1..columnCount).map { meta.getColumnLabel(it) }
+                            var rows = ArrayList<List<Any?>>(batchSize)
+                            while (resultSet.next()) {
+                                rows += (1..columnCount).map { resultSet.getObject(it) }
+                                if (rows.size >= batchSize) {
+                                    batches.send(JdbcQueryBatch(columns, rows, isLast = false))
+                                    rows = ArrayList(batchSize)
+                                }
+                            }
+                            // 尾批（含空结果集的单个空批）。
+                            batches.send(JdbcQueryBatch(columns, rows, isLast = true))
+                        }
+                    }
+                    batches.close()
+                } catch (error: SQLTimeoutException) {
+                    batches.close(JdbcConnectTimeoutException(error.message ?: "query timed out"))
+                } catch (error: SQLException) {
+                    batches.close(JdbcFailure(error.message, error.sqlState, error.errorCode, error))
+                } catch (error: Throwable) {
+                    batches.close(error)
+                }
+            }
+            for (batch in batches) onBatch(batch)
         }
 
         /** `isClosed` 本身会抛 SQLException，兜成 false（按不可用处理）。 */

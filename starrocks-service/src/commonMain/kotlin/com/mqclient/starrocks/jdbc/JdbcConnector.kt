@@ -41,12 +41,50 @@ interface JdbcConnection {
     /** 执行探针语句（`SELECT 1`），返回结果集是否有行。 */
     suspend fun probe(): Boolean
 
+    /**
+     * 执行一条 SQL，按 [batchSize] 行为单位把结果流式回调给 [onBatch]。
+     *
+     * 平台中立的流式取数：SELECT 流按行分批（末批 [JdbcQueryBatch.isLast] = true），
+     * 非查询语句回调**单个**带 [JdbcQueryBatch.updateCount] 的批次。实现负责把
+     * `SQLException` 翻译成 [JdbcFailure] / [JdbcConnectTimeoutException]。
+     *
+     * 注意契约：[onBatch] 总在**调用方协程上下文**回调（实现内部做 IO 切换但不
+     * 把回调切到 IO 线程）—— 调用方在 `flow {}` 里 emit 依赖这一点（Flow 上下文
+     * 不变量）。
+     */
+    suspend fun executeQuery(
+        sql: String,
+        batchSize: Int = DEFAULT_QUERY_BATCH_SIZE,
+        onBatch: suspend (JdbcQueryBatch) -> Unit,
+    )
+
     /** 物理连接是否仍可用（半开 / 已关闭时 false）。 */
     fun isUsable(): Boolean
 
     /** 关闭连接；必须幂等、自行兜异常。 */
     suspend fun close()
+
+    companion object {
+        /** 查询分批的默认行数（UI 渲染与内存占用的折中）。 */
+        const val DEFAULT_QUERY_BATCH_SIZE: Int = 100
+    }
 }
+
+/**
+ * 一次 JDBC 查询的平台中立结果批次（对标 olap-base 的 `ResultBatch`，但**不依赖
+ * olap-base** —— jdbc 适配层保持在协议最底层）。
+ *
+ * @param columns 列名（每个批次都带全量 schema）；非查询语句为空。
+ * @param rows 行数据（原生值已映射成 Kotlin 基本类型 / null）。
+ * @param updateCount 非查询语句的受影响行数；SELECT 流为 null。
+ * @param isLast 是否末批。
+ */
+class JdbcQueryBatch(
+    val columns: List<String> = emptyList(),
+    val rows: List<List<Any?>> = emptyList(),
+    val updateCount: Long? = null,
+    val isLast: Boolean,
+)
 
 /**
  * 平台中立的 JDBC 失败（由 jvmMain 的 `SQLException` 翻译而来）。

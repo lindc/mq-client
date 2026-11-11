@@ -1,9 +1,14 @@
 package com.mqclient.starrocks
 
+import com.mqclient.core.ConnectionStore
+import com.mqclient.core.ServiceException
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.olap.base.connection.HealthReport
+import com.mqclient.olap.base.query.ResultBatch
 import com.mqclient.starrocks.jdbc.JdbcConnector
 import com.mqclient.starrocks.jdbc.MysqlJdbcConnector
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 
 /**
  * StarRocks service 层的**模块门面**：把 S1 的 [StarRocksConnectionManager] 暴露给
@@ -45,4 +50,47 @@ object StarRocksModule {
             healthy = false,
             detail = "StarRocks module is not initialized",
         )
+
+    /**
+     * SQL 控制台的查询入口（S3 MVP）：在当前共享会话上执行 [sql]，按批流式返回。
+     * 未初始化时返回抛错的 Flow（UI 捕获后显示「未连接」类错误），不静默失败。
+     */
+    fun executeQuery(sql: String): Flow<ResultBatch> {
+        val current = manager ?: return flow {
+            throw IllegalStateException("StarRocks module is not initialized")
+        }
+        return current.executeQuery(sql)
+    }
+
+    /* ------------------------------ 懒加载连接（S3） ------------------------------ */
+
+    /** 共享会话是否存活（SQL 控制台「执行」前判断是否需要自动连接）。 */
+    fun isAlive(): Boolean = manager?.isAlive() == true
+
+    /**
+     * 按**落盘连接**建立会话（SQL 控制台「点击执行自动连接」的入口）。
+     *
+     * 从 [ConnectionStore] 的连接快照按 [connectionId] 找 [ConnectionInfo]，options
+     * 还原成 [StarRocksConnectionConfig] 后交 [StarRocksConnectionManager.connect]
+     * —— 基类对「已有可用会话」幂等返回，**自动建好的 Session 保存在 manager 里**，
+     * 后续执行直接复用（单槽语义，与右侧树上手动连接同一份会话）。
+     *
+     * 失败以 `Result.failure` 返回（找不到连接 → [ServiceException]；建连失败 →
+     * 底层 `JdbcFailure` 等），UI 用 `userMessage()` 翻译后展示。
+     */
+    suspend fun connectById(connectionId: String): Result<Unit> {
+        val current = manager ?: return Result.failure(
+            IllegalStateException("StarRocks module is not initialized"),
+        )
+        val info = ConnectionStore.connections.value.firstOrNull { it.id == connectionId }
+            ?: return Result.failure(
+                ServiceException(
+                    errorKey = "err_conn_not_found",
+                    args = listOf(connectionId),
+                    fallbackMessage = "Connection '$connectionId' not found",
+                ),
+            )
+        val config = StarRocksConnectionConfig.fromOptions(info.id, info.name, info.options)
+        return current.connect(config).map { }
+    }
 }

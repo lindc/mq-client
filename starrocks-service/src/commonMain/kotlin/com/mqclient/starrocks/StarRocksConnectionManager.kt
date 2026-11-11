@@ -7,12 +7,16 @@ import com.mqclient.olap.base.connection.HealthReport
 import com.mqclient.olap.base.dialect.SqlDialect
 import com.mqclient.olap.base.error.OlapErrorCode
 import com.mqclient.olap.base.perf.olapTimeMillis
+import com.mqclient.olap.base.query.ResultBatch
+import com.mqclient.olap.base.query.ResultColumn
 import com.mqclient.starrocks.jdbc.JdbcConnection
 import com.mqclient.starrocks.jdbc.JdbcConnector
 import com.mqclient.starrocks.jdbc.JdbcFailure
 import com.mqclient.starrocks.jdbc.StarRocksErrorDetail
 import com.mqclient.starrocks.jdbc.StarRocksSqlDialect
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 
 /**
  * StarRocks 连接管理器（S1：真实 `testConnection` 与 `healthCheck`）。
@@ -171,6 +175,57 @@ class StarRocksConnectionManager(
     suspend fun shutdown() {
         close()
         runCatching { connector.close() }
+    }
+
+    /* ------------------------------ S3 查询 ------------------------------ */
+
+    /**
+     * 在**当前共享会话**上执行一条 SQL，结果按批流式返回（MVP 查询闭环）。
+     *
+     * - SELECT：每 [JdbcConnection.DEFAULT_QUERY_BATCH_SIZE] 行一个
+     *   [ResultBatch]（schema 每批全量携带，UI 不用回看前序批次）；
+     * - DML / DDL：单个 `updateCount != null` 的批次（UI 显示受影响行数）；
+     * - `JdbcFailure` / 超时 / 「未连接」（[withSession] 抛
+     *   [com.mqclient.core.ServiceException]）原样上抛，UI 用 `userMessage()` 翻译。
+     *
+     * emit 都发生在调用方上下文（JDBC 阻塞迭代在 connector 内部的 IO 协程），
+     * 满足 Flow 上下文不变量；`withSession` 不取锁 —— 长查询不挡 connect /
+     * healthCheck（半开自愈语义见基类）。
+     *
+     * // TODO: 迁移到 olap-base 的 AbstractQueryExecutor（QueryHandle / 取消 /
+     *   EXPLAIN / 审计），MVP 先走 manager 级轻量通道。
+     */
+    fun executeQuery(sql: String): Flow<ResultBatch> = flow {
+        val start = olapTimeMillis()
+        var rows = 0L
+        var batchIndex = 0
+        withSession { session ->
+            session.executeQuery(sql) { batch ->
+                val result = if (batch.updateCount != null) {
+                    ResultBatch(
+                        columns = emptyList(),
+                        rows = emptyList(),
+                        lastBatch = batch.isLast,
+                        batchIndex = batchIndex,
+                        updateCount = batch.updateCount,
+                    )
+                } else {
+                    rows += batch.rows.size
+                    ResultBatch(
+                        columns = batch.columns.map { ResultColumn(it, "") },
+                        rows = batch.rows,
+                        lastBatch = batch.isLast,
+                        batchIndex = batchIndex,
+                    )
+                }
+                batchIndex++
+                emit(result)
+            }
+        }
+        com.mqclient.core.log.Log.info(
+            logTag,
+            "$perfPrefix[query] rows=$rows 耗时=${olapTimeMillis() - start}ms",
+        )
     }
 
     /* ------------------------------ 内部 ------------------------------ */

@@ -79,7 +79,7 @@ class StarRocksAdapterUI : AdapterUI {
      */
     override fun contentFor(objectType: String, connectionId: String): (@Composable () -> Unit)? =
         when (objectType) {
-            "console" -> { { StarRocksSqlConsolePlaceholder() } }
+            "console" -> { { StarRocksSqlConsolePlaceholder(connectionId = connectionId) } }
             "overview", "catalog", "topology", "queries" -> {
                 { DevelopingPlaceholder("olap.starrocks.menu.$objectType") }
             }

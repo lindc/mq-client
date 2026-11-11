@@ -50,6 +50,16 @@ class FakeJdbcConnector(
     var connectorCloseCalls: Int = 0
         private set
 
+    /**
+     * 查询脚本：`executeQuery` 时按序回调的批次（null = 未配置，抛
+     * [IllegalStateException]，防测试静默走通未实现的路径）。
+     */
+    var scriptedQueryBatches: List<JdbcQueryBatch>? = null
+
+    /** `executeQuery` 收到的最后一条 SQL（断言用）。 */
+    var lastExecutedSql: String? = null
+        private set
+
     private val connections = mutableListOf<FakeConnection>()
 
     override suspend fun connect(url: String, user: String, password: String): JdbcConnection {
@@ -81,6 +91,17 @@ class FakeJdbcConnector(
                 throw JdbcFailure(behavior.message, behavior.sqlState, behavior.errorCode)
             }
             return behavior is Behavior.Success
+        }
+
+        override suspend fun executeQuery(
+            sql: String,
+            batchSize: Int,
+            onBatch: suspend (JdbcQueryBatch) -> Unit,
+        ) {
+            lastExecutedSql = sql
+            val batches = scriptedQueryBatches
+                ?: throw IllegalStateException("scriptedQueryBatches not configured")
+            batches.forEach { onBatch(it) }
         }
 
         override fun isUsable(): Boolean = !closed

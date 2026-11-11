@@ -2,6 +2,7 @@ package com.mqclient.starrocks
 
 import com.mqclient.olap.base.connection.AnalyticsSession
 import com.mqclient.starrocks.jdbc.JdbcConnection
+import com.mqclient.starrocks.jdbc.JdbcQueryBatch
 
 /**
  * StarRocks 会话（重量级共享句柄，对齐 olap-base 的 `AnalyticsSession`）。
@@ -26,4 +27,14 @@ class StarRocksSession(
 
     /** 探针语句 `SELECT 1`（`healthCheck` / `testConnection` 共用）。 */
     suspend fun probe(): Boolean = connection.probe()
+
+    /**
+     * 在共享会话上执行一条 SQL，结果按批流式回调（透传
+     * [JdbcConnection.executeQuery]；`JdbcFailure` 等平台中立异常原样上抛）。
+     */
+    suspend fun executeQuery(
+        sql: String,
+        batchSize: Int = JdbcConnection.DEFAULT_QUERY_BATCH_SIZE,
+        onBatch: suspend (JdbcQueryBatch) -> Unit,
+    ) = connection.executeQuery(sql, batchSize, onBatch)
 }
