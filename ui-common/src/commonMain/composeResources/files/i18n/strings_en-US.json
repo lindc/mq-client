@@ -273,7 +273,6 @@
   "ai_err_conn_exists": "AI connection id '%1$s' already exists — edit it instead",
   "ai_err_conn_not_found": "AI connection '%1$s' does not exist",
   "olap.starrocks.console.run": "Run",
-  "olap.starrocks.console.running": "Running...",
   "olap.starrocks.console.idle_hint": "Enter SQL and click Run",
   "olap.starrocks.console.sql_placeholder": "Type SQL here (Ctrl+Enter to run)",
   "olap.starrocks.console.empty_result": "OK (%1$s ms), empty result set",
@@ -282,5 +281,11 @@
   "olap.starrocks.console.error_prefix": "Execution failed: ",
   "olap.starrocks.console.connecting": "Connecting...",
   "olap.starrocks.console.connect_failed": "Auto-connect failed: %1$s",
-  "err_conn_not_found": "Connection '%1$s' not found"
+  "err_conn_not_found": "Connection '%1$s' not found",
+  "olap.starrocks.console.stream_loading": "Loading... (%1$s rows loaded)",
+  "olap.starrocks.console.truncated": "Large result set: showing first %1$s rows (server result unaffected)",
+  "olap.starrocks.console.stop": "Stop execution",
+  "olap.starrocks.console.clear": "Clear editor and results",
+  "olap.starrocks.console.copy": "Copy results (TSV)",
+  "olap.starrocks.console.summary": "%1$s statements: %2$s ok, %3$s failed"
 }

@@ -273,7 +273,6 @@
   "ai_err_conn_exists": "AI 连接 id '%1$s' 已存在，请改用编辑",
   "ai_err_conn_not_found": "AI 连接 '%1$s' 不存在",
   "olap.starrocks.console.run": "执行",
-  "olap.starrocks.console.running": "执行中...",
   "olap.starrocks.console.idle_hint": "请输入 SQL 并点击执行",
   "olap.starrocks.console.sql_placeholder": "输入 SQL 语句（Ctrl+Enter 执行）",
   "olap.starrocks.console.empty_result": "执行成功（%1$s ms），空结果集",
@@ -282,5 +281,11 @@
   "olap.starrocks.console.error_prefix": "执行失败：",
   "olap.starrocks.console.connecting": "正在建立连接...",
   "olap.starrocks.console.connect_failed": "自动连接失败：%1$s",
-  "err_conn_not_found": "连接 '%1$s' 不存在"
+  "err_conn_not_found": "连接 '%1$s' 不存在",
+  "olap.starrocks.console.stream_loading": "正在加载中...（已加载 %1$s 行）",
+  "olap.starrocks.console.truncated": "结果集较大，仅展示前 %1$s 行（服务端结果不受影响）",
+  "olap.starrocks.console.stop": "停止执行",
+  "olap.starrocks.console.clear": "清空编辑器与结果",
+  "olap.starrocks.console.copy": "复制结果（TSV）",
+  "olap.starrocks.console.summary": "共 %1$s 条语句：成功 %2$s，失败 %3$s"
 }

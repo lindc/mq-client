@@ -66,48 +66,98 @@ class MysqlJdbcConnector : JdbcConnector {
          *
          * 非查询语句（`execute` 返回 false）回调单个 `updateCount` 批次；
          * 空结果集回调单个空 schema 的末批。
+         *
+         * ## 中断清理（「报错后无法再次执行」的根因修复）
+         *
+         * 行级流式（`fetchSize = MIN_VALUE`）下，同一连接同时只能有一个活跃的
+         * 流式 ResultSet：消费端中断（取消 / 截断 / 异常）时若不清理，残留的
+         * 未读完 ResultSet 会让**这条连接报废** —— 后续任何查询都抛
+         * "Streaming result set is still active"。同时阻塞在 `rs.next()` 的
+         * IO 协程不响应协程取消，`coroutineScope` 会悬等它跑完（可能几十万行）。
+         *
+         * 因此 Statement 由**消费协程**创建并持有引用：`finally` 里一旦发现未
+         * 自然完成，强制 `producer.cancel()` + 关 Statement + **关整条连接**
+         * （`isUsable` 随即变 false，manager 的懒加载路径 `isAlive()` 会自动
+         * 重连重建会话）—— 卡死的两端同时解开。
          */
         override suspend fun executeQuery(
             sql: String,
             batchSize: Int,
             onBatch: suspend (JdbcQueryBatch) -> Unit,
-        ) = coroutineScope {
-            val batches = Channel<JdbcQueryBatch>(Channel.UNLIMITED)
-            launch(Dispatchers.IO) {
-                try {
-                    raw.createStatement().use { statement: Statement ->
-                        if (!statement.execute(sql)) {
-                            batches.send(
-                                JdbcQueryBatch(updateCount = statement.updateCount.toLong(), isLast = true),
-                            )
-                            return@use
-                        }
-                        statement.resultSet.use { resultSet ->
-                            val meta = resultSet.metaData
-                            val columnCount = meta.columnCount
-                            val columns = (1..columnCount).map { meta.getColumnLabel(it) }
-                            var rows = ArrayList<List<Any?>>(batchSize)
-                            while (resultSet.next()) {
-                                rows += (1..columnCount).map { resultSet.getObject(it) }
-                                if (rows.size >= batchSize) {
-                                    batches.send(JdbcQueryBatch(columns, rows, isLast = false))
-                                    rows = ArrayList(batchSize)
-                                }
+        ) {
+            // Statement 在消费协程创建并持引用（生产协程只负责读），中断时消费端
+            // 才有能力从资源侧强制解开阻塞。
+            //
+            // coroutineScope 的「悬等生产协程」问题（消费端取消后等阻塞 IO 跑完）
+            // 由下方 finally 的强制断连解决：socket 一关，阻塞的 rs.next() 立即
+            // 抛错返回，scope 无需等待几十万行读完。
+            val statement: Statement = withContext(Dispatchers.IO) { raw.createStatement() }
+            var completed = false
+            try {
+                coroutineScope {
+                    val batches = Channel<JdbcQueryBatch>(Channel.UNLIMITED)
+                    val producer = launch(Dispatchers.IO) {
+                        try {
+                            // 行级流式（压测 10 万行不爆内存的关键）：Connector/J 默认
+                            // fetchSize=-1 会把整个 ResultSet 一次性拉进客户端内存；
+                            // 正向值（如 1000）则必须配 useCursorFetch=true 连接属性才
+                            // 生效。设为 Integer.MIN_VALUE 是 Connector/J 文档的行级流式
+                            // 开关 —— rs.next() 逐行从网络读，真正的分批由本方法按
+                            // [batchSize] 组批。StarRocks FE 兼容 MySQL 协议，同样适用。
+                            statement.fetchSize = Int.MIN_VALUE
+                            if (!statement.execute(sql)) {
+                                batches.send(
+                                    JdbcQueryBatch(updateCount = statement.updateCount.toLong(), isLast = true),
+                                )
+                                batches.close()
+                                return@launch
                             }
-                            // 尾批（含空结果集的单个空批）。
-                            batches.send(JdbcQueryBatch(columns, rows, isLast = true))
+                            statement.resultSet.use { resultSet ->
+                                val meta = resultSet.metaData
+                                val columnCount = meta.columnCount
+                                val columns = (1..columnCount).map { meta.getColumnLabel(it) }
+                                var rows = ArrayList<List<Any?>>(batchSize)
+                                while (resultSet.next()) {
+                                    rows += (1..columnCount).map { resultSet.getObject(it) }
+                                    if (rows.size >= batchSize) {
+                                        batches.send(JdbcQueryBatch(columns, rows, isLast = false))
+                                        rows = ArrayList(batchSize)
+                                    }
+                                }
+                                // 尾批（含空结果集的单个空批）。
+                                batches.send(JdbcQueryBatch(columns, rows, isLast = true))
+                            }
+                            batches.close()
+                        } catch (error: SQLTimeoutException) {
+                            batches.close(JdbcConnectTimeoutException(error.message ?: "query timed out"))
+                        } catch (error: SQLException) {
+                            batches.close(JdbcFailure(error.message, error.sqlState, error.errorCode, error))
+                        } catch (error: Throwable) {
+                            batches.close(error)
                         }
                     }
-                    batches.close()
-                } catch (error: SQLTimeoutException) {
-                    batches.close(JdbcConnectTimeoutException(error.message ?: "query timed out"))
-                } catch (error: SQLException) {
-                    batches.close(JdbcFailure(error.message, error.sqlState, error.errorCode, error))
-                } catch (error: Throwable) {
-                    batches.close(error)
+                    try {
+                        for (batch in batches) onBatch(batch)
+                        completed = true
+                    } finally {
+                        if (!completed) {
+                            // 未自然完成（取消 / 截断 / 异常）：从资源侧强制解开。
+                            // 顺序关键：先关 socket（阻断 rs.next() / 防止 statement.close()
+                            // 尝试 drain 剩余行而挂住），再关 Statement。
+                            producer.cancel()
+                            runCatching { raw.close() }   // 流式残留 → 连接报废，交给自愈重建
+                            runCatching { statement.close() }
+                        } else {
+                            // 正常完成（生产协程 use 已关过 Statement；幂等兜底）。
+                            runCatching { statement.close() }
+                        }
+                    }
                 }
+            } catch (error: SQLTimeoutException) {
+                throw JdbcConnectTimeoutException(error.message ?: "query timed out")
+            } catch (error: SQLException) {
+                throw JdbcFailure(error.message, error.sqlState, error.errorCode, error)
             }
-            for (batch in batches) onBatch(batch)
         }
 
         /** `isClosed` 本身会抛 SQLException，兜成 false（按不可用处理）。 */
