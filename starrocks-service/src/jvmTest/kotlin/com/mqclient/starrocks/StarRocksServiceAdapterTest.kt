@@ -33,12 +33,31 @@ class StarRocksServiceAdapterTest {
         )
         // 启动 / 退出时宿主直接调用，不能抛。
         adapter.dispose()
-        assertTrue(adapter.navigationItems(dummyConnection()).isEmpty())
+        assertTrue(adapter.navigationItems(dummyConnection()).isNotEmpty())
     }
 
     @Test
-    fun `navigation and badge contributions are empty in skeleton`() {
-        assertTrue(adapter.navigationItems(dummyConnection()).isEmpty())
+    fun `navigation contributes the five placeholder menu entries`() {
+        val items = adapter.navigationItems(dummyConnection())
+        assertEquals(listOf("overview", "catalog", "console", "topology", "queries"), items.map { it.id })
+        // titleKey 走公共表 olap.starrocks.menu.* 前缀；iconId 必须是宿主 NavIcons
+        // 已登记的 id，否则树图标回落 Circle（空心圆）。
+        assertEquals(
+            listOf(
+                "olap.starrocks.menu.overview",
+                "olap.starrocks.menu.catalog",
+                "olap.starrocks.menu.console",
+                "olap.starrocks.menu.topology",
+                "olap.starrocks.menu.queries",
+            ),
+            items.map { it.titleKey },
+        )
+        assertEquals(
+            listOf("clusterRelations", "namelists", "command", "topology", "processDefinitions"),
+            items.map { it.iconId },
+        )
+        // badge 仍是骨架占位。
+        assertTrue(adapter.badgeCounts("test-connection") == kotlinx.coroutines.flow.emptyFlow<Map<String, Int>>())
     }
 
     private fun dummyConnection(): com.mqclient.core.ConnectionInfo =

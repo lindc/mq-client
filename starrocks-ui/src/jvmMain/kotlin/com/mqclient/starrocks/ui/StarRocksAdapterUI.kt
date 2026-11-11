@@ -1,8 +1,16 @@
 package com.mqclient.starrocks.ui
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import com.mqclient.core.AdapterUI
 import com.mqclient.starrocks.StarRocksConstants
+import com.mqclient.uicommon.i18n.stringResource
+import com.mqclient.uicommon.i18n.withArg
 
 /**
  * StarRocks UI 层的 [AdapterUI] SPI **空骨架**实现。
@@ -61,10 +69,33 @@ class StarRocksAdapterUI : AdapterUI {
     override val content: @Composable () -> Unit = { StarRocksPlaceholder() }
 
     /**
-     * 任意导航项都返回占位页（不解析 objectType / connectionId）。
-     * 返回 null 会让宿主回落到通用 coming-soon；这里显式给出占位页，
-     * 保证空骨架的可见行为由本模块自己定义。
+     * 按导航项（objectType）分发主内容区：
+     * - `console` → SQL 控制台 Tab 布局占位页（[StarRocksSqlConsolePlaceholder]）；
+     * - 其余四个已知导航项 → 「模块开发中」占位（标题按各节点的 i18n 键翻译）；
+     * - 未知 objectType → 模块通用占位页。
+     *
+     * 导航项 id 与 `StarRocksServiceAdapter.navigationItems` 严格对齐；真实面板
+     * 落地时逐项替换（与 RocketMQ 的 when(objectType) 分发同构）。
      */
     override fun contentFor(objectType: String, connectionId: String): (@Composable () -> Unit)? =
-        { StarRocksPlaceholder() }
+        when (objectType) {
+            "console" -> { { StarRocksSqlConsolePlaceholder() } }
+            "overview", "catalog", "topology", "queries" -> {
+                { DevelopingPlaceholder("olap.starrocks.menu.$objectType") }
+            }
+            else -> { { StarRocksPlaceholder() } }
+        }
+
+    /** 「XX 模块开发中」占位：标题按导航项自己的 i18n 键翻译后拼进模板。 */
+    @Composable
+    private fun DevelopingPlaceholder(titleKey: String) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(
+                stringResource("olap.starrocks.menu.developing")
+                    .withArg(stringResource(titleKey)),
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
 }

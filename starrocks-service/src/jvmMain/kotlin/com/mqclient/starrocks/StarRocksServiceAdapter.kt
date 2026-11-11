@@ -59,8 +59,24 @@ class StarRocksServiceAdapter : ServiceAdapter {
     /** 注入宿主上下文，建立可向 UI 提供 `testConnection` 的模块门面。 */
     override fun initialize(context: ServiceContext) = StarRocksModule.initialize(context)
 
-    /** 空骨架不贡献导航项（返回空集合，不抛异常）。 */
-    override fun navigationItems(connection: ConnectionInfo): List<NavigationItem> = emptyList()
+    /**
+     * 侧边栏二级菜单（与 RocketMQ 同构，树由 service 的 [ServiceAdapter.navigationItems]
+     * 提供）：集群概览 / 数据目录 / SQL 控制台 / 拓扑结构 / 会话与慢查询。
+     * 全部是占位入口 —— `contentFor` 按 objectType 分发，「console」渲染 Tab
+     * 布局占位页，其余回落「模块开发中」占位。
+     *
+     * iconId 必须是宿主 `NavIcons` 已登记的 id（映射在 app-ui，模块不可改宿主）：
+     * `clusterRelations` → Hub、`namelists` → List、`command` → Terminal、
+     * `topology` → Map、`processDefinitions` → Description。
+     * titleKey 走公共表 `olap.starrocks.menu.*`（与本模块其他文案同一前缀约定）。
+     */
+    override fun navigationItems(connection: ConnectionInfo): List<NavigationItem> = listOf(
+        NavigationItem(id = "overview", titleKey = "olap.starrocks.menu.overview", iconId = "clusterRelations", isTool = true),
+        NavigationItem(id = "catalog", titleKey = "olap.starrocks.menu.catalog", iconId = "namelists"),
+        NavigationItem(id = "console", titleKey = "olap.starrocks.menu.console", iconId = "command", isTool = true),
+        NavigationItem(id = "topology", titleKey = "olap.starrocks.menu.topology", iconId = "topology", isTool = true),
+        NavigationItem(id = "queries", titleKey = "olap.starrocks.menu.queries", iconId = "processDefinitions"),
+    )
 
     /** 空骨架不贡献徽章。 */
     override fun badgeCounts(connectionId: String): Flow<Map<String, Int>> = emptyFlow()
