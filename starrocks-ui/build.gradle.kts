@@ -20,6 +20,9 @@ kotlin {
             implementation(libs.compose.runtime)
             implementation(libs.compose.foundation)
             implementation(compose.material3)
+            // composeResources（品牌图标 drawable）需要资源 API 才能生成访问器
+            // （与 kafka-ui 同款；缺了它 Res 类不生成，ModuleIcon 编译不过）。
+            implementation(compose.components.resources)
             // 密码可见性切换的 Visibility / VisibilityOff 图标（跨平台矢量，
             // 与 kafka-ui / ibm-mq-ui 同款；Linux 无 Emoji 字体也能正常显示）。
             implementation(compose.materialIconsExtended)
