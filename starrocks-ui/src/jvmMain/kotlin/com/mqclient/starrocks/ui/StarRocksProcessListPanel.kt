@@ -7,12 +7,15 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
@@ -33,6 +36,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -48,6 +53,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.*
 
 /** 当前会话（information_schema.processlist 的一行）。 */
 internal data class ProcessInfo(
@@ -59,6 +65,8 @@ internal data class ProcessInfo(
     val state: String,
     val timeSeconds: Long,
     val info: String,
+    /** StarRocks 的 queryId（UUID）；老版本 processlist 无此列时回落连接 id。 */
+    val queryId: String,
 )
 
 internal const val PROCESSLIST_SQL =
@@ -80,6 +88,9 @@ internal fun parseProcessList(result: StarRocksQueryRows): List<ProcessInfo> {
         names.firstNotNullOfOrNull { n -> cols.indexOf(n.lowercase()).takeIf { it >= 0 } }
 
     val idIdx = indexOfAny("id", "process_id", "connection_id")
+    // StarRocks 3.x 的 processlist 有 QUERY_ID（UUID）；老版本 / MySQL 没有，
+    // 回落连接 id，保证「查看 Profile」链路在没有真实环境时也能点通。
+    val queryIdIdx = indexOfAny("query_id", "queryid", "queryId")
     val userIdx = indexOfAny("user")
     val hostIdx = indexOfAny("host")
     val dbIdx = indexOfAny("db", "database")
@@ -104,6 +115,7 @@ internal fun parseProcessList(result: StarRocksQueryRows): List<ProcessInfo> {
             state = cell(row, stateIdx),
             timeSeconds = timeIdx?.let { row.getOrNull(it)?.toString()?.toLongOrNull() } ?: 0L,
             info = infoIdx?.let { row.getOrNull(it)?.toString() }.orEmpty().ifBlank { "" },
+            queryId = cell(row, queryIdIdx).takeUnless { it == "-" } ?: id,
         )
     }
 }
@@ -115,6 +127,65 @@ internal fun parseProcessList(result: StarRocksQueryRows): List<ProcessInfo> {
 internal fun killStatements(id: String): List<String>? {
     val numeric = id.trim().toLongOrNull() ?: return null
     return listOf("KILL QUERY $numeric;", "KILL $numeric;")
+}
+
+/**
+ * Profile 拉取语句：StarRocks 官方文档是 `ANALYZE PROFILE FROM '<queryId>'`，
+ * 也接受不带引号的写法；两种都备着，逐条降级尝试（与 Kill 同款）。
+ *
+ * queryId 先做**字符集白名单校验**（UUID 含 `-`，连接 id 是纯数字），
+ * 防 SQL 注入；非法输入返回 null，调用方静默跳过。
+ */
+internal fun profileStatements(queryId: String): List<String>? {
+    val safe = queryId.trim()
+    if (safe.isEmpty() || !Regex("""[A-Za-z0-9_:\-]+""").matches(safe)) return null
+    val escaped = safe.replace("'", "''")
+    return listOf(
+        "ANALYZE PROFILE FROM '$escaped';",
+        "ANALYZE PROFILE FROM $escaped;",
+    )
+}
+
+private val prettyJson = Json { prettyPrint = true }
+
+/** 尝试把一段文本 pretty print 成 JSON；不是合法 JSON 返回 null。 */
+private fun prettyJsonOrNull(text: String): String? = runCatching {
+    val element: JsonElement = prettyJson.parseToJsonElement(text)
+    prettyJson.encodeToString(JsonElement.serializer(), element)
+}.getOrNull()
+
+/**
+ * Profile 结果 → 展示文本。兼容三种后端返回形态：
+ * 1) 整段就是一个 JSON；2) 每行一个 JSON 对象；3) 纯表格文本（原样返回）。
+ * 不解析成树，只做格式化文本。
+ */
+internal fun formatProfileText(raw: String): String {
+    val trimmed = raw.trim()
+    if (trimmed.isEmpty()) return raw
+    prettyJsonOrNull(trimmed)?.let { return it }
+    val lines = trimmed.lines()
+    val prettyLines = lines.map { prettyJsonOrNull(it.trim()) ?: return raw }
+    return prettyLines.joinToString("\n")
+}
+
+/**
+ * 拉取 Profile 原始文本：逐条尝试 [profileStatements]，全部走 [queryRows]
+ * （复用 `executeQuery` 流式通道）。全部失败时抛最后一个异常，由 UI 显示友好文案。
+ */
+internal suspend fun loadProfileText(connectionId: String, queryId: String): String {
+    val statements = profileStatements(queryId)
+        ?: throw IllegalArgumentException("invalid query id")
+    var lastError: Throwable? = null
+    for (sql in statements) {
+        val result = runCatching { queryRows(connectionId, sql) }
+        result.onSuccess { rows ->
+            return rows.rows.joinToString("\n") { row ->
+                row.joinToString(" | ") { it?.toString() ?: "NULL" }
+            }
+        }
+        lastError = result.exceptionOrNull()
+    }
+    throw lastError ?: IllegalStateException("profile query failed")
 }
 
 /**
@@ -133,6 +204,7 @@ internal fun StarRocksProcessListPanel(connectionId: String, modifier: Modifier 
     var error by remember { mutableStateOf<String?>(null) }
     var autoRefresh by remember { mutableStateOf(false) }
     var killTarget by remember { mutableStateOf<ProcessInfo?>(null) }
+    var profileTarget by remember { mutableStateOf<ProcessInfo?>(null) }
     val scope = rememberCoroutineScope()
     val snackbar = LocalSnackbarHostState.current
     // 单条 JDBC 连接不支持并发查询：自动刷新与手动 / Kill 后刷新重叠时直接跳过，
@@ -238,8 +310,21 @@ internal fun StarRocksProcessListPanel(connectionId: String, modifier: Modifier 
                 )
             }
 
-            else -> ProcessTable(sessions, onKill = { killTarget = it })
+            else -> ProcessTable(
+                sessions,
+                onKill = { killTarget = it },
+                onProfile = { profileTarget = it },
+            )
         }
+    }
+
+    // ── Profile 文本弹窗（本期只打通链路，不解析为树） ──
+    profileTarget?.let { target ->
+        ProfileDialog(
+            connectionId = connectionId,
+            queryId = target.queryId,
+            onDismiss = { profileTarget = null },
+        )
     }
 
     // ── Kill 二次确认（危险操作拦截） ──
@@ -281,20 +366,29 @@ internal fun StarRocksProcessListPanel(connectionId: String, modifier: Modifier 
 
 /** 会话表格：固定列宽 + 整表横向滚动，纵向 LazyColumn 虚拟化。 */
 @Composable
-private fun ProcessTable(sessions: List<ProcessInfo>, onKill: (ProcessInfo) -> Unit) {
+private fun ProcessTable(
+    sessions: List<ProcessInfo>,
+    onKill: (ProcessInfo) -> Unit,
+    onProfile: (ProcessInfo) -> Unit,
+) {
     val horizontal = rememberScrollState()
     Row(Modifier.fillMaxSize().horizontalScroll(horizontal)) {
         LazyColumn {
-            item { ProcessRow(header = true, session = null, onKill = {}) }
+            item { ProcessRow(header = true, session = null, onKill = {}, onProfile = {}) }
             items(sessions, key = { it.id }) { session ->
-                ProcessRow(header = false, session = session, onKill = onKill)
+                ProcessRow(header = false, session = session, onKill = onKill, onProfile = onProfile)
             }
         }
     }
 }
 
 @Composable
-private fun ProcessRow(header: Boolean, session: ProcessInfo?, onKill: (ProcessInfo) -> Unit) {
+private fun ProcessRow(
+    header: Boolean,
+    session: ProcessInfo?,
+    onKill: (ProcessInfo) -> Unit,
+    onProfile: (ProcessInfo) -> Unit,
+) {
     val slow = session?.let { it.timeSeconds > SLOW_QUERY_SECONDS } ?: false
     val rowColor = when {
         header -> MaterialTheme.colorScheme.surfaceVariant
@@ -316,6 +410,7 @@ private fun ProcessRow(header: Boolean, session: ProcessInfo?, onKill: (ProcessI
             ProcessCell(stringResource("olap.starrocks.processlist.col_time"), 90.dp, header = true)
             ProcessCell(stringResource("olap.starrocks.processlist.col_sql"), 320.dp, header = true)
             ProcessCell(stringResource("olap.starrocks.processlist.col_action"), 90.dp, header = true)
+            ProcessCell(stringResource("olap.starrocks.processlist.col_profile"), 110.dp, header = true)
             return@Row
         }
 
@@ -333,6 +428,16 @@ private fun ProcessRow(header: Boolean, session: ProcessInfo?, onKill: (ProcessI
                 Text(
                     stringResource("olap.starrocks.processlist.kill"),
                     color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.labelMedium,
+                )
+            }
+        }
+        // 「查看 Profile」：只拉取 + 文本展示，不做树形解析。
+        Box(Modifier.width(110.dp), contentAlignment = Alignment.Center) {
+            TextButton(onClick = { onProfile(s) }) {
+                Text(
+                    stringResource("olap.starrocks.processlist.profile"),
+                    color = MaterialTheme.colorScheme.primary,
                     style = MaterialTheme.typography.labelMedium,
                 )
             }
@@ -356,5 +461,93 @@ private fun ProcessCell(
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
         modifier = Modifier.width(width).padding(horizontal = 8.dp),
+    )
+}
+
+private sealed interface ProfileState {
+    data object Loading : ProfileState
+    data class Loaded(val text: String) : ProfileState
+    data class Failed(val message: String) : ProfileState
+}
+
+/**
+ * Profile 文本弹窗：本轮只打通「拿到数据」的链路，不解析为树。
+ * 取数走 [loadProfileText] → `executeQuery`；结果由 [formatProfileText] 美化后
+ * 作为普通可选中文本展示，附一键复制方便后续离线分析。
+ */
+@Composable
+private fun ProfileDialog(connectionId: String, queryId: String, onDismiss: () -> Unit) {
+    var state by remember { mutableStateOf<ProfileState>(ProfileState.Loading) }
+    val clipboard = LocalClipboardManager.current
+    val emptyText = stringResource("olap.starrocks.processlist.profile_empty")
+    val failedTemplate = stringResource("olap.starrocks.processlist.profile_failed")
+
+    LaunchedEffect(connectionId, queryId) {
+        state = ProfileState.Loading
+        val result = withContext(Dispatchers.IO) {
+            runCatching { loadProfileText(connectionId, queryId) }
+        }
+        result
+            .onSuccess { raw -> state = ProfileState.Loaded(formatProfileText(raw).ifBlank { emptyText }) }
+            .onFailure { error -> state = ProfileState.Failed(failedTemplate.withArg(error.userMessage())) }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        modifier = Modifier.width(720.dp),
+        title = {
+            Text(
+                stringResource("olap.starrocks.processlist.profile_title").withArg(queryId),
+                style = MaterialTheme.typography.titleMedium,
+            )
+        },
+        text = {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 480.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                when (val s = state) {
+                    ProfileState.Loading -> Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        Text(
+                            stringResource("olap.starrocks.processlist.profile_loading"),
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(start = 8.dp),
+                        )
+                    }
+                    is ProfileState.Failed -> Text(
+                        s.message,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    is ProfileState.Loaded -> {
+                        // TODO: 将 JSON 解析为可视化的 Operator 树，并提取耗时最长的节点送给 AI 分析
+                        SelectionContainer {
+                            Text(
+                                s.text,
+                                fontFamily = FontFamily.Monospace,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val text = (state as? ProfileState.Loaded)?.text.orEmpty()
+                    if (text.isNotBlank()) clipboard.setText(AnnotatedString(text))
+                },
+                enabled = state is ProfileState.Loaded,
+            ) {
+                Text(stringResource("olap.starrocks.processlist.profile_copy"))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource("common_close")) }
+        },
     )
 }

@@ -32,6 +32,8 @@ kotlin {
             // 密码可见性切换的 Visibility / VisibilityOff 图标（跨平台矢量，
             // 与 kafka-ui / ibm-mq-ui 同款；Linux 无 Emoji 字体也能正常显示）。
             implementation(compose.materialIconsExtended)
+            // Profile 结果的 JSON 美化（ANALYZE PROFILE 返回文本/JSON）。
+            implementation(libs.kotlinx.serialization.json)
         }
         jvmTest.dependencies {
             implementation(kotlin("test"))

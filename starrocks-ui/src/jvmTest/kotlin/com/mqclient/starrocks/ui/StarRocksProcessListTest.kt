@@ -70,4 +70,48 @@ class StarRocksProcessListTest {
     fun `empty result yields empty state data`() {
         assertTrue(parseProcessList(StarRocksQueryRows(columns, emptyList())).isEmpty())
     }
+
+    @Test
+    fun `query id column is preferred over connection id`() {
+        val result = StarRocksQueryRows(
+            columns = columns + "query_id",
+            rows = listOf(listOf(42L, "root", "h", "db", "Query", 1L, "Running", "SELECT 1", "a1b2-c3d4")),
+        )
+        assertEquals("a1b2-c3d4", parseProcessList(result).single().queryId)
+        // 没有 query_id 列时回落连接 id，保证按钮在没有真实 StarRocks 时也能点通。
+        val fallback = StarRocksQueryRows(
+            columns = columns,
+            rows = listOf(listOf(42L, "root", "h", "db", "Query", 1L, "Running", "SELECT 1")),
+        )
+        assertEquals("42", parseProcessList(fallback).single().queryId)
+    }
+
+    @Test
+    fun `profile statements accept uuid and numeric ids but reject injection`() {
+        assertEquals(
+            listOf("ANALYZE PROFILE FROM 'a1b2-c3d4';", "ANALYZE PROFILE FROM a1b2-c3d4;"),
+            profileStatements("a1b2-c3d4"),
+        )
+        assertEquals(
+            listOf("ANALYZE PROFILE FROM '42';", "ANALYZE PROFILE FROM 42;"),
+            profileStatements("42"),
+        )
+        assertNull(profileStatements("42; DROP DATABASE x"))
+        assertNull(profileStatements("' OR 1=1 --"))
+        assertNull(profileStatements(""))
+    }
+
+    @Test
+    fun `profile text is pretty printed or kept as plain text`() {
+        val single = formatProfileText("""{"queryId":"q1","nodes":[{"name":"SCAN","time":12}]}""")
+        assertTrue(single.contains("\n") && single.contains("\"queryId\""), "单个 JSON 应缩进：$single")
+
+        val perLine = formatProfileText("""{"a":1}
+{"b":2}""")
+        assertTrue(perLine.contains("\n\n") || perLine.lines().size >= 4, "每行一个 JSON 也要美化：$perLine")
+
+        val plain = "PLAN FRAGMENT 0\n  SCAN: rows=10"
+        assertEquals(plain, formatProfileText(plain), "非 JSON 文本原样返回")
+        assertEquals("", formatProfileText(""))
+    }
 }
