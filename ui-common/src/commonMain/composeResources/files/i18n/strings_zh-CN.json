@@ -282,7 +282,7 @@
   "olap.starrocks.console.connecting": "正在建立连接...",
   "olap.starrocks.console.connect_failed": "自动连接失败：%1$s",
   "err_conn_not_found": "连接 '%1$s' 不存在",
-  "olap.starrocks.console.stream_loading": "正在加载中...（已加载 %1$s 行）",
+  "olap.starrocks.console.stream_loading": "正在执行查询...（已加载 %1$s 行）",
   "olap.starrocks.console.truncated": "结果集较大，仅展示前 %1$s 行（服务端结果不受影响）",
   "olap.starrocks.console.stop": "停止执行",
   "olap.starrocks.console.clear": "清空编辑器与结果",
@@ -292,5 +292,6 @@
   "olap.starrocks.console.history_title": "最近 50 条执行记录",
   "olap.starrocks.console.history_empty": "暂无执行记录",
   "olap.starrocks.console.history_ok": "成功",
-  "olap.starrocks.console.history_fail": "失败"
+  "olap.starrocks.console.history_fail": "失败",
+  "olap.starrocks.console.executing": "正在执行查询..."
 }

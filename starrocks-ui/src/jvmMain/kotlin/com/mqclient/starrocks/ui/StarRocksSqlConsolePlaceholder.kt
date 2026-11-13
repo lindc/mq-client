@@ -127,6 +127,28 @@ internal fun StarRocksSqlConsolePlaceholder(modifier: Modifier = Modifier, conne
 }
 
 /**
+ * 控制台的**阶段机**：连接与查询是互斥的两个阶段。
+ *
+ * 旧实现用 `connecting: Boolean` + `grid.streaming: Boolean` 两套状态，且连接
+ * 成功后的整个查询期间 `connecting` 仍为 true（直到 launch 的 finally 才复位）
+ * —— 结果区一直显示「正在建立连接...」，文案与事实不符。单一阶段机让文案
+ * 与阶段一一对应，不可能组合出「已连接 + 显示建立连接」这种非法态。
+ */
+private enum class ConsolePhase {
+    /** 未执行过（初始提示）。 */
+    Idle,
+
+    /** 懒加载自动建连中 → 「正在建立连接...」。 */
+    Connecting,
+
+    /** 连接已就绪、查询进行中 → 「正在执行查询...」。 */
+    Executing,
+
+    /** 本轮结束：结果 / 错误由 [ConsoleGrid] 表达，不再显示加载态。 */
+    Finished,
+}
+
+/**
  * 结果网格的可观察状态：**流式收集的落点**。
  *
  * `columns` / `rows` 用 Compose 快照 List —— 协程里每收一批就 append，
@@ -135,9 +157,6 @@ internal fun StarRocksSqlConsolePlaceholder(modifier: Modifier = Modifier, conne
 private class ConsoleGrid {
     val columns = mutableStateListOf<ResultColumn>()
     val rows = mutableStateListOf<List<Any?>>()
-
-    /** 是否正在流式拉取（结果区顶部显示加载横幅）。 */
-    var streaming by mutableStateOf(false)
 
     /** 本轮是否已发起过执行（区分「初始」与「空结果集」）。 */
     var hasRun by mutableStateOf(false)
@@ -161,7 +180,6 @@ private class ConsoleGrid {
     fun reset() {
         columns.clear()
         rows.clear()
-        streaming = false
         hasRun = false
         truncated = false
         updateCount = null
@@ -188,7 +206,7 @@ private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
     // 持有光标 / 选中态，「执行选中」依赖它。
     var textFieldValue by remember { mutableStateOf(TextFieldValue("")) }
     val grid = remember { ConsoleGrid() }
-    var connecting by remember { mutableStateOf(false) }
+    var phase by remember { mutableStateOf(ConsolePhase.Idle) }
     var showHistory by remember { mutableStateOf(false) }
     var draftLoaded by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -223,13 +241,14 @@ private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
 
     /** 清空编辑器与结果（对齐 mq-ui 控制台的 clear）。 */
     fun clearAll() {
-        if (grid.streaming || connecting) job?.cancel()
+        if (phase == ConsolePhase.Connecting || phase == ConsolePhase.Executing) job?.cancel()
         textFieldValue = TextFieldValue("")
         grid.reset()
+        phase = ConsolePhase.Idle
     }
 
     fun runSql() {
-        if (connecting || grid.streaming) return
+        if (phase == ConsolePhase.Connecting || phase == ConsolePhase.Executing) return
         // 严格基于原生 [TextFieldValue.selection] 取源：有选区只发选区，
         // 无选区发全文（再按分号切多语句）。不做任何 selection 的写回/干预。
         val selected = selectedSource(textFieldValue)
@@ -245,10 +264,11 @@ private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
         job = scope.launch {
             var start = 0L
             try {
-                // 懒加载连接：未连接先自动建会话（成功后 Session 存进 ConnectionManager，
-                // 后续「执行」直接复用，不再重复连接）。
+                // 懒加载连接：只有真正未连接时才进 Connecting 阶段。
+                // 左侧树显示「已连接」时 isAlive()==true，这里整段跳过 ——
+                // 不会再出现「建立连接」的文案。
                 if (!StarRocksModule.isAlive()) {
-                    connecting = true
+                    phase = ConsolePhase.Connecting
                     val connected = StarRocksModule.connectById(connectionId)
                     if (connected.isFailure) {
                         grid.reset()
@@ -259,6 +279,10 @@ private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
                     }
                 }
 
+                // 连接就绪 → **立即**切到查询阶段（关键修复）：旧实现把
+                // connecting 留到整个 launch 结束才复位，导致查询全程显示
+                // 「正在建立连接...」。
+                phase = ConsolePhase.Executing
                 grid.reset()
                 grid.hasRun = true
                 start = System.currentTimeMillis()
@@ -268,7 +292,6 @@ private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
                 // 取消经 CancellationException 在条目边界 / collect 内传播。
                 for (statement in statements) {
                     try {
-                        grid.streaming = true
                         var statementUpdateCount: Long? = null
                         var schemaApplied = false   // 每条语句的首个数据批：换 schema 并清上条结果
                         StarRocksModule.executeQuery(connectionId, statement).collect { batch ->
@@ -311,17 +334,14 @@ private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
                         grid.failedCount += 1
                         grid.error = error.userMessage()
                         return@launch
-                    } finally {
-                        // 每条语句的 finally：彻底复位拉取态（成功 / 失败 / 取消都走）。
-                        grid.streaming = false
                     }
                 }
             } catch (cancellation: CancellationException) {
                 // Stop / Tab 切换等取消：不算错误，保留已完成的部分。
             } finally {
-                // 全程兜底：无论成功 / 失败 / 取消，执行态必须复位（核心修复）。
-                connecting = false
-                grid.streaming = false
+                // 全程兜底：无论成功 / 失败 / 取消，阶段机复位到 Finished，
+                // 不残留任何上一轮的 Loading 文案。
+                phase = ConsolePhase.Finished
                 if (start > 0L) grid.durationMs = System.currentTimeMillis() - start
             }
         }
@@ -338,8 +358,8 @@ private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
                 // 按钮不抢输入框焦点（否则 TextField 失焦）。只控制焦点，
                 // 完全不碰 TextFieldValue.selection —— 选区由 Compose 原生管理。
                 modifier = Modifier.focusProperties { canFocus = false },
-                // 连接中 / 拉取中禁用：防狂点导致并发建连 / 重复查询。
-                enabled = !connecting && !grid.streaming,
+                // 连接中 / 执行中禁用：防狂点导致并发建连 / 重复查询。
+                enabled = phase != ConsolePhase.Connecting && phase != ConsolePhase.Executing,
             ) {
                 Icon(Icons.Filled.PlayArrow, contentDescription = stringResource("olap.starrocks.console.run"))
             }
@@ -351,7 +371,7 @@ private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
             IconButton(
                 onClick = { job?.cancel() },
                 modifier = Modifier.focusProperties { canFocus = false },
-                enabled = connecting || grid.streaming,
+                enabled = phase == ConsolePhase.Connecting || phase == ConsolePhase.Executing,
             ) {
                 Icon(Icons.Filled.Stop, contentDescription = stringResource("olap.starrocks.console.stop"))
             }
@@ -412,7 +432,7 @@ private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
         )
 
         // ── 结果区：剩余全部高度 ──
-        ResultArea(grid, connecting, Modifier.fillMaxWidth().weight(0.65f).padding(8.dp))
+        ResultArea(grid, phase, Modifier.fillMaxWidth().weight(0.65f).padding(8.dp))
     }
 }
 
@@ -521,43 +541,53 @@ private fun formatTime(epochMs: Long): String =
     java.text.SimpleDateFormat("MM-dd HH:mm:ss").format(java.util.Date(epochMs))
 
 @Composable
-private fun ResultArea(grid: ConsoleGrid, connecting: Boolean, modifier: Modifier = Modifier) {
+private fun ResultArea(grid: ConsoleGrid, phase: ConsolePhase, modifier: Modifier = Modifier) {
     Box(modifier, contentAlignment = Alignment.Center) {
-        when {
-            // 懒加载自动连接中。
-            connecting -> ProgressHint(stringResource("olap.starrocks.console.connecting"))
-
-            // 执行失败（清空了之前的表格）。
-            grid.error != null -> Text(
-                stringResource("olap.starrocks.console.error_prefix") + grid.error,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(16.dp),
-            )
-
-            // 初始：还没执行过。
-            !grid.hasRun -> Text(
+        when (phase) {
+            ConsolePhase.Idle -> Text(
                 stringResource("olap.starrocks.console.idle_hint"),
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
-            // DML / DDL：受影响行数（列 schema 为空）。
-            grid.updateCount != null -> Text(
-                stringResource("olap.starrocks.console.affected_rows")
-                    .withArg(grid.updateCount ?: 0L, grid.durationMs),
-                style = MaterialTheme.typography.bodyLarge,
-            )
+            // 只有**真正**在自动建连时才显示这个文案。
+            ConsolePhase.Connecting -> ProgressHint(stringResource("olap.starrocks.console.connecting"))
 
-            // 空结果集。
-            grid.columns.isEmpty() && grid.rows.isEmpty() -> Text(
-                stringResource("olap.starrocks.console.empty_result").withArg(grid.durationMs),
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            // 连接就绪、查询进行中：结果还没到就显示居中的「正在执行查询...」，
+            // 已有首批数据则边收边渲染表格（顶部横幅同款文案）。
+            ConsolePhase.Executing ->
+                if (grid.rows.isEmpty() && grid.columns.isEmpty()) {
+                    ProgressHint(stringResource("olap.starrocks.console.executing"))
+                } else {
+                    ResultTable(grid, phase, Modifier.fillMaxSize())
+                }
 
-            // SELECT：流式表格（拉取中顶部横幅「正在加载中...」）。
-            else -> ResultTable(grid, Modifier.fillMaxSize())
+            // 本轮结束：结果 / 错误由 grid 表达，任何 Loading 文案都不再显示。
+            ConsolePhase.Finished -> when {
+                // 执行失败（清空了之前的表格）。
+                grid.error != null -> Text(
+                    stringResource("olap.starrocks.console.error_prefix") + grid.error,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(16.dp),
+                )
+
+                // DML / DDL：受影响行数（列 schema 为空）。
+                grid.updateCount != null -> Text(
+                    stringResource("olap.starrocks.console.affected_rows")
+                        .withArg(grid.updateCount ?: 0L, grid.durationMs),
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+
+                // 空结果集。
+                grid.columns.isEmpty() && grid.rows.isEmpty() -> Text(
+                    stringResource("olap.starrocks.console.empty_result").withArg(grid.durationMs),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                else -> ResultTable(grid, phase, Modifier.fillMaxSize())
+            }
         }
     }
 }
@@ -566,11 +596,11 @@ private fun ResultArea(grid: ConsoleGrid, connecting: Boolean, modifier: Modifie
 
 /** 流式结果表格：行落在快照 List，边收边渲染；顶部横幅反映拉取进度。 */
 @Composable
-private fun ResultTable(grid: ConsoleGrid, modifier: Modifier = Modifier) {
+private fun ResultTable(grid: ConsoleGrid, phase: ConsolePhase, modifier: Modifier = Modifier) {
     Column(modifier) {
-        // ── 顶部状态横幅：拉取中显示进度；截断显示保护提示 ──
+        // ── 顶部状态横幅：执行中显示进度；截断显示保护提示 ──
         when {
-            grid.streaming -> StreamingBanner(
+            phase == ConsolePhase.Executing -> StreamingBanner(
                 text = stringResource("olap.starrocks.console.stream_loading").withArg(grid.rows.size),
             )
             grid.truncated -> StreamingBanner(

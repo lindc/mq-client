@@ -282,7 +282,7 @@
   "olap.starrocks.console.connecting": "Connecting...",
   "olap.starrocks.console.connect_failed": "Auto-connect failed: %1$s",
   "err_conn_not_found": "Connection '%1$s' not found",
-  "olap.starrocks.console.stream_loading": "Loading... (%1$s rows loaded)",
+  "olap.starrocks.console.stream_loading": "Executing query... (%1$s rows loaded)",
   "olap.starrocks.console.truncated": "Large result set: showing first %1$s rows (server result unaffected)",
   "olap.starrocks.console.stop": "Stop execution",
   "olap.starrocks.console.clear": "Clear editor and results",
@@ -292,5 +292,6 @@
   "olap.starrocks.console.history_title": "Last 50 queries",
   "olap.starrocks.console.history_empty": "No query history yet",
   "olap.starrocks.console.history_ok": "OK",
-  "olap.starrocks.console.history_fail": "FAILED"
+  "olap.starrocks.console.history_fail": "FAILED",
+  "olap.starrocks.console.executing": "Executing query..."
 }

@@ -6,6 +6,7 @@ import java.sql.SQLTimeoutException
 import java.sql.Statement
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -67,18 +68,23 @@ class MysqlJdbcConnector : JdbcConnector {
          * 非查询语句（`execute` 返回 false）回调单个 `updateCount` 批次；
          * 空结果集回调单个空 schema 的末批。
          *
-         * ## 中断清理（「报错后无法再次执行」的根因修复）
+         * ## 中断清理（「报错后无法再次执行」与「连接被误关」两个坑一起修）
          *
          * 行级流式（`fetchSize = MIN_VALUE`）下，同一连接同时只能有一个活跃的
-         * 流式 ResultSet：消费端中断（取消 / 截断 / 异常）时若不清理，残留的
-         * 未读完 ResultSet 会让**这条连接报废** —— 后续任何查询都抛
-         * "Streaming result set is still active"。同时阻塞在 `rs.next()` 的
-         * IO 协程不响应协程取消，`coroutineScope` 会悬等它跑完（可能几十万行）。
+         * 流式 ResultSet：消费端**取消 / 截断**时若不清理，残留的未读完 ResultSet
+         * 会让这条连接报废 —— 后续任何查询都抛 "Streaming result set is still
+         * active"；同时阻塞在 `rs.next()` 的 IO 协程不响应协程取消，
+         * `coroutineScope` 会悬等它跑完（可能几十万行）。
          *
-         * 因此 Statement 由**消费协程**创建并持有引用：`finally` 里一旦发现未
-         * 自然完成，强制 `producer.cancel()` + 关 Statement + **关整条连接**
-         * （`isUsable` 随即变 false，manager 的懒加载路径 `isAlive()` 会自动
-         * 重连重建会话）—— 卡死的两端同时解开。
+         * 但**普通 SQL 执行异常（语法错误 / 表不存在 / 权限）不是取消**：
+         * `statement.execute` 一抛错就根本没有未读完的 ResultSet，此时只需关
+         * Statement，底层 Connection 完全健康。旧实现把两者混为一谈（只要
+         * `!completed` 就 `raw.close()`），导致一条语法错误就废掉连接、`isAlive()`
+         * 变 false、下次执行被迫重新建连（UI 闪「正在建立连接...」）。
+         *
+         * 因此 Statement 由**消费协程**创建并持引用；`finally` 按 [interruption]
+         * 分流：取消 / 连接级故障 → 断连自愈；普通 SQL 异常 → 只关 Statement，
+         * 连接存活。
          */
         override suspend fun executeQuery(
             sql: String,
@@ -93,6 +99,8 @@ class MysqlJdbcConnector : JdbcConnector {
             // 抛错返回，scope 无需等待几十万行读完。
             val statement: Statement = withContext(Dispatchers.IO) { raw.createStatement() }
             var completed = false
+            /** 消费端中断原因：决定 finally 里是否允许关闭底层 [raw] 连接。 */
+            var interruption: Throwable? = null
             try {
                 coroutineScope {
                     val batches = Channel<JdbcQueryBatch>(Channel.UNLIMITED)
@@ -139,17 +147,32 @@ class MysqlJdbcConnector : JdbcConnector {
                     try {
                         for (batch in batches) onBatch(batch)
                         completed = true
+                    } catch (error: Throwable) {
+                        interruption = error
+                        throw error
                     } finally {
-                        if (!completed) {
-                            // 未自然完成（取消 / 截断 / 异常）：从资源侧强制解开。
-                            // 顺序关键：先关 socket（阻断 rs.next() / 防止 statement.close()
-                            // 尝试 drain 剩余行而挂住），再关 Statement。
-                            producer.cancel()
-                            runCatching { raw.close() }   // 流式残留 → 连接报废，交给自愈重建
-                            runCatching { statement.close() }
-                        } else {
-                            // 正常完成（生产协程 use 已关过 Statement；幂等兜底）。
-                            runCatching { statement.close() }
+                        when {
+                            completed -> {
+                                // 正常完成：生产协程 use 已关过 ResultSet / Statement，幂等兜底。
+                                runCatching { statement.close() }
+                            }
+                            // 取消 / 截断（流式 ResultSet 未读完）或连接级故障：
+                            // 这条连接已不可复用，断连交给 manager 的懒加载自愈重建。
+                            // 顺序：先关 socket 阻断阻塞的 rs.next()，再关 Statement。
+                            interruption is CancellationException ||
+                                isConnectionLevelJdbcFailure(interruption) -> {
+                                producer.cancel()
+                                runCatching { raw.close() }
+                                runCatching { statement.close() }
+                            }
+                            // 普通 SQL 执行异常（语法错误 / 表不存在 / 权限等）：
+                            // **只关 Statement + ResultSet，底层 Connection 保持存活**。
+                            // isAlive() 仍为 true，左侧树「已连接」不退化，下一次执行
+                            // 直接复用会话，绝不会误触发「正在建立连接...」。
+                            else -> {
+                                producer.cancel()
+                                runCatching { statement.close() }
+                            }
                         }
                     }
                 }
@@ -174,4 +197,18 @@ class MysqlJdbcConnector : JdbcConnector {
             const val PROBE_SQL: String = "SELECT 1"
         }
     }
+}
+
+/**
+ * 是否为**连接级**故障（网络断开 / 服务端踢连接）。口径与
+ * `StarRocksConnectionManager.isSessionBroken` 一致：SQLState 08xxx 或 MySQL
+ * 2006/2013。只有这类错误才允许关闭底层 Connection —— 普通 SQL 语法错误
+ * （42000 / 42S02 / 1064 …）必须走「只关 Statement」路径，保持会话存活，
+ * 否则一条写错的 SQL 就会让左侧树「已连接」退化、下次执行被迫重新建连。
+ */
+internal fun isConnectionLevelJdbcFailure(error: Throwable?): Boolean {
+    val failure = error as? JdbcFailure ?: return false
+    return failure.sqlState?.startsWith("08") == true ||
+        failure.errorCode == 2006 ||
+        failure.errorCode == 2013
 }
