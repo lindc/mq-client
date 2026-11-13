@@ -21,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.PlayArrow
@@ -64,13 +65,16 @@ import com.mqclient.core.db.OlapQueryRecord
 import com.mqclient.core.db.OlapQueryRepository
 import com.mqclient.olap.base.query.ResultColumn
 import com.mqclient.starrocks.StarRocksModule
+import com.mqclient.uicommon.LocalSnackbarHostState
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 import com.mqclient.uicommon.i18n.userMessage
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 「SQL 控制台」导航项的内容页（S3：流式渲染 + 多语句执行）。
@@ -211,9 +215,15 @@ private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
     var showHistory by remember { mutableStateOf(false) }
     var diagnosisSql by remember { mutableStateOf<String?>(null) }
     var draftLoaded by remember { mutableStateOf(false) }
+    // CSV 导出：-1 = 空闲；>=0 = 导出中（已写入行数，进度横幅用）。
+    var exportingRows by remember { mutableLongStateOf(-1L) }
+    val snackbar = LocalSnackbarHostState.current
     val scope = rememberCoroutineScope()
     var job by remember { mutableStateOf<Job?>(null) }
     val clipboard = LocalClipboardManager.current
+    // 导出文案在组合期解析（协程里用捕获值，避免在非组合上下文查表）。
+    val exportSuccessText = stringResource("olap.starrocks.console.export_success")
+    val exportFailedText = stringResource("olap.starrocks.console.export_failed")
 
     // 初始化 + 数据目录联动：先消费「双击表名」在 Tab 打开前挂起的 SQL，
     // 没有才回落草稿；随后常驻订阅后续请求（Tab 已打开时的实时联动）。
@@ -253,6 +263,36 @@ private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
         clipboard.setText(AnnotatedString(tsv))
     }
 
+    /**
+     * 导出 CSV：AWT FileDialog 选路径 → **重新执行当前 SQL** 流式写入
+     * （每批即写即 flush，不把 UI 快照列表二次拼接）。全程 IO，完成 / 失败
+     * 用 Snackbar 提示；导出期间按钮禁用、进度横幅实时显示已写入行数。
+     */
+    fun exportCsv() {
+        // 与查询执行互斥：单槽连接不支持并发，导出期间不允许再跑 runSql。
+        if (exportingRows >= 0L || phase == ConsolePhase.Connecting || phase == ConsolePhase.Executing) return
+        val source = selectedSource(textFieldValue) ?: textFieldValue.text
+        val statement = splitStatements(source).firstOrNull() ?: source.trim()
+        if (statement.isBlank()) return
+        scope.launch {
+            // AWT FileDialog 是模态阻塞调用，必须挂 EDT（Compose Main 即 Swing EDT）。
+            val path = pickCsvSavePath() ?: return@launch
+            exportingRows = 0
+            try {
+                val rows = withContext(Dispatchers.IO) {
+                    streamCsvExport(connectionId, statement, path) { written -> exportingRows = written }
+                }
+                snackbar.showSnackbar(exportSuccessText.withArg(path, rows))
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Throwable) {
+                snackbar.showSnackbar(exportFailedText.withArg(error.userMessage()))
+            } finally {
+                exportingRows = -1
+            }
+        }
+    }
+
     /** 清空编辑器与结果（对齐 mq-ui 控制台的 clear）。 */
     fun clearAll() {
         if (phase == ConsolePhase.Connecting || phase == ConsolePhase.Executing) job?.cancel()
@@ -262,6 +302,8 @@ private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
     }
 
     fun runSql() {
+        // 导出期间不允许再执行（互斥：单槽连接不支持并发查询）。
+        if (exportingRows >= 0L) return
         if (phase == ConsolePhase.Connecting || phase == ConsolePhase.Executing) return
         // 严格基于原生 [TextFieldValue.selection] 取源：有选区只发选区，
         // 无选区发全文（再按分号切多语句）。不做任何 selection 的写回/干预。
@@ -403,6 +445,16 @@ private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
             ) {
                 Icon(Icons.Filled.ContentCopy, contentDescription = stringResource("olap.starrocks.console.copy"))
             }
+            // 导出 CSV：重新执行当前 SQL 流式写文件；导出中禁用（进度见下方横幅）。
+            IconButton(
+                onClick = ::exportCsv,
+                modifier = Modifier.focusProperties { canFocus = false },
+                enabled = phase != ConsolePhase.Connecting &&
+                    phase != ConsolePhase.Executing &&
+                    exportingRows < 0L,
+            ) {
+                Icon(Icons.Filled.Download, contentDescription = stringResource("olap.starrocks.console.export"))
+            }
             IconButton(
                 onClick = { showHistory = true },
                 modifier = Modifier.focusProperties { canFocus = false },
@@ -420,6 +472,24 @@ private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
                 modifier = Modifier.focusProperties { canFocus = false },
             ) {
                 Icon(Icons.Filled.AutoAwesome, contentDescription = stringResource("olap.starrocks.ai.button"))
+            }
+        }
+
+        // ── 导出进度横幅：结果区顶部实时显示已写入行数 ──
+        if (exportingRows >= 0L) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+            ) {
+                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                Text(
+                    stringResource("olap.starrocks.console.exporting").withArg(exportingRows),
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
             }
         }
 
