@@ -104,6 +104,13 @@ val topicBrokerLayout: TopologyLayoutProvider =
 val exchangeQueueLayout: TopologyLayoutProvider =
     twoColumnLayoutProvider { type -> type == TopologyNodeType.RABBIT_QUEUE }
 
+/**
+ * OLAP（StarRocks）：FE | BE 的星形投影 —— 单个 FE 在左列，所有 BE 在右列，
+ * 每条 FE→BE 边是一条「接入层 → 存储层」连线。复用通用两列布局，不新造布局算法。
+ */
+val feBeLayout: TopologyLayoutProvider =
+    twoColumnLayoutProvider { type -> type == TopologyNodeType.OLAP_BE }
+
 /** 卡片高度：对齐 [CARD_HEIGHT]（布局与卡片尺寸必须一致）。 */
 private val NODE_HEIGHT = CARD_HEIGHT.dp
 

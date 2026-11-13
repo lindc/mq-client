@@ -14,6 +14,12 @@ kotlin {
             // 「测试失败是否仍要保存」确认框（SaveAnywayDialog / SaveState）——
             // 与 IBM MQ / Kafka / RabbitMQ / RocketMQ 四套表单完全同构。
             implementation(projects.mqUi)
+            // 拓扑面板：TopologyCanvas / feBeLayout（拓扑渲染）+ graph-core 的
+            // TopologyData / TopologyNodeType（经 topology-ui 的 api 传递）。
+            implementation(projects.topologyUi)
+            // AI 慢查询诊断：ChatService / AdapterChatService（SSE 流式）、
+            // wrapUntrustedContext 安全边界、AiMessageBubble 的 Markdown 渲染。
+            implementation(projects.aiUi)
             // stringResource（i18n 查表）来自 ui-common；占位页复用其共享
             // 基础能力，不新造可复用组件。
             implementation(projects.uiCommon)

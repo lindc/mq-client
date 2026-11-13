@@ -29,6 +29,8 @@ class TopologyGraphTest {
             "PARTITION", "BROKER", "CONSUMER_GROUP",
             // RabbitMQ
             "EXCHANGE", "RABBIT_QUEUE",
+            // OLAP（StarRocks FE / BE 集群拓扑）
+            "OLAP_FE", "OLAP_BE",
         )
 
         assertEquals(expected, TopologyNodeType.entries.map { it.name })

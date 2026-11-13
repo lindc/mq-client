@@ -70,19 +70,22 @@ class StarRocksAdapterUI : AdapterUI {
 
     /**
      * 按导航项（objectType）分发主内容区：
-     * - `console` → SQL 控制台 Tab 布局占位页（[StarRocksSqlConsolePlaceholder]）；
-     * - 其余四个已知导航项 → 「模块开发中」占位（标题按各节点的 i18n 键翻译）；
+     * - `console` → SQL 控制台（可接收数据目录的「双击表名」联动）；
+     * - `catalog` → 数据目录（库 / 表 / 字段树）；
+     * - `overview` → 集群概览（MetricCard + 节点表）；
+     * - 其余两个已知导航项 → 「模块开发中」占位；
      * - 未知 objectType → 模块通用占位页。
      *
-     * 导航项 id 与 `StarRocksServiceAdapter.navigationItems` 严格对齐；真实面板
-     * 落地时逐项替换（与 RocketMQ 的 when(objectType) 分发同构）。
+     * 导航项 id 与 `StarRocksServiceAdapter.navigationItems` 严格对齐（与
+     * RocketMQ 的 when(objectType) 分发同构）。
      */
     override fun contentFor(objectType: String, connectionId: String): (@Composable () -> Unit)? =
         when (objectType) {
             "console" -> { { StarRocksSqlConsolePlaceholder(connectionId = connectionId) } }
-            "overview", "catalog", "topology", "queries" -> {
-                { DevelopingPlaceholder("olap.starrocks.menu.$objectType") }
-            }
+            "catalog" -> { { StarRocksCatalogPanel(connectionId) } }
+            "overview" -> { { StarRocksOverviewPanel(connectionId) } }
+            "topology" -> { { StarRocksTopologyPanel(connectionId) } }
+            "queries" -> { { StarRocksProcessListPanel(connectionId) } }
             else -> { { StarRocksPlaceholder() } }
         }
 

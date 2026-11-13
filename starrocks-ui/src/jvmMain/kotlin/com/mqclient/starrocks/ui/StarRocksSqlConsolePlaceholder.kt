@@ -19,6 +19,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.History
@@ -208,16 +209,29 @@ private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
     val grid = remember { ConsoleGrid() }
     var phase by remember { mutableStateOf(ConsolePhase.Idle) }
     var showHistory by remember { mutableStateOf(false) }
+    var diagnosisSql by remember { mutableStateOf<String?>(null) }
     var draftLoaded by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     var job by remember { mutableStateOf<Job?>(null) }
     val clipboard = LocalClipboardManager.current
 
-    // 初始化：从 SQLite 读回上次未提交的草稿（关闭应用后重进仍保留）。
+    // 初始化 + 数据目录联动：先消费「双击表名」在 Tab 打开前挂起的 SQL，
+    // 没有才回落草稿；随后常驻订阅后续请求（Tab 已打开时的实时联动）。
     LaunchedEffect(connectionId) {
-        val draft = runCatching { OlapQueryRepository.loadDraft(connectionId) }.getOrNull()
-        if (!draft.isNullOrEmpty()) textFieldValue = TextFieldValue(draft)
+        val requested = StarRocksConsoleSqlHolder.consume(connectionId)
+        if (requested != null) {
+            textFieldValue = TextFieldValue(requested)
+        } else {
+            // 从 SQLite 读回上次未提交的草稿（关闭应用后重进仍保留）。
+            val draft = runCatching { OlapQueryRepository.loadDraft(connectionId) }.getOrNull()
+            if (!draft.isNullOrEmpty()) textFieldValue = TextFieldValue(draft)
+        }
         draftLoaded = true
+        StarRocksConsoleSqlHolder.requests.collect { request ->
+            if (request.connectionId == connectionId) {
+                textFieldValue = TextFieldValue(request.sql)
+            }
+        }
     }
 
     // 防抖自动保存：文本变化后 1 秒无新输入才落库（LaunchedEffect 每次
@@ -395,6 +409,18 @@ private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
             ) {
                 Icon(Icons.Filled.History, contentDescription = stringResource("olap.starrocks.console.history"))
             }
+            // AI 慢查询诊断：取选中的 SQL（无选区取全文首条），交给诊断弹窗
+            // 执行 EXPLAIN + 表结构组装后流式问模型。
+            IconButton(
+                onClick = {
+                    val source = selectedSource(textFieldValue) ?: textFieldValue.text
+                    val statement = splitStatements(source).firstOrNull() ?: source.trim()
+                    if (statement.isNotBlank()) diagnosisSql = statement
+                },
+                modifier = Modifier.focusProperties { canFocus = false },
+            ) {
+                Icon(Icons.Filled.AutoAwesome, contentDescription = stringResource("olap.starrocks.ai.button"))
+            }
         }
 
         // ── 历史记录面板：最近 50 条，点击把 SQL 填回编辑器 ──
@@ -406,6 +432,15 @@ private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
                     showHistory = false
                 },
                 onDismiss = { showHistory = false },
+            )
+        }
+
+        // ── AI 诊断弹窗（独立 composition，关闭即取消所有协程 / 流式请求） ──
+        diagnosisSql?.let { sql ->
+            StarRocksAiDiagnosisDialog(
+                connectionId = connectionId,
+                sql = sql,
+                onDismiss = { diagnosisSql = null },
             )
         }
 

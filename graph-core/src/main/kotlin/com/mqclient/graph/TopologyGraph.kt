@@ -40,6 +40,12 @@ enum class TopologyNodeType {
     EXCHANGE,
     /** RabbitMQ 队列（区别于 IBM MQ 的 LOCAL_QUEUE：AMQP 0.9.1 语义）。 */
     RABBIT_QUEUE,
+
+    // ---- OLAP（StarRocks FE / BE 集群拓扑）----
+    /** Frontend：查询接入 / 元数据节点，星形拓扑的中心。 */
+    OLAP_FE,
+    /** Backend：存储 / 计算节点，作为 FE 的子节点连线。 */
+    OLAP_BE,
 }
 
 /**

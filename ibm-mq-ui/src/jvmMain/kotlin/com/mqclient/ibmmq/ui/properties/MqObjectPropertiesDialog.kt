@@ -118,6 +118,9 @@ internal fun com.mqclient.graph.TopologyNodeType.toMqObjectType(): MqObjectType?
     com.mqclient.graph.TopologyNodeType.CONSUMER_GROUP -> null
     com.mqclient.graph.TopologyNodeType.EXCHANGE -> null
     com.mqclient.graph.TopologyNodeType.RABBIT_QUEUE -> null
+    // OLAP 专属节点类型：不属 MQ 对象体系（拓扑面板由各模块自行演进）。
+    com.mqclient.graph.TopologyNodeType.OLAP_FE -> null
+    com.mqclient.graph.TopologyNodeType.OLAP_BE -> null
 }
 
 @Composable

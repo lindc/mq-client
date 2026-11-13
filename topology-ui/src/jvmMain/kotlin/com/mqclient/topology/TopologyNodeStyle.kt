@@ -39,6 +39,9 @@ fun TopologyNodeType.getIcon(): ImageVector = when (this) {
     // RabbitMQ：交换机用 CallSplit（路由分发语义），队列用 Inbox（收件语义）。
     TopologyNodeType.EXCHANGE -> Icons.Filled.CallSplit
     TopologyNodeType.RABBIT_QUEUE -> Icons.Filled.Inbox
+    // OLAP：FE 是查询接入层用 Storage（元数据/调度语义），BE 是存储计算节点用 Dns。
+    TopologyNodeType.OLAP_FE -> Icons.Filled.Storage
+    TopologyNodeType.OLAP_BE -> Icons.Filled.Dns
 }
 
 /**
@@ -69,4 +72,8 @@ fun TopologyNodeType.getColor(): Color = when (this) {
     // 取蓝的深阶 1565C0）。
     TopologyNodeType.EXCHANGE -> Color(0xFF00838F)
     TopologyNodeType.RABBIT_QUEUE -> Color(0xFF1565C0)
+    // OLAP：FE 靛蓝（中心权威节点）、BE 蓝绿（存活计算节点；不存活由 NodeSeverity
+    // 覆盖为红色，见 TopologyNodeCard 的 severity 分支）。
+    TopologyNodeType.OLAP_FE -> Color(0xFF4F46E5)
+    TopologyNodeType.OLAP_BE -> Color(0xFF0D9488)
 }

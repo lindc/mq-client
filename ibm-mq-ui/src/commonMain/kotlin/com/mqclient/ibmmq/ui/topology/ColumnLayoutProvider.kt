@@ -147,6 +147,9 @@ val columnLayoutProvider: TopologyLayoutProvider = labeled@{ kuiver, config, typ
             TopologyNodeType.CONSUMER_GROUP -> 0
             TopologyNodeType.EXCHANGE -> 0
             TopologyNodeType.RABBIT_QUEUE -> 0
+            // OLAP 专属节点类型：MQ 图里不出现，归第 0 列兜底（保 exhaustive）。
+            TopologyNodeType.OLAP_FE -> 0
+            TopologyNodeType.OLAP_BE -> 0
             TopologyNodeType.LOCAL_QUEUE -> 9 + maxAliasDepth
         }
     }
