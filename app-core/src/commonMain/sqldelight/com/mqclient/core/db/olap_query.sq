@@ -1,0 +1,42 @@
+-- OLAP 查询历史（审计）：一条记录 = 一次 SQL 执行事实，只追加、不更新不删除。
+-- **绝不存结果集**（行数 / 列值 / ResultSet 都不落库）—— 结果可能 10 万行，
+-- 落盘会让本地库体积爆炸。SQL 原文、状态、耗时、错误信息才是要审计的东西。
+-- 写入由 starrocks-service 的执行咽喉点（StarRocksModule.executeQuery 的
+-- onCompletion）经 OlapQueryRepository 落库，与 mq_command 同款单库共享。
+CREATE TABLE IF NOT EXISTS olap_query_history (
+    id             TEXT PRIMARY KEY NOT NULL,  -- 记录自身 UUIDv7（newUuidV7）
+    connection_id  TEXT NOT NULL,              -- ConnectionInfo.id（与树节点 id 同源）
+    sql_text       TEXT NOT NULL,              -- 提交给执行器的单条 SQL 原文，不截断
+    status         TEXT NOT NULL,              -- SUCCESS / FAILED（取消归入 FAILED）
+    duration_ms    INTEGER NOT NULL,           -- 执行耗时（收集全程墙钟时间）
+    error_message  TEXT,                       -- 失败原因（异常 message）；成功为 NULL
+    created_at     INTEGER NOT NULL            -- 执行发起时刻（Unix 毫秒）
+);
+
+CREATE INDEX IF NOT EXISTS idx_olap_query_history_conn_time
+    ON olap_query_history(connection_id, created_at DESC);
+
+-- OLAP SQL 草稿：一个连接一份，按 connection_id 覆盖写（INSERT OR REPLACE）。
+-- 只存编辑器文本，退出应用后重进由控制台 LaunchedEffect 读回。
+CREATE TABLE IF NOT EXISTS olap_draft (
+    connection_id TEXT PRIMARY KEY NOT NULL,
+    sql_text      TEXT NOT NULL,
+    updated_at    INTEGER NOT NULL
+);
+
+insertHistory:
+INSERT INTO olap_query_history(id, connection_id, sql_text, status, duration_ms, error_message, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?);
+
+recentByConnection:
+SELECT * FROM olap_query_history
+WHERE connection_id = ?
+ORDER BY created_at DESC
+LIMIT ?;
+
+upsertDraft:
+INSERT OR REPLACE INTO olap_draft(connection_id, sql_text, updated_at)
+VALUES (?, ?, ?);
+
+selectDraft:
+SELECT sql_text FROM olap_draft WHERE connection_id = ?;

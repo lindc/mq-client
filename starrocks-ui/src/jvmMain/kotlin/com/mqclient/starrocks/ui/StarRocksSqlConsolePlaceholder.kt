@@ -1,12 +1,15 @@
 package com.mqclient.starrocks.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -18,8 +21,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -28,7 +33,9 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -39,6 +46,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
@@ -51,6 +59,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.mqclient.core.db.OlapQueryRecord
+import com.mqclient.core.db.OlapQueryRepository
 import com.mqclient.olap.base.query.ResultColumn
 import com.mqclient.starrocks.StarRocksModule
 import com.mqclient.uicommon.i18n.stringResource
@@ -58,6 +68,7 @@ import com.mqclient.uicommon.i18n.withArg
 import com.mqclient.uicommon.i18n.userMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -164,6 +175,9 @@ private class ConsoleGrid {
 /** OOM 保护：超过该行数停止 append 并取消拉取（数据仍在服务端，客户端不再累积）。 */
 private const val MAX_ROWS = 50_000
 
+/** 草稿防抖窗口（停止输入后毫秒数）。 */
+private const val DRAFT_DEBOUNCE_MS = 1_000L
+
 /** 截断信号：继承 [CancellationException] 以结束当前收集协程，但不算错误。 */
 private class StopStream : CancellationException("result set truncated at $MAX_ROWS rows")
 
@@ -172,12 +186,30 @@ private class StopStream : CancellationException("result set truncated at $MAX_R
 private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
     // TextFieldValue（而非纯 String）：与 mq-ui CommandConsoleViewModel 同构，
     // 持有光标 / 选中态，「执行选中」依赖它。
-    var editor by remember { mutableStateOf(TextFieldValue("")) }
+    var textFieldValue by remember { mutableStateOf(TextFieldValue("")) }
     val grid = remember { ConsoleGrid() }
     var connecting by remember { mutableStateOf(false) }
+    var showHistory by remember { mutableStateOf(false) }
+    var draftLoaded by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     var job by remember { mutableStateOf<Job?>(null) }
     val clipboard = LocalClipboardManager.current
+
+    // 初始化：从 SQLite 读回上次未提交的草稿（关闭应用后重进仍保留）。
+    LaunchedEffect(connectionId) {
+        val draft = runCatching { OlapQueryRepository.loadDraft(connectionId) }.getOrNull()
+        if (!draft.isNullOrEmpty()) textFieldValue = TextFieldValue(draft)
+        draftLoaded = true
+    }
+
+    // 防抖自动保存：文本变化后 1 秒无新输入才落库（LaunchedEffect 每次
+    // key 变化会取消上一个协程 —— 这就是 Compose 版的 debounce）。
+    // key 只取 textFieldValue.text：光标 / 选区变化不触发写盘。
+    LaunchedEffect(textFieldValue.text, draftLoaded) {
+        if (!draftLoaded) return@LaunchedEffect
+        delay(DRAFT_DEBOUNCE_MS)
+        runCatching { OlapQueryRepository.saveDraft(connectionId, textFieldValue.text) }
+    }
 
     /** 复制结果为 TSV（表头 + 行），列以 Tab 分隔 —— 与主流数据库工具一致。 */
     fun copyResults() {
@@ -192,15 +224,22 @@ private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
     /** 清空编辑器与结果（对齐 mq-ui 控制台的 clear）。 */
     fun clearAll() {
         if (grid.streaming || connecting) job?.cancel()
-        editor = TextFieldValue("")
+        textFieldValue = TextFieldValue("")
         grid.reset()
     }
 
     fun runSql() {
         if (connecting || grid.streaming) return
-        val source = selectedSource(editor) ?: editor.text.trim()
-        if (source.isEmpty()) return
-        val statements = splitStatements(source)
+        // 严格基于原生 [TextFieldValue.selection] 取源：有选区只发选区，
+        // 无选区发全文（再按分号切多语句）。不做任何 selection 的写回/干预。
+        val selected = selectedSource(textFieldValue)
+        val sqlToExecute = selected ?: textFieldValue.text
+        com.mqclient.core.log.Log.info(
+            "olap-starrocks-ui",
+            if (selected != null) "execute SELECTION (${selected.length} chars)" else "execute FULL TEXT",
+        )
+        if (sqlToExecute.isBlank()) return
+        val statements = splitStatements(sqlToExecute)
         if (statements.isEmpty()) return
 
         job = scope.launch {
@@ -232,7 +271,7 @@ private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
                         grid.streaming = true
                         var statementUpdateCount: Long? = null
                         var schemaApplied = false   // 每条语句的首个数据批：换 schema 并清上条结果
-                        StarRocksModule.executeQuery(statement).collect { batch ->
+                        StarRocksModule.executeQuery(connectionId, statement).collect { batch ->
                             if (batch.updateCount != null) {
                                 statementUpdateCount = batch.updateCount
                             } else {
@@ -296,6 +335,9 @@ private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
         ) {
             IconButton(
                 onClick = ::runSql,
+                // 按钮不抢输入框焦点（否则 TextField 失焦）。只控制焦点，
+                // 完全不碰 TextFieldValue.selection —— 选区由 Compose 原生管理。
+                modifier = Modifier.focusProperties { canFocus = false },
                 // 连接中 / 拉取中禁用：防狂点导致并发建连 / 重复查询。
                 enabled = !connecting && !grid.streaming,
             ) {
@@ -308,28 +350,52 @@ private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
 
             IconButton(
                 onClick = { job?.cancel() },
+                modifier = Modifier.focusProperties { canFocus = false },
                 enabled = connecting || grid.streaming,
             ) {
                 Icon(Icons.Filled.Stop, contentDescription = stringResource("olap.starrocks.console.stop"))
             }
             IconButton(
                 onClick = ::clearAll,
-                enabled = editor.text.isNotEmpty() || grid.hasRun,
+                modifier = Modifier.focusProperties { canFocus = false },
+                enabled = textFieldValue.text.isNotEmpty() || grid.hasRun,
             ) {
                 Icon(Icons.Filled.DeleteSweep, contentDescription = stringResource("olap.starrocks.console.clear"))
             }
             IconButton(
                 onClick = ::copyResults,
+                modifier = Modifier.focusProperties { canFocus = false },
                 enabled = grid.rows.isNotEmpty(),
             ) {
                 Icon(Icons.Filled.ContentCopy, contentDescription = stringResource("olap.starrocks.console.copy"))
             }
+            IconButton(
+                onClick = { showHistory = true },
+                modifier = Modifier.focusProperties { canFocus = false },
+            ) {
+                Icon(Icons.Filled.History, contentDescription = stringResource("olap.starrocks.console.history"))
+            }
+        }
+
+        // ── 历史记录面板：最近 50 条，点击把 SQL 填回编辑器 ──
+        if (showHistory) {
+            HistoryDialog(
+                connectionId = connectionId,
+                onPick = { sql ->
+                    textFieldValue = TextFieldValue(sql)
+                    showHistory = false
+                },
+                onDismiss = { showHistory = false },
+            )
         }
 
         // ── SQL 编辑器：多行等宽，占剩余高度 35% ──
         OutlinedTextField(
-            value = editor,
-            onValueChange = { editor = it },
+            value = textFieldValue,
+            // 原生选区完全交给 Compose：直接赋值，绝不修改 it.selection。
+            // 之前「失焦时保住旧选区」的自定义逻辑会把上一次的选区写回 state，
+            // 造成「高亮在新行、执行却拿到旧行」的错位 —— 一律删除。
+            onValueChange = { textFieldValue = it },
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(0.35f)
@@ -356,11 +422,13 @@ private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
  * 否则 substring 会抛 StringIndexOutOfBoundsException。
  * 返回 null = 没有选中文本（调用方回落全文）。
  */
-private fun selectedSource(editor: TextFieldValue): String? {
-    val selStart = editor.selection.min
-    val selEnd = editor.selection.max
-    if (selStart == selEnd) return null
-    return editor.text.substring(selStart, selEnd).trim().takeIf { it.isNotEmpty() }
+internal fun selectedSource(textFieldValue: TextFieldValue): String? {
+    val selection = textFieldValue.selection
+    // 无选区（光标只是一个闪烁竖线）→ 返回 null，由调用方执行全文。
+    if (selection.start == selection.end) return null
+    // 反向选择（从后往前拖）时 start > end，用 min/max 归一防 substring 越界；
+    // 除此之外**原样截取**，不改写任何选区状态。
+    return textFieldValue.text.substring(selection.min, selection.max)
 }
 
 /**
@@ -368,7 +436,7 @@ private fun selectedSource(editor: TextFieldValue): String? {
  * 场景在本工具的目标查询里极少）。剔除 `--` 行注释与空段，末尾多余分号
  * 自然产生空段被过滤。
  */
-private fun splitStatements(text: String): List<String> =
+internal fun splitStatements(text: String): List<String> =
     text.split(';')
         .map { segment ->
             segment.lines()
@@ -377,6 +445,80 @@ private fun splitStatements(text: String): List<String> =
                 .trim()
         }
         .filter { it.isNotEmpty() }
+
+/**
+ * 「历史记录」面板：最近 50 条执行事实（SQL / 状态 / 耗时 / 错误信息），
+ * 点击任一条把该 SQL 填回编辑器。**只查审计表，不碰结果集**。
+ */
+@Composable
+private fun HistoryDialog(
+    connectionId: String,
+    onPick: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var entries by remember { mutableStateOf<List<OlapQueryRecord>>(emptyList()) }
+    LaunchedEffect(connectionId) {
+        entries = runCatching { OlapQueryRepository.recent(connectionId, 50) }.getOrDefault(emptyList())
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource("olap.starrocks.console.history_title")) },
+        text = {
+            if (entries.isEmpty()) {
+                Text(
+                    stringResource("olap.starrocks.console.history_empty"),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            } else {
+                LazyColumn(
+                    Modifier.height(320.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    items(entries) { entry ->
+                        val ok = entry.status == OlapQueryRecord.STATUS_SUCCESS
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable { onPick(entry.sqlText) }
+                                .background(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.shapes.small)
+                                .padding(8.dp),
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    stringResource(
+                                        if (ok) "olap.starrocks.console.history_ok"
+                                        else "olap.starrocks.console.history_fail",
+                                    ),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (ok) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.error,
+                                )
+                                Text(
+                                    "  ${formatTime(entry.createdAt)}  ${entry.durationMs} ms",
+                                    style = MaterialTheme.typography.labelSmall,
+                                )
+                            }
+                            Text(
+                                (entry.errorMessage ?: entry.sqlText).take(120).replace('\n', ' '),
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource("common_close")) }
+        },
+    )
+}
+
+/** 历史条目时间戳（本机时区，jvmMain 可用 java.text）。 */
+private fun formatTime(epochMs: Long): String =
+    java.text.SimpleDateFormat("MM-dd HH:mm:ss").format(java.util.Date(epochMs))
 
 @Composable
 private fun ResultArea(grid: ConsoleGrid, connecting: Boolean, modifier: Modifier = Modifier) {

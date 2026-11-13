@@ -287,5 +287,10 @@
   "olap.starrocks.console.stop": "Stop execution",
   "olap.starrocks.console.clear": "Clear editor and results",
   "olap.starrocks.console.copy": "Copy results (TSV)",
-  "olap.starrocks.console.summary": "%1$s statements: %2$s ok, %3$s failed"
+  "olap.starrocks.console.summary": "%1$s statements: %2$s ok, %3$s failed",
+  "olap.starrocks.console.history": "History",
+  "olap.starrocks.console.history_title": "Last 50 queries",
+  "olap.starrocks.console.history_empty": "No query history yet",
+  "olap.starrocks.console.history_ok": "OK",
+  "olap.starrocks.console.history_fail": "FAILED"
 }

@@ -287,5 +287,10 @@
   "olap.starrocks.console.stop": "停止执行",
   "olap.starrocks.console.clear": "清空编辑器与结果",
   "olap.starrocks.console.copy": "复制结果（TSV）",
-  "olap.starrocks.console.summary": "共 %1$s 条语句：成功 %2$s，失败 %3$s"
+  "olap.starrocks.console.summary": "共 %1$s 条语句：成功 %2$s，失败 %3$s",
+  "olap.starrocks.console.history": "历史记录",
+  "olap.starrocks.console.history_title": "最近 50 条执行记录",
+  "olap.starrocks.console.history_empty": "暂无执行记录",
+  "olap.starrocks.console.history_ok": "成功",
+  "olap.starrocks.console.history_fail": "失败"
 }
