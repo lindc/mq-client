@@ -11,9 +11,9 @@ built on Kotlin Multiplatform + Compose Desktop.
 [![Compose](https://img.shields.io/badge/UI-Compose%20Desktop%20·%20Material%203-4285F4?logo=jetpackcompose&logoColor=white)](https://www.jetbrains.com/lp/compose-multiplatform/)
 [![JDK](https://img.shields.io/badge/JDK-25-000000?logo=openjdk&logoColor=white)](https://openjdk.org)
 [![Storage](https://img.shields.io/badge/Storage-SQLite%20·%20SQLDelight-003B57)](https://github.com/cashapp/sqldelight)
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue)](LICENSE)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue)](../LICENSE)
 
-[English](README.md) · **简体中文**
+[English](../README.md) · **简体中文**
 
 </div>
 
@@ -111,7 +111,7 @@ flowchart TB
 
 依赖方向铁律：**UI → Service → mq-base / app-core，单向**；反向只通过 EventBus 事件与 SPI 回调。每个 MQ 的 `service` / `ui` 平级成对，新增协议 = 一对模块继承模板，平台层零改动。
 
-> 📐 完整的架构与功能盘点（33 个模块逐一说明、分业务域功能清单、代码量化指标）见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
+> 📐 完整的架构与功能盘点（33 个模块逐一说明、分业务域功能清单、代码量化指标）见 [`ARCHITECTURE.md`](ARCHITECTURE.md)。
 
 ## 📁 项目结构
 
@@ -212,7 +212,7 @@ git checkout -b feat/your-feature
 
 ## 📄 License
 
-本项目基于 [Apache License 2.0](LICENSE) 开源发布。
+本项目基于 [Apache License 2.0](../LICENSE) 开源发布。
 
 ```text
 Copyright 2026 Lindc

@@ -12,7 +12,7 @@
 [![Storage](https://img.shields.io/badge/Storage-SQLite%20·%20SQLDelight-003B57)](https://github.com/cashapp/sqldelight)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue)](LICENSE)
 
-**English** · [简体中文](README.zh.md)
+**English** · [简体中文](docs/README.zh-CN.md)
 
 </div>
 
