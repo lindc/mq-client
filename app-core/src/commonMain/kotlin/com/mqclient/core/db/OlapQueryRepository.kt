@@ -74,6 +74,11 @@ object OlapQueryRepository {
         }
     }
 
+    /** 清空指定连接的全部执行历史（不可逆；调用方自行二次确认）。 */
+    suspend fun clear(connectionId: String): Unit = withContext(Dispatchers.IO) {
+        withDb { db -> db.olap_queryQueries.clearByConnection(connection_id = connectionId) }
+    }
+
     /**
      * 记住**已经在哪个 driver 上建过表**（而非一个布尔）：换了 driver（测试换临时库、
      * 运行时重新初始化 DB）必须重新 CREATE，否则空库上直接查表会失败。

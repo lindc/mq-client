@@ -34,6 +34,9 @@ WHERE connection_id = ?
 ORDER BY created_at DESC
 LIMIT ?;
 
+clearByConnection:
+DELETE FROM olap_query_history WHERE connection_id = ?;
+
 upsertDraft:
 INSERT OR REPLACE INTO olap_draft(connection_id, sql_text, updated_at)
 VALUES (?, ?, ?);

@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -20,6 +21,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DeleteSweep
@@ -28,6 +30,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -65,7 +68,9 @@ import com.mqclient.core.db.OlapQueryRecord
 import com.mqclient.core.db.OlapQueryRepository
 import com.mqclient.olap.base.query.ResultColumn
 import com.mqclient.starrocks.StarRocksModule
+import com.mqclient.uicommon.DangerButton
 import com.mqclient.uicommon.LocalSnackbarHostState
+import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 import com.mqclient.uicommon.i18n.userMessage
@@ -403,7 +408,8 @@ private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
         }
     }
 
-    Column(modifier) {
+    Box(modifier) {
+        Column(Modifier.fillMaxSize()) {
         // ── 工具栏：执行 / 停止 / 清空 / 复制（对齐 mq-ui CommandToolbar） ──
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -494,16 +500,6 @@ private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
         }
 
         // ── 历史记录面板：最近 50 条，点击把 SQL 填回编辑器 ──
-        if (showHistory) {
-            HistoryDialog(
-                connectionId = connectionId,
-                onPick = { sql ->
-                    textFieldValue = TextFieldValue(sql)
-                    showHistory = false
-                },
-                onDismiss = { showHistory = false },
-            )
-        }
 
         // ── AI 诊断弹窗（独立 composition，关闭即取消所有协程 / 流式请求） ──
         diagnosisSql?.let { sql ->
@@ -515,12 +511,26 @@ private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
         }
 
         // ── SQL 编辑器：多行等宽，占剩余高度 35% ──
+        // SQL 语法高亮：颜色随主题取（关键字=primary、字符串=secondary、数字=tertiary）；
+        // remember 带颜色键 —— 主题切换时重建变换。纯视觉转换，不碰光标 / 选区。
+        // 注意：remember 的 calculation lambda 不是 @Composable，颜色先取出来再捕获。
+        val keywordColor = MaterialTheme.colorScheme.primary
+        val stringColor = MaterialTheme.colorScheme.secondary
+        val numberColor = MaterialTheme.colorScheme.tertiary
+        val sqlTransformation = remember(keywordColor, stringColor, numberColor) {
+            SqlHighlightTransformation(
+                keywordColor = keywordColor,
+                stringColor = stringColor,
+                numberColor = numberColor,
+            )
+        }
         OutlinedTextField(
             value = textFieldValue,
             // 原生选区完全交给 Compose：直接赋值，绝不修改 it.selection。
             // 之前「失焦时保住旧选区」的自定义逻辑会把上一次的选区写回 state，
             // 造成「高亮在新行、执行却拿到旧行」的错位 —— 一律删除。
             onValueChange = { textFieldValue = it },
+            visualTransformation = sqlTransformation,
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(0.35f)
@@ -538,6 +548,20 @@ private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
 
         // ── 结果区：剩余全部高度 ──
         ResultArea(grid, phase, Modifier.fillMaxWidth().weight(0.65f).padding(8.dp))
+        }
+
+        // ── 执行历史：右侧常驻面板（overlay），点击条目回填 SQL ──
+        if (showHistory) {
+            HistoryPanel(
+                connectionId = connectionId,
+                onPick = { sql -> textFieldValue = TextFieldValue(sql) },
+                onDismiss = { showHistory = false },
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .fillMaxHeight()
+                    .width(420.dp),
+            )
+        }
     }
 }
 
@@ -572,73 +596,132 @@ internal fun splitStatements(text: String): List<String> =
         .filter { it.isNotEmpty() }
 
 /**
- * 「历史记录」面板：最近 50 条执行事实（SQL / 状态 / 耗时 / 错误信息），
- * 点击任一条把该 SQL 填回编辑器。**只查审计表，不碰结果集**。
+ * 「执行历史」右侧面板：最近 50 条（时间倒序），点击回填 SQL，可一键清空。
+ * **只查审计表，不碰结果集**。
+ *
+ * 形态是叠加在主内容右侧的常驻面板（Box 对齐 CenterEnd），主内容左侧仍可交互；
+ * 关闭 / 切 Tab 随组合销毁。
  */
 @Composable
-private fun HistoryDialog(
+private fun HistoryPanel(
     connectionId: String,
     onPick: (String) -> Unit,
     onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     var entries by remember { mutableStateOf<List<OlapQueryRecord>>(emptyList()) }
-    LaunchedEffect(connectionId) {
-        entries = runCatching { OlapQueryRepository.recent(connectionId, 50) }.getOrDefault(emptyList())
+    var confirmClear by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val snackbar = LocalSnackbarHostState.current
+    val clearedText = stringResource("olap.starrocks.console.history_cleared")
+
+    fun reload() {
+        scope.launch {
+            entries = runCatching { OlapQueryRepository.recent(connectionId, 50) }.getOrDefault(emptyList())
+        }
     }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource("olap.starrocks.console.history_title")) },
-        text = {
-            if (entries.isEmpty()) {
+    LaunchedEffect(connectionId) { reload() }
+
+    Column(
+        modifier
+            .fillMaxHeight()
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(8.dp),
+    ) {
+        // ── 标题栏：标题 + 清空 + 关闭 ──
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Text(
+                stringResource("olap.starrocks.console.history_title"),
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.weight(1f),
+            )
+            IconButton(onClick = { confirmClear = true }, enabled = entries.isNotEmpty()) {
+                Icon(Icons.Filled.DeleteSweep, contentDescription = stringResource("olap.starrocks.console.history_clear"))
+            }
+            IconButton(onClick = onDismiss) {
+                Icon(Icons.Filled.Close, contentDescription = stringResource("common_close"))
+            }
+        }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+        if (entries.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
                     stringResource("olap.starrocks.console.history_empty"),
                     style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-            } else {
-                LazyColumn(
-                    Modifier.height(320.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    items(entries) { entry ->
-                        val ok = entry.status == OlapQueryRecord.STATUS_SUCCESS
-                        Column(
-                            Modifier
-                                .fillMaxWidth()
-                                .clickable { onPick(entry.sqlText) }
-                                .background(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.shapes.small)
-                                .padding(8.dp),
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    stringResource(
-                                        if (ok) "olap.starrocks.console.history_ok"
-                                        else "olap.starrocks.console.history_fail",
-                                    ),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = if (ok) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.error,
-                                )
-                                Text(
-                                    "  ${formatTime(entry.createdAt)}  ${entry.durationMs} ms",
-                                    style = MaterialTheme.typography.labelSmall,
-                                )
-                            }
+            }
+        } else {
+            LazyColumn(
+                Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                items(entries, key = { "${it.id}:${it.createdAt}" }) { entry ->
+                    val ok = entry.status == OlapQueryRecord.STATUS_SUCCESS
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { onPick(entry.sqlText) }
+                            .background(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.shapes.small)
+                            .padding(8.dp),
+                    ) {
+                        // 头部：状态（成功绿 / 失败红）· 执行时间 · 耗时
+                        Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                (entry.errorMessage ?: entry.sqlText).take(120).replace('\n', ' '),
-                                style = MaterialTheme.typography.bodySmall,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
+                                stringResource(
+                                    if (ok) "olap.starrocks.console.history_ok"
+                                    else "olap.starrocks.console.history_fail",
+                                ),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (ok) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.error,
+                            )
+                            Text(
+                                "  ${formatTime(entry.createdAt)}  ${entry.durationMs} ms",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
+                        // 内容：SQL 前两行，超出省略
+                        val lines = entry.sqlText.lines()
+                        val preview = if (lines.size > 2) lines.take(2).joinToString("\n") + "\n…" else entry.sqlText
+                        Text(
+                            preview,
+                            fontFamily = FontFamily.Monospace,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
                     }
                 }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource("common_close")) }
-        },
-    )
+        }
+    }
+
+    // ── 清空历史二次确认（不可逆操作） ──
+    if (confirmClear) {
+        AlertDialog(
+            onDismissRequest = { confirmClear = false },
+            title = { Text(stringResource("olap.starrocks.console.history_clear")) },
+            text = { Text(stringResource("olap.starrocks.console.history_clear_confirm")) },
+            confirmButton = {
+                DangerButton(onClick = {
+                    confirmClear = false
+                    scope.launch {
+                        withContext(Dispatchers.IO) { runCatching { OlapQueryRepository.clear(connectionId) } }
+                        entries = emptyList()
+                        snackbar.showSnackbar(clearedText)
+                    }
+                }) { Text(stringResource("common_ok")) }
+            },
+            dismissButton = {
+                SecondaryButton(onClick = { confirmClear = false }) { Text(stringResource("common_cancel")) }
+            },
+        )
+    }
 }
 
 /** 历史条目时间戳（本机时区，jvmMain 可用 java.text）。 */

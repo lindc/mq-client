@@ -103,6 +103,35 @@ class OlapQueryRepositoryTest {
         assertNull(OlapQueryRepository.loadDraft("conn-2"), "不同连接互不覆盖")
     }
 
+    @Test
+    fun `clear removes only this connection's history`() = runBlocking {
+        DatabaseManager.initialize(DriverFactory(), Dispatchers.IO.limitedParallelism(1))
+
+        listOf("conn-1", "conn-1", "conn-2").forEachIndexed { index, conn ->
+            OlapQueryRepository.save(
+                OlapQueryRecord(
+                    id = "rec-$index", connectionId = conn, sqlText = "SELECT $index",
+                    status = OlapQueryRecord.STATUS_SUCCESS, durationMs = 1L,
+                    errorMessage = null, createdAt = 1_000L + index,
+                ),
+            )
+        }
+
+        OlapQueryRepository.clear("conn-1")
+
+        assertTrue(OlapQueryRepository.recent("conn-1").isEmpty(), "该连接的历史应被清空")
+        assertEquals(1, OlapQueryRepository.recent("conn-2").size, "其他连接不受影响")
+        // 再写入正常（表仍在，只是数据被清）。
+        OlapQueryRepository.save(
+            OlapQueryRecord(
+                id = "rec-new", connectionId = "conn-1", sqlText = "SELECT 9",
+                status = OlapQueryRecord.STATUS_SUCCESS, durationMs = 1L,
+                errorMessage = null, createdAt = 9_000L,
+            ),
+        )
+        assertEquals("rec-new", OlapQueryRepository.recent("conn-1").single().id)
+    }
+
     private companion object {
         const val DIR_PROPERTY = "mqclient.config.dir"
     }
