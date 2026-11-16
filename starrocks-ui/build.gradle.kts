@@ -6,9 +6,12 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            // 协议层骨架（PROTOCOL_ID / PROTOCOL_NAME 常量）；service 侧 api
-            // 暴露的 app-core / olap-base 类型随之传递，jvmMain 的 AdapterUI
-            // 实现需要它们。
+            // 宿主核心契约（AdapterUI / ConnectionFormState / ConfigManager）：
+            // 显式声明，与 kafka-ui / ibm-mq-ui 等兄弟模块一致 —— 不依赖
+            // starrocks-service 的 api 传递（service 侧已收敛为 implementation，
+            // olap-base 的 api(appCore) 是模板签名所需，属合理暴露）。
+            implementation(projects.appCore)
+            // 协议层骨架（PROTOCOL_ID / PROTOCOL_NAME 常量）与查询门面。
             implementation(projects.starrocksService)
             // 连接表单复用 mq-ui 的保存状态机（AbstractConnectionFormState）与
             // 「测试失败是否仍要保存」确认框（SaveAnywayDialog / SaveState）——

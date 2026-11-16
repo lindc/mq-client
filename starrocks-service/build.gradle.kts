@@ -10,7 +10,7 @@ kotlin {
             // 要看到完整的父类链（与 mq-base 对 app-core 的口径一致）。
             api(projects.olapBase)
             // ServiceAdapter / ServiceContext 等 SPI 契约在 app-core（jvmMain）。
-            api(projects.appCore)
+            implementation(projects.appCore)
         }
         jvmMain.dependencies {
             // S1：StarRocks FE 走 MySQL 协议，用 Connector/J 8.0.x 做真实
