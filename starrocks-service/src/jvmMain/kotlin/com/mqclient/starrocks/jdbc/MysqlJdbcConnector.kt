@@ -97,13 +97,27 @@ class MysqlJdbcConnector : JdbcConnector {
             // coroutineScope 的「悬等生产协程」问题（消费端取消后等阻塞 IO 跑完）
             // 由下方 finally 的强制断连解决：socket 一关，阻塞的 rs.next() 立即
             // 抛错返回，scope 无需等待几十万行读完。
-            val statement: Statement = withContext(Dispatchers.IO) { raw.createStatement() }
+            //
+            // 创建必须在翻译范围内：连接已死时 createStatement() 会抛 SQLException，
+            // 不翻译会裸传到 UI（userMessage() 无法翻译），且 isSessionBroken 只认
+            // JdbcFailure —— 自愈路径也失效。
+            val statement: Statement = try {
+                withContext(Dispatchers.IO) { raw.createStatement() }
+            } catch (error: SQLTimeoutException) {
+                throw JdbcConnectTimeoutException(error.message ?: "create statement timed out")
+            } catch (error: SQLException) {
+                throw JdbcFailure(error.message, error.sqlState, error.errorCode, error)
+            }
             var completed = false
             /** 消费端中断原因：决定 finally 里是否允许关闭底层 [raw] 连接。 */
             var interruption: Throwable? = null
             try {
                 coroutineScope {
-                    val batches = Channel<JdbcQueryBatch>(Channel.UNLIMITED)
+                    // 有界通道（背压窗口）：消费慢时 producer 在 send 上挂起 ——
+                    // 停止从网络读行，内存在途恒定为窗口大小；取消时若 producer
+                    // 正阻塞在 send 上也会被立即解开。旧实现 UNLIMITED 让 producer
+                    // 以网速无界领先消费者，宽结果集下内存不受控。
+                    val batches = Channel<JdbcQueryBatch>(QUERY_CHANNEL_CAPACITY)
                     val producer = launch(Dispatchers.IO) {
                         try {
                             // 行级流式（压测 10 万行不爆内存的关键）：Connector/J 默认
@@ -140,6 +154,10 @@ class MysqlJdbcConnector : JdbcConnector {
                             batches.close(JdbcConnectTimeoutException(error.message ?: "query timed out"))
                         } catch (error: SQLException) {
                             batches.close(JdbcFailure(error.message, error.sqlState, error.errorCode, error))
+                        } catch (cancellation: CancellationException) {
+                            // 取消原样上抛（消费端中断清理路径会 producer.cancel()）：
+                            // 吞掉会让本协程「正常完成」而非 cancelled，违反取消语义。
+                            throw cancellation
                         } catch (error: Throwable) {
                             batches.close(error)
                         }
@@ -195,6 +213,12 @@ class MysqlJdbcConnector : JdbcConnector {
         private companion object {
             /** 探针语句（StarRocks FE 支持无表 SELECT 常量）。 */
             const val PROBE_SQL: String = "SELECT 1"
+
+            /**
+             * 查询通道的在途批数（背压窗口）。默认批次 100 行 → 在途上限约
+             * 800 行：够 UI 边收边渲染平滑，又不给 producer 无限领先的空间。
+             */
+            const val QUERY_CHANNEL_CAPACITY: Int = 8
         }
     }
 }

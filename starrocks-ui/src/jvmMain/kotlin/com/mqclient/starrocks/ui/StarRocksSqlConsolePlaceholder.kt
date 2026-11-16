@@ -325,10 +325,9 @@ private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
         job = scope.launch {
             var start = 0L
             try {
-                // 懒加载连接：只有真正未连接时才进 Connecting 阶段。
-                // 左侧树显示「已连接」时 isAlive()==true，这里整段跳过 ——
-                // 不会再出现「建立连接」的文案。
-                if (!StarRocksModule.isAlive()) {
+                // 懒加载连接：只有「未连接 / 会话属于别的连接」时才进 Connecting 阶段。
+                // 带身份的预检保证多连接下不会误判（executeQuery 内部还有身份守卫兜底）。
+                if (!StarRocksModule.isAlive(connectionId)) {
                     phase = ConsolePhase.Connecting
                     val connected = StarRocksModule.connectById(connectionId)
                     if (connected.isFailure) {

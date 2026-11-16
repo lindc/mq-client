@@ -115,7 +115,8 @@ internal fun openConsoleWithSql(connectionId: String, sql: String) {
  * 异常原样上抛，由面板 catch 后显示友好文案。
  */
 internal suspend fun queryRows(connectionId: String, sql: String): StarRocksQueryRows {
-    if (!StarRocksModule.isAlive()) {
+    // 预检只是加速路径：会话不属于该连接 / 未连接时，executeQuery 内部会自动抢占建连。
+    if (!StarRocksModule.isAlive(connectionId)) {
         StarRocksModule.connectById(connectionId).getOrThrow()
     }
     var columns: List<ResultColumn> = emptyList()

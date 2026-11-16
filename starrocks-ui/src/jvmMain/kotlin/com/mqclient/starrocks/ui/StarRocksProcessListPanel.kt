@@ -51,7 +51,6 @@ import com.mqclient.uicommon.i18n.withArg
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
 
@@ -207,16 +206,14 @@ internal fun StarRocksProcessListPanel(connectionId: String, modifier: Modifier 
     var profileTarget by remember { mutableStateOf<ProcessInfo?>(null) }
     val scope = rememberCoroutineScope()
     val snackbar = LocalSnackbarHostState.current
-    // 单条 JDBC 连接不支持并发查询：自动刷新与手动 / Kill 后刷新重叠时直接跳过，
-    // 避免 "Streaming result set is still active" 与请求堆积。
-    val loadMutex = remember { Mutex() }
+    // 单连接并发防护已下沉到 StarRocksModule.executeQuery 的串行锁：
+    // 手动刷新 / 自动刷新 / Kill / Profile 并发时在此自动排队，面板无需自行加锁。
 
     // 文案在组合期解析（协程里用捕获值，避免在非组合上下文查表）。
     val killedText = stringResource("olap.starrocks.processlist.killed")
     val killFailedTemplate = stringResource("olap.starrocks.processlist.kill_failed")
 
     suspend fun load() {
-        if (!loadMutex.tryLock()) return
         loading = true
         error = null
         try {
@@ -227,7 +224,6 @@ internal fun StarRocksProcessListPanel(connectionId: String, modifier: Modifier 
             sessions = emptyList()
         } finally {
             loading = false
-            loadMutex.unlock()
         }
     }
 

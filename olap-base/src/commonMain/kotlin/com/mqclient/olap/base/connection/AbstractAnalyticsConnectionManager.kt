@@ -113,9 +113,22 @@ abstract class AbstractAnalyticsConnectionManager<C : AnalyticsConnectionConfig,
      * `olap.connection.connected / failed / closed` 事件（payload 带 connectionId）。
      */
     suspend fun connect(config: C): Result<S> = mutex.withLock {
-        session?.takeIf { it.isUsable() }?.let {
-            log.debug("connect ignored (already connected): connection=${config.connectionId}")
-            return@withLock Result.success(it)
+        session?.takeIf { it.isUsable() }?.let { existing ->
+            if (sessionConfig?.connectionId == config.connectionId) {
+                log.debug("connect ignored (already connected): connection=${config.connectionId}")
+                return@withLock Result.success(existing)
+            }
+            // 槽位抢占：单槽管理器一次只服务一个连接；另一个连接的请求到来时，
+            // 旧会话必须关掉再开新的 —— 否则新连接的查询会静默执行在旧连接上
+            //（单槽语义下唯一的正确性缺口）。状态上报由调用方按
+            // [currentConnectionId] 前后对比处理。
+            log.info(
+                "slot stolen: old=${sessionConfig?.connectionId} new=${config.connectionId}",
+            )
+            runCatching { closeSession(existing) }
+                .onFailure { log.warn("stale session close failed (ignored): error=${it.message}") }
+            session = null
+            sessionConfig = null
         }
         val start = olapTimeMillis()
         log.debug("connect start: connection=${config.connectionId}")
@@ -191,8 +204,18 @@ abstract class AbstractAnalyticsConnectionManager<C : AnalyticsConnectionConfig,
         }
     }
 
-    /** 会话句柄是否仍然存在（供扫描健康度区分「真没连接」与「单次请求失败」）。 */
-    fun isAlive(): Boolean = session?.isUsable() == true
+    /**
+     * 会话句柄是否仍然存在**且属于 [connectionId]**（单槽语义下区分「谁的会话」，
+     * 供查询执行前的身份守卫 —— 会话属于别的连接时调用方应先 connect 抢占）。
+     */
+    fun isAlive(connectionId: String): Boolean =
+        session?.isUsable() == true && sessionConfig?.connectionId == connectionId
+
+    /**
+     * 当前会话所属的连接 id（无会话时 null）—— 槽位抢占后旧连接的状态上报
+     * （Disconnected）依据。
+     */
+    fun currentConnectionId(): String? = sessionConfig?.connectionId
 
     /**
      * 在**当前共享会话**上执行一段工作。

@@ -47,9 +47,24 @@ object StarRocksModule {
         manager = StarRocksConnectionManager(context, connector = connector)
     }
 
-    /** 退出钩子：摘掉引用（S2 接 catalog / query 后再扩资源释放）。 */
+    /**
+     * 退出钩子：**先同步断开共享会话**再摘引用（对齐 KafkaModule.shutdown 的
+     * 口径 —— ModuleRegistry.disposeServices 不挂起，退出路径不能留下没关的
+     * 物理连接；`runBlocking` 等会话关完才返回）。关闭失败只记日志，不阻断
+     * 其余模块的销毁。
+     */
     fun dispose() {
+        val managerToStop = manager
         manager = null
+        managerToStop?.let { current ->
+            runCatching { kotlinx.coroutines.runBlocking { current.shutdown() } }
+                .onFailure {
+                    com.mqclient.core.log.Log.warn(
+                        "olap-starrocks",
+                        "module dispose: session shutdown failed (ignored): ${it.message}",
+                    )
+                }
+        }
     }
 
     /**
@@ -83,7 +98,17 @@ object StarRocksModule {
         }
         val startedAt = olapTimeMillis()
         val recordId = newUuidV7()
-        return current.executeQuery(sql).onCompletion { cause ->
+        return flow {
+            // 身份守卫 + 懒建连下沉：会话不属于该连接时自动抢占 / 补连（单槽语义，
+            // 抢占会断开旧连接的会话；UI 侧的 isAlive 预检只是加速路径，不再是
+            // 正确性依赖）。连接查不到 / 建连失败原样抛给收集方。
+            if (!current.isAlive(connectionId)) {
+                current.connect(findConfig(connectionId)).getOrThrow()
+            }
+            // 单槽串行由 manager.executeQuery 内的 queryMutex 保证（此处只做
+            // 身份守卫 + 懒建连，守卫不取锁、connect 自带 manager 级互斥）。
+            current.executeQuery(sql).collect { batch -> emit(batch) }
+        }.onCompletion { cause ->
             val cancelled = cause is CancellationException
             val record = OlapQueryRecord(
                 id = recordId,
@@ -114,8 +139,23 @@ object StarRocksModule {
 
     /* ------------------------------ 懒加载连接（S3） ------------------------------ */
 
-    /** 共享会话是否存活（SQL 控制台「执行」前判断是否需要自动连接）。 */
-    fun isAlive(): Boolean = manager?.isAlive() == true
+    /**
+     * 共享会话是否存活**且属于 [connectionId]**（SQL 控制台「执行」前的预检）。
+     * 会话属于别的连接时返回 false —— 调用方 connectById / executeQuery 会自动
+     * 抢占（单槽语义，见 [AbstractAnalyticsConnectionManager.connect]）。
+     */
+    fun isAlive(connectionId: String): Boolean = manager?.isAlive(connectionId) == true
+
+    /** 按连接 id 从落盘快照还原配置（找不到连接抛 [ServiceException]）。 */
+    private fun findConfig(connectionId: String): StarRocksConnectionConfig {
+        val info = ConnectionStore.connections.value.firstOrNull { it.id == connectionId }
+            ?: throw ServiceException(
+                errorKey = "err_conn_not_found",
+                args = listOf(connectionId),
+                fallbackMessage = "Connection '$connectionId' not found",
+            )
+        return StarRocksConnectionConfig.fromOptions(info.id, info.name, info.options)
+    }
 
     /**
      * 按**落盘连接**建立会话（SQL 控制台「点击执行自动连接」的入口）。
@@ -144,20 +184,22 @@ object StarRocksModule {
         val current = manager ?: return Result.failure(
             IllegalStateException("StarRocks module is not initialized"),
         )
-        val info = ConnectionStore.connections.value.firstOrNull { it.id == connectionId }
-            ?: return Result.failure(
-                ServiceException(
-                    errorKey = "err_conn_not_found",
-                    args = listOf(connectionId),
-                    fallbackMessage = "Connection '$connectionId' not found",
-                ),
-            )
-        val config = StarRocksConnectionConfig.fromOptions(info.id, info.name, info.options)
+        val config = try {
+            findConfig(connectionId)
+        } catch (error: ServiceException) {
+            return Result.failure(error)
+        }
+        // 抢占前记下旧会话归属：connect 成功且换了连接时，旧连接的树状态要退下。
+        val previousId = current.currentConnectionId()
         val result = current.connect(config).map { }
-        reportStatus(
-            connectionId,
-            if (result.isSuccess) ConnectionStatus.Connected else ConnectionStatus.Failed,
-        )
+        if (result.isSuccess) {
+            if (previousId != null && previousId != connectionId) {
+                reportStatus(previousId, ConnectionStatus.Disconnected)
+            }
+            reportStatus(connectionId, ConnectionStatus.Connected)
+        } else {
+            reportStatus(connectionId, ConnectionStatus.Failed)
+        }
         return result
     }
 

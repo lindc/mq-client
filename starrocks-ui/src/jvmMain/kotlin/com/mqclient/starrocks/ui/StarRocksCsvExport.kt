@@ -5,7 +5,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.BufferedWriter
 import java.io.File
-import java.io.FileWriter
+import java.io.FileOutputStream
+import java.io.OutputStreamWriter
 
 /**
  * CSV 字段转义：含逗号 / 引号 / 换行 / 回车的值用双引号包裹，内部引号双写
@@ -62,7 +63,12 @@ internal suspend fun streamCsvExport(
 ): Long = withContext(Dispatchers.IO) {
     var headerWritten = false
     var count = 0L
-    BufferedWriter(FileWriter(File(path))).use { writer ->
+    // UTF-8 显式编码（FileWriter 是平台默认 —— 中文 Windows 下 GBK，数据跨工具必乱码）；
+    // BOM 让 Excel 双击打开时正确识别 UTF-8。
+    BufferedWriter(
+        OutputStreamWriter(FileOutputStream(File(path)), Charsets.UTF_8),
+    ).use { writer ->
+        writer.write("\ufeff")
         StarRocksModule.executeQuery(connectionId, sql).collect { batch ->
             if (!headerWritten) {
                 // 列名来自 ResultBatch.columns（每批自带全量 schema），首个批次写表头。

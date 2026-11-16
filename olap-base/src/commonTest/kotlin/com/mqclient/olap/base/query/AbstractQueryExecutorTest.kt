@@ -109,7 +109,10 @@ class AbstractQueryExecutorTest {
         val sink = RecordingSink()
         val executor = FakeExecutor(sink)
         val session = FakeSession()
-        val handle = executor.execute(session, AnalyticsQuery(sql = "SELECT 1"))
+        val handle = executor.execute(
+            session,
+            AnalyticsQuery(sql = "SELECT 1", connectionId = "conn-42"),
+        )
 
         val batches = executor.stream(handle).toList()
         assertEquals(2, batches.size)
@@ -120,6 +123,22 @@ class AbstractQueryExecutorTest {
         assertEquals(QueryState.COMPLETED, record.status)
         assertEquals(3L, record.rowsFetched)
         assertEquals(null, record.errorCode)
+        assertEquals("conn-42", record.connectionId, "审计必须带上提交时的连接归属")
+    }
+
+    @Test
+    fun `cancelled query writes audit with the connectionId of the submitted query`() = runTest {
+        val sink = RecordingSink()
+        val executor = FakeExecutor(sink)
+        val session = FakeSession()
+        val handle = executor.execute(
+            session,
+            AnalyticsQuery(sql = "SELECT 1", connectionId = "conn-7"),
+        )
+
+        assertTrue(executor.cancel(handle))
+        assertEquals(1, sink.records.size)
+        assertEquals("conn-7", sink.records.single().connectionId)
     }
 
     @Test

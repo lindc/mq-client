@@ -11,8 +11,12 @@ import com.mqclient.starrocks.jdbc.JdbcQueryBatch
 import com.mqclient.starrocks.jdbc.StarRocksErrorDetail
 import com.mqclient.starrocks.jdbc.StarRocksSqlDialect
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -152,7 +156,42 @@ class StarRocksConnectionManagerTest {
         manager.shutdown()
         assertEquals(1, connector.connectionCloseCalls)
         assertEquals(1, connector.connectorCloseCalls, "shutdown 应释放连接器")
-        assertFalse(manager.isAlive())
+        assertFalse(manager.isAlive("test-conn"))
+    }
+
+    // ---------------- 单槽身份 / 槽位抢占 ----------------
+
+    @Test
+    fun `connecting to a different connection steals the slot and closes the old session`() = runTest {
+        val connector = FakeJdbcConnector(FakeJdbcConnector.Behavior.Success)
+        val manager = manager(connector)
+        val configB = config().copy(connectionId = "test-conn-b")
+
+        assertTrue(manager.connect(config()).isSuccess)
+        assertEquals("test-conn", manager.currentConnectionId())
+        assertTrue(manager.isAlive("test-conn"))
+
+        // 另一个连接的 connect 请求到来：旧会话被顶掉，B 成为当前会话。
+        assertTrue(manager.connect(configB).isSuccess)
+        assertEquals(2, connector.connectCalls)
+        assertEquals(1, connector.connectionCloseCalls, "被抢占的旧会话必须关闭")
+        assertEquals(1, connector.openConnections, "只允许 B 的会话存活")
+        assertEquals("test-conn-b", manager.currentConnectionId())
+        assertFalse(manager.isAlive("test-conn"), "旧连接的存活判断必须转 false")
+        assertTrue(manager.isAlive("test-conn-b"))
+        manager.shutdown()
+    }
+
+    @Test
+    fun `same connection reconnect is idempotent`() = runTest {
+        val connector = FakeJdbcConnector(FakeJdbcConnector.Behavior.Success)
+        val manager = manager(connector)
+
+        assertTrue(manager.connect(config()).isSuccess)
+        assertTrue(manager.connect(config()).isSuccess)
+        assertEquals(1, connector.connectCalls, "同连接重复 connect 必须幂等，不重开连接")
+        assertTrue(manager.isAlive("test-conn"))
+        manager.shutdown()
     }
 
     // ---------------- executeQuery（S3 查询闭环） ----------------
@@ -204,4 +243,31 @@ class StarRocksConnectionManagerTest {
 
         manager.shutdown()
     }
+
+    // ---------------- 单槽串行化（并发防护下沉） ----------------
+
+    @Test
+    fun `concurrent executeQuery collectors are serialized by the single-slot mutex`() =
+        runBlocking {
+            val connector = FakeJdbcConnector(FakeJdbcConnector.Behavior.Success)
+            // 批次间留 20ms 挂起点：若没有串行锁，4 个并发收集必然重叠。
+            connector.queryDelayMs = 20
+            connector.scriptedQueryBatches = listOf(
+                JdbcQueryBatch(columns = listOf("x"), rows = emptyList(), isLast = true),
+            )
+            val manager = manager(connector)
+            assertTrue(manager.connect(config()).isSuccess)
+
+            coroutineScope {
+                repeat(4) { i ->
+                    launch(Dispatchers.IO) { manager.executeQuery("SELECT $i").toList() }
+                }
+            }
+            assertEquals(
+                1,
+                connector.maxConcurrentQueries,
+                "行级流式下并发收集必须被单槽锁串行（maxConcurrent 不得 > 1）",
+            )
+            manager.shutdown()
+        }
 }

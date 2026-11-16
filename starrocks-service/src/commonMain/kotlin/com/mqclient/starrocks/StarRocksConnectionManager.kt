@@ -17,6 +17,8 @@ import com.mqclient.starrocks.jdbc.StarRocksSqlDialect
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * StarRocks 连接管理器（S1：真实 `testConnection` 与 `healthCheck`）。
@@ -61,6 +63,14 @@ class StarRocksConnectionManager(
 
     /** 打点前缀（取 olap-base 常量，禁止硬编码）。 */
     private val perfPrefix: String = OlapCategory.PERF_TAG_PREFIX
+
+    /**
+     * 查询串行锁：行级流式（fetchSize=MIN_VALUE）下，一条物理连接同时只能有
+     * 一个活跃 ResultSet。并发收集者在此**挂起排队**（不占线程），而不是撞
+     * "Streaming result set is still active" —— 防护下沉到 manager 后，上层
+     * 面板（控制台 / 目录 / processlist / 导出 / AI）无需各自加锁。
+     */
+    private val queryMutex = Mutex()
 
     /* ------------------------------ 基类钩子 ------------------------------ */
 
@@ -199,27 +209,30 @@ class StarRocksConnectionManager(
         val start = olapTimeMillis()
         var rows = 0L
         var batchIndex = 0
-        withSession { session ->
-            session.executeQuery(sql) { batch ->
-                val result = if (batch.updateCount != null) {
-                    ResultBatch(
-                        columns = emptyList(),
-                        rows = emptyList(),
-                        lastBatch = batch.isLast,
-                        batchIndex = batchIndex,
-                        updateCount = batch.updateCount,
-                    )
-                } else {
-                    rows += batch.rows.size
-                    ResultBatch(
-                        columns = batch.columns.map { ResultColumn(it, "") },
-                        rows = batch.rows,
-                        lastBatch = batch.isLast,
-                        batchIndex = batchIndex,
-                    )
+        // 单槽串行：锁覆盖整个 withSession（含 emit —— 下游消费慢时上游自然停住）。
+        queryMutex.withLock {
+            withSession { session ->
+                session.executeQuery(sql) { batch ->
+                    val result = if (batch.updateCount != null) {
+                        ResultBatch(
+                            columns = emptyList(),
+                            rows = emptyList(),
+                            lastBatch = batch.isLast,
+                            batchIndex = batchIndex,
+                            updateCount = batch.updateCount,
+                        )
+                    } else {
+                        rows += batch.rows.size
+                        ResultBatch(
+                            columns = batch.columns.map { ResultColumn(it, "") },
+                            rows = batch.rows,
+                            lastBatch = batch.isLast,
+                            batchIndex = batchIndex,
+                        )
+                    }
+                    batchIndex++
+                    emit(result)
                 }
-                batchIndex++
-                emit(result)
             }
         }
         com.mqclient.core.log.Log.info(

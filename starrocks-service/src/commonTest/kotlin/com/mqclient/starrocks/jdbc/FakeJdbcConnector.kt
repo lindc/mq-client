@@ -1,5 +1,7 @@
 package com.mqclient.starrocks.jdbc
 
+import kotlinx.coroutines.delay
+
 /**
  * 测试替身（**commonTest**）：可编程地模拟成功 / 连接超时 / SQL 异常，
  * 并记录 `connect` / `probe` / `close` 调用，供断言「连接用完是否在 finally 中关闭」。
@@ -50,6 +52,15 @@ class FakeJdbcConnector(
     var connectorCloseCalls: Int = 0
         private set
 
+    /** `executeQuery` 内每个批次的模拟耗时（>0 时供并发重叠检测）。 */
+    var queryDelayMs: Long = 0
+
+    /** 同时活跃的 `executeQuery` 最大并发数（单槽串行化守卫的断言依据）。 */
+    var maxConcurrentQueries: Int = 0
+        private set
+
+    private var activeQueries = 0
+
     /**
      * 查询脚本：`executeQuery` 时按序回调的批次（null = 未配置，抛
      * [IllegalStateException]，防测试静默走通未实现的路径）。
@@ -99,9 +110,18 @@ class FakeJdbcConnector(
             onBatch: suspend (JdbcQueryBatch) -> Unit,
         ) {
             lastExecutedSql = sql
-            val batches = scriptedQueryBatches
-                ?: throw IllegalStateException("scriptedQueryBatches not configured")
-            batches.forEach { onBatch(it) }
+            activeQueries++
+            if (activeQueries > maxConcurrentQueries) maxConcurrentQueries = activeQueries
+            try {
+                val batches = scriptedQueryBatches
+                    ?: throw IllegalStateException("scriptedQueryBatches not configured")
+                batches.forEach {
+                    if (queryDelayMs > 0) delay(queryDelayMs)
+                    onBatch(it)
+                }
+            } finally {
+                activeQueries--
+            }
         }
 
         override fun isUsable(): Boolean = !closed

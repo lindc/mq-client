@@ -57,7 +57,11 @@ abstract class AbstractQueryExecutor<S : AnalyticsSession>(
     private val activeQueries = LinkedHashMap<String, ActiveQuery>()
 
     /** 一条在途查询的状态引用；行数用原子计数（流算子内免锁累加）。 */
-    private class ActiveQuery(val handle: QueryHandle) {
+    private class ActiveQuery(
+        val handle: QueryHandle,
+        /** 提交时来自 [AnalyticsQuery.connectionId] —— 审计记录的归属字段。 */
+        val connectionId: String,
+    ) {
         @Volatile
         var state: QueryState = QueryState.RUNNING
 
@@ -90,7 +94,7 @@ abstract class AbstractQueryExecutor<S : AnalyticsSession>(
     suspend fun execute(session: S, query: AnalyticsQuery): QueryHandle {
         val start = olapTimeMillis()
         val handle = doExecute(session, query)
-        tableMutex.withLock { activeQueries[handle.id] = ActiveQuery(handle) }
+        tableMutex.withLock { activeQueries[handle.id] = ActiveQuery(handle, query.connectionId) }
         log.info(
             "$PERF_TAG_PREFIX[execute] queryId=${handle.id} 耗时=${olapTimeMillis() - start}ms " +
                 "readOnly=${query.readOnly}",
@@ -186,7 +190,7 @@ abstract class AbstractQueryExecutor<S : AnalyticsSession>(
         cause: Throwable?,
     ): QueryAuditRecord = QueryAuditRecord(
         queryId = handle.id,
-        connectionId = "",
+        connectionId = active.connectionId,
         sql = handle.sql,
         startedAt = handle.startedAt,
         durationMs = olapTimeMillis() - handle.startedAt,
