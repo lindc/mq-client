@@ -71,13 +71,9 @@ object ConfigManager {
      * purpose: `token` alone already covers accessToken and refreshToken,
      * while names like prompt / url / model stay plaintext. Consumed by
      * [SensitiveOptionsSerializer] — annotated fields carry their serializer
-     * directly.
+     * directly. Keyword list lives in Sensitive.kt（commonMain，随 ConnectionInfo
+     * 搬家）: SENSITIVE_NAME_KEYWORDS.
      */
-    val SENSITIVE_NAME_KEYWORDS: List<String> = listOf(
-        "password", "passwd", "pwd",
-        "apikey", "api_key", "accesstoken", "token",
-        "secret", "privatekey", "credential",
-    )
 
     private val fs: FileSystem = FileSystem.SYSTEM
 

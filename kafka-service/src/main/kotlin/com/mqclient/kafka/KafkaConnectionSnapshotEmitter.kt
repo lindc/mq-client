@@ -1,7 +1,6 @@
 package com.mqclient.kafka
 
 import com.mqclient.core.ConnectionInfo
-import com.mqclient.core.ConnectionStore
 import com.mqclient.core.event.AppEvent
 import com.mqclient.core.event.EventNames
 import com.mqclient.core.event.getString
@@ -49,7 +48,7 @@ internal object KafkaConnectionSnapshotEmitter {
      */
     fun onConnectionSaved(event: AppEvent, context: ServiceContext) {
         val connectionId = event.getString("connectionId") ?: return
-        val connection = ConnectionStore.connections.value.firstOrNull { it.id == connectionId } ?: return
+        val connection = context.connectionRegistry.findConnection(connectionId) ?: return
         context.emit(
             name = EventNames.MQ_CONNECTION_SNAPSHOT_CREATED,
             payload = buildSnapshotPayload(connection),

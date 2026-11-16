@@ -2,6 +2,7 @@ package com.mqclient.core.event
 
 import com.mqclient.core.scheduler.JobScheduler
 import com.mqclient.core.spi.MODULE_ID_KEY
+import com.mqclient.core.ConnectionRegistry
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.emit
 import com.mqclient.core.spi.onOwnEvents
@@ -271,7 +272,8 @@ class EventBusTest {
     @Test
     fun `module context emits with its own prefix and source`() = withBus { bus ->
         val moduleScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-        val context = ServiceContext.of("ibm-mq", bus, moduleScope, JobScheduler(moduleScope, bus))
+        val context = ServiceContext.of("ibm-mq", bus, moduleScope, JobScheduler(moduleScope, bus),
+            ConnectionRegistry.Empty)
         val own = CopyOnWriteArrayList<AppEvent>()
         val foreign = CopyOnWriteArrayList<AppEvent>()
         context.onOwnEvents { own += it }

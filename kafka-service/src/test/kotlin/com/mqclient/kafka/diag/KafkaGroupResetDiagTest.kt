@@ -2,6 +2,7 @@ package com.mqclient.kafka.diag
 
 import com.mqclient.core.event.EventBus
 import com.mqclient.core.scheduler.JobScheduler
+import com.mqclient.core.ConnectionRegistry
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.kafka.KafkaConfig
 import com.mqclient.kafka.KafkaGroupResetTo
@@ -72,7 +73,8 @@ class KafkaGroupResetDiagTest {
     private fun testContext(): ServiceContext {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val eventBus = EventBus(scope)
-        return ServiceContext.of("kafka", eventBus, scope, JobScheduler(scope, eventBus))
+        return ServiceContext.of("kafka", eventBus, scope, JobScheduler(scope, eventBus),
+            ConnectionRegistry.Empty)
     }
 
     private fun clientProps(groupId: String?) = java.util.Properties().apply {

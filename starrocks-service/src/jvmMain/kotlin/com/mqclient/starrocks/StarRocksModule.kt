@@ -1,14 +1,13 @@
 package com.mqclient.starrocks
 
+import com.mqclient.core.ConnectionInfo
 import com.mqclient.core.ConnectionStatus
-import com.mqclient.core.ConnectionStore
-import com.mqclient.core.CoreModule
 import com.mqclient.core.ServiceException
-import com.mqclient.core.db.OlapQueryRecord
-import com.mqclient.core.db.OlapQueryRepository
+import com.mqclient.core.event.EventNames
 import com.mqclient.olap.base.perf.olapTimeMillis
 import com.mqclient.core.newUuidV7
 import com.mqclient.core.spi.ServiceContext
+import com.mqclient.core.spi.emit
 import com.mqclient.olap.base.connection.HealthReport
 import com.mqclient.olap.base.query.ResultBatch
 import com.mqclient.starrocks.jdbc.JdbcConnector
@@ -18,7 +17,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.onCompletion
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -39,11 +37,16 @@ object StarRocksModule {
     @Volatile
     private var manager: StarRocksConnectionManager? = null
 
+    /** SPI 注入的运行时上下文：连接注册表（连接查找 / 状态上报）与审计事件都经它。 */
+    @Volatile
+    private var context: ServiceContext? = null
+
     /** 真实 JDBC 连接器（jvmMain）；UI 侧只通过 [testConnection] 间接使用。 */
     private val connector: JdbcConnector = MysqlJdbcConnector()
 
     /** SPI 初始化钩子：由 ServiceAdapter 在宿主启动时调用。 */
     fun initialize(context: ServiceContext) {
+        this.context = context
         manager = StarRocksConnectionManager(context, connector = connector)
     }
 
@@ -83,14 +86,15 @@ object StarRocksModule {
      * ## 执行历史落库（S4）
      *
      * [onCompletion] 是唯一的执行咽喉点：流正常收完（SUCCESS）或异常结束
-     * （FAILED，含 SQLException / 取消）都会回调，在此计算耗时并组装
-     * [OlapQueryRecord]。**只记 SQL 原文 + 状态 + 耗时 + 错误信息，绝不记结果集**
-     * （见 olap_query.sq 表头）—— 10 万行的结果落盘会把本地库撑爆。
+     * （FAILED，含 SQLException / 取消）都会回调，在此计算耗时并组装**自包含
+     * payload** 广播 [EventNames.OLAP_QUERY_EXECUTED]。**只记 SQL 原文 + 状态 +
+     * 耗时 + 错误信息，绝不记结果集**（见 olap_query.sq 表头）—— 10 万行的结果
+     * 落盘会把本地库撑爆。
      *
-     * 落库是 fire-and-forget：挂到应用级 [CoreModule.scope] 上切
-     * [Dispatchers.IO]，不挂起 Flow 收集 —— 磁盘 IO 不阻塞 UI 拿到结果的速度；
-     * 写入失败只记日志、绝不反噬查询结果。与 IBM MQ 的 mq_command 审计表同款
-     * 「事件自包含 + 咽喉点组装」，区别是这里直接调 repository（少一层事件）。
+     * 与 IBM MQ 的 mq_command 审计完全同款「事件自包含 + 咽喉点组装」：落库统一
+     * 在核内 handler（OlapQueryHistoryHandler），模块不再直取 repository /
+     * `CoreModule.scope` 单例 —— emit 不挂起、不阻塞 Flow 收集，写盘失败走核内
+     * 错误通道，绝不反噬查询结果。
      */
     fun executeQuery(connectionId: String, sql: String): Flow<ResultBatch> {
         val current = manager ?: return flow {
@@ -109,31 +113,21 @@ object StarRocksModule {
             // 身份守卫 + 懒建连，守卫不取锁、connect 自带 manager 级互斥）。
             current.executeQuery(sql).collect { batch -> emit(batch) }
         }.onCompletion { cause ->
-            val cancelled = cause is CancellationException
-            val record = OlapQueryRecord(
-                id = recordId,
-                connectionId = connectionId,
-                sqlText = sql,
-                status = if (cause == null) OlapQueryRecord.STATUS_SUCCESS
-                else OlapQueryRecord.STATUS_FAILED,
-                durationMs = olapTimeMillis() - startedAt,
-                errorMessage = cause?.let {
-                    if (cancelled) "cancelled" else (it.message ?: it::class.simpleName)
-                },
-                createdAt = startedAt,
+            val recordContext = context ?: return@onCompletion  // 未初始化（无界面脚本）时静默跳过
+            recordContext.emit(
+                name = EventNames.OLAP_QUERY_EXECUTED,
+                payload = mapOf(
+                    "recordId" to recordId,
+                    "connectionId" to connectionId,
+                    "sqlText" to sql,
+                    "status" to if (cause == null) "SUCCESS" else "FAILED",
+                    "durationMs" to (olapTimeMillis() - startedAt),
+                    "errorMessage" to cause?.let {
+                        if (it is CancellationException) "cancelled" else (it.message ?: it::class.simpleName)
+                    },
+                    "createdAt" to startedAt,
+                ),
             )
-            // 异步落库：不阻塞收集协程；CoreModule 未初始化（无界面脚本）时静默跳过。
-            runCatching {
-                CoreModule.scope.launch(Dispatchers.IO) {
-                    runCatching { OlapQueryRepository.save(record) }
-                        .onFailure { error ->
-                            com.mqclient.core.log.Log.warn(
-                                "olap-starrocks",
-                                "query history save failed: ${error.message}",
-                            )
-                        }
-                }
-            }
         }
     }
 
@@ -146,9 +140,9 @@ object StarRocksModule {
      */
     fun isAlive(connectionId: String): Boolean = manager?.isAlive(connectionId) == true
 
-    /** 按连接 id 从落盘快照还原配置（找不到连接抛 [ServiceException]）。 */
+    /** 按连接 id 从注入的注册表还原配置（找不到连接抛 [ServiceException]）。 */
     private fun findConfig(connectionId: String): StarRocksConnectionConfig {
-        val info = ConnectionStore.connections.value.firstOrNull { it.id == connectionId }
+        val info: ConnectionInfo = context?.connectionRegistry?.findConnection(connectionId)
             ?: throw ServiceException(
                 errorKey = "err_conn_not_found",
                 args = listOf(connectionId),
@@ -160,7 +154,7 @@ object StarRocksModule {
     /**
      * 按**落盘连接**建立会话（SQL 控制台「点击执行自动连接」的入口）。
      *
-     * 从 [ConnectionStore] 的连接快照按 [connectionId] 找 [ConnectionInfo]，options
+     * 从注入的 [ServiceContext.connectionRegistry] 按 [connectionId] 找 [ConnectionInfo]，options
      * 还原成 [StarRocksConnectionConfig] 后交 [StarRocksConnectionManager.connect]
      * —— 基类对「已有可用会话」幂等返回，**自动建好的 Session 保存在 manager 里**，
      * 后续执行直接复用（单槽语义，与右侧树上手动连接同一份会话）。
@@ -170,9 +164,8 @@ object StarRocksModule {
      *
      * ## 连接状态同步（左侧树变绿的关键）
      *
-     * 项目约定：连接状态**不走 EventBus**（`EventNames` 注释明确「状态不走事件，
-     * 模块直接调 `ConnectionStore.reportStatus()`」），左侧树订阅的是
-     * `ConnectionStore.connections` 这份 StateFlow（`collectAsState`）。而
+     * 项目约定：连接状态**不走 EventBus**（状态用 StateFlow，见 EventNames），左侧树
+     * 订阅的是注册表的 `connections` 这份 StateFlow（`collectAsState`）。而
      * `AbstractAnalyticsConnectionManager.connect` 只发了
      * `olap.connection.connected` 事件、**没有** reportStatus —— 正是「执行触发了
      * 底层连接，树却仍显示未连接」的断点。这里按 MQ 模块同款（mq-base
@@ -210,13 +203,14 @@ object StarRocksModule {
      * 消费，不会因线程归属丢事件。
      */
     private suspend fun reportStatus(connectionId: String, status: ConnectionStatus) {
+        val registry = context?.connectionRegistry ?: return
         val onMain = runCatching {
             withContext(Dispatchers.Main) {
-                ConnectionStore.reportStatus(connectionId, status, StarRocksConstants.PROTOCOL_ID)
+                registry.reportStatus(connectionId, status, StarRocksConstants.PROTOCOL_ID)
             }
         }
         if (onMain.isFailure) {
-            ConnectionStore.reportStatus(connectionId, status, StarRocksConstants.PROTOCOL_ID)
+            registry.reportStatus(connectionId, status, StarRocksConstants.PROTOCOL_ID)
         }
     }
 }

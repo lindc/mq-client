@@ -4,7 +4,6 @@ import com.ibm.mq.MQQueueManager
 import com.ibm.mq.constants.MQConstants
 import com.mqclient.core.ServiceException
 import com.mqclient.core.ConnectionStatus
-import com.mqclient.core.ConnectionStore
 import com.mqclient.core.cache.CacheManager
 import com.mqclient.core.concurrent.KeyedJobRegistry
 import com.mqclient.core.concurrent.runCatchingCancellable
@@ -653,7 +652,7 @@ class IbmMQService(private val context: ServiceContext) {
             // 心跳跑通了即这条连接是活的，按「连接状态上报」约定报给核心（唯一入口，
             // 见 ConnectionStore.reportStatus）。状态没变时核心直接忽略，重复上报
             // 不会推着界面重组。
-            ConnectionStore.reportStatus(connectionId, ConnectionStatus.Connected, context.moduleId)
+            context.connectionRegistry.reportStatus(connectionId, ConnectionStatus.Connected, context.moduleId)
         } catch (cancellation: CancellationException) {
             // 模块关闭 / 任务被取消：正常退出，不是失败，也不发事件、不改状态。
             throw cancellation
@@ -671,7 +670,7 @@ class IbmMQService(private val context: ServiceContext) {
             if (ctx.status == ConnectionStatus.Connected) {
                 ctx.lastError = message
                 ctx.status = ConnectionStatus.Failed
-                ConnectionStore.reportStatus(connectionId, ConnectionStatus.Failed, context.moduleId)
+                context.connectionRegistry.reportStatus(connectionId, ConnectionStatus.Failed, context.moduleId)
                 ibmMqLog.warn("connection marked FAILED after heartbeat scan error: connection=$connectionId")
             }
         }
@@ -790,7 +789,7 @@ class IbmMQService(private val context: ServiceContext) {
                 if (ctx.status == ConnectionStatus.Connected) {
                     ctx.lastError = message
                     ctx.status = ConnectionStatus.Failed
-                    ConnectionStore.reportStatus(connectionId, ConnectionStatus.Failed, context.moduleId)
+                    context.connectionRegistry.reportStatus(connectionId, ConnectionStatus.Failed, context.moduleId)
                     ibmMqLog.warn("connection marked FAILED after objects scan error: connection=$connectionId")
                 }
             }

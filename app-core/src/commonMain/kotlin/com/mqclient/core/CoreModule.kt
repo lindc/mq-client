@@ -5,6 +5,8 @@ import com.mqclient.core.db.MqCommandHistoryHandler
 import com.mqclient.core.db.MqCommandHistoryRepository
 import com.mqclient.core.db.MqConnectionSnapshotHandler
 import com.mqclient.core.db.MqConnectionSnapshotRepository
+import com.mqclient.core.db.OlapQueryHistoryHandler
+import com.mqclient.core.db.OlapQueryRepository
 import com.mqclient.core.event.EventBus
 import com.mqclient.core.event.EventBusErrorReporter
 import com.mqclient.core.event.EventNames
@@ -60,6 +62,13 @@ object CoreModule {
      * 订阅与摸库时机同 [snapshotHandler]。
      */
     private val commandHistoryHandler = MqCommandHistoryHandler(MqCommandHistoryRepository)
+
+    /**
+     * OLAP 查询历史落库的处理器（olap_query_history 表）：OLAP 查询门面
+     * （StarRocksModule.executeQuery 的 onCompletion）广播 `core.olap.query.executed`，
+     * 这里统一写库 —— 与 MQ 审计同一分工，「谁摸数据库」集中在核内 handler。
+     */
+    private val olapQueryHistoryHandler = OlapQueryHistoryHandler(OlapQueryRepository)
 
     /** 应用级事件总线。在 [initialize] 之前访问会抛 [IllegalStateException]。 */
     val eventBus: EventBus
@@ -154,6 +163,7 @@ object CoreModule {
         // 连接快照落库（mq_connection 表）—— 订阅生命周期跟总线一致，见 snapshotHandler 的注释。
         created.on(EventNames.MQ_CONNECTION_SNAPSHOT_CREATED) { event -> snapshotHandler.handle(event) }
         created.on(EventNames.MQ_COMMAND_EXECUTED) { event -> commandHistoryHandler.handle(event) }
+        created.on(EventNames.OLAP_QUERY_EXECUTED) { event -> olapQueryHistoryHandler.handle(event) }
         return created
     }
 

@@ -2,6 +2,7 @@ package com.mqclient.rocketmq
 
 import com.mqclient.core.event.EventBus
 import com.mqclient.core.scheduler.JobScheduler
+import com.mqclient.core.ConnectionRegistry
 import com.mqclient.core.spi.ServiceContext
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -72,6 +73,6 @@ class RocketMqScanFailureIsolationTest {
             eventBus = bus,
             parentScope = scope,
             jobScheduler = JobScheduler(scope, bus),
-        )
+            ConnectionRegistry.Empty)
     }
 }

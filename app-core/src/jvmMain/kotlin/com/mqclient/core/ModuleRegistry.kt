@@ -96,7 +96,7 @@ object ModuleRegistry {
         jobScheduler: JobScheduler,
     ): List<ServiceAdapter> {
         val initialized = services.map { adapter ->
-            val context = ServiceContext.of(adapter.id, eventBus, parentScope, jobScheduler)
+            val context = ServiceContext.of(adapter.id, eventBus, parentScope, jobScheduler, ConnectionStore)
             runCatching { adapter.initialize(context) }
                 .onFailure { error ->
                     Log.error(LOG_TAG, "cannot initialize module '${adapter.id}': $error")

@@ -3,6 +3,7 @@ package com.mqclient.starrocks
 import com.mqclient.core.event.EventBus
 import com.mqclient.core.scheduler.JobScheduler
 import com.mqclient.core.ServiceException
+import com.mqclient.core.ConnectionRegistry
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.olap.base.error.OlapErrorCode
 import com.mqclient.starrocks.jdbc.FakeJdbcConnector
@@ -33,7 +34,8 @@ class StarRocksConnectionManagerTest {
     private fun testContext(): ServiceContext {
         val scope = CoroutineScope(SupervisorJob())
         val bus = EventBus(scope)
-        return ServiceContext.of("starrocks", bus, scope, JobScheduler(scope, bus))
+        return ServiceContext.of("starrocks", bus, scope, JobScheduler(scope, bus),
+            ConnectionRegistry.Empty)
     }
 
     private fun config(): StarRocksConnectionConfig = StarRocksConnectionConfig(

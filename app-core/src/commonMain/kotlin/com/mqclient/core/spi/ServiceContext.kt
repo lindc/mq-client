@@ -1,5 +1,6 @@
 package com.mqclient.core.spi
 
+import com.mqclient.core.ConnectionRegistry
 import com.mqclient.core.event.AppEvent
 import com.mqclient.core.event.EventBus
 import com.mqclient.core.scheduler.JobScheduler
@@ -10,9 +11,9 @@ import kotlinx.coroutines.SupervisorJob
 
 /**
  * 每个业务模块拿到的运行时上下文：一条事件总线 + 一个应用级定时任务调度器 +
- * 一个属于它自己的 scope。
+ * 连接注册表的只读视图 + 一个属于它自己的 scope。
  *
- * 模块只依赖这个接口，不依赖 `CoreModule` 单例，也不依赖启动代码 —— 新增模块时
+ * 模块只依赖这个接口，不依赖 `CoreModule` / `ConnectionStore` 单例，也不依赖启动代码 —— 新增模块时
  * 只要实现 `ServiceAdapter.initialize(context)`（SPI 自动发现）并在这里注册自己的
  * 订阅即可，没有任何全局注册表要改。
  *
@@ -36,24 +37,32 @@ interface ServiceContext {
      */
     val jobScheduler: JobScheduler
 
+    /**
+     * 连接注册表的只读视图（HostFacade 搬家）：按 id 查连接、读快照、上报连接
+     * 状态。宿主传入 `ConnectionStore`（唯一实现）；测试喂 [ConnectionRegistry.Empty]
+     * 或受控 fake —— 模块从此不直取全局单例。
+     */
+    val connectionRegistry: ConnectionRegistry
+
     /** 模块自己的 scope：随应用退出级联取消，模块内部协程崩了不牵连别的模块。 */
     val coroutineScope: CoroutineScope
 
     companion object {
         /**
          * 用父 scope 建一个模块上下文（[coroutineScope] 由 [moduleScope] 派生）。
-         * 生产代码里由 `ModuleRegistry` 在 SPI 初始化时调用。
+         * 生产代码里由 `ModuleRegistry` 在 SPI 初始化时调用（注册表传 `ConnectionStore`）。
          *
-         * [jobScheduler] 显式传入而不是在这里查 `CoreModule`：上下文工厂不依赖全局
-         * 单例，测试里可以喂一个挂在受控 scope 上的调度器。
+         * [jobScheduler] / [connectionRegistry] 显式传入而不是在这里查全局单例：
+         * 上下文工厂不依赖全局状态，测试里可以喂受控实例。
          */
         fun of(
             moduleId: String,
             eventBus: EventBus,
             parentScope: CoroutineScope,
             jobScheduler: JobScheduler,
+            connectionRegistry: ConnectionRegistry,
         ): ServiceContext =
-            DefaultServiceContext(moduleId, eventBus, jobScheduler, moduleScope(parentScope, moduleId))
+            DefaultServiceContext(moduleId, eventBus, jobScheduler, connectionRegistry, moduleScope(parentScope, moduleId))
 
         /**
          * 模块 scope：父 Job 是 [parentScope]（应用退出时级联取消），自己带
@@ -72,6 +81,7 @@ private class DefaultServiceContext(
     override val moduleId: String,
     override val eventBus: EventBus,
     override val jobScheduler: JobScheduler,
+    override val connectionRegistry: ConnectionRegistry,
     override val coroutineScope: CoroutineScope,
 ) : ServiceContext
 

@@ -1,6 +1,5 @@
 package com.mqclient.ibmmq
 
-import com.mqclient.core.ConnectionStore
 import com.mqclient.core.event.EventNames
 import com.mqclient.core.event.getString
 import com.mqclient.core.log.Log
@@ -141,7 +140,7 @@ object IbmMQModule {
         val created = IbmMQService(context)
         val connectionManager = IbmMQConnectionManager(context, created)
         // MQSC 控制台的执行器：历史仓库是模块级单例（内存版），生命周期跟模块走。
-        mqscExecutor = MqscExecutor(MqscPcfSender(), MqscHistoryRepository())
+        mqscExecutor = MqscExecutor(MqscPcfSender(), MqscHistoryRepository(), context.eventBus)
 
         subscriptions = listOf(
             // 自己发、自己收：只有 ibm-mq.* 会进这里。
@@ -195,7 +194,7 @@ object IbmMQModule {
 
         // 启动时已经在配置里的连接：补登记 DISCONNECTED 上下文。**不连接** ——
         // 「启动即连」是旧模型的行为，显式连接模型下等用户动手。
-        ConnectionStore.connections.value
+        context.connectionRegistry.connections.value
             .filter { it.serviceId == context.moduleId }
             .forEach { connectionManager.ensureContext(it) }
 
@@ -321,5 +320,5 @@ object IbmMQModule {
         event.getString("type") == context.moduleId
 
     private fun ownConnectionById(connectionId: String) =
-        ConnectionStore.connections.value.firstOrNull { it.id == connectionId }
+        moduleContext?.connectionRegistry?.findConnection(connectionId)
 }

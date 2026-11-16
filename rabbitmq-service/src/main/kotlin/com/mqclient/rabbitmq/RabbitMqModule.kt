@@ -1,6 +1,5 @@
 package com.mqclient.rabbitmq
 
-import com.mqclient.core.ConnectionStore
 import com.mqclient.core.ServiceException
 import com.mqclient.core.event.EventNames
 import com.mqclient.core.event.getString
@@ -193,7 +192,7 @@ object RabbitMqModule {
 
         // 启动时已经在配置里的连接：补登记 DISCONNECTED 上下文。**不连接** ——
         // 等用户显式动手。
-        ConnectionStore.connections.value
+        context.connectionRegistry.connections.value
             .filter { it.serviceId == context.moduleId }
             .forEach { created.ensureContext(it) }
 
@@ -496,5 +495,5 @@ object RabbitMqModule {
         event.getString("type") == context.moduleId
 
     private fun ownConnectionById(connectionId: String) =
-        ConnectionStore.connections.value.firstOrNull { it.id == connectionId }
+        moduleContext?.connectionRegistry?.findConnection(connectionId)
 }

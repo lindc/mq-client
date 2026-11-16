@@ -96,6 +96,16 @@ object EventNames {
      * `responseTime` / `durationMs`。
      */
     const val MQ_COMMAND_EXECUTED = "core.mq.command.executed"
+    /**
+     * 一条 OLAP 查询到达终态；订阅方（app-core 的 OlapQueryHistoryHandler）把它
+     * 写进 olap_query_history 表（执行历史审计）。发出方是 OLAP 模块的查询门面
+     * （StarRocksModule.executeQuery 的 onCompletion）—— 与 MQ 命令审计同一分工：
+     * 模块只组装 payload 自包含的事件，「谁摸数据库」集中在核内 handler。payload：
+     * `recordId`(UUIDv7) / `connectionId` / `sqlText` / `status`(SUCCESS|FAILED) /
+     * `durationMs` / `errorMessage` / `createdAt`(epoch ms)。
+     */
+    const val OLAP_QUERY_EXECUTED = "core.olap.query.executed"
+
 
     /**
      * 模块请求宿主打开某个对象的导航 Tab（概览指标卡点击跳转这类「面板内反向导航」）。

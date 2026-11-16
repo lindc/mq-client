@@ -5,6 +5,7 @@ import com.mqclient.core.ConnectionStore
 import com.mqclient.core.event.EventBus
 import com.mqclient.core.scheduler.JobScheduler
 import com.mqclient.core.scheduler.ScheduledJob
+import com.mqclient.core.ConnectionRegistry
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.emitSync
 import com.mqclient.ibmmq.IbmMQModule
@@ -56,7 +57,8 @@ class PcfScanBudgetLiveTest {
 
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val bus = EventBus(scope)
-        val context = ServiceContext.of("ibm-mq", bus, scope, JobScheduler(scope, bus))
+        val context = ServiceContext.of("ibm-mq", bus, scope, JobScheduler(scope, bus),
+            ConnectionRegistry.Empty)
         IbmMQModule.initialize(context)
         try {
             context.emitSync(IbmMQEvents.CONNECT_REQUESTED, mapOf("connectionId" to info.id))

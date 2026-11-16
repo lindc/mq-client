@@ -85,3 +85,18 @@ object EncryptedStringSerializer : KSerializer<String> {
 
     override fun deserialize(decoder: Decoder): String = decryptStoredValue(decoder.decodeString())
 }
+
+/**
+ * 敏感键名关键字（case-insensitive 子串匹配）：`options` / 配置段里命中任一关键字
+ * 的**值**在落盘序列化时加密（见 [encryptStoredValue]）。保守取值 —— `token` 单独
+ * 已覆盖 accessToken / refreshToken，而 prompt / url / model 这类保持明文。
+ *
+ * 唯一消费方：[SensitiveOptionsSerializer]（带注解的字段直接挂它，树遍历之外
+ * 这是唯一按名字识别敏感性的地方）。原先是 ConfigManager 伴生对象的成员，随
+ * ConnectionInfo 迁 commonMain 搬到这里（序列化器必须留在 commonMain）。
+ */
+val SENSITIVE_NAME_KEYWORDS: List<String> = listOf(
+    "password", "passwd", "pwd",
+    "apikey", "api_key", "accesstoken", "token",
+    "secret", "privatekey", "credential",
+)

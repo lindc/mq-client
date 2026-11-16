@@ -3,6 +3,7 @@ package com.mqclient.kafka
 import com.mqclient.core.cache.CacheManager
 import com.mqclient.core.event.EventBus
 import com.mqclient.core.scheduler.JobScheduler
+import com.mqclient.core.ConnectionRegistry
 import com.mqclient.core.spi.ServiceContext
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -45,7 +46,8 @@ class KafkaObjectScanOrchestrationTest {
 
     private fun newContext(scope: CoroutineScope): ServiceContext {
         val bus = EventBus(scope)
-        return ServiceContext.of("kafka", bus, scope, JobScheduler(scope, bus))
+        return ServiceContext.of("kafka", bus, scope, JobScheduler(scope, bus),
+            ConnectionRegistry.Empty)
     }
 
     private fun broker(id: Int) = KafkaBrokerSnapshot(

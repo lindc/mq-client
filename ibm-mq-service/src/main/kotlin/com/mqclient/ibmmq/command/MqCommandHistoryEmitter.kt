@@ -1,6 +1,6 @@
 package com.mqclient.ibmmq.command
 
-import com.mqclient.core.CoreModule
+import com.mqclient.core.event.EventBus
 import com.mqclient.core.event.EventNames
 import com.mqclient.core.newUuidV7
 import com.mqclient.ibmmq.MODULE_ID
@@ -13,6 +13,9 @@ import com.mqclient.ibmmq.command.model.MqscResult
  * 通道启停 / 监听器启停 / RESET CHANNEL 全部收敛于此，各调用点无需感知记录行为。
  * payload 自包含（app-core 的 MqCommandHistoryHandler 忠实落库 mq_command 表），
  * 发射侧任何异常都不外泄 —— 历史记录失败不能影响命令执行本身。
+ *
+ * 总线由调用链透传（MqscExecutor 构造注入，源自 ServiceContext.eventBus）：
+ * HostFacade 搬家后发射方不再直取 `CoreModule.eventBusOrNull` 全局单例。
  */
 internal object MqCommandHistoryEmitter {
 
@@ -22,9 +25,15 @@ internal object MqCommandHistoryEmitter {
      * [requestTime] 必须是**命令发起前**的时刻（executeSingle 在调 executeOne 之前取），
      * 其余字段全部来自 [result]（duration 由 executeOne 度量）。
      */
-    fun onExecuted(connectionId: String, command: String, result: MqscResult, requestTime: Long) {
+    fun onExecuted(
+        bus: EventBus?,
+        connectionId: String,
+        command: String,
+        result: MqscResult,
+        requestTime: Long,
+    ) {
         if (!isWrite(command)) return
-        val bus = CoreModule.eventBusOrNull ?: return
+        if (bus == null) return
         runCatching {
             bus.emit(
                 name = EventNames.MQ_COMMAND_EXECUTED,

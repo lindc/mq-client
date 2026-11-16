@@ -45,7 +45,7 @@ fun newConnectionId(): String = newUuidV7()
  * 「现在有哪些」（状态）。启动时已经在配置里的连接不会补发事件，所以模块补注册任务时
  * 读的是这里的快照（见 `IbmMQModule.initialize`）。
  */
-object ConnectionStore {
+object ConnectionStore : ConnectionRegistry {
 
     /**
      * 从磁盘装载连接列表，状态一律重置为 [ConnectionStatus.Disconnected]。
@@ -61,8 +61,9 @@ object ConnectionStore {
 
     private val _connections = MutableStateFlow(loadFromDisk())
 
-    /** 可观测快照；UI 用 `collectAsState()` 订阅。直接改它无效 —— 新建 / 编辑 / 删除走 [create] / [update] / [delete]。 */
-    val connections: StateFlow<List<ConnectionInfo>> = _connections.asStateFlow()
+    /** 可观测快照；UI 用 `collectAsState()` 订阅。直接改它无效 —— 新建 / 编辑 / 删除走 [create] / [update] / [delete]。
+     *  经 [ConnectionRegistry] 暴露给模块（ServiceContext 注入），宿主 UI 仍直读本单例。 */
+    override val connections: StateFlow<List<ConnectionInfo>> = _connections.asStateFlow()
 
     /**
      * 重新读盘（状态同样重置为未连接）。**读失败时保留当前列表**：把失败当成空列表会让
@@ -199,7 +200,7 @@ object ConnectionStore {
      * @return 状态确实变了返回 true；连接不存在或状态没变返回 false。
      */
     @Synchronized
-    fun reportStatus(connectionId: String, status: ConnectionStatus, source: String = "core"): Boolean {
+    override fun reportStatus(connectionId: String, status: ConnectionStatus, source: String): Boolean {
         val current = _connections.value
         val index = current.indexOfFirst { it.id == connectionId }
         if (index < 0) {
@@ -212,6 +213,9 @@ object ConnectionStore {
         Log.debug(LOG_TAG, "connection '$connectionId' -> ${status.name} (reported by $source)")
         return true
     }
+
+    override fun findConnection(connectionId: String): ConnectionInfo? =
+        _connections.value.firstOrNull { it.id == connectionId }
 
     /** 对比新旧快照，把变化逐条广播出去（新增 / 内容变化 / 删除）。 */
     private fun broadcastChanges(previous: List<ConnectionInfo>, current: List<ConnectionInfo>) {

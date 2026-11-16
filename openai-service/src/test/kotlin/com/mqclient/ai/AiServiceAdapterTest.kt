@@ -2,6 +2,7 @@ package com.mqclient.ai
 
 import com.mqclient.core.event.EventBus
 import com.mqclient.core.scheduler.JobScheduler
+import com.mqclient.core.ConnectionRegistry
 import com.mqclient.core.spi.ServiceContext
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -29,7 +30,7 @@ class AiServiceAdapterTest {
                 eventBus = EventBus(scope),
                 parentScope = scope,
                 jobScheduler = JobScheduler(scope, EventBus(scope)),
-            )
+            ConnectionRegistry.Empty)
 
             AiServiceAdapter().initialize(context)
 

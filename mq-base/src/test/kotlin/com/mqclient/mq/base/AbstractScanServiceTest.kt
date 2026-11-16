@@ -2,6 +2,7 @@ package com.mqclient.mq.base
 
 import com.mqclient.core.event.EventBus
 import com.mqclient.core.scheduler.JobScheduler
+import com.mqclient.core.ConnectionRegistry
 import com.mqclient.core.spi.ServiceContext
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -85,7 +86,8 @@ class AbstractScanServiceTest {
     private fun newService(): Pair<FakeScanService, CoroutineScope> {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val bus = EventBus(scope)
-        val context = ServiceContext.of("fake-mq", bus, scope, JobScheduler(scope, bus))
+        val context = ServiceContext.of("fake-mq", bus, scope, JobScheduler(scope, bus),
+            ConnectionRegistry.Empty)
         return FakeScanService(context) to scope
     }
 

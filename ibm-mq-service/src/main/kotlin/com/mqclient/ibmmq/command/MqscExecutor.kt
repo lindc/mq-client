@@ -1,6 +1,7 @@
 package com.mqclient.ibmmq.command
 
 import com.ibm.mq.pcf.PCFException
+import com.mqclient.core.event.EventBus
 import com.mqclient.core.concurrent.runCatchingCancellable
 import com.mqclient.ibmmq.command.model.MqscCommand
 import com.mqclient.ibmmq.command.model.MqscHistoryItem
@@ -20,6 +21,8 @@ import kotlinx.coroutines.ensureActive
 class MqscExecutor(
     private val pcfExecutor: PcfExecutor,
     private val historyRepository: MqscHistoryRepository,
+    /** 命令审计事件的发射总线（源自 ServiceContext.eventBus；null = 无总线时静默跳过）。 */
+    private val commandBus: EventBus?,
 ) {
 
     companion object {
@@ -92,7 +95,7 @@ class MqscExecutor(
         }
         // 这个是**普通函数**（内部自己处理了异常），不涉及挂起点，普通 runCatching 就够。
         runCatching {
-            MqCommandHistoryEmitter.onExecuted(connectionId, command, result, requestTime)
+            MqCommandHistoryEmitter.onExecuted(commandBus, connectionId, command, result, requestTime)
         }
         return result
     }

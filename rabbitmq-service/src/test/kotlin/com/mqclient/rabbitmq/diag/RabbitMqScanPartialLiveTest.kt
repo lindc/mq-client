@@ -4,6 +4,7 @@ import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.event.EventBus
 import com.mqclient.core.scheduler.JobScheduler
+import com.mqclient.core.ConnectionRegistry
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.emitSync
 import com.mqclient.rabbitmq.RabbitMqAdminClient
@@ -72,7 +73,8 @@ class RabbitMqScanPartialLiveTest {
         // ---- 第 2 步：完整模块链路 ----
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val bus = EventBus(scope)
-        val context = ServiceContext.of("rabbitmq", bus, scope, JobScheduler(scope, bus))
+        val context = ServiceContext.of("rabbitmq", bus, scope, JobScheduler(scope, bus),
+            ConnectionRegistry.Empty)
         RabbitMqModule.initialize(context)
         try {
             context.emitSync(
@@ -209,7 +211,7 @@ class RabbitMqScanPartialLiveTest {
     private fun limitedContext(): ServiceContext {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         val bus = EventBus(scope)
-        return ServiceContext.of("rabbitmq-probe", bus, scope, JobScheduler(scope, bus))
+        return ServiceContext.of("rabbitmq-probe", bus, scope, JobScheduler(scope, bus), ConnectionRegistry.Empty)
     }
 
     /** 探测单个端点：返回 `OK(n)` 或 `FAIL(<类型>: <消息>)`。 */
