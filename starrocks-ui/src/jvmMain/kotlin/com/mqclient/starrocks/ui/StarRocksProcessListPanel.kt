@@ -89,7 +89,8 @@ internal fun parseProcessList(result: StarRocksQueryRows): List<ProcessInfo> {
     val idIdx = indexOfAny("id", "process_id", "connection_id")
     // StarRocks 3.x 的 processlist 有 QUERY_ID（UUID）；老版本 / MySQL 没有，
     // 回落连接 id，保证「查看 Profile」链路在没有真实环境时也能点通。
-    val queryIdIdx = indexOfAny("query_id", "queryid", "queryId")
+    // 列名匹配统一在 lowercase 后进行（cols 已归一），无需列大小写变体。
+    val queryIdIdx = indexOfAny("query_id", "queryid")
     val userIdx = indexOfAny("user")
     val hostIdx = indexOfAny("host")
     val dbIdx = indexOfAny("db", "database")
@@ -251,7 +252,8 @@ internal fun StarRocksProcessListPanel(connectionId: String, modifier: Modifier 
                 snackbar.showSnackbar(killedText)
                 load() // 成功后立刻刷新，让用户看到会话已消失
             } else {
-                error = killFailedTemplate.withArg(target.id)
+                // 操作结果走 Snackbar：写全局 error 会整屏盖掉会话表。
+                snackbar.showSnackbar(killFailedTemplate.withArg(target.id))
             }
         }
     }

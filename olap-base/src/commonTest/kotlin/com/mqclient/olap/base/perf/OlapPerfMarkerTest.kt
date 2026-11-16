@@ -17,9 +17,9 @@ class OlapPerfMarkerTest {
     }
 
     @Test
-    fun `sections cover connect catalog plan execute fetch total`() {
+    fun `sections cover connect catalog plan execute fetch query total`() {
         assertEquals(
-            setOf("connect", "catalog", "plan", "execute", "fetch", "total"),
+            setOf("connect", "catalog", "plan", "execute", "fetch", "query", "total"),
             OlapPerfMarker.SECTIONS,
         )
     }

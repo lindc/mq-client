@@ -98,7 +98,6 @@ import kotlinx.coroutines.withContext
  */
 @Composable
 internal fun StarRocksSqlConsolePlaceholder(modifier: Modifier = Modifier, connectionId: String = "") {
-    // TODO: 接入 SQLDelight，监听输入防抖，实现 SQL 草稿自动保存（saved_query 表）
     // TODO: 监听 StarRocksConnectionManager 的关闭事件，清理当前连接下的所有 Tabs，重连时自动恢复
 
     var tabCount by remember { mutableIntStateOf(1) }
@@ -258,14 +257,14 @@ private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
         runCatching { OlapQueryRepository.saveDraft(connectionId, textFieldValue.text) }
     }
 
-    /** 复制结果为 TSV（表头 + 行），列以 Tab 分隔 —— 与主流数据库工具一致。 */
+    /** 复制结果为 TSV（表头 + 行），列以 Tab 分隔 —— 与主流数据库工具一致。
+     *  拼接挪到 IO（5 万行 × 多列的字符串在 EDT 上拼会卡顿）。 */
     fun copyResults() {
         if (grid.columns.isEmpty() && grid.rows.isEmpty()) return
-        val tsv = buildString {
-            appendLine(grid.columns.joinToString("\t") { it.name })
-            grid.rows.forEach { row -> appendLine(row.joinToString("\t") { it?.toString() ?: "NULL" }) }
+        scope.launch {
+            val tsv = withContext(Dispatchers.IO) { buildTsv(grid.columns, grid.rows) }
+            clipboard.setText(AnnotatedString(tsv))
         }
-        clipboard.setText(AnnotatedString(tsv))
     }
 
     /**
@@ -370,7 +369,7 @@ private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
                                 }
                                 if (grid.rows.size >= MAX_ROWS && !batch.lastBatch) {
                                     grid.truncated = true
-                                    throw StopStream() // 取消本条后续拉取（finally 复位 streaming）
+                                    throw StopStream() // 截断：保留已收集数据，横幅由 grid.truncated 表达
                                 }
                             }
                         }
@@ -498,8 +497,6 @@ private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
             }
         }
 
-        // ── 历史记录面板：最近 50 条，点击把 SQL 填回编辑器 ──
-
         // ── AI 诊断弹窗（独立 composition，关闭即取消所有协程 / 流式请求） ──
         diagnosisSql?.let { sql ->
             StarRocksAiDiagnosisDialog(
@@ -562,6 +559,15 @@ private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
             )
         }
     }
+}
+
+/**
+ * 结果 → TSV 文本（表头 + 行，Tab 分隔，NULL 原样）。纯函数便于测试；
+ * 大结果集的拼接由调用方放到 IO 线程。
+ */
+internal fun buildTsv(columns: List<ResultColumn>, rows: List<List<Any?>>): String = buildString {
+    appendLine(columns.joinToString("\t") { it.name })
+    rows.forEach { row -> appendLine(row.joinToString("\t") { it?.toString() ?: "NULL" }) }
 }
 
 /**

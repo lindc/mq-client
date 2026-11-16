@@ -12,6 +12,8 @@ import com.mqclient.olap.base.OlapCategory.PERF_TAG_PREFIX
  *  - `plan`：EXPLAIN（`AbstractQueryExecutor.explain`）；
  *  - `execute`：查询提交（`AbstractQueryExecutor.execute`）；
  *  - `fetch`：结果拉流（`AbstractQueryExecutor.stream`）；
+ *  - `query`：提交 + 拉流的**端到端**合计（MVP 的 manager 级 executeQuery 通道，
+ *    尚未迁移到执行器模板，用此段与模板的分段区分开）；
  *  - `total`：跨段总耗时（上层服务按需打）。
  *
  * 输出格式与 `[MQ-Perf]` 一致：`[OLAP-Perf][<section>] ... 耗时=<X>ms`。
@@ -22,7 +24,7 @@ object OlapPerfMarker {
     const val TAG: String = PERF_TAG_PREFIX
 
     /** 全部分段名（打点段的合法取值；新增分段必须先加到这里）。 */
-    val SECTIONS: Set<String> = setOf("connect", "catalog", "plan", "execute", "fetch", "total")
+    val SECTIONS: Set<String> = setOf("connect", "catalog", "plan", "execute", "fetch", "query", "total")
 
     /** 一条打点的段标签：`[OLAP-Perf][<section>]`。 */
     fun sectionLabel(section: String): String = "$TAG[$section]"

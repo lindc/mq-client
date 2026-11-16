@@ -1,5 +1,6 @@
 package com.mqclient.starrocks.ui
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -38,6 +39,14 @@ import com.mqclient.mqui.metric.MetricCard
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.userMessage
 import kotlinx.coroutines.launch
+
+/**
+ * 「存活」语义色（暗色主题用亮绿保对比度，浅色用 Material 深绿）。
+ * Compose M3 没有内置 success 语义色，集中在此避免字面量散落两处。
+ */
+@Composable
+private fun aliveColor(): Color =
+    if (isSystemInDarkTheme()) Color(0xFF81C784) else Color(0xFF2E7D32)
 
 /**
  * 「集群概览」只读面板：优先 `SHOW BACKENDS`，不支持则 `SHOW FRONTENDS`，
@@ -100,7 +109,7 @@ internal fun StarRocksOverviewPanel(connectionId: String, modifier: Modifier = M
                 label = stringResource("olap.starrocks.overview.alive_nodes"),
                 value = aliveCount.toString(),
                 valueColor = if (nodes.isNotEmpty() && aliveCount == nodes.size)
-                    Color(0xFF2E7D32) else MaterialTheme.colorScheme.error,
+                    aliveColor() else MaterialTheme.colorScheme.error,
                 modifier = Modifier.weight(1f).fillMaxHeight(),
             )
             MetricCard(
@@ -170,7 +179,7 @@ internal fun StarRocksOverviewPanel(connectionId: String, modifier: Modifier = M
                                 else "olap.starrocks.overview.dead",
                             ),
                             style = MaterialTheme.typography.bodyMedium,
-                            color = if (node.alive) Color(0xFF2E7D32) else MaterialTheme.colorScheme.error,
+                            color = if (node.alive) aliveColor() else MaterialTheme.colorScheme.error,
                             modifier = Modifier.weight(0.7f),
                         )
                     }
