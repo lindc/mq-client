@@ -266,13 +266,35 @@ class StarRocksProfileTest {
         // 浅色：#F5F5F5 背景配 #333333 文字；两套高亮都可见。
         val dark = viewerColors(dark = true)
         val light = viewerColors(dark = false)
-        assertEquals(0x1E1E1E, dark.bg.toArgb().toLong() and 0xFFFFFF)
+        assertEquals(0x252526, dark.bg.toArgb().toLong() and 0xFFFFFF)
         assertEquals(0xD4D4D4, dark.text.toArgb().toLong() and 0xFFFFFF)
         assertEquals(0xF5F5F5, light.bg.toArgb().toLong() and 0xFFFFFF)
         assertEquals(0x333333, light.text.toArgb().toLong() and 0xFFFFFF)
         assertTrue(dark.text != dark.bg && light.text != light.bg)
         assertTrue(dark.highlight != light.highlight)
         assertTrue(dark.keyword != Color.White && light.keyword != Color.White)
+    }
+
+    @Test
+    fun `DDL and profile share the exact same code block colors`() {
+        // 关键验收：浅色模式下 DDL 与 Profile 查看器代码块的背景/文字/边框/关键字
+        // 必须完全一致 —— 两者都取 codeBlockColors(dark) 同一份预设。
+        val darkProfile = codeBlockColors(dark = true)
+        val lightProfile = codeBlockColors(dark = false)
+        assertEquals(0x252526, darkProfile.bg.toArgb().toLong() and 0xFFFFFF)
+        assertEquals(0xFF333333L, darkProfile.border.toArgb().toLong() and 0xFFFFFFFF)
+        // VS Code 风格：关键字浅蓝 / 数字浅绿（深色）
+        assertEquals(0x569CD6, darkProfile.keyword.toArgb().toLong() and 0xFFFFFF)
+        assertEquals(0xB5CEA8, darkProfile.number.toArgb().toLong() and 0xFFFFFF)
+        // 浅色：浅灰底 + 深灰字，与 DDL 在亮色 app 主题下同源
+        assertEquals(0xF5F5F5, lightProfile.bg.toArgb().toLong() and 0xFFFFFF)
+        assertEquals(0x333333, lightProfile.text.toArgb().toLong() and 0xFFFFFF)
+        assertEquals(0xE0E0E0, lightProfile.border.toArgb().toLong() and 0xFFFFFF)
+        // ViewerColors 的关键字/数字色来自同一预设（保证染色与容器风格一致）
+        assertTrue(viewerColors(true).keyword == darkProfile.keyword)
+        assertTrue(viewerColors(true).number == darkProfile.number)
+        assertTrue(viewerColors(false).keyword == lightProfile.keyword)
+        assertTrue(viewerColors(false).number == lightProfile.number)
     }
 
     @Test

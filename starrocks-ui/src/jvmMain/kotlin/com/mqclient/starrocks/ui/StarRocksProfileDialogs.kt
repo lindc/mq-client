@@ -409,17 +409,19 @@ internal data class ViewerColors(
     val borderColor: Color,
     val highlight: Color,
     val keyword: Color,
+    val number: Color,
 )
 
 private val ViewerDarkColors = ViewerColors(
-    bg = Color(0xFF1E1E1E),
+    bg = Color(0xFF252526),
     text = Color(0xFFD4D4D4),
     label = Color(0xFF9E9E9E),
     chipBg = Color(0xFF2D2D2D),
     accent = Color(0xFF4FC1FF),
-    borderColor = Color(0xFF555555),
+    borderColor = Color(0xFF333333),
     highlight = Color(0xFFFFEB3B).copy(alpha = 0.28f),
-    keyword = Color(0xFF569CD6),
+    keyword = codeBlockColors(dark = true).keyword,
+    number = codeBlockColors(dark = true).number,
 )
 
 private val ViewerLightColors = ViewerColors(
@@ -430,13 +432,17 @@ private val ViewerLightColors = ViewerColors(
     accent = Color(0xFF0451A5),
     borderColor = Color(0xFFC8C8C8),
     highlight = Color(0xFFFFB300).copy(alpha = 0.45f),
-    keyword = Color(0xFF0451A5),
+    keyword = codeBlockColors(dark = false).keyword,
+    number = codeBlockColors(dark = false).number,
 )
 
 internal fun viewerColors(dark: Boolean): ViewerColors =
     if (dark) ViewerDarkColors else ViewerLightColors
 
 /** 结构染色的关键字：Metric 键名 / 分层标题，命中处染柔和色（深蓝 / 浅蓝随主题）。 */
+/** 数字 token（带小数）：VS Code 浅绿染色用。 */
+private val NUMBER_REGEX = Regex("""(?<![A-Za-z0-9_])\d+(?:\.\d+)?(?![A-Za-z0-9_])""")
+
 private val VIEWER_KEYWORDS = listOf(
     "QueryId:", "State:", "TotalTime:", "OperatorTotalTime:", "OutputRows:",
     "PeakMemoryUsage", "AllocatedMemoryUsage", "PullRowNum:", "PushRowNum:",
@@ -543,28 +549,14 @@ internal fun StarRocksProfileViewerDialog(
                     .padding(horizontal = 20.dp),
             )
 
-            // ── 全文区（可滚动 / 可选中复制 / 搜索高亮 / 结构染色） ──
-            Box(
-                Modifier
+            // ── 全文区（共享 CodeBlock：8dp 圆角 + 细边框 + 12dp padding + 等宽 20sp） ──
+            CodeBlock(
+                text = annotated,
+                colors = codeBlockColors(darkTheme),
+                modifier = Modifier
                     .weight(1f)
-                    .padding(horizontal = 20.dp, vertical = 8.dp)
-                    .background(colors.bg, RoundedCornerShape(8.dp)),
-            ) {
-                SelectionContainer {
-                    Text(
-                        annotated,
-                        fontFamily = FontFamily.Monospace,
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            color = colors.text,
-                            lineHeight = 20.sp,
-                        ),
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .verticalScroll(rememberScrollState())
-                            .padding(12.dp),
-                    )
-                }
-            }
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
+            )
         }
     }
 }
@@ -611,6 +603,12 @@ private fun buildViewerText(raw: String, query: String, colors: ViewerColors): A
         }
     }
 
+    // 数字染色（VS Code 浅绿）：匹配独立的数字 token（含小数 / 单位后缀前的数值）。
+    val numberSpans = mutableListOf<ViewerSpan>()
+    NUMBER_REGEX.findAll(raw).forEach { match ->
+        numberSpans += ViewerSpan(match.range.first, match.range.last + 1, SpanStyle(color = colors.number))
+    }
+
     val searchSpans = mutableListOf<ViewerSpan>()
     if (query.isNotBlank()) {
         val lower = raw.lowercase()
@@ -624,12 +622,17 @@ private fun buildViewerText(raw: String, query: String, colors: ViewerColors): A
         }
     }
 
-    // 关键字 span 剔除与搜索 span 重叠的部分（搜索高亮优先）。
+    // 关键字 / 数字 span 剔除与搜索 span 重叠的部分（搜索高亮优先）；
+    // 数字 span 还要剔除落在关键字里的部分（关键字色优先）。
     val keptKeywords = keywordSpans.filter { kw ->
         searchSpans.none { s -> kw.start < s.end && s.start < kw.end }
     }
+    val keptNumbers = numberSpans.filter { num ->
+        searchSpans.none { s -> num.start < s.end && s.start < num.end } &&
+            keptKeywords.none { kw -> num.start < kw.end && kw.start < num.end }
+    }
 
-    val all = (keptKeywords + searchSpans).sortedBy { it.start }
+    val all = (keptKeywords + keptNumbers + searchSpans).sortedBy { it.start }
     var cursor = 0
     for (span in all.sortedBy { it.start }) {
         if (span.start < cursor) continue   // 重叠裁剪
