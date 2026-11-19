@@ -1,8 +1,10 @@
 package com.mqclient.starrocks.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,10 +22,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -33,7 +32,6 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.TableChart
-import androidx.compose.material.icons.filled.ViewColumn
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -42,7 +40,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryTabRow
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -59,6 +56,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
@@ -67,11 +65,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.mqclient.uicommon.PropertyItem
-import com.mqclient.uicommon.PropertyTable
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.userMessage
 import com.mqclient.uicommon.i18n.withArg
+import com.mqclient.uicommon.table.DataGrid
+import com.mqclient.uicommon.table.DataGridColumn
+import com.mqclient.uicommon.table.DataGridTextCell
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -241,20 +240,20 @@ internal fun parsePartitions(result: StarRocksQueryRows): List<CatalogPartition>
     }
 }
 
-/** 右侧详情面板的选中节点。 */
+/** 右侧详情面板的选中节点。字段不再是节点 —— 树只负责导航，字段在右侧表格里展示。 */
 private sealed interface CatalogSelection {
     data object Database : CatalogSelection
     data class Table(val name: String) : CatalogSelection
-    data class Column(val table: String, val column: String) : CatalogSelection
 }
 
 /**
- * 「数据目录」面板：左侧树（库 → 表文件夹 → 表 → 字段 / 分区，带图标 / 缩进引导线 /
- * 搜索过滤）+ 右侧详情面板（选中库 = 表清单概览；选中表 = 表结构表格 + DDL Tab；
- * 选中字段 = 字段属性）。
+ * 「数据目录」面板：左侧树（库 → 表文件夹 → 表名 / 物化视图文件夹 → 视图名，带图标 /
+ * 缩进引导线 / 搜索过滤）+ 右侧详情面板（选中库 = 表清单概览；选中表 = 字段表格 + DDL Tab）。
  *
+ * - 左侧树只做**导航**：字段不再进树 —— 字段多的表会把树拖成无穷长廊，而且和右侧
+ *   表结构完全重复；分区摘要也从树里移出，收在右侧概览底部的折叠小节里；
  * - 元数据全部走 [queryRows]（复用 `executeQuery` 流式通道）；
- * - 单击表展开 / 收起并**懒加载**字段与分区；双击表 [openConsoleWithSql]
+ * - 单击表选中并**懒加载**字段 / 分区；双击表 [openConsoleWithSql]
  *   打开 SQL 控制台并填入 `SELECT * FROM 表名 LIMIT 100;`（物化视图同样适用）；
  * - 分区查询失败（MySQL 不支持 `SHOW PARTITIONS`）**静默降级**，绝不写全局 error。
  */
@@ -267,7 +266,6 @@ internal fun StarRocksCatalogPanel(connectionId: String, modifier: Modifier = Mo
     var dbExpanded by remember { mutableStateOf(true) }
     var tablesFolderExpanded by remember { mutableStateOf(true) }
     var mvFolderExpanded by remember { mutableStateOf(true) }
-    var expandedTable by remember { mutableStateOf<String?>(null) }
     var selection by remember { mutableStateOf<CatalogSelection?>(null) }
     var search by remember { mutableStateOf("") }
     // 字段：null = 加载中；空列表 = 加载完成但确实无字段。
@@ -275,32 +273,6 @@ internal fun StarRocksCatalogPanel(connectionId: String, modifier: Modifier = Mo
     val partitionCache = remember { mutableStateMapOf<String, PartitionLoadState>() }
     val ddlCache = remember { mutableStateMapOf<String, String>() }
     val scope = rememberCoroutineScope()
-
-    suspend fun load() {
-        loading = true
-        error = null
-        com.mqclient.core.log.Log.info("starrocks-ui", "[Catalog] load start (connectionId=$connectionId)")
-        try {
-            dbName = runCatching { queryRows(connectionId, "SELECT DATABASE();") }
-                .getOrNull()?.rows?.firstOrNull()?.firstOrNull()?.toString()
-                ?.takeIf { it.isNotBlank() }
-            // 物化视图名单走 SHOW MATERIALIZED VIEWS（3.4 的 table_type 不可靠）；失败静默降级。
-            val mvNames = runCatching {
-                parseMaterializedViewNames(queryRows(connectionId, MATERIALIZED_VIEW_SQL))
-            }.getOrDefault(emptySet())
-            tables = parseTables(queryRows(connectionId, TABLES_SQL), mvNames)
-            com.mqclient.core.log.Log.info("starrocks-ui", "[Catalog] load done: tables=${tables.size}, dbName=$dbName")
-            columnCache.clear()
-            partitionCache.clear()
-            ddlCache.clear()
-            expandedTable = null
-        } catch (e: Throwable) {
-            error = e.userMessage()
-            tables = emptyList()
-        } finally {
-            loading = false
-        }
-    }
 
     fun ensureColumns(table: String) {
         if (columnCache.containsKey(table)) return
@@ -332,25 +304,61 @@ internal fun StarRocksCatalogPanel(connectionId: String, modifier: Modifier = Mo
         }
     }
 
-    /** 单击表：展开 / 收起 + 选中；字段与分区各自独立懒加载，互不影响、不染红整棵树。 */
-    fun toggleTable(table: CatalogTable) {
-        selection = CatalogSelection.Table(table.name)
-        if (expandedTable == table.name) {
-            expandedTable = null
-            return
+    fun ensureDdl(table: String) {
+        if (ddlCache.containsKey(table)) return
+        ddlCache[table] = ""
+        scope.launch {
+            val ddl = try {
+                queryRows(connectionId, ddlSql(table)).rows.firstOrNull()
+                    ?.getOrNull(1)?.toString().orEmpty()
+            } catch (c: CancellationException) {
+                throw c
+            } catch (e: Throwable) {
+                ""
+            }
+            ddlCache[table] = ddl
         }
-        expandedTable = table.name
-        ensureColumns(table.name)
-        ensurePartitions(table.name)
     }
 
-    /** 展开中的表选中时补拉字段（从库概览点表进来可能尚未加载）。 */
-    fun ensureForSelection(target: CatalogSelection) {
-        when (target) {
-            is CatalogSelection.Table -> if (expandedTable == target.name) ensureColumns(target.name)
-            is CatalogSelection.Column -> ensureColumns(target.table)
-            else -> Unit
+    /**
+     * 刷新表清单。清缓存后若右侧仍停在某张表上，立即补拉它的字段 / 分区 —— 否则
+     * 详情面板的 `LaunchedEffect(tableName)` 不会因表名未变而重跑，界面会永远停在 spinner。
+     */
+    suspend fun load() {
+        loading = true
+        error = null
+        com.mqclient.core.log.Log.info("starrocks-ui", "[Catalog] load start (connectionId=$connectionId)")
+        try {
+            dbName = runCatching { queryRows(connectionId, "SELECT DATABASE();") }
+                .getOrNull()?.rows?.firstOrNull()?.firstOrNull()?.toString()
+                ?.takeIf { it.isNotBlank() }
+            // 物化视图名单走 SHOW MATERIALIZED VIEWS（3.4 的 table_type 不可靠）；失败静默降级。
+            val mvNames = runCatching {
+                parseMaterializedViewNames(queryRows(connectionId, MATERIALIZED_VIEW_SQL))
+            }.getOrDefault(emptySet())
+            tables = parseTables(queryRows(connectionId, TABLES_SQL), mvNames)
+            com.mqclient.core.log.Log.info("starrocks-ui", "[Catalog] load done: tables=${tables.size}, dbName=$dbName")
+            columnCache.clear()
+            partitionCache.clear()
+            ddlCache.clear()
+            (selection as? CatalogSelection.Table)?.let { table ->
+                ensureColumns(table.name)
+                ensurePartitions(table.name)
+                ensureDdl(table.name)
+            }
+        } catch (e: Throwable) {
+            error = e.userMessage()
+            tables = emptyList()
+        } finally {
+            loading = false
         }
+    }
+
+    /** 单击表：选中 + 懒加载右侧要用的字段 / 分区（树只导航，不做展开）。 */
+    fun selectTable(table: CatalogTable) {
+        selection = CatalogSelection.Table(table.name)
+        ensureColumns(table.name)
+        ensurePartitions(table.name)
     }
 
     LaunchedEffect(connectionId) { load() }
@@ -439,7 +447,7 @@ internal fun StarRocksCatalogPanel(connectionId: String, modifier: Modifier = Mo
                             dbExpanded = !dbExpanded
                             selection = CatalogSelection.Database
                         }) {
-                            TreeChevron(dbExpanded)
+                            Chevron(dbExpanded)
                             Icon(
                                 Icons.Filled.Storage,
                                 contentDescription = null,
@@ -473,17 +481,9 @@ internal fun StarRocksCatalogPanel(connectionId: String, modifier: Modifier = Mo
                             tableItems(
                                 entries = filteredNormal,
                                 keyPrefix = "t",
-                                expandedTable = expandedTable,
-                                columnCache = columnCache,
-                                partitionCache = partitionCache,
-                                search = query,
                                 selection = selection,
-                                onToggle = ::toggleTable,
+                                onSelect = ::selectTable,
                                 onOpenConsole = { table -> openConsoleWithSql(connectionId, previewSql(table.name)) },
-                                onSelectColumn = { table, column ->
-                                    selection = CatalogSelection.Column(table, column)
-                                    ensureForSelection(CatalogSelection.Column(table, column))
-                                },
                             )
                         }
 
@@ -507,17 +507,9 @@ internal fun StarRocksCatalogPanel(connectionId: String, modifier: Modifier = Mo
                                 tableItems(
                                     entries = filteredMv,
                                     keyPrefix = "mv",
-                                    expandedTable = expandedTable,
-                                    columnCache = columnCache,
-                                    partitionCache = partitionCache,
-                                    search = query,
                                     selection = selection,
-                                    onToggle = ::toggleTable,
+                                    onSelect = ::selectTable,
                                     onOpenConsole = { table -> openConsoleWithSql(connectionId, previewSql(table.name)) },
-                                    onSelectColumn = { table, column ->
-                                        selection = CatalogSelection.Column(table, column)
-                                        ensureForSelection(CatalogSelection.Column(table, column))
-                                    },
                                 )
                             }
                         }
@@ -537,37 +529,29 @@ internal fun StarRocksCatalogPanel(connectionId: String, modifier: Modifier = Mo
                 columnCache = columnCache,
                 partitionCache = partitionCache,
                 ddlCache = ddlCache,
-                onFetchDdl = { table ->
-                    if (!ddlCache.containsKey(table)) {
-                        ddlCache[table] = ""
-                        scope.launch {
-                            val ddl = try {
-                                queryRows(connectionId, ddlSql(table)).rows.firstOrNull()
-                                    ?.getOrNull(1)?.toString().orEmpty()
-                            } catch (c: CancellationException) {
-                                throw c
-                            } catch (e: Throwable) {
-                                ""
-                            }
-                            ddlCache[table] = ddl
-                        }
-                    }
-                },
+                onFetchDdl = { table -> ensureDdl(table) },
                 onOpenTable = { name ->
-                    selection = CatalogSelection.Table(name)
-                    tables.firstOrNull { it.name == name }?.let(::toggleTable)
+                    tables.firstOrNull { it.name == name }?.let(::selectTable)
                 },
-                onRefreshColumns = { table -> ensureForSelection(CatalogSelection.Table(table)) },
+                onEnsureTable = { table ->
+                    ensureColumns(table)
+                    ensurePartitions(table)
+                },
             )
             }
     }
 }
 
-/** 树行通用外壳：缩进引导线（每层一条竖线）+ 点击回调 + 内容。 */
+/**
+ * 树行通用外壳：缩进引导线（每层一条竖线）+ 单击 / 双击回调 + 内容。
+ *
+ * 单击**立即**回调，不等双击超时 —— 选表要立刻出结构，不能为了双击识别搭上 300ms。
+ */
 @Composable
 private fun TreeRow(
     depth: Int,
     onClick: (() -> Unit)? = null,
+    onDoubleClick: (() -> Unit)? = null,
     content: @Composable RowScope.() -> Unit,
 ) {
     Box(Modifier.fillMaxWidth()) {
@@ -590,7 +574,15 @@ private fun TreeRow(
             modifier = Modifier
                 .padding(start = (depth * 16).dp)
                 .fillMaxWidth()
-                .let { m -> onClick?.let { m.pointerInput(Unit) { detectTapGestures(onTap = { it() }) } } ?: m }
+                .let { m ->
+                    if (onClick == null) {
+                        m
+                    } else {
+                        m.pointerInput(Unit) {
+                            detectTapAndDoubleTap(onTap = onClick, onDoubleTap = onDoubleClick)
+                        }
+                    }
+                }
                 .padding(vertical = 6.dp),
         ) {
             content()
@@ -599,26 +591,30 @@ private fun TreeRow(
 }
 
 /**
- * 带引导线的小节标题行（字段 / 分区分组头、加载 / 空态提示）：
- * 与 TreeRow 共用同一套引导线绘制逻辑，保证从表（depth=2）到小节（depth=3）
- * 再到列（depth=4）的竖线逐层连续、不再断开。
+ * 首击立即 [onTap]，双击窗口内的第二击再补一次 [onDoubleTap]。
+ *
+ * 不用 `detectTapGestures(onTap, onDoubleTap)` 的原因：它必须等过双击超时（~300ms）
+ * 才能确定「不是双击」，于是单击选表会明显卡顿。这里的语义是「先选中，再打开控制台」，
+ * 双击时首击的选中动作已经完成，正好是用户预期的顺序。
  */
-@Composable
-private fun TreeHintRow(depth: Int, text: String, bold: Boolean = false) {
-    TreeRow(depth = depth) {
-        Text(
-            text,
-            style = if (bold) MaterialTheme.typography.labelMedium else MaterialTheme.typography.labelSmall,
-            fontWeight = if (bold) FontWeight.Medium else null,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(vertical = 3.dp),
-        )
+private suspend fun PointerInputScope.detectTapAndDoubleTap(
+    onTap: () -> Unit,
+    onDoubleTap: (() -> Unit)? = null,
+) {
+    var lastTapUptime = 0L
+    awaitEachGesture {
+        awaitFirstDown(requireUnconsumed = false)
+        val up = waitForUpOrCancellation() ?: return@awaitEachGesture
+        val isDoubleTap = onDoubleTap != null &&
+            up.uptimeMillis - lastTapUptime <= viewConfiguration.doubleTapTimeoutMillis
+        lastTapUptime = up.uptimeMillis
+        if (isDoubleTap) onDoubleTap() else onTap()
     }
 }
 
 /** 展开箭头（18dp）。 */
 @Composable
-private fun TreeChevron(expanded: Boolean) {
+private fun Chevron(expanded: Boolean) {
     Icon(
         if (expanded) Icons.Filled.KeyboardArrowDown else Icons.Filled.KeyboardArrowRight,
         contentDescription = null,
@@ -635,7 +631,7 @@ private fun LazyListScope.folderItem(
 ) {
     item {
         TreeRow(depth = 1, onClick = onToggle) {
-            TreeChevron(expanded)
+            Chevron(expanded)
             Icon(
                 if (materializedView) Icons.Filled.Layers else Icons.Filled.Folder,
                 contentDescription = null,
@@ -658,114 +654,49 @@ private fun LazyListScope.folderItem(
     }
 }
 
+/**
+ * 表 / 物化视图行：单行导航项，**不再展开字段或分区**。字段在右侧二维表格，
+ * 分区在右侧概览底部的折叠小节；树只回答「有哪些对象」。
+ *
+ * 单击选中（右侧立即加载结构），双击打开 SQL 控制台并填入 `SELECT * ... LIMIT 100`。
+ */
 private fun LazyListScope.tableItems(
     entries: List<CatalogTable>,
     keyPrefix: String,
-    expandedTable: String?,
-    columnCache: Map<String, List<CatalogColumn>?>,
-    partitionCache: Map<String, PartitionLoadState>,
-    search: String,
     selection: CatalogSelection?,
-    onToggle: (CatalogTable) -> Unit,
+    onSelect: (CatalogTable) -> Unit,
     onOpenConsole: (CatalogTable) -> Unit,
-    onSelectColumn: (String, String) -> Unit,
 ) {
     items(entries, key = { "$keyPrefix:${it.name}" }) { table ->
-        val expanded = expandedTable == table.name
-        val selected = selection is CatalogSelection.Table && selection.let { (it as CatalogSelection.Table).name == table.name }
-        val columns = columnCache[table.name]
-        // 搜索时字段按关键字过滤（仅对已加载的字段生效）。
-        val visibleColumns = columns
-            ?.takeIf { search.isEmpty() }
-            ?: columns?.filter {
-                it.name.contains(search, ignoreCase = true) || it.type.contains(search, ignoreCase = true)
-            }
-
-        Column {
-            TreeRow(depth = 2, onClick = { onToggle(table) }) {
-                TreeChevron(expanded)
-                Icon(
-                    when {
-                        table.materializedView -> Icons.Filled.Layers
-                        table.type == "VIEW" -> Icons.Filled.Visibility
-                        else -> Icons.Filled.TableChart
-                    },
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(start = 4.dp).size(16.dp),
-                )
-                Column(Modifier.padding(start = 4.dp).weight(1f)) {
-                    Text(
-                        table.name,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                    )
-                    if (table.comment.isNotBlank()) {
-                        Text(
-                            table.comment,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                        )
-                    }
-                }
-            }
-
-            if (expanded) {
-                // 字段小节（depth=3，引导线与表 depth=2 / 列 depth=4 逐层连续）
-                TreeHintRow(
-                    depth = 3,
-                    text = stringResource("olap.starrocks.catalog.columns_label"),
-                    bold = true,
-                )
+        val selected = (selection as? CatalogSelection.Table)?.name == table.name
+        TreeRow(
+            depth = 2,
+            onClick = { onSelect(table) },
+            onDoubleClick = { onOpenConsole(table) },
+        ) {
+            Icon(
                 when {
-                    columns == null -> TreeHintRow(3, stringResource("olap.starrocks.catalog.loading"))
-                    visibleColumns.isNullOrEmpty() ->
-                        TreeHintRow(3, stringResource("olap.starrocks.catalog.columns_empty"))
-                    else -> visibleColumns.forEach { column ->
-                        TreeRow(depth = 4, onClick = { onSelectColumn(table.name, column.name) }) {
-                            Icon(
-                                Icons.Filled.ViewColumn,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(14.dp),
-                            )
-                            Text(
-                                column.name,
-                                style = MaterialTheme.typography.bodySmall,
-                                modifier = Modifier.padding(start = 4.dp),
-                            )
-                            Text(
-                                "(${column.type})",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(start = 4.dp),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
-                }
-
-                // 分区小节（失败静默降级，不弹红字；引导线与字段区同层连续）
-                TreeHintRow(
-                    depth = 3,
-                    text = stringResource("olap.starrocks.catalog.partitions_label"),
-                    bold = true,
+                    table.materializedView -> Icons.Filled.Layers
+                    table.type == "VIEW" -> Icons.Filled.Visibility
+                    else -> Icons.Filled.TableChart
+                },
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(start = 4.dp).size(16.dp),
+            )
+            Column(Modifier.padding(start = 4.dp).weight(1f)) {
+                Text(
+                    table.name,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                 )
-                when (val state = partitionCache[table.name]) {
-                    null, PartitionLoadState.Loading ->
-                        TreeHintRow(3, stringResource("olap.starrocks.catalog.loading"))
-                    PartitionLoadState.Unsupported ->
-                        TreeHintRow(3, stringResource("olap.starrocks.catalog.partitions_unsupported"))
-                    is PartitionLoadState.Loaded ->
-                        if (state.partitions.isEmpty()) {
-                            TreeHintRow(3, stringResource("olap.starrocks.catalog.partitions_empty"))
-                        } else {
-                            state.partitions.forEach { partition ->
-                                TreeHintRow(4, partition.summary)
-                            }
-                        }
+                if (table.comment.isNotBlank()) {
+                    Text(
+                        table.comment,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
                 }
             }
         }
@@ -775,8 +706,7 @@ private fun LazyListScope.tableItems(
 /**
  * 右侧详情面板：按选中节点动态渲染。
  * - 库：表清单概览（表名 / 类型 / 注释，行可点进入表详情）；
- * - 表：概览（表结构表格）+ DDL（SHOW CREATE TABLE 文本 + 复制）双 Tab；
- * - 字段：字段属性（PropertyTable）。
+ * - 表：概览（字段二维表格 + 分区折叠小节）+ DDL（SHOW CREATE TABLE 文本 + 复制）双 Tab。
  */
 @Composable
 private fun CatalogDetailPane(
@@ -784,11 +714,11 @@ private fun CatalogDetailPane(
     dbName: String?,
     tables: List<CatalogTable>,
     columnCache: Map<String, List<CatalogColumn>?>,
-    @Suppress("UNUSED_PARAMETER") partitionCache: Map<String, PartitionLoadState>,
+    partitionCache: Map<String, PartitionLoadState>,
     ddlCache: Map<String, String>,
     onFetchDdl: (String) -> Unit,
     onOpenTable: (String) -> Unit,
-    onRefreshColumns: (String) -> Unit,
+    onEnsureTable: (String) -> Unit,
 ) {
     when (selection) {
         null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -804,12 +734,11 @@ private fun CatalogDetailPane(
         is CatalogSelection.Table -> TableDetailPane(
             tableName = selection.name,
             columns = columnCache[selection.name],
+            partitions = partitionCache[selection.name],
             ddl = ddlCache[selection.name],
             onFetchDdl = { onFetchDdl(selection.name) },
-            onRefreshColumns = { onRefreshColumns(selection.name) },
+            onEnsureTable = { onEnsureTable(selection.name) },
         )
-
-        is CatalogSelection.Column -> ColumnDetailPane(selection.table, selection.column, columnCache[selection.table])
     }
 }
 
@@ -884,18 +813,22 @@ private fun DatabaseDetailPane(
     }
 }
 
-/** 表详情：概览（表结构表格）+ DDL 双 Tab。 */
+/** 表详情：概览（字段二维表格 + 分区折叠小节）+ DDL 双 Tab。 */
 @Composable
 private fun TableDetailPane(
     tableName: String,
     columns: List<CatalogColumn>?,
+    partitions: PartitionLoadState?,
     ddl: String?,
     onFetchDdl: (String) -> Unit,
-    onRefreshColumns: (String) -> Unit,
+    onEnsureTable: (String) -> Unit,
 ) {
     var tab by remember(tableName) { mutableStateOf(0) }
-    LaunchedEffect(tableName) { onFetchDdl(tableName) }
-    LaunchedEffect(tableName) { onRefreshColumns(tableName) }
+    // 从库概览直接点表进来时字段 / 分区还没拉过；缓存命中时 onEnsureTable 是空操作。
+    LaunchedEffect(tableName) {
+        onFetchDdl(tableName)
+        onEnsureTable(tableName)
+    }
 
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         Text(
@@ -911,7 +844,7 @@ private fun TableDetailPane(
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when (tab) {
-                0 -> SchemaGrid(tableName, columns)
+                0 -> OverviewPane(columns, partitions)
                 else -> DdlPane(tableName, ddl)
             }
         }
@@ -919,59 +852,137 @@ private fun TableDetailPane(
 }
 
 /**
- * 表结构详情：与「列」节点一致的属性面板风格 —— 每个字段一个分组
- * （字段名加粗标题 + [PropertyTable] 键值对），避免横向 6 列表格挤在一起。
+ * 概览 Tab：字段二维表格 + 分区折叠小节。
+ *
+ * 字段用传统 DataGrid（Name / Type / Nullable / Key / Default / Extra / Comment）
+ * 而不是「一字段一卡片」：字段几十个时卡片要滚很久才能看完，而且无法横向对比类型
+ * 与默认值 —— 这正是数据库客户端（DBeaver / Navicat）用表格的理由。
  */
 @Composable
-private fun SchemaGrid(tableName: String, columns: List<CatalogColumn>?) {
-    when {
-        columns == null -> Row(
-            Modifier.fillMaxWidth().padding(vertical = 16.dp),
-            horizontalArrangement = Arrangement.Center,
-        ) {
-            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-        }
+private fun OverviewPane(columns: List<CatalogColumn>?, partitions: PartitionLoadState?) {
+    Column(Modifier.fillMaxSize().padding(top = 8.dp)) {
+        when {
+            columns == null -> Row(
+                Modifier.fillMaxWidth().weight(1f),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+            }
 
-        columns.isEmpty() -> HintText(stringResource("olap.starrocks.catalog.columns_empty"), 16.dp)
+            columns.isEmpty() -> HintText(stringResource("olap.starrocks.catalog.columns_empty"), 0.dp)
 
-        else -> LazyColumn(
-            Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            item {
+            else -> {
                 Text(
                     stringResource("olap.starrocks.catalog.table_columns_title").withArg(columns.size),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 6.dp),
                 )
+                ColumnDataGrid(columns, Modifier.weight(1f))
             }
-            items(columns, key = { it.name }) { column ->
-                Column {
-                    Text(
-                        column.name,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(vertical = 6.dp),
-                    )
-                    PropertyTable(items = columnProperties(column))
-                }
+        }
+        PartitionSection(partitions)
+    }
+}
+
+/** 绑定 [CatalogColumn] 的列定义：省掉每处重复的泛型实参。 */
+private fun gridColumn(
+    title: String,
+    weight: Float,
+    cell: @Composable (CatalogColumn) -> Unit,
+): DataGridColumn<CatalogColumn> = DataGridColumn(title = title, weight = weight, cell = cell)
+
+/**
+ * 字段表：列宽权重之和为 1，表头与行共用同一份 [DataGridColumn] 约束 —— 天然对齐。
+ * 列宽按典型内容分配（Name / Comment 最宽，Nullable / Key 只装 YES / PRI）。
+ */
+@Composable
+private fun ColumnDataGrid(columns: List<CatalogColumn>, modifier: Modifier = Modifier) {
+    DataGrid(
+        columns = listOf(
+            gridColumn(stringResource("olap.starrocks.catalog.col_name"), 0.20f) { column ->
+                DataGridTextCell(column.name, monospace = true, emphasized = true)
+            },
+            gridColumn(stringResource("olap.starrocks.catalog.col_type"), 0.18f) { column ->
+                DataGridTextCell(column.type)
+            },
+            gridColumn(stringResource("olap.starrocks.catalog.col_nullable"), 0.08f) { column ->
+                DataGridTextCell(column.nullable.ifBlank { "-" }, subdued = true)
+            },
+            gridColumn(stringResource("olap.starrocks.catalog.col_key"), 0.08f) { column ->
+                DataGridTextCell(column.key.ifBlank { "-" }, subdued = true)
+            },
+            gridColumn(stringResource("olap.starrocks.catalog.col_default"), 0.14f) { column ->
+                DataGridTextCell(column.default.ifBlank { "-" }, subdued = column.default.isBlank())
+            },
+            gridColumn(stringResource("olap.starrocks.catalog.col_extra"), 0.12f) { column ->
+                DataGridTextCell(column.extra.ifBlank { "-" }, subdued = column.extra.isBlank())
+            },
+            gridColumn(stringResource("olap.starrocks.catalog.col_comment"), 0.20f) { column ->
+                DataGridTextCell(column.comment.ifBlank { "-" }, subdued = column.comment.isBlank())
+            },
+        ),
+        rows = columns,
+        rowKey = { it.name },
+        modifier = modifier.fillMaxWidth(),
+    )
+}
+
+/**
+ * 概览底部的分区小节：默认收起成一行，展开后限高滚动，不抢字段表格的高度。
+ *
+ * 分区从左侧树移到这里：它属于表的**细节**，不属于导航；引擎不支持
+ * `SHOW PARTITIONS`（MySQL）时只留一行说明，不写全局 error。
+ */
+@Composable
+private fun PartitionSection(partitions: PartitionLoadState?) {
+    when (partitions) {
+        is PartitionLoadState.Loaded -> if (partitions.partitions.isNotEmpty()) {
+            PartitionList(partitions.partitions)
+        }
+
+        PartitionLoadState.Unsupported ->
+            HintText(stringResource("olap.starrocks.catalog.partitions_unsupported"), 0.dp)
+
+        else -> Unit
+    }
+}
+
+/** 分区清单：折叠头（分区数）+ 展开后的摘要行（每行一个分区，单行省略）。 */
+@Composable
+private fun PartitionList(partitions: List<CatalogPartition>) {
+    var expanded by remember { mutableStateOf(false) }
+    HorizontalDivider(Modifier.padding(top = 8.dp))
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .pointerInput(Unit) { detectTapGestures(onTap = { expanded = !expanded }) }
+            .padding(vertical = 4.dp),
+    ) {
+        Chevron(expanded)
+        Text(
+            stringResource("olap.starrocks.catalog.partitions_title").withArg(partitions.size),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    if (expanded) {
+        LazyColumn(Modifier.fillMaxWidth().heightIn(max = 140.dp)) {
+            items(partitions) { partition ->
+                Text(
+                    partition.summary,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                )
             }
         }
     }
 }
-
-/** 字段的完整属性键值对（表详情每个字段分组 / 列节点详情共用，风格一致）。 */
-@Composable
-private fun columnProperties(column: CatalogColumn): List<PropertyItem> = listOf(
-    PropertyItem(stringResource("olap.starrocks.catalog.col_name"), column.name),
-    PropertyItem(stringResource("olap.starrocks.catalog.col_type"), column.type),
-    PropertyItem(stringResource("olap.starrocks.catalog.col_nullable"), column.nullable.ifBlank { "-" }),
-    PropertyItem(stringResource("olap.starrocks.catalog.col_key"), column.key.ifBlank { "-" }),
-    PropertyItem(stringResource("olap.starrocks.catalog.col_default"), column.default.ifBlank { "-" }),
-    PropertyItem(stringResource("olap.starrocks.catalog.col_extra"), column.extra.ifBlank { "-" }),
-    PropertyItem(stringResource("olap.starrocks.catalog.col_comment"), column.comment.ifBlank { "-" }),
-)
 
 /** DDL Tab：SHOW CREATE TABLE 文本（等宽、可选中）+ 一键复制。 */
 @Composable
@@ -1002,35 +1013,6 @@ private fun DdlPane(tableName: String, ddl: String?) {
                 text = AnnotatedString(ddl),
                 modifier = Modifier.fillMaxSize(),
             )
-        }
-    }
-}
-
-/** 字段详情：该字段的完整属性（PropertyTable 键值展示）。 */
-@Composable
-private fun ColumnDetailPane(
-    tableName: String,
-    columnName: String,
-    columns: List<CatalogColumn>?,
-) {
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
-        Text(
-            "$tableName · $columnName",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary,
-        )
-        Spacer(Modifier.height(8.dp))
-        when {
-            columns == null -> HintText(stringResource("olap.starrocks.catalog.loading"), 16.dp)
-            else -> {
-                val column = columns.firstOrNull { it.name == columnName }
-                if (column == null) {
-                    HintText(stringResource("olap.starrocks.catalog.columns_empty"), 16.dp)
-                } else {
-                    PropertyTable(items = columnProperties(column))
-                }
-            }
         }
     }
 }
