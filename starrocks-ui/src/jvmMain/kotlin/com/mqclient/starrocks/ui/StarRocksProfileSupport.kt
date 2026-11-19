@@ -1,6 +1,8 @@
 package com.mqclient.starrocks.ui
 
 import com.mqclient.core.ServiceException
+import com.mqclient.core.log.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -161,7 +163,7 @@ private fun parseGetQueryProfileSummary(raw: String): ProfileSummary {
 }
 
 /** `456.180us` / `3s16ms` / `2.469ms` / `0ns` → 纳秒（多单位段累加），无法解析返回 0。 */
-private fun timeToNanos(text: String): Long =
+internal fun timeToNanos(text: String): Long =
     Regex("""(\d+(?:\.\d+)?)(ns|us|ms|s)""").findAll(text).fold(0L) { acc, m ->
         val value = m.groupValues[1].toDouble()
         val scaled = when (m.groupValues[2]) {
@@ -276,61 +278,40 @@ private fun parseScanRows(lines: List<String>): String {
 }
 
 /**
- * Profile 拉取语句链（主查询 + 极端兜底，均经字符集白名单校验 + 单引号转义，
- * 拼接收口在本函数，调用方不得自行拼 SQL）：
+ * Profile 拉取语句（统一入口）：`ANALYZE PROFILE FROM '<uuid>'`（3.1+，**必须
+ * 单引号**）。不带引号时 FE 词法器把 UUID 在连字符处切开，报 "No viable
+ * statement for input 'ANALYZE PROFILE FROM 297a21b0'" —— 错误消息只显示到
+ * 出错 token，看起来像 UUID 被截断成 8 位，实为解析器的报错显示行为。
  *
- * 1. `ANALYZE PROFILE FROM '<uuid>'` —— **主查询**（3.1+ 富格式报告）。**必须单引号**：
- *    不带引号时 FE 词法器把 UUID 在连字符处切开，报 "No viable statement for input
- *    'ANALYZE PROFILE FROM 297a21b0'" —— 错误消息只显示到出错 token，看起来像
- *    UUID 被截断成 8 位，实为解析器的报错显示行为。
- * 2. `SELECT get_query_profile('<uuid>')` —— **极端兜底**：ANALYZE 因版本 / 权限
- *    不可用时仍能取到 Profile 文本（3.4.0 实测可用）。
+ * queryId 先做**字符集白名单校验**（UUID 含 `-`）防 SQL 注入；拼接统一收口在
+ * 本函数（含单引号转义），调用方不得自行拼 SQL。
  */
-internal fun profileStatements(queryId: String): List<String>? {
+internal fun profileStatements(queryId: String): List<String> {
     val safe = queryId.trim()
-    if (safe.isEmpty() || !Regex("""[A-Za-z0-9_:\-]+""").matches(safe)) return null
+    require(safe.isNotEmpty() && Regex("""[A-Za-z0-9_:\-]+""").matches(safe)) { "invalid query id" }
     val escaped = safe.replace("'", "''")
-    return listOf(
-        "ANALYZE PROFILE FROM '$escaped';",
-        "SELECT get_query_profile('$escaped');",
-    )
+    return listOf("ANALYZE PROFILE FROM '$escaped';")
 }
 
 /** 会话级开启 Profile 采集的辅助语句（仅当前会话生效，**不动全局配置**）。 */
 internal const val ENABLE_PROFILE_SQL = "SET enable_profile = true;"
 
-/** 本会话最近一次查询的 Query ID（SQL 控制台「查看本次 Profile」入口用）。 */
-internal const val LAST_QUERY_ID_SQL = "SELECT LAST_QUERY_ID() AS last_qid;"
 
 /** Profile 未采集的业务异常错误键（文案在 ui-common 公共表，userMessage() 渲染）。 */
 internal const val KEY_PROFILE_NOT_COLLECTED = "olap.starrocks.profile_not_collected"
 
-/** 记录存在但拿不到详情的业务异常错误键（版本 / 权限限制）。 */
-internal const val KEY_PROFILE_DETAIL_UNSUPPORTED = "olap.starrocks.profile_detail_unsupported"
 
 /** 业务异常的英文兜底文案（与默认语言一致；日志与缺键回落路径可见）。 */
-private const val PROFILE_NOT_COLLECTED_FALLBACK =
-    "Cannot fetch the profile for this query. Possible causes: the cluster version is below v3.1, " +
-        "or the query has exceeded the FE profile retention period."
-
-private const val PROFILE_DETAIL_UNSUPPORTED_FALLBACK =
-    "The query record exists in the profile list, but this StarRocks version does not support " +
-        "fetching the profile detail."
+internal const val PROFILE_NOT_COLLECTED_FALLBACK =
+    "Cannot fetch the profile. Please confirm the query state is Finished and the version is >= v3.1."
 
 /**
- * 拉取 Profile 原始文本（Query Profile 闭环的取数入口）。
+ * 拉取 Profile 原始文本（Query Profile 闭环的取数入口）：执行
+ * [profileStatements] 生成的 `ANALYZE PROFILE FROM '<uuid>'` 并拍平为文本。
  *
- * 降级链（**不依赖任何 SET** —— 采集由连接初始化的
- * `sessionVariables=enable_profile=true` 保证）：
- * 1. `ANALYZE PROFILE FROM '<uuid>'` 主查询（3.1+ 富格式报告）；
- * 2. 失败后经 `SHOW PROFILELIST` 确认 QueryId 是否有记录（区分「未采集 / 超出
- *    保留周期」与「版本不支持获取详情」）；
- * 3. `SELECT get_query_profile('<uuid>')` 极端兜底。
- *
- * 全部落空时抛 [ServiceException]：
- * - 记录不存在 / 空结果 → [KEY_PROFILE_NOT_COLLECTED]；
- * - 记录存在但拿不到详情 → [KEY_PROFILE_DETAIL_UNSUPPORTED]；
- * - 权限 / 语法类错误保留原样上抛（UI 映射版本与权限提示）。
+ * 报错（版本低于 v3.1 / 权限不足 / 未采集 / 已超保留周期）或空文本时：记录日志
+ * 并抛 [ServiceException]（[KEY_PROFILE_NOT_COLLECTED]，userMessage() 渲染指引）。
+ * 采集由连接初始化的 `sessionVariables=enable_profile=true` 保证。
  *
  * [runQuery] 可注入以便无环境单测（默认走 [queryRows] → `executeQuery` 流式通道）。
  */
@@ -339,69 +320,57 @@ internal suspend fun fetchQueryProfile(
     queryId: String,
     runQuery: suspend (String) -> StarRocksQueryRows = { queryRows(connectionId, it) },
 ): String {
-    val statements = profileStatements(queryId)
-        ?: throw IllegalArgumentException("invalid query id")
-    var lastError: Throwable? = null
-    var notCollected = false
-    var existsInProfileList = false
-
-    // 归类单条语句的失败：Profile 未采集类（空结果 / "query not exists" / "not found"）
-    // → 业务异常；其余（权限 / 语法）保留原异常，UI 映射版本与权限提示。
-    fun record(error: Throwable?) {
-        val raw = error?.message.orEmpty().lowercase()
-        if (error == null || "query not exists" in raw || "not found" in raw) {
-            notCollected = true
-        } else {
-            lastError = error
-        }
-    }
-
-    fun flatten(rows: StarRocksQueryRows): String = rows.rows.joinToString("\n") { row ->
-        row.joinToString(" | ") { it?.toString() ?: "NULL" }
-    }
-
-    // 1. 主查询：ANALYZE PROFILE（富格式报告）。
-    runCatching { runQuery(statements[0]) }
-        .onSuccess { rows ->
-            val text = flatten(rows)
-            if (text.isNotBlank()) return text
-            record(null)   // 空文本 = Profile 未采集 / 已过保留周期
-        }
-        .onFailure { record(it) }
-
-    // 2. 降级确认：SHOW PROFILELIST 里该 QueryId 是否有记录（失败不阻断）。
-    runCatching {
-        existsInProfileList = parseProfileList(runQuery(PROFILELIST_SQL))
-            .any { it.queryId.equals(queryId.trim(), ignoreCase = true) }
-    }
-
-    // 3. 极端兜底：get_query_profile。
-    runCatching { runQuery(statements[1]) }
-        .onSuccess { rows ->
-            val text = flatten(rows)
-            if (text.isNotBlank()) return text
-            record(null)
-        }
-        .onFailure { record(it) }
-
-    throw when {
-        existsInProfileList -> ServiceException(
-            errorKey = KEY_PROFILE_DETAIL_UNSUPPORTED,
-            fallbackMessage = PROFILE_DETAIL_UNSUPPORTED_FALLBACK,
-            cause = lastError,
-        )
-
-        notCollected -> ServiceException(
+    val sql = profileStatements(queryId).single()
+    val text = try {
+        flattenRows(runQuery(sql))
+    } catch (cancellation: CancellationException) {
+        throw cancellation
+    } catch (error: Throwable) {
+        Log.warn("starrocks-ui", "profile fetch failed: ${error.message}")
+        throw ServiceException(
             errorKey = KEY_PROFILE_NOT_COLLECTED,
             fallbackMessage = PROFILE_NOT_COLLECTED_FALLBACK,
-            cause = lastError,
+            cause = error,
         )
-
-        else -> lastError ?: IllegalStateException("profile query failed")
     }
+    if (text.isBlank()) {
+        // get_query_profile 对未采集查询返回空串（3.4.0 实测）：同样按未采集处理。
+        Log.warn("starrocks-ui", "profile fetch returned empty text (queryId=$queryId)")
+        throw ServiceException(
+            errorKey = KEY_PROFILE_NOT_COLLECTED,
+            fallbackMessage = PROFILE_NOT_COLLECTED_FALLBACK,
+        )
+    }
+    return text
+}
+
+private fun flattenRows(rows: StarRocksQueryRows): String = rows.rows.joinToString("\n") { row ->
+    row.joinToString(" | ") { it?.toString() ?: "NULL" }
 }
 
 private val prettyJson = Json { prettyPrint = true }
+
+/**
+ * 系统 / 元数据语句判定：`SHOW` / `SET` / `USE` / `EXPLAIN` / `DESC` / `KILL` /
+ * 权限类语句不产生 Profile 树 —— 列表「查看 Profile」按钮据此置灰。
+ * 取首条非空、非注释行的第一个 token 比对；空语句按系统语句处理（置灰）。
+ */
+private val SYSTEM_STATEMENT_PREFIXES = setOf("SHOW", "SET", "USE", "EXPLAIN", "DESC", "DESCRIBE", "KILL", "GRANT", "REVOKE")
+
+internal fun isSystemStatement(sql: String): Boolean {
+    val firstToken = sql.lineSequence()
+        .map { it.trim() }
+        .firstOrNull { it.isNotEmpty() && !it.startsWith("--") && !it.startsWith("#") }
+        ?.trimStart('-')
+        ?.trim()
+        ?.split(Regex("""\s+"""))
+        ?.firstOrNull()
+        ?.trimStart('(')
+        ?.trimEnd(';', ',', ')')
+        ?.uppercase()
+        .orEmpty()
+    return firstToken.isEmpty() || firstToken in SYSTEM_STATEMENT_PREFIXES
+}
 
 /** 尝试把一段文本 pretty print 成 JSON；不是合法 JSON 返回 null。 */
 private fun prettyJsonOrNull(text: String): String? = runCatching {

@@ -158,91 +158,35 @@ class StarRocksProfileTest {
 
     @Test
     fun `not collected maps to the business exception`() = runBlocking {
-        // ANALYZE 报 query not exists + SHOW PROFILELIST 无记录 + get_query_profile 空
-        // → 未采集 / 超保留周期业务异常。
-        val executed = mutableListOf<String>()
-        val error = runCatching {
-            fetchQueryProfile("conn-1", "297a21b0-e412-11f1-8289-968dc029c89c") { sql ->
-                executed += sql
-                when {
-                    sql.startsWith("ANALYZE") -> throw IllegalStateException("query not exists")
-                    sql.startsWith("SHOW PROFILELIST") -> StarRocksQueryRows(profileListColumns, emptyList())
-                    else -> StarRocksQueryRows(listOf("t"), listOf(listOf("")))
-                }
-            }
-        }.exceptionOrNull()
-        assertEquals(
-            listOf(
-                "ANALYZE PROFILE FROM '297a21b0-e412-11f1-8289-968dc029c89c';",
-                "SHOW PROFILELIST;",
-                "SELECT get_query_profile('297a21b0-e412-11f1-8289-968dc029c89c');",
-            ),
-            executed,
-        )
-        assertTrue(error is ServiceException, "应为 ServiceException：$error")
-        assertEquals(KEY_PROFILE_NOT_COLLECTED, error.errorKey)
-    }
-
-    @Test
-    fun `record exists but detail unsupported maps to its own exception`() = runBlocking {
-        // ANALYZE 失败，但 SHOW PROFILELIST 里有该 QueryId → 版本不支持获取详情。
-        val error = runCatching {
-            fetchQueryProfile("conn-1", "297a21b0-e412-11f1-8289-968dc029c89c") { sql ->
-                when {
-                    sql.startsWith("ANALYZE") -> throw IllegalStateException("no viable statement")
-                    sql.startsWith("SHOW PROFILELIST") -> StarRocksQueryRows(
-                        profileListColumns,
-                        listOf(listOf("297a21b0-e412-11f1-8289-968dc029c89c", "t", "1ms", "Finished", "SELECT 1")),
-                    )
-
-                    else -> StarRocksQueryRows(listOf("t"), listOf(listOf("")))
-                }
-            }
-        }.exceptionOrNull()
-        assertTrue(error is ServiceException, "应为 ServiceException：$error")
-        assertEquals(KEY_PROFILE_DETAIL_UNSUPPORTED, error.errorKey)
-    }
-
-    @Test
-    fun `successful analyze short-circuits without fallback`() = runBlocking {
-        val executed = mutableListOf<String>()
-        val text = fetchQueryProfile("conn-1", "297a21b0-e412-11f1-8289-968dc029c89c") { sql ->
-            executed += sql
-            StarRocksQueryRows(listOf("t"), listOf(listOf("Query:\n  Summary:")))
-        }
-        // 主查询成功即返回：不跑 SHOW PROFILELIST 确认，也不走 get_query_profile。
-        assertEquals(listOf("ANALYZE PROFILE FROM '297a21b0-e412-11f1-8289-968dc029c89c';"), executed)
-        assertEquals("Query:\n  Summary:", text)
-        Unit
-    }
-
-    @Test
-    fun `blank analyze falls through to get_query_profile`() = runBlocking {
-        // ANALYZE 空文本 → SHOW PROFILELIST 确认（无记录）→ get_query_profile 拿到数据。
-        val executed = mutableListOf<String>()
-        val text = fetchQueryProfile("conn-1", "297a21b0-e412-11f1-8289-968dc029c89c") { sql ->
-            executed += sql
-            when {
-                sql.startsWith("ANALYZE") -> StarRocksQueryRows(listOf("t"), listOf(listOf("")))
-                sql.startsWith("SHOW PROFILELIST") -> StarRocksQueryRows(profileListColumns, emptyList())
-                else -> StarRocksQueryRows(listOf("t"), listOf(listOf("Query:\n  Summary:")))
-            }
-        }
-        assertEquals(3, executed.size)
-        assertEquals("Query:\n  Summary:", text)
-        Unit
-    }
-
-    @Test
-    fun `permission errors surface unchanged for the ui to map`() = runBlocking {
+        // ANALYZE 报错（未采集 / 版本 / 权限）→ 记日志并抛业务异常（i18n 键）。
         val error = runCatching {
             fetchQueryProfile("conn-1", "297a21b0-e412-11f1-8289-968dc029c89c") { _ ->
-                throw IllegalStateException("access denied")
+                throw IllegalStateException("query not exists")
             }
         }.exceptionOrNull()
-        // 权限类错误保留原样（不吞成未采集）—— UI 据此映射版本 / 权限提示。
-        assertTrue(error !is ServiceException, "权限错误不应映射为业务异常：$error")
-        assertEquals("access denied", error?.message)
+        assertTrue(error is ServiceException, "应为 ServiceException：$error")
+        assertEquals(KEY_PROFILE_NOT_COLLECTED, error.errorKey)
+        assertEquals("query not exists", error.cause?.message, "原始错误挂在 cause 上供排查")
+    }
+
+    @Test
+    fun `successful analyze short-circuits`() = runBlocking {
+        val text = fetchQueryProfile("conn-1", "297a21b0-e412-11f1-8289-968dc029c89c") { _ ->
+            StarRocksQueryRows(listOf("t"), listOf(listOf("Query:\n  Summary:")))
+        }
+        assertEquals("Query:\n  Summary:", text)
+        Unit
+    }
+
+    @Test
+    fun `blank result maps to the business exception`() = runBlocking {
+        val error = runCatching {
+            fetchQueryProfile("conn-1", "297a21b0-e412-11f1-8289-968dc029c89c") { _ ->
+                StarRocksQueryRows(listOf("t"), listOf(listOf("")))
+            }
+        }.exceptionOrNull()
+        assertTrue(error is ServiceException, "应为 ServiceException：$error")
+        assertEquals(KEY_PROFILE_NOT_COLLECTED, error.errorKey)
         Unit
     }
 
@@ -258,18 +202,27 @@ class StarRocksProfileTest {
     }
 
     @Test
-    fun `all blank results surface the not collected business exception`() = runBlocking {
-        val error = runCatching {
-            fetchQueryProfile("conn-1", "297a21b0-e412-11f1-8289-968dc029c89c") { sql ->
-                when {
-                    sql.startsWith("SHOW PROFILELIST") -> StarRocksQueryRows(profileListColumns, emptyList())
-                    else -> StarRocksQueryRows(listOf("t"), listOf(listOf("")))
-                }
-            }
-        }.exceptionOrNull()
-        assertTrue(error is ServiceException, "应为 ServiceException：$error")
-        assertEquals(KEY_PROFILE_NOT_COLLECTED, error.errorKey)
-        Unit
+    fun `system statements are gated from profile collection`() {
+        // SHOW / SET / USE / EXPLAIN 等系统与元数据语句不产生 Profile 树 —— 列表按钮防呆。
+        listOf(
+            "SHOW FULL PROCESSLIST;",
+            "SET enable_profile = true;",
+            "USE test_db",
+            "EXPLAIN SELECT 1",
+            "DESC sales",
+            "KILL 42;",
+        ).forEach { sql -> assertTrue(isSystemStatement(sql), sql) }
+
+        // 普通查询（含行首注释）不是系统语句。
+        listOf(
+            "SELECT 1",
+            "INSERT INTO sales VALUES (NOW(), '华东', 'p', 1.0, 1)",
+            "-- 注释\nSELECT 1",
+        ).forEach { sql -> assertTrue(!isSystemStatement(sql), sql) }
+
+        // 空语句按系统语句处理（置灰）。
+        assertTrue(isSystemStatement(""))
+        assertTrue(isSystemStatement("-- 只有注释"))
     }
 
     @Test

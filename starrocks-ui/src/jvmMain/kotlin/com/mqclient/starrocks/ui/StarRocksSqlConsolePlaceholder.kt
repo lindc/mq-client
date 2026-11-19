@@ -65,6 +65,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.mqclient.core.ServiceException
 import com.mqclient.core.db.OlapQueryRecord
 import com.mqclient.core.db.OlapQueryRepository
 import com.mqclient.olap.base.query.ResultColumn
@@ -310,10 +311,9 @@ private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
     }
 
     /**
-     * 「查看本次 Profile」：本会话最近一次成功查询的 UUID → Profile 文本 → 大窗查看器。
-     * 控制台与取数共享同一会话，`LAST_QUERY_ID()` 即用户刚执行的最后一条语句；
-     * 系统语句（SHOW/SET/USE…）或未开采集时由 [fetchQueryProfile] 抛出带指引的业务异常，
-     * Snackbar 展示。
+     * 「查看本次 Profile」：从 `SHOW PROFILELIST` 提取最新一条**有效查询**（跳过
+     * SHOW / SET / EXPLAIN 等系统语句）的完整 QueryId → ANALYZE PROFILE → 大窗查看器。
+     * 取不到有效查询或 Profile 未采集时，Snackbar 展示带指引的业务异常文案。
      */
     fun viewLastProfile() {
         if (phase != ConsolePhase.Finished || grid.successCount == 0 || profileFetching) return
@@ -321,12 +321,15 @@ private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
         scope.launch {
             try {
                 val target = withContext(Dispatchers.IO) {
-                    val idRows = queryRows(connectionId, LAST_QUERY_ID_SQL)
-                    val qidIdx = idRows.columns.map { it.lowercase() }.indexOf("last_qid")
-                    val queryId = idRows.rows.firstOrNull()
-                        ?.getOrNull(qidIdx.takeIf { it >= 0 } ?: 0)?.toString()?.trim().orEmpty()
-                    if (queryId.isEmpty()) throw IllegalStateException("LAST_QUERY_ID() returned empty")
-                    queryId to fetchQueryProfile(connectionId, queryId)
+                    val listed = parseProfileList(queryRows(connectionId, PROFILELIST_SQL))
+                    // PROFILELIST 按时间倒序：取最新一条可采集（非系统语句、已结束）的查询。
+                    val item = listed
+                        .firstOrNull { !isSystemStatement(it.statement) && it.state == "Finished" }
+                        ?: throw ServiceException(
+                            errorKey = KEY_PROFILE_NOT_COLLECTED,
+                            fallbackMessage = PROFILE_NOT_COLLECTED_FALLBACK,
+                        )
+                    item.queryId to fetchQueryProfile(connectionId, item.queryId)
                 }
                 profileViewer = target
             } catch (cancellation: CancellationException) {

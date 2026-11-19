@@ -67,101 +67,6 @@ internal data class ProfileDetailTarget(
     val statement: String,
 )
 
-/**
- * 「最近查询（Profile）」弹窗：`SHOW PROFILELIST` 的最近查询列表 —— 已结束的查询
- * 也在列表里，每行带「查看Profile」直达 [ProfileDetailDialog]。
- * 这是拿到 QueryId 最可靠的一跳（会话行只在查询恰在运行时才有映射）。
- */
-@Composable
-internal fun ProfileListDialog(
-    connectionId: String,
-    onOpenProfile: (ProfileListItem) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    var items by remember { mutableStateOf<List<ProfileListItem>?>(null) } // null = 加载中
-    var error by remember { mutableStateOf<String?>(null) }
-    val failedPrefix = stringResource("olap.starrocks.processlist.error_prefix")
-
-    LaunchedEffect(connectionId) {
-        try {
-            items = withContext(Dispatchers.IO) {
-                parseProfileList(queryRows(connectionId, PROFILELIST_SQL))
-            }
-        } catch (e: Throwable) {
-            error = e.userMessage()
-            items = emptyList()
-        }
-    }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        modifier = Modifier.width(760.dp),
-        title = { Text(stringResource("olap.starrocks.profilelist.title"), style = MaterialTheme.typography.titleMedium) },
-        text = {
-            Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState())) {
-                val current = items
-                when {
-                    current == null -> Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                        Text(
-                            stringResource("olap.starrocks.profilelist.loading"),
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.padding(start = 8.dp),
-                        )
-                    }
-
-                    error != null -> Text(
-                        failedPrefix + error,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-
-                    current.isEmpty() -> Text(
-                        stringResource("olap.starrocks.profilelist.empty"),
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-
-                    else -> current.forEachIndexed { index, item ->
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    item.statement.take(200).ifBlank { "-" },
-                                    fontFamily = FontFamily.Monospace,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                Text(
-                                    "${item.time} · ${item.state} · ${item.startTime}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(top = 2.dp),
-                                )
-                            }
-                            TextButton(onClick = { onOpenProfile(item) }) {
-                                Text(
-                                    stringResource("olap.starrocks.profilelist.view_profile"),
-                                    style = MaterialTheme.typography.labelMedium,
-                                )
-                            }
-                        }
-                        if (index < current.lastIndex) {
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource("common_close")) }
-        },
-    )
-}
-
 private sealed interface ProfileDetailState {
     data object Loading : ProfileDetailState
     data class Loaded(val raw: String, val summary: ProfileSummary) : ProfileDetailState
@@ -246,17 +151,12 @@ internal fun ProfileDetailDialog(
                 state = ProfileDetailState.Loaded(raw, parseProfileSummary(raw))
             }
             .onFailure { error ->
-                // 两类业务异常：未采集 / 超保留周期（message 已含原因，hintSql 给
-                // 可复制的 SET 指引）；记录存在但拿不到详情（版本 / 权限提示）。
+                // Profile 未采集业务异常：userMessage() 已渲染指引，hintSql 给
+                // 可复制的会话级开启语句；其余错误映射版本 / 权限提示。
                 val notCollected = error is LocalizedException && error.errorKey == KEY_PROFILE_NOT_COLLECTED
-                val detailUnsupported = error is LocalizedException && error.errorKey == KEY_PROFILE_DETAIL_UNSUPPORTED
                 state = ProfileDetailState.Failed(
                     message = failedTemplate.withArg(error.userMessage()),
-                    hint = when {
-                        notCollected -> null
-                        detailUnsupported -> unsupportedHint
-                        else -> hintFor(error)
-                    },
+                    hint = if (notCollected) null else hintFor(error),
                     hintSql = if (notCollected) ENABLE_PROFILE_SQL else null,
                 )
             }
