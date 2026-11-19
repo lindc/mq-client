@@ -393,7 +393,6 @@
   "olap.starrocks.profile.copy_all": "复制全部",
   "olap.starrocks.profile.search_placeholder": "搜索关键字（如 OLAP_SCAN、TotalTime）",
   "olap.starrocks.profile.match_count": "%1$d 处匹配",
-  "olap.starrocks.profile.toggle_theme": "切换深色 / 浅色主题",
   "olap.starrocks.profile.open_viewer": "完整 Profile 查看器",
   "olap.starrocks.profile.enable_collect": "开启会话采集",
   "olap.starrocks.profile.enabling_collect": "正在开启...",

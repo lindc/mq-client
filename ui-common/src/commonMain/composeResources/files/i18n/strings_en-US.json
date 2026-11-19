@@ -393,7 +393,6 @@
   "olap.starrocks.profile.copy_all": "Copy all",
   "olap.starrocks.profile.search_placeholder": "Search (e.g. OLAP_SCAN, TotalTime)",
   "olap.starrocks.profile.match_count": "%1$d matches",
-  "olap.starrocks.profile.toggle_theme": "Toggle dark/light theme",
   "olap.starrocks.profile.open_viewer": "Open full profile viewer",
   "olap.starrocks.profile.enable_collect": "Enable session collection",
   "olap.starrocks.profile.enabling_collect": "Enabling...",

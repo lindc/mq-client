@@ -996,9 +996,9 @@ private fun DdlPane(tableName: String, ddl: String?) {
             TextButton(onClick = { clipboard.setText(AnnotatedString(ddl)) }) {
                 Text(stringResource("olap.starrocks.catalog.ddl_copy"), style = MaterialTheme.typography.labelMedium)
             }
-            // 共享 CodeBlock：与 Profile 查看器同一套 8dp 圆角 / 1dp 细边框 /
-            // 12dp padding / 等宽 20sp 行高；跟随 app 主题选深 / 浅配色预设，
-            // 亮色 app 主题下与 Profile 浅色模式视觉完全一致。
+            // 共享 CodeBlock：与 Profile 查看器完全同源——无边框 / 8dp 圆角 /
+            // 20dp padding / 等宽 20sp 行高；跟随 app 主题（浅色 app 下为
+            // 浅灰底 + 深灰字），两处视觉始终一致。
             CodeBlock(
                 text = AnnotatedString(ddl),
                 colors = codeBlockColors(dark = isAppThemeDark()),

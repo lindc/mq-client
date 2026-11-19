@@ -20,8 +20,6 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.DarkMode
-import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material3.AlertDialog
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -29,7 +27,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -462,8 +459,8 @@ internal fun StarRocksProfileViewerDialog(
     onDismiss: () -> Unit,
 ) {
     val clipboard = LocalClipboardManager.current
-    var darkTheme by remember { mutableStateOf(true) }
-    val colors = viewerColors(darkTheme)
+    // 与数据目录 DDL 同源：跟随 app 主题，不再有独立的深 / 浅切换。
+    val colors = viewerColors(dark = isAppThemeDark())
     var query by remember { mutableStateOf("") }
     val summary = remember(raw) { parseProfileSummary(raw) }
     val annotated = remember(raw, query, colors) { buildViewerText(raw, query, colors) }
@@ -472,7 +469,6 @@ internal fun StarRocksProfileViewerDialog(
         else raw.lowercase().split(query.lowercase()).size - 1
     }
     val matchCountText = stringResource("olap.starrocks.profile.match_count").withArg(matchCount)
-    val toggleThemeText = stringResource("olap.starrocks.profile.toggle_theme")
 
     ObjectDetailDialog(
         title = title,
@@ -486,7 +482,7 @@ internal fun StarRocksProfileViewerDialog(
         },
     ) {
         Column(Modifier.fillMaxSize()) {
-            // ── 指标卡 + 主题切换（右上角） ──
+            // ── 指标卡 ──
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
@@ -500,14 +496,6 @@ internal fun StarRocksProfileViewerDialog(
                     ViewerMetricChip(stringResource("olap.starrocks.profile.summary_peak"), summary.peakMemory, colors)
                     ViewerMetricChip(stringResource("olap.starrocks.profile.summary_scan"), summary.scanRows, colors)
                     ViewerMetricChip(stringResource("olap.starrocks.profile.summary_state"), summary.state, colors)
-                }
-                // 主题切换：深色（VS Code 风）/ 浅色（打印风）。
-                IconButton(onClick = { darkTheme = !darkTheme }) {
-                    Icon(
-                        if (darkTheme) Icons.Filled.LightMode else Icons.Filled.DarkMode,
-                        contentDescription = toggleThemeText,
-                        tint = colors.accent,
-                    )
                 }
             }
 
@@ -549,11 +537,11 @@ internal fun StarRocksProfileViewerDialog(
                     .padding(horizontal = 20.dp),
             )
 
-            // ── 全文区：铺满弹窗下半部分的主视觉区（无边框 + 横向无留白 +
-            // 仅顶部圆角贴合弹窗底部 + 20dp 内边距），与 DDL 同为共享 CodeBlock ──
+            // ── 全文区：与数据目录 DDL 完全同源的共享 CodeBlock（浅色主题下
+            // 浅灰底 + 深灰字、无边框、铺满剩余空间、20dp 内边距；跟随 app 主题） ──
             CodeBlock(
                 text = annotated,
-                colors = codeBlockColors(darkTheme),
+                colors = codeBlockColors(dark = isAppThemeDark()),
                 shape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp),
                 modifier = Modifier
                     .fillMaxWidth()
