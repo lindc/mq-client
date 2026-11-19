@@ -549,13 +549,16 @@ internal fun StarRocksProfileViewerDialog(
                     .padding(horizontal = 20.dp),
             )
 
-            // ── 全文区（共享 CodeBlock：8dp 圆角 + 细边框 + 12dp padding + 等宽 20sp） ──
+            // ── 全文区：铺满弹窗下半部分的主视觉区（无边框 + 横向无留白 +
+            // 仅顶部圆角贴合弹窗底部 + 20dp 内边距），与 DDL 同为共享 CodeBlock ──
             CodeBlock(
                 text = annotated,
                 colors = codeBlockColors(darkTheme),
+                shape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp),
                 modifier = Modifier
+                    .fillMaxWidth()
                     .weight(1f)
-                    .padding(horizontal = 20.dp, vertical = 8.dp),
+                    .padding(top = 8.dp),
             )
         }
     }

@@ -282,14 +282,12 @@ class StarRocksProfileTest {
         val darkProfile = codeBlockColors(dark = true)
         val lightProfile = codeBlockColors(dark = false)
         assertEquals(0x252526, darkProfile.bg.toArgb().toLong() and 0xFFFFFF)
-        assertEquals(0xFF333333L, darkProfile.border.toArgb().toLong() and 0xFFFFFFFF)
         // VS Code 风格：关键字浅蓝 / 数字浅绿（深色）
         assertEquals(0x569CD6, darkProfile.keyword.toArgb().toLong() and 0xFFFFFF)
         assertEquals(0xB5CEA8, darkProfile.number.toArgb().toLong() and 0xFFFFFF)
         // 浅色：浅灰底 + 深灰字，与 DDL 在亮色 app 主题下同源
         assertEquals(0xF5F5F5, lightProfile.bg.toArgb().toLong() and 0xFFFFFF)
         assertEquals(0x333333, lightProfile.text.toArgb().toLong() and 0xFFFFFF)
-        assertEquals(0xE0E0E0, lightProfile.border.toArgb().toLong() and 0xFFFFFF)
         // ViewerColors 的关键字/数字色来自同一预设（保证染色与容器风格一致）
         assertTrue(viewerColors(true).keyword == darkProfile.keyword)
         assertTrue(viewerColors(true).number == darkProfile.number)
