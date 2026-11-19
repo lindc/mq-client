@@ -246,12 +246,17 @@ internal fun ProfileDetailDialog(
                 state = ProfileDetailState.Loaded(raw, parseProfileSummary(raw))
             }
             .onFailure { error ->
-                // Profile 未采集业务异常：userMessage() 已渲染三条可能原因，
-                // 提示块里再给可复制的会话级开启语句；其余错误映射版本 / 权限提示。
+                // 两类业务异常：未采集 / 超保留周期（message 已含原因，hintSql 给
+                // 可复制的 SET 指引）；记录存在但拿不到详情（版本 / 权限提示）。
                 val notCollected = error is LocalizedException && error.errorKey == KEY_PROFILE_NOT_COLLECTED
+                val detailUnsupported = error is LocalizedException && error.errorKey == KEY_PROFILE_DETAIL_UNSUPPORTED
                 state = ProfileDetailState.Failed(
                     message = failedTemplate.withArg(error.userMessage()),
-                    hint = if (notCollected) null else hintFor(error),
+                    hint = when {
+                        notCollected -> null
+                        detailUnsupported -> unsupportedHint
+                        else -> hintFor(error)
+                    },
                     hintSql = if (notCollected) ENABLE_PROFILE_SQL else null,
                 )
             }

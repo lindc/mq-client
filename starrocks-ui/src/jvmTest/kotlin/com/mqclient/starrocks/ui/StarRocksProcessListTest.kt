@@ -205,15 +205,15 @@ class StarRocksProcessListTest {
         val fullUuid = "a1b2-c3d4"
         assertEquals(
             listOf(
-                "SELECT get_query_profile('a1b2-c3d4');",
                 "ANALYZE PROFILE FROM 'a1b2-c3d4';",
+                "SELECT get_query_profile('a1b2-c3d4');",
             ),
             profileStatements("a1b2-c3d4"),
         )
         assertEquals(
             listOf(
-                "SELECT get_query_profile('42');",
                 "ANALYZE PROFILE FROM '42';",
+                "SELECT get_query_profile('42');",
             ),
             profileStatements("42"),
         )

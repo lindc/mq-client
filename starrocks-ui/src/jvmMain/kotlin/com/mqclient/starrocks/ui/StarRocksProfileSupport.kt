@@ -276,25 +276,23 @@ private fun parseScanRows(lines: List<String>): String {
 }
 
 /**
- * Profile 拉取语句链（逐条降级尝试，取第一个成功者）：
+ * Profile 拉取语句链（主查询 + 极端兜底，均经字符集白名单校验 + 单引号转义，
+ * 拼接收口在本函数，调用方不得自行拼 SQL）：
  *
- * 1. `SELECT get_query_profile('<uuid>')` —— **首选**：不依赖 ANALYZE 的版本支持
- *    （3.4.0 实测可用，含 OperatorTotalTime）；未采集时返回空串（不报错）。
- * 2. `ANALYZE PROFILE FROM '<uuid>'` —— 兜底：3.1+ 支持，**必须单引号**（不带引号时
- *    FE 词法器把 UUID 在连字符处切开，报 "No viable statement for input
+ * 1. `ANALYZE PROFILE FROM '<uuid>'` —— **主查询**（3.1+ 富格式报告）。**必须单引号**：
+ *    不带引号时 FE 词法器把 UUID 在连字符处切开，报 "No viable statement for input
  *    'ANALYZE PROFILE FROM 297a21b0'" —— 错误消息只显示到出错 token，看起来像
- *    UUID 被截断成 8 位，实为解析器的报错显示行为）。
- *
- * queryId 先做**字符集白名单校验**（UUID 含 `-`，连接 id 是纯数字）防 SQL 注入；
- * 拼接统一收口在本函数（含单引号转义），调用方不得自行拼 SQL。
+ *    UUID 被截断成 8 位，实为解析器的报错显示行为。
+ * 2. `SELECT get_query_profile('<uuid>')` —— **极端兜底**：ANALYZE 因版本 / 权限
+ *    不可用时仍能取到 Profile 文本（3.4.0 实测可用）。
  */
 internal fun profileStatements(queryId: String): List<String>? {
     val safe = queryId.trim()
     if (safe.isEmpty() || !Regex("""[A-Za-z0-9_:\-]+""").matches(safe)) return null
     val escaped = safe.replace("'", "''")
     return listOf(
-        "SELECT get_query_profile('$escaped');",
         "ANALYZE PROFILE FROM '$escaped';",
+        "SELECT get_query_profile('$escaped');",
     )
 }
 
@@ -307,18 +305,32 @@ internal const val LAST_QUERY_ID_SQL = "SELECT LAST_QUERY_ID() AS last_qid;"
 /** Profile 未采集的业务异常错误键（文案在 ui-common 公共表，userMessage() 渲染）。 */
 internal const val KEY_PROFILE_NOT_COLLECTED = "olap.starrocks.profile_not_collected"
 
+/** 记录存在但拿不到详情的业务异常错误键（版本 / 权限限制）。 */
+internal const val KEY_PROFILE_DETAIL_UNSUPPORTED = "olap.starrocks.profile_detail_unsupported"
+
 /** 业务异常的英文兜底文案（与默认语言一致；日志与缺键回落路径可见）。 */
 private const val PROFILE_NOT_COLLECTED_FALLBACK =
-    "This query does not support profile collection (system statements like SHOW / SET / USE), " +
-        "or the session that executed it has not run SET enable_profile = true."
+    "Cannot fetch the profile for this query. Possible causes: the cluster version is below v3.1, " +
+        "or the query has exceeded the FE profile retention period."
+
+private const val PROFILE_DETAIL_UNSUPPORTED_FALLBACK =
+    "The query record exists in the profile list, but this StarRocks version does not support " +
+        "fetching the profile detail."
 
 /**
  * 拉取 Profile 原始文本（Query Profile 闭环的取数入口）。
  *
- * 降级链见 [profileStatements]（get_query_profile 首选 / ANALYZE 兜底）；两步都拿
- * 不到非空文本时抛 [ServiceException]（[KEY_PROFILE_NOT_COLLECTED]，userMessage()
- * 渲染指引——客户端已在连接建立时自动开启采集，旧查询无法回溯，请重新发起）。
- * 权限 / 语法类错误保留原样上抛（UI 据此映射版本与权限提示）。
+ * 降级链（**不依赖任何 SET** —— 采集由连接初始化的
+ * `sessionVariables=enable_profile=true` 保证）：
+ * 1. `ANALYZE PROFILE FROM '<uuid>'` 主查询（3.1+ 富格式报告）；
+ * 2. 失败后经 `SHOW PROFILELIST` 确认 QueryId 是否有记录（区分「未采集 / 超出
+ *    保留周期」与「版本不支持获取详情」）；
+ * 3. `SELECT get_query_profile('<uuid>')` 极端兜底。
+ *
+ * 全部落空时抛 [ServiceException]：
+ * - 记录不存在 / 空结果 → [KEY_PROFILE_NOT_COLLECTED]；
+ * - 记录存在但拿不到详情 → [KEY_PROFILE_DETAIL_UNSUPPORTED]；
+ * - 权限 / 语法类错误保留原样上抛（UI 映射版本与权限提示）。
  *
  * [runQuery] 可注入以便无环境单测（默认走 [queryRows] → `executeQuery` 流式通道）。
  */
@@ -331,6 +343,7 @@ internal suspend fun fetchQueryProfile(
         ?: throw IllegalArgumentException("invalid query id")
     var lastError: Throwable? = null
     var notCollected = false
+    var existsInProfileList = false
 
     // 归类单条语句的失败：Profile 未采集类（空结果 / "query not exists" / "not found"）
     // → 业务异常；其余（权限 / 语法）保留原异常，UI 映射版本与权限提示。
@@ -343,30 +356,49 @@ internal suspend fun fetchQueryProfile(
         }
     }
 
-    statements.forEachIndexed { index, sql ->
-        runCatching { runQuery(sql) }
-            .onSuccess { rows ->
-                // 空文本 = 该查询没有已收集的 Profile（get_query_profile 对未收集查询
-                // 不报错而返回空串，3.4.0 实测）—— 视为未采集，继续降级。
-                val text = rows.rows.joinToString("\n") { row ->
-                    row.joinToString(" | ") { it?.toString() ?: "NULL" }
-                }
-                if (text.isNotBlank()) return text
-                record(null)
-            }
-            .onFailure { record(it) }
-        // 采集侧兜底已上移到连接初始化（jdbcUrl 的 sessionVariables=enable_profile=true）：
-        // 客户端自身发起的查询天然被收集，链内不再重复执行 SET。
+    fun flatten(rows: StarRocksQueryRows): String = rows.rows.joinToString("\n") { row ->
+        row.joinToString(" | ") { it?.toString() ?: "NULL" }
     }
 
-    if (notCollected) {
-        throw ServiceException(
+    // 1. 主查询：ANALYZE PROFILE（富格式报告）。
+    runCatching { runQuery(statements[0]) }
+        .onSuccess { rows ->
+            val text = flatten(rows)
+            if (text.isNotBlank()) return text
+            record(null)   // 空文本 = Profile 未采集 / 已过保留周期
+        }
+        .onFailure { record(it) }
+
+    // 2. 降级确认：SHOW PROFILELIST 里该 QueryId 是否有记录（失败不阻断）。
+    runCatching {
+        existsInProfileList = parseProfileList(runQuery(PROFILELIST_SQL))
+            .any { it.queryId.equals(queryId.trim(), ignoreCase = true) }
+    }
+
+    // 3. 极端兜底：get_query_profile。
+    runCatching { runQuery(statements[1]) }
+        .onSuccess { rows ->
+            val text = flatten(rows)
+            if (text.isNotBlank()) return text
+            record(null)
+        }
+        .onFailure { record(it) }
+
+    throw when {
+        existsInProfileList -> ServiceException(
+            errorKey = KEY_PROFILE_DETAIL_UNSUPPORTED,
+            fallbackMessage = PROFILE_DETAIL_UNSUPPORTED_FALLBACK,
+            cause = lastError,
+        )
+
+        notCollected -> ServiceException(
             errorKey = KEY_PROFILE_NOT_COLLECTED,
             fallbackMessage = PROFILE_NOT_COLLECTED_FALLBACK,
             cause = lastError,
         )
+
+        else -> lastError ?: IllegalStateException("profile query failed")
     }
-    throw lastError ?: IllegalStateException("profile query failed")
 }
 
 private val prettyJson = Json { prettyPrint = true }
