@@ -43,6 +43,55 @@ fun WidthCappedColumn(modifier: Modifier = Modifier, maxWidth: Dp = PropertyTabl
 
 ---
 
+## 数据表格规范（DataGrid）
+
+多列、对齐、需要滚动的东西（StarRocks 字段清单是第一个使用者）用 `ui-common` 的
+`com.mqclient.uicommon.table.DataGrid`，不要用 `Row` 手拼表头 + 表体：
+
+```kotlin
+data class DataGridColumn<T>(
+    val title: String,
+    val weight: Float = 1f,      // 列宽比例；与 width 互斥
+    val width: Dp? = null,       // 定宽列（纯数字 / 状态位）
+    val cell: @Composable (T) -> Unit,
+)
+
+@Composable
+fun <T> DataGrid(columns: List<DataGridColumn<T>>, rows: List<T>,
+                 modifier: Modifier = Modifier, rowKey: ((T) -> Any)? = null,
+                 zebraStriping: Boolean = true)
+
+@Composable
+fun DataGridTextCell(text: String, emphasized: Boolean = false, subdued: Boolean = false)
+```
+
+**视觉标尺只有一个来源**：`ui-common` 的 `table/TableVisuals`。它原先只是 `PropertyTable`
+里的字面量，现被 Kafka 分区表 / RocketMQ 路由表 / RabbitMQ 绑定表各自抄了一遍 ——
+每张新表抄错一处，同一窗口里两张表就不再是一家。现在：
+
+- **行高** `RowMinHeight = 40.dp`（PropertyTable 同款）；
+- **行内边距** `10.dp / 8.dp`；
+- **斑马纹** `surfaceVariant.copy(alpha = ZebraAlpha = 0.3f)`，奇数行（index 1/3/…）；
+- **圆角** `RowShape = RoundedCornerShape(4.dp)`，**行距** `RowSpacing = 8.dp`；
+- **字体** `bodyMedium`（与 PropertyTable 的 Key/Value 同档）。
+
+`PropertyTable` 与 `DataGrid` 读同一组常量，改一处两边同时生效。新表只写「列怎么分」，
+不再重复这些数字。
+
+DataGrid 自身约定：
+
+- **列宽只写一次**：表头与行共用同一份 `DataGridColumn` 的 `weight` / `width` —— 对齐不会漂移。权重用整数比例（`2f` / `1.5f` / `1f`），不要求归一到 1；
+- **表头**：sticky（不参与行滚动）、`surfaceContainerHighest` 底、`onSurface` 文字 + `SemiBold`、与数据行同档字号（不放大，否则像标题栏）；
+- **hover**：每行独立 `MutableInteractionSource`，底色 `surfaceContainerHigh`，**优先于斑马纹**；
+- **滚动**：行用 `LazyColumn`（带 `rowKey`），只组合视口内的行；`modifier` 必须给出有界高度（典型是 `Modifier.weight(1f)`）；
+- **空态**：空 `rows` 只画表头，空态文案由调用方决定；
+- **测试钩子**：行与表头带 `DataGridZebraRowTag` / `DataGridPlainRowTag` / `DataGridHeaderTag`，渲染测试用它断言行高（`assertHeightIsAtLeast(40.dp)`）。不要用 `onNodeWithText` 的行 bounds——那是文字高度，不是行高。
+
+范围边界：Key-Value 属性展示仍用 `PropertyTable`（两列、斑马纹、复制按钮、限宽居中），
+两者不要互相替代；消息列表的专用行（附件、操作按钮）仍在各模块内部。
+
+---
+
 ## 按钮规范（PrimaryButton / SecondaryButton / DangerButton）
 
 各模块的普通操作按钮统一用 `ui-common` 的 `com.mqclient.uicommon` 按钮组件，

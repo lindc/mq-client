@@ -8,7 +8,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.mqclient.uicommon.AppTooltip
 import java.time.Instant
@@ -27,13 +30,26 @@ import java.util.Locale
  * 仍留在各自模块（页面级统一是另一件事）。
  */
 
-/** 表头单元格文本：labelLarge + 次要色 + 单行。 */
+/**
+ * 表头单元格文本：labelLarge + 次要色 + 单行（消息表默认样式）。
+ *
+ * [style] / [fontWeight] / [color] 可覆盖默认样式：多列数据表（`DataGrid`）用
+ * `bodyMedium` + `SemiBold` + `onSurface`，与数据行同一档字号、靠字重和颜色立起来；
+ * 消息表格保持默认 —— 默认值不变，所以既有调用点零改动。
+ */
 @Composable
-fun TableHeaderText(text: String, modifier: Modifier = Modifier) {
+fun TableHeaderText(
+    text: String,
+    modifier: Modifier = Modifier,
+    style: TextStyle = MaterialTheme.typography.labelLarge,
+    fontWeight: FontWeight? = null,
+    color: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+) {
     Text(
         text = text,
-        style = MaterialTheme.typography.labelLarge,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = style,
+        color = color,
+        fontWeight = fontWeight,
         maxLines = 1,
         modifier = modifier,
     )

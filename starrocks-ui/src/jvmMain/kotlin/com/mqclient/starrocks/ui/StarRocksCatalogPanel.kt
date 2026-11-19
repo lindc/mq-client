@@ -894,32 +894,36 @@ private fun gridColumn(
 ): DataGridColumn<CatalogColumn> = DataGridColumn(title = title, weight = weight, cell = cell)
 
 /**
- * 字段表：列宽权重之和为 1，表头与行共用同一份 [DataGridColumn] 约束 —— 天然对齐。
- * 列宽按典型内容分配（Name / Comment 最宽，Nullable / Key 只装 YES / PRI）。
+ * 字段表：只负责「哪 7 列、各占多宽、每格取哪个字段」—— 表格本身完全交给
+ * `ui-common` 的 [DataGrid]，与 IBM MQ / Kafka 属性对话框共用同一套行高（40dp）、
+ * 斑马纹（`surfaceVariant@30%`）、4dp 圆角、8dp 行距与 bodyMedium 字号。
+ *
+ * 列宽用整数比例（Name 2f / Type 1.5f / Comment 2f / 其余 1f），长字段名只会被
+ * 省略号截断，不会把表格撑变形；表头与行共用同一份 [DataGridColumn]，列宽不会漂移。
  */
 @Composable
 private fun ColumnDataGrid(columns: List<CatalogColumn>, modifier: Modifier = Modifier) {
     DataGrid(
         columns = listOf(
-            gridColumn(stringResource("olap.starrocks.catalog.col_name"), 0.20f) { column ->
-                DataGridTextCell(column.name, monospace = true, emphasized = true)
+            gridColumn(stringResource("olap.starrocks.catalog.col_name"), 2f) { column ->
+                DataGridTextCell(column.name, emphasized = true)
             },
-            gridColumn(stringResource("olap.starrocks.catalog.col_type"), 0.18f) { column ->
+            gridColumn(stringResource("olap.starrocks.catalog.col_type"), 1.5f) { column ->
                 DataGridTextCell(column.type)
             },
-            gridColumn(stringResource("olap.starrocks.catalog.col_nullable"), 0.08f) { column ->
+            gridColumn(stringResource("olap.starrocks.catalog.col_nullable"), 1f) { column ->
                 DataGridTextCell(column.nullable.ifBlank { "-" }, subdued = true)
             },
-            gridColumn(stringResource("olap.starrocks.catalog.col_key"), 0.08f) { column ->
+            gridColumn(stringResource("olap.starrocks.catalog.col_key"), 1f) { column ->
                 DataGridTextCell(column.key.ifBlank { "-" }, subdued = true)
             },
-            gridColumn(stringResource("olap.starrocks.catalog.col_default"), 0.14f) { column ->
+            gridColumn(stringResource("olap.starrocks.catalog.col_default"), 1.2f) { column ->
                 DataGridTextCell(column.default.ifBlank { "-" }, subdued = column.default.isBlank())
             },
-            gridColumn(stringResource("olap.starrocks.catalog.col_extra"), 0.12f) { column ->
+            gridColumn(stringResource("olap.starrocks.catalog.col_extra"), 1f) { column ->
                 DataGridTextCell(column.extra.ifBlank { "-" }, subdued = column.extra.isBlank())
             },
-            gridColumn(stringResource("olap.starrocks.catalog.col_comment"), 0.20f) { column ->
+            gridColumn(stringResource("olap.starrocks.catalog.col_comment"), 2f) { column ->
                 DataGridTextCell(column.comment.ifBlank { "-" }, subdued = column.comment.isBlank())
             },
         ),

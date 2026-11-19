@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
@@ -36,12 +35,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.mqclient.uicommon.i18n.stringResource
+import com.mqclient.uicommon.table.TableVisuals
 import kotlinx.coroutines.launch
 
 /**
  * 「Key-Value」属性表（各 MQ 模块属性面板/对话框的统一展示组件）：
  *
- *  - **斑马纹**：奇数行（index 1/3/...）`surfaceVariant` 浅底 + 4dp 微圆角，偶数行透明；
+ *  - **斑马纹**：奇数行（index 1/3/...）`surfaceVariant@30%` 浅底 + 4dp 微圆角，偶数行透明；
+ *    行高 / 内边距 / 圆角 / 行距 / 透明度全部来自 [TableVisuals] —— 多列表格
+ *    （[com.mqclient.uicommon.table.DataGrid]）读的是同一组常量，两者不可能漂移；
  *  - **宽度**：整表最大 [PropertyTableMaxWidth] 并**水平居中**（超宽屏下不再把两列拉散）；
  *  - **分栏**：Key `weight(0.35f)` / Value `weight(0.65f)`，都是左对齐（次要色 / 主色），
  *    各自最多两行后省略；
@@ -121,22 +123,28 @@ fun PropertyTable(
     val snackbarHostState = remember { SnackbarHostState() }
     // Snackbar 留在**外层全宽** Box：跟到限宽列里会让「已复制」提示偏到中间去。
     Box(modifier = modifier.fillMaxWidth()) {
-        WidthCappedColumn(maxWidth = maxWidth, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        WidthCappedColumn(
+            maxWidth = maxWidth,
+            verticalArrangement = Arrangement.spacedBy(TableVisuals.RowSpacing),
+        ) {
             items.forEachIndexed { index, item ->
                 val zebra = index % 2 == 1
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 40.dp)
-                        .clip(RoundedCornerShape(4.dp))
+                        .heightIn(min = TableVisuals.RowMinHeight)
+                        .clip(TableVisuals.RowShape)
                         .background(
                             if (zebra) {
-                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = TableVisuals.ZebraAlpha)
                             } else {
                                 Color.Transparent
                             },
                         )
-                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                        .padding(
+                            horizontal = TableVisuals.RowHorizontalPadding,
+                            vertical = TableVisuals.RowVerticalPadding,
+                        ),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(modifier = Modifier.weight(KeyWeight).padding(end = 12.dp)) {
