@@ -154,9 +154,10 @@ class StarRocksProfileTest {
             "-- 注释\nSELECT 1",
         ).forEach { sql -> assertTrue(isProfileEligible(sql), sql) }
 
-        // 空语句（会话空闲行）不可采集。
-        assertTrue(!isProfileEligible(""))
-        assertTrue(!isProfileEligible("-- 只有注释"))
+        // 空 / 未知语句放行：空闲会话行的 QueryId 仍可映射解析，
+        // 禁用会误伤主路径（取不到时由取数层业务异常兜底提示）。
+        assertTrue(isProfileEligible(""))
+        assertTrue(isProfileEligible("-- 只有注释"))
     }
 
     @Test
