@@ -77,10 +77,115 @@ internal data class ProfileSummary(
 )
 
 /**
- * 解析 ANALYZE PROFILE 的纯文本报告。只认 Summary 段的前缀键与算子树行，
- * 形状不符的字段一律空串兜底。
+ * 解析 Profile 文本（自动识别两种格式，均为 3.4.0 真实输出）：
+ * - `get_query_profile`（取数链首选）：`- 键: 值` 缩进风格，算子块为
+ *   `NAME (plan_node_id=N):` + `- OperatorTotalTime`，扫描行数在 SCAN 块的
+ *   `- PullRowNum: 10.008K (10008)`；
+ * - `ANALYZE PROFILE`（兜底）：Summary 段 + `└──` 算子树。
+ * 形状不符的字段一律空串兜底，绝不崩面板。
  */
-internal fun parseProfileSummary(raw: String): ProfileSummary {
+internal fun parseProfileSummary(raw: String): ProfileSummary =
+    if (raw.contains("- Query State:")) parseGetQueryProfileSummary(raw)
+    else parseAnalyzeProfileSummary(raw)
+
+private fun parseGetQueryProfileSummary(raw: String): ProfileSummary {
+    val lines = raw.lines()
+
+    /** Summary 段的 `- 键: 值` 字段（精确前缀，避免命中 Planner 的 `-- Total[1]`）。 */
+    fun field(key: String): String = lines
+        .firstOrNull { it.trim().startsWith("- $key: ") }
+        ?.substringAfter(": ")?.trim().orEmpty()
+
+    val queryId = field("Query ID")
+    val state = field("Query State")
+    val totalTime = field("Total")
+
+    val peakValue = lines
+        .firstOrNull { it.trim().startsWith("- QueryPeakMemoryUsagePerNode: ") }
+        ?.substringAfter(": ")?.trim().orEmpty()
+    val allocatedValue = lines
+        .firstOrNull { it.trim().startsWith("- QueryAllocatedMemoryUsage: ") }
+        ?.substringAfter(": ")?.trim().orEmpty()
+    val peakMemory = when {
+        peakValue.isNotEmpty() && peakValue != "?" -> peakValue
+        allocatedValue.isNotEmpty() && allocatedValue != "?" -> allocatedValue
+        else -> ""
+    }
+
+    // 算子块：`NAME (plan_node_id=N):` 头 + 块内 `- OperatorTotalTime` / `- PullRowNum`。
+    class Op(val name: String) {
+        var timeNanos = 0L
+        var timeText = ""
+        var pullRows: Long? = null
+    }
+
+    val headerRegex = Regex("""^(\S+) \(plan_node_id=-?\d+\):$""")
+    val operators = mutableListOf<Op>()
+    var current: Op? = null
+
+    fun flush() {
+        current?.let { operators += it }
+        current = null
+    }
+
+    for (line in lines) {
+        val trimmed = line.trim()
+        headerRegex.matchEntire(trimmed)?.let { m ->
+            flush()
+            current = Op(m.groupValues[1])
+            continue
+        }
+        val op = current ?: continue
+        when {
+            trimmed.startsWith("- OperatorTotalTime: ") -> {
+                op.timeText = trimmed.substringAfter(": ").trim()
+                op.timeNanos = timeToNanos(op.timeText)
+            }
+
+            trimmed.startsWith("- PullRowNum: ") && op.name.contains("SCAN") ->
+                op.pullRows = parseRowCount(trimmed.substringAfter(": ").trim())
+        }
+    }
+    flush()
+
+    val topOperators = operators
+        .filter { it.timeNanos > 0 }
+        .sortedByDescending { it.timeNanos }
+        .map { ProfileOperator(name = it.name, time = it.timeText, pct = "") }
+    val scanRows = operators
+        .filter { it.name.contains("SCAN") && it.pullRows != null }
+        .sumOf { it.pullRows!! }
+        .let { if (operators.any { op -> op.name.contains("SCAN") && op.pullRows != null }) it.toString() else "" }
+
+    return ProfileSummary(queryId, state, totalTime, peakMemory, scanRows, topOperators)
+}
+
+/** `456.180us` / `3s16ms` / `2.469ms` / `0ns` → 纳秒（多单位段累加），无法解析返回 0。 */
+private fun timeToNanos(text: String): Long =
+    Regex("""(\d+(?:\.\d+)?)(ns|us|ms|s)""").findAll(text).fold(0L) { acc, m ->
+        val value = m.groupValues[1].toDouble()
+        val scaled = when (m.groupValues[2]) {
+            "ns" -> value
+            "us" -> value * 1_000
+            "ms" -> value * 1_000_000
+            else -> value * 1_000_000_000
+        }
+        acc + scaled.toLong()
+    }
+
+/** `10.008K (10008)` → 10008（优先括号内的精确值）；`10.008K` → 10008；其余 null。 */
+private fun parseRowCount(value: String): Long? {
+    Regex("""\((\d+)\)""").find(value)?.let { return it.groupValues[1].toLongOrNull() }
+    val match = Regex("""([\d.]+)\s*([KM]?)""").matchEntire(value.trim()) ?: return null
+    val number = match.groupValues[1].toDoubleOrNull() ?: return null
+    return when (match.groupValues[2]) {
+        "K" -> (number * 1_000).toLong()
+        "M" -> (number * 1_000_000).toLong()
+        else -> number.toLong()
+    }
+}
+
+private fun parseAnalyzeProfileSummary(raw: String): ProfileSummary {
     val lines = raw.lines()
     // Summary 段在第一个 "Fragment N" 之前：只在这里找键，避免算子树里的
     // TotalTime / OutputRows 行被误当成 Summary 字段。
@@ -196,14 +301,40 @@ internal fun profileStatements(queryId: String): List<String>? {
 /** 会话级开启 Profile 采集的辅助语句（仅当前会话生效，**不动全局配置**）。 */
 internal const val ENABLE_PROFILE_SQL = "SET enable_profile = true;"
 
+/** 本会话最近一次查询的 Query ID（SQL 控制台「查看本次 Profile」入口用）。 */
+internal const val LAST_QUERY_ID_SQL = "SELECT LAST_QUERY_ID() AS last_qid;"
+
 /** Profile 未采集的业务异常错误键（文案在 ui-common 公共表，userMessage() 渲染）。 */
 internal const val KEY_PROFILE_NOT_COLLECTED = "olap.starrocks.profile_not_collected"
 
 /** 业务异常的英文兜底文案（与默认语言一致；日志与缺键回落路径可见）。 */
 private const val PROFILE_NOT_COLLECTED_FALLBACK =
-    "The session that executed this query did not enable profile collection, so the profile " +
-        "cannot be viewed retroactively. The client enables collection automatically on connect " +
-        "(session variable enable_profile) — re-run the query and view its profile after it finishes."
+    "This query does not support profile collection (system statements like SHOW / SET / USE), " +
+        "or the session that executed it has not run SET enable_profile = true."
+
+/**
+ * 判断一条 SQL 是否值得采集 / 查看 Profile：`SHOW` / `SET` / `USE` / `DESC` /
+ * `KILL` / 权限类等系统与元数据语句不被 StarRocks 采集（取数必然落空）。
+ * 会话列表的按钮防呆与控制台入口共用本判断。
+ *
+ * 取首条非空、非注释行的第一个 token 比对；空语句视为不可采集。
+ */
+private val NON_PROFILE_STATEMENTS = setOf("SHOW", "SET", "USE", "DESC", "DESCRIBE", "KILL", "GRANT", "REVOKE")
+
+internal fun isProfileEligible(sql: String): Boolean {
+    val firstToken = sql.lineSequence()
+        .map { it.trim() }
+        .firstOrNull { it.isNotEmpty() && !it.startsWith("--") && !it.startsWith("#") }
+        ?.trimStart('-')
+        ?.trim()
+        ?.split(Regex("""\s+"""))
+        ?.firstOrNull()
+        ?.trimStart('(')
+        ?.trimEnd(';', ',', ')')
+        ?.uppercase()
+        .orEmpty()
+    return firstToken.isNotEmpty() && firstToken !in NON_PROFILE_STATEMENTS
+}
 
 /**
  * 拉取 Profile 原始文本（Query Profile 闭环的取数入口）。

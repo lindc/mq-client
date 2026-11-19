@@ -136,6 +136,30 @@ class StarRocksProfileTest {
     }
 
     @Test
+    fun `system statements are not profile eligible`() {
+        // SHOW / SET / USE 等系统与元数据语句不被 StarRocks 采集 —— 列表按钮防呆共用。
+        listOf(
+            "SHOW FULL PROCESSLIST;",
+            "SET enable_profile = true;",
+            "USE test_db",
+            "DESC sales",
+            "DESCRIBE sales",
+            "KILL 42;",
+        ).forEach { sql -> assertTrue(!isProfileEligible(sql), sql) }
+
+        // 普通查询（含行首注释）可采集。
+        listOf(
+            "SELECT 1",
+            "INSERT INTO sales VALUES (NOW(), '华东', 'p', 1.0, 1)",
+            "-- 注释\nSELECT 1",
+        ).forEach { sql -> assertTrue(isProfileEligible(sql), sql) }
+
+        // 空语句（会话空闲行）不可采集。
+        assertTrue(!isProfileEligible(""))
+        assertTrue(!isProfileEligible("-- 只有注释"))
+    }
+
+    @Test
     fun `sql constants stay on the verified statements`() {
         assertEquals("SHOW PROFILELIST;", PROFILELIST_SQL)
         assertTrue(PROFILELIST_SQL.startsWith("SHOW"), PROFILELIST_SQL)
@@ -243,5 +267,78 @@ class StarRocksProfileTest {
         assertTrue(error is ServiceException, "应为 ServiceException：$error")
         assertEquals(KEY_PROFILE_NOT_COLLECTED, error.errorKey)
         Unit
+    }
+
+    @Test
+    fun `parses real get_query_profile format`() {
+        // 3.4.0 实测：get_query_profile 首选语句返回 `- 键: 值` 缩进风格（与 ANALYZE
+        // 报告不同）—— 算子块按 OperatorTotalTime 降序，扫描行数取 SCAN 块 PullRowNum。
+        val getProfileText = """
+            Query:
+              Summary:
+                 - Query ID: 605e4f10-e417-11f1-8289-968dc029c89c
+                 - Start Time: 2026-11-19 12:47:27
+                 - End Time: 2026-11-19 12:47:27
+                 - Total: 23ms
+                 - Query Type: Query
+                 - Query State: Finished
+                 - StarRocks Version: 3.4.0-e94580b
+                 - User: root
+                 - Default Db: test_db
+                 - Sql Statement: SELECT region, COUNT(*), ROUND(SUM(amount),2) FROM sales GROUP BY region
+                 - Collect Profile Time: 0
+                 - IsProfileAsync: true
+              Planner:
+                 - -- Parser[1] 0
+                 - -- Total[1] 8ms
+              Execution:
+                 - QueryAllocatedMemoryUsage: 1.641 MB
+                 - QueryCumulativeScanTime: 223.969us
+                 - QueryPeakMemoryUsagePerNode: 824.250 KB
+                 - QuerySumMemoryUsage: 824.250 KB
+                 - ResultDeliverTime: 0ns
+                Fragment 0:
+                   - BackendAddresses: 127.0.0.1:9060
+                  Pipeline (id=0):
+                     - ActiveTime: 54.953us
+                    RESULT_SINK (plan_node_id=-1):
+                      CommonMetrics:
+                         - OperatorTotalTime: 16.466us
+                         - PullRowNum: 1
+                      UniqueMetrics:
+                         - SinkType: MYSQL_PROTOCAL
+                  Pipeline (id=1):
+                    BUCKET_PROCESS_SINK (plan_node_id=1):
+                      CommonMetrics:
+                         - OperatorTotalTime: 68.170us
+                      UniqueMetrics:
+                    OLAP_SCAN (plan_node_id=0):
+                      CommonMetrics:
+                         - OperatorTotalTime: 456.180us
+                         - PullRowNum: 10.008K (10008)
+                      UniqueMetrics:
+                         - Table: sales
+                         - BytesRead: 78.310 KB
+                    OLAP_SCAN_PREPARE (plan_node_id=0):
+                      CommonMetrics:
+                         - OperatorTotalTime: 12.000us
+        """.trimIndent()
+
+        val summary = parseProfileSummary(getProfileText)
+        assertEquals("605e4f10-e417-11f1-8289-968dc029c89c", summary.queryId)
+        assertEquals("Finished", summary.state)
+        assertEquals("23ms", summary.totalTime, "- Total: 23ms（不被 Planner 的 -- Total[1] 干扰）")
+        assertEquals("824.250 KB", summary.peakMemory, "优先 QueryPeakMemoryUsagePerNode")
+        assertEquals("10008", summary.scanRows, "OLAP_SCAN 块 PullRowNum（OLAP_SCAN_PREPARE 不计入）")
+        // 按 OperatorTotalTime 降序（与块出现顺序无关）；本格式无占比 → pct 空串。
+        assertEquals(
+            listOf(
+                "OLAP_SCAN" to "456.180us",
+                "BUCKET_PROCESS_SINK" to "68.170us",
+                "RESULT_SINK" to "16.466us",
+            ),
+            summary.topOperators.take(3).map { it.name to it.time },
+        )
+        assertTrue(summary.topOperators.all { it.pct.isEmpty() }, "get_query_profile 格式无占比字段")
     }
 }

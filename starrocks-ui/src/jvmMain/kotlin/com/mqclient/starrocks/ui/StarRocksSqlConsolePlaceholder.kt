@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
@@ -221,6 +222,9 @@ private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
     var draftLoaded by remember { mutableStateOf(false) }
     // CSV 导出：-1 = 空闲；>=0 = 导出中（已写入行数，进度横幅用）。
     var exportingRows by remember { mutableLongStateOf(-1L) }
+    // 「查看本次 Profile」：取数中 + 取到 (queryId, 原始文本) 后弹大窗查看器。
+    var profileFetching by remember { mutableStateOf(false) }
+    var profileViewer by remember { mutableStateOf<Pair<String, String>?>(null) }
     val snackbar = LocalSnackbarHostState.current
     val scope = rememberCoroutineScope()
     var job by remember { mutableStateOf<Job?>(null) }
@@ -303,6 +307,36 @@ private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
         textFieldValue = TextFieldValue("")
         grid.reset()
         phase = ConsolePhase.Idle
+    }
+
+    /**
+     * 「查看本次 Profile」：本会话最近一次成功查询的 UUID → Profile 文本 → 大窗查看器。
+     * 控制台与取数共享同一会话，`LAST_QUERY_ID()` 即用户刚执行的最后一条语句；
+     * 系统语句（SHOW/SET/USE…）或未开采集时由 [fetchQueryProfile] 抛出带指引的业务异常，
+     * Snackbar 展示。
+     */
+    fun viewLastProfile() {
+        if (phase != ConsolePhase.Finished || grid.successCount == 0 || profileFetching) return
+        profileFetching = true
+        scope.launch {
+            try {
+                val target = withContext(Dispatchers.IO) {
+                    val idRows = queryRows(connectionId, LAST_QUERY_ID_SQL)
+                    val qidIdx = idRows.columns.map { it.lowercase() }.indexOf("last_qid")
+                    val queryId = idRows.rows.firstOrNull()
+                        ?.getOrNull(qidIdx.takeIf { it >= 0 } ?: 0)?.toString()?.trim().orEmpty()
+                    if (queryId.isEmpty()) throw IllegalStateException("LAST_QUERY_ID() returned empty")
+                    queryId to fetchQueryProfile(connectionId, queryId)
+                }
+                profileViewer = target
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Throwable) {
+                snackbar.showSnackbar(error.userMessage())
+            } finally {
+                profileFetching = false
+            }
+        }
     }
 
     fun runSql() {
@@ -465,6 +499,19 @@ private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
             ) {
                 Icon(Icons.Filled.History, contentDescription = stringResource("olap.starrocks.console.history"))
             }
+            // 查看本次 Profile：LAST_QUERY_ID() → get_query_profile/ANALYZE 兜底
+            // → 大窗查看器；系统语句或未开采集时 Snackbar 给出带指引的提示。
+            IconButton(
+                onClick = ::viewLastProfile,
+                modifier = Modifier.focusProperties { canFocus = false },
+                enabled = phase == ConsolePhase.Finished && grid.successCount > 0 && !profileFetching,
+            ) {
+                if (profileFetching) {
+                    CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                } else {
+                    Icon(Icons.Filled.Insights, contentDescription = stringResource("olap.starrocks.console.view_profile"))
+                }
+            }
             // AI 慢查询诊断：取选中的 SQL（无选区取全文首条），交给诊断弹窗
             // 执行 EXPLAIN + 表结构组装后流式问模型。
             IconButton(
@@ -503,6 +550,15 @@ private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
                 connectionId = connectionId,
                 sql = sql,
                 onDismiss = { diagnosisSql = null },
+            )
+        }
+
+        // ── 本次查询的 Profile 大窗查看器 ──
+        profileViewer?.let { (queryId, raw) ->
+            StarRocksProfileViewerDialog(
+                title = stringResource("olap.starrocks.processlist.profile_title").withArg(queryId),
+                raw = raw,
+                onDismiss = { profileViewer = null },
             )
         }
 

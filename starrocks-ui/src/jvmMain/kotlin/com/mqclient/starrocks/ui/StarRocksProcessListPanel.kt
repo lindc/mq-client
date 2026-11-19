@@ -39,6 +39,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.mqclient.uicommon.AppTooltip
 import com.mqclient.uicommon.DangerButton
 import com.mqclient.uicommon.LocalSnackbarHostState
 import com.mqclient.uicommon.SecondaryButton
@@ -451,13 +452,33 @@ private fun ProcessRow(
             }
         }
         // 「查看 Profile」：只拉取 + 文本展示，不做树形解析。
+        // 防呆：SHOW / SET / USE 等系统语句不被采集 —— 按钮置灰 + 悬浮提示原因。
         Box(Modifier.width(110.dp), contentAlignment = Alignment.Center) {
-            TextButton(onClick = { onProfile(s) }) {
-                Text(
-                    stringResource("olap.starrocks.processlist.profile"),
-                    color = MaterialTheme.colorScheme.primary,
-                    style = MaterialTheme.typography.labelMedium,
-                )
+            val profileEligible = isProfileEligible(s.info)
+            if (profileEligible) {
+                TextButton(onClick = { onProfile(s) }) {
+                    Text(
+                        stringResource("olap.starrocks.processlist.profile"),
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                }
+            } else {
+                AppTooltip(
+                    tooltip = {
+                        Text(
+                            stringResource("olap.starrocks.processlist.profile_eligible_hint"),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    },
+                ) {
+                    TextButton(onClick = {}, enabled = false) {
+                        Text(
+                            stringResource("olap.starrocks.processlist.profile"),
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                    }
+                }
             }
         }
     }
