@@ -1,5 +1,7 @@
 package com.mqclient.starrocks.ui
 
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import com.mqclient.core.ServiceException
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
@@ -255,6 +257,22 @@ class StarRocksProfileTest {
         assertEquals("605e4f10-e417-11f1-8289-968dc029c89c", summary.queryId)
         assertEquals("Finished", summary.state)
         assertEquals("23ms", summary.totalTime)
+    }
+
+
+    @Test
+    fun `viewer color presets keep high contrast in both themes`() {
+        // 深色：#1E1E1E 背景配 #D4D4D4 近白文字（用户报告的可读性回归锚点）；
+        // 浅色：#F5F5F5 背景配 #333333 文字；两套高亮都可见。
+        val dark = viewerColors(dark = true)
+        val light = viewerColors(dark = false)
+        assertEquals(0x1E1E1E, dark.bg.toArgb().toLong() and 0xFFFFFF)
+        assertEquals(0xD4D4D4, dark.text.toArgb().toLong() and 0xFFFFFF)
+        assertEquals(0xF5F5F5, light.bg.toArgb().toLong() and 0xFFFFFF)
+        assertEquals(0x333333, light.text.toArgb().toLong() and 0xFFFFFF)
+        assertTrue(dark.text != dark.bg && light.text != light.bg)
+        assertTrue(dark.highlight != light.highlight)
+        assertTrue(dark.keyword != Color.White && light.keyword != Color.White)
     }
 
     @Test

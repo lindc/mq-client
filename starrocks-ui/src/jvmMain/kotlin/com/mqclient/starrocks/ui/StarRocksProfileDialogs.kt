@@ -20,6 +20,8 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material3.AlertDialog
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -27,6 +29,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -47,6 +50,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.mqclient.aiui.untrustedContextRule
 import com.mqclient.aiui.wrapUntrustedContext
 import com.mqclient.core.LocalizedException
@@ -392,18 +396,57 @@ private fun TopOperatorTable(operators: List<ProfileOperator>) {
     }
 }
 
-/* 查看器深色主题（IDE 风格，独立于应用主题，保证可读性）。 */
-private val ViewerBg = Color(0xFF1E1E1E)
-private val ViewerText = Color(0xFFD4D4D4)
-private val ViewerLabel = Color(0xFF9E9E9E)
-private val ViewerChipBg = Color(0xFF2D2D2D)
-private val ViewerAccent = Color(0xFF4FC1FF)
-private val ViewerHighlight = Color(0xFFFFEB3B).copy(alpha = 0.28f)
+/**
+ * 查看器配色统一管理（VS Code 深色 / 打印浅色两套预设），杜绝组件内散落的硬编码。
+ * highlight 在两种主题下都保证可读；keyword 用于 TotalTime 等关键指标的柔和染色。
+ */
+internal data class ViewerColors(
+    val bg: Color,
+    val text: Color,
+    val label: Color,
+    val chipBg: Color,
+    val accent: Color,
+    val borderColor: Color,
+    val highlight: Color,
+    val keyword: Color,
+)
+
+private val ViewerDarkColors = ViewerColors(
+    bg = Color(0xFF1E1E1E),
+    text = Color(0xFFD4D4D4),
+    label = Color(0xFF9E9E9E),
+    chipBg = Color(0xFF2D2D2D),
+    accent = Color(0xFF4FC1FF),
+    borderColor = Color(0xFF555555),
+    highlight = Color(0xFFFFEB3B).copy(alpha = 0.28f),
+    keyword = Color(0xFF569CD6),
+)
+
+private val ViewerLightColors = ViewerColors(
+    bg = Color(0xFFF5F5F5),
+    text = Color(0xFF333333),
+    label = Color(0xFF7A7A7A),
+    chipBg = Color(0xFFEBEBEB),
+    accent = Color(0xFF0451A5),
+    borderColor = Color(0xFFC8C8C8),
+    highlight = Color(0xFFFFB300).copy(alpha = 0.45f),
+    keyword = Color(0xFF0451A5),
+)
+
+internal fun viewerColors(dark: Boolean): ViewerColors =
+    if (dark) ViewerDarkColors else ViewerLightColors
+
+/** 结构染色的关键字：Metric 键名 / 分层标题，命中处染柔和色（深蓝 / 浅蓝随主题）。 */
+private val VIEWER_KEYWORDS = listOf(
+    "QueryId:", "State:", "TotalTime:", "OperatorTotalTime:", "OutputRows:",
+    "PeakMemoryUsage", "AllocatedMemoryUsage", "PullRowNum:", "PushRowNum:",
+    "Table:", "Summary:", "Fragment ", "Pipeline (id=",
+)
 
 /**
  * 完整 Profile 查看器：ObjectDetailDialog 外壳（CONTENT 档 = 屏幕约 85%，可调）。
- * 深色 IDE 风格面板：顶部指标卡（Query ID / 总耗时 / 峰值内存 / 扫描行数 / 状态）+
- * 关键字搜索（命中处高亮 + 匹配计数）+ 等宽全文（可滚动、可选中复制）。
+ * IDE 风格面板：顶部指标卡 + 关键字搜索（命中高亮 + 匹配计数）+ 等宽全文
+ * （行高 20sp、结构染色、可滚动、可选中复制）；右上角可切换深色 / 浅色主题。
  * 底部「复制全部」入剪贴板的文本即上游清洗后的纯净文本（无 ANSI 乱码）。
  */
 @Composable
@@ -413,14 +456,17 @@ internal fun StarRocksProfileViewerDialog(
     onDismiss: () -> Unit,
 ) {
     val clipboard = LocalClipboardManager.current
+    var darkTheme by remember { mutableStateOf(true) }
+    val colors = viewerColors(darkTheme)
     var query by remember { mutableStateOf("") }
     val summary = remember(raw) { parseProfileSummary(raw) }
-    val annotated = remember(raw, query) { buildHighlightedText(raw, query) }
+    val annotated = remember(raw, query, colors) { buildViewerText(raw, query, colors) }
     val matchCount = remember(raw, query) {
         if (query.isBlank()) 0
         else raw.lowercase().split(query.lowercase()).size - 1
     }
     val matchCountText = stringResource("olap.starrocks.profile.match_count").withArg(matchCount)
+    val toggleThemeText = stringResource("olap.starrocks.profile.toggle_theme")
 
     ObjectDetailDialog(
         title = title,
@@ -434,19 +480,29 @@ internal fun StarRocksProfileViewerDialog(
         },
     ) {
         Column(Modifier.fillMaxSize()) {
-            // ── 指标卡 ──
+            // ── 指标卡 + 主题切换（右上角） ──
             Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 20.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
             ) {
-                ViewerMetricChip(stringResource("olap.starrocks.processlist.col_id"), summary.queryId)
-                ViewerMetricChip(stringResource("olap.starrocks.profile.summary_total"), summary.totalTime)
-                ViewerMetricChip(stringResource("olap.starrocks.profile.summary_peak"), summary.peakMemory)
-                ViewerMetricChip(stringResource("olap.starrocks.profile.summary_scan"), summary.scanRows)
-                ViewerMetricChip(stringResource("olap.starrocks.profile.summary_state"), summary.state)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                ) {
+                    ViewerMetricChip(stringResource("olap.starrocks.processlist.col_id"), summary.queryId, colors)
+                    ViewerMetricChip(stringResource("olap.starrocks.profile.summary_total"), summary.totalTime, colors)
+                    ViewerMetricChip(stringResource("olap.starrocks.profile.summary_peak"), summary.peakMemory, colors)
+                    ViewerMetricChip(stringResource("olap.starrocks.profile.summary_scan"), summary.scanRows, colors)
+                    ViewerMetricChip(stringResource("olap.starrocks.profile.summary_state"), summary.state, colors)
+                }
+                // 主题切换：深色（VS Code 风）/ 浅色（打印风）。
+                IconButton(onClick = { darkTheme = !darkTheme }) {
+                    Icon(
+                        if (darkTheme) Icons.Filled.LightMode else Icons.Filled.DarkMode,
+                        contentDescription = toggleThemeText,
+                        tint = colors.accent,
+                    )
+                }
             }
 
             // ── 搜索框 + 匹配计数 ──
@@ -456,13 +512,13 @@ internal fun StarRocksProfileViewerDialog(
                 singleLine = true,
                 textStyle = MaterialTheme.typography.bodySmall.copy(
                     fontFamily = FontFamily.Monospace,
-                    color = ViewerText,
+                    color = colors.text,
                 ),
                 placeholder = {
                     Text(
                         stringResource("olap.starrocks.profile.search_placeholder"),
                         style = MaterialTheme.typography.bodySmall,
-                        color = ViewerLabel,
+                        color = colors.label,
                     )
                 },
                 trailingIcon = {
@@ -470,35 +526,38 @@ internal fun StarRocksProfileViewerDialog(
                         Text(
                             matchCountText,
                             style = MaterialTheme.typography.labelSmall,
-                            color = ViewerAccent,
+                            color = colors.accent,
                             modifier = Modifier.padding(end = 8.dp),
                         )
                     }
                 },
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = ViewerText,
-                    unfocusedTextColor = ViewerText,
-                    cursorColor = ViewerAccent,
-                    focusedBorderColor = ViewerAccent,
-                    unfocusedBorderColor = Color(0xFF555555),
+                    focusedTextColor = colors.text,
+                    unfocusedTextColor = colors.text,
+                    cursorColor = colors.accent,
+                    focusedBorderColor = colors.accent,
+                    unfocusedBorderColor = colors.borderColor,
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp),
             )
 
-            // ── 深色全文区（可滚动 / 可选中复制 / 命中高亮） ──
+            // ── 全文区（可滚动 / 可选中复制 / 搜索高亮 / 结构染色） ──
             Box(
                 Modifier
                     .weight(1f)
                     .padding(horizontal = 20.dp, vertical = 8.dp)
-                    .background(ViewerBg, RoundedCornerShape(8.dp)),
+                    .background(colors.bg, RoundedCornerShape(8.dp)),
             ) {
                 SelectionContainer {
                     Text(
                         annotated,
                         fontFamily = FontFamily.Monospace,
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = colors.text,
+                            lineHeight = 20.sp,
+                        ),
                         modifier = Modifier
                             .fillMaxSize()
                             .verticalScroll(rememberScrollState())
@@ -510,50 +569,73 @@ internal fun StarRocksProfileViewerDialog(
     }
 }
 
-/** 深色指标卡：标签（灰）+ 值（亮），空值显示 "-"。 */
+/** 深浅主题共用的指标卡：标签 + 值，空值显示 "-"。 */
 @Composable
-private fun ViewerMetricChip(label: String, value: String) {
+private fun ViewerMetricChip(label: String, value: String, colors: ViewerColors) {
     Column(
         modifier = Modifier
-            .background(ViewerChipBg, RoundedCornerShape(6.dp))
+            .background(colors.chipBg, RoundedCornerShape(6.dp))
             .padding(horizontal = 10.dp, vertical = 6.dp),
     ) {
         Text(
             label,
             style = MaterialTheme.typography.labelSmall,
-            color = ViewerLabel,
+            color = colors.label,
         )
         Text(
             value.ifBlank { "-" },
             style = MaterialTheme.typography.bodySmall,
-            color = ViewerText,
+            color = colors.text,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
     }
 }
 
+/** 搜索高亮 span（高优先级：覆盖关键字染色）。 */
+private data class ViewerSpan(val start: Int, val end: Int, val style: SpanStyle)
+
 /**
- * 搜索高亮：关键字（大小写不敏感）命中处加背景色；无关键字时原样返回。
+ * 构建查看器文本：结构染色（Metric 键名染柔和色）+ 搜索命中高亮（覆盖结构染色）。
+ * 两个 span 集合先各自收集，再按起点排序并裁剪重叠。
  */
-private fun buildHighlightedText(raw: String, query: String): AnnotatedString = buildAnnotatedString {
-    if (query.isBlank()) {
-        append(raw)
-        return@buildAnnotatedString
-    }
-    val lower = raw.lowercase()
-    val needle = query.lowercase()
-    var index = 0
-    while (true) {
-        val found = lower.indexOf(needle, index)
-        if (found < 0) {
-            append(raw.substring(index))
-            break
+private fun buildViewerText(raw: String, query: String, colors: ViewerColors): AnnotatedString = buildAnnotatedString {
+    val keywordSpans = mutableListOf<ViewerSpan>()
+    for (keyword in VIEWER_KEYWORDS) {
+        var index = 0
+        while (true) {
+            val found = raw.indexOf(keyword, index)
+            if (found < 0) break
+            keywordSpans += ViewerSpan(found, found + keyword.length, SpanStyle(color = colors.keyword))
+            index = found + keyword.length
         }
-        append(raw.substring(index, found))
-        withStyle(SpanStyle(background = ViewerHighlight)) {
-            append(raw.substring(found, found + needle.length))
-        }
-        index = found + needle.length
     }
+
+    val searchSpans = mutableListOf<ViewerSpan>()
+    if (query.isNotBlank()) {
+        val lower = raw.lowercase()
+        val needle = query.lowercase()
+        var index = 0
+        while (true) {
+            val found = lower.indexOf(needle, index)
+            if (found < 0) break
+            searchSpans += ViewerSpan(found, found + needle.length, SpanStyle(background = colors.highlight))
+            index = found + needle.length
+        }
+    }
+
+    // 关键字 span 剔除与搜索 span 重叠的部分（搜索高亮优先）。
+    val keptKeywords = keywordSpans.filter { kw ->
+        searchSpans.none { s -> kw.start < s.end && s.start < kw.end }
+    }
+
+    val all = (keptKeywords + searchSpans).sortedBy { it.start }
+    var cursor = 0
+    for (span in all.sortedBy { it.start }) {
+        if (span.start < cursor) continue   // 重叠裁剪
+        if (span.start > cursor) append(raw.substring(cursor, span.start))
+        withStyle(span.style) { append(raw.substring(span.start, span.end)) }
+        cursor = span.end
+    }
+    if (cursor < raw.length) append(raw.substring(cursor))
 }
