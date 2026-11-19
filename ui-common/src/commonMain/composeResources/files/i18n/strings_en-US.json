@@ -379,7 +379,7 @@
   "olap.starrocks.profile.enable_collect": "Enable session collection",
   "olap.starrocks.profile.enabling_collect": "Enabling...",
   "olap.starrocks.profile.collect_enabled": "Session profile collection is now enabled (SET enable_profile = true). Old queries cannot be viewed retroactively — re-run the query and view its profile after it finishes.",
-  "olap.starrocks.processlist.profile_eligible_hint": "This statement type does not support profile collection",
+  "olap.starrocks.processlist.profile_eligible_hint": "Cannot resolve the QueryId of this session; profile is unavailable",
   "olap.starrocks.console.view_profile": "View this query's profile",
   "olap.starrocks.processlist.profile_copy": "Copy text",
   "olap.starrocks.console.export": "Export CSV",

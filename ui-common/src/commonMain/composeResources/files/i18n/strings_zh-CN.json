@@ -379,7 +379,7 @@
   "olap.starrocks.profile.enable_collect": "开启会话采集",
   "olap.starrocks.profile.enabling_collect": "正在开启...",
   "olap.starrocks.profile.collect_enabled": "已在当前会话开启 Profile 采集（SET enable_profile = true）。旧查询无法回溯：请重新发起查询，结束后再查看。",
-  "olap.starrocks.processlist.profile_eligible_hint": "该类型查询不支持采集 Profile",
+  "olap.starrocks.processlist.profile_eligible_hint": "无法定位该查询的 QueryId，暂无法查看 Profile",
   "olap.starrocks.console.view_profile": "查看本次 Profile",
   "olap.starrocks.processlist.profile_copy": "复制文本",
   "olap.starrocks.console.export": "导出 CSV",

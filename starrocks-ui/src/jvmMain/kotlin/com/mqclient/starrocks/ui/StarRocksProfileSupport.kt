@@ -313,32 +313,6 @@ private const val PROFILE_NOT_COLLECTED_FALLBACK =
         "or the session that executed it has not run SET enable_profile = true."
 
 /**
- * 判断一条 SQL 是否值得采集 / 查看 Profile：`SHOW` / `SET` / `USE` / `DESC` /
- * `KILL` / 权限类等系统与元数据语句不被 StarRocks 采集（取数必然落空）。
- * 会话列表的按钮防呆与控制台入口共用本判断。
- *
- * 取首条非空、非注释行的第一个 token 比对。**空 / 未知语句放行**：空闲会话行的
- * Info 为空，但其 QueryId 仍可经 LAST_QUERY_ID / current_queries 映射解析，
- * 禁用会误伤主路径 —— 取不到时由取数层的业务异常兜底提示。
- */
-private val NON_PROFILE_STATEMENTS = setOf("SHOW", "SET", "USE", "DESC", "DESCRIBE", "KILL", "GRANT", "REVOKE")
-
-internal fun isProfileEligible(sql: String): Boolean {
-    val firstToken = sql.lineSequence()
-        .map { it.trim() }
-        .firstOrNull { it.isNotEmpty() && !it.startsWith("--") && !it.startsWith("#") }
-        ?.trimStart('-')
-        ?.trim()
-        ?.split(Regex("""\s+"""))
-        ?.firstOrNull()
-        ?.trimStart('(')
-        ?.trimEnd(';', ',', ')')
-        ?.uppercase()
-        .orEmpty()
-    return firstToken !in NON_PROFILE_STATEMENTS
-}
-
-/**
  * 拉取 Profile 原始文本（Query Profile 闭环的取数入口）。
  *
  * 降级链见 [profileStatements]（get_query_profile 首选 / ANALYZE 兜底）；两步都拿

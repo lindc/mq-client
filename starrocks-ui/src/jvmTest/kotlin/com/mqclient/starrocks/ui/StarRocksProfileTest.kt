@@ -136,31 +136,6 @@ class StarRocksProfileTest {
     }
 
     @Test
-    fun `system statements are not profile eligible`() {
-        // SHOW / SET / USE 等系统与元数据语句不被 StarRocks 采集 —— 列表按钮防呆共用。
-        listOf(
-            "SHOW FULL PROCESSLIST;",
-            "SET enable_profile = true;",
-            "USE test_db",
-            "DESC sales",
-            "DESCRIBE sales",
-            "KILL 42;",
-        ).forEach { sql -> assertTrue(!isProfileEligible(sql), sql) }
-
-        // 普通查询（含行首注释）可采集。
-        listOf(
-            "SELECT 1",
-            "INSERT INTO sales VALUES (NOW(), '华东', 'p', 1.0, 1)",
-            "-- 注释\nSELECT 1",
-        ).forEach { sql -> assertTrue(isProfileEligible(sql), sql) }
-
-        // 空 / 未知语句放行：空闲会话行的 QueryId 仍可映射解析，
-        // 禁用会误伤主路径（取不到时由取数层业务异常兜底提示）。
-        assertTrue(isProfileEligible(""))
-        assertTrue(isProfileEligible("-- 只有注释"))
-    }
-
-    @Test
     fun `sql constants stay on the verified statements`() {
         assertEquals("SHOW PROFILELIST;", PROFILELIST_SQL)
         assertTrue(PROFILELIST_SQL.startsWith("SHOW"), PROFILELIST_SQL)

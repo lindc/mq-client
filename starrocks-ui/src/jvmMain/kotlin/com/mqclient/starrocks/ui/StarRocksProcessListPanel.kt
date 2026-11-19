@@ -452,10 +452,12 @@ private fun ProcessRow(
             }
         }
         // 「查看 Profile」：只拉取 + 文本展示，不做树形解析。
-        // 防呆：SHOW / SET / USE 等系统语句不被采集 —— 按钮置灰 + 悬浮提示原因。
+        // 防呆按「QueryId 是否可解析」判断，而不是 Info 文本 —— 面板自身会话行的
+        // Info 恒为 SHOW FULL PROCESSLIST，但其 QueryId 已映射到用户真正的控制台
+        // 查询（LAST_QUERY_ID）；只有数字回落 id（无法定位 QueryId）才置灰。
         Box(Modifier.width(110.dp), contentAlignment = Alignment.Center) {
-            val profileEligible = isProfileEligible(s.info)
-            if (profileEligible) {
+            val queryIdResolved = s.queryId.toLongOrNull() == null
+            if (queryIdResolved) {
                 TextButton(onClick = { onProfile(s) }) {
                     Text(
                         stringResource("olap.starrocks.processlist.profile"),
