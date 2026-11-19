@@ -72,6 +72,46 @@ class StarRocksProcessListTest {
     }
 
     @Test
+    fun `processlist sql does not reference information_schema`() {
+        // StarRocks 的 information_schema 没有 processlist 表（3.4.0 实测
+        // "Unknown table 'information_schema.processlist'"），会话列表必须走
+        // `SHOW FULL PROCESSLIST` —— 钉住，防止改回 I_S 表查询。
+        assertTrue(!PROCESSLIST_SQL.contains("information_schema"), PROCESSLIST_SQL)
+        assertTrue(PROCESSLIST_SQL.startsWith("SHOW"), PROCESSLIST_SQL)
+    }
+
+    @Test
+    fun `parses starrocks 3_4 SHOW FULL PROCESSLIST shape`() {
+        // 3.4.0 实测列：Id/User/Host/Db/Command/ConnectionStartTime/Time/State/Info/IsPending。
+        // 额外列（ConnectionStartTime/IsPending）被忽略；Db 为 null；无 query_id 列。
+        val result = StarRocksQueryRows(
+            columns = listOf(
+                "Id", "User", "Host", "Db", "Command",
+                "ConnectionStartTime", "Time", "State", "Info", "IsPending",
+            ),
+            rows = listOf(
+                listOf(
+                    23L, "root", "127.0.0.1:42002", null, "Query",
+                    "2026-11-19 11:35:51", 0L, "OK", "SHOW FULL PROCESSLIST", false,
+                ),
+            ),
+        )
+        val sessions = parseProcessList(result)
+        assertEquals(1, sessions.size)
+        with(sessions.single()) {
+            assertEquals("23", id)
+            assertEquals("root", user)
+            assertEquals("127.0.0.1:42002", host)
+            assertEquals("-", db, "Db 为 null 时回落占位符")
+            assertEquals("Query", command)
+            assertEquals("OK", state)
+            assertEquals(0L, timeSeconds)
+            assertEquals("SHOW FULL PROCESSLIST", info)
+            assertEquals("23", queryId, "3.4 无 query_id 列，回落连接 id")
+        }
+    }
+
+    @Test
     fun `query id column is preferred over connection id`() {
         val result = StarRocksQueryRows(
             columns = columns + "query_id",
@@ -87,14 +127,101 @@ class StarRocksProcessListTest {
     }
 
     @Test
-    fun `profile statements accept uuid and numeric ids but reject injection`() {
+    fun `current queries proc maps connection id to real query id`() {
+        // 3.4.0 实测列：StartTime/feIp/QueryId/ConnectionId/...（Profile 语句需要 UUID）。
+        val result = StarRocksQueryRows(
+            columns = listOf(
+                "StartTime", "feIp", "QueryId", "ConnectionId", "Database", "User",
+                "ScanBytes", "ScanRows", "MemoryUsage", "DiskSpillSize", "CPUTime",
+                "ExecTime", "Warehouse", "CustomQueryId", "ResourceGroup",
+            ),
+            rows = listOf(
+                listOf(
+                    "2026-11-19 11:41:24", "127.0.0.1", "25ffebe1-e40e-11f1-8289-968dc029c89c",
+                    34L, "", "root", "0.000 B", "0 rows", "46.438 KB", "0.000 B",
+                    "0.000 s", "2.013 s", "default_warehouse", "", "default_wg",
+                ),
+            ),
+        )
         assertEquals(
-            listOf("ANALYZE PROFILE FROM 'a1b2-c3d4';", "ANALYZE PROFILE FROM a1b2-c3d4;"),
+            mapOf("34" to "25ffebe1-e40e-11f1-8289-968dc029c89c"),
+            parseQueryIdsByConnection(result),
+        )
+        // 列缺失（老版本 / 形状不符）→ 空 map，会话列表不受影响。
+        assertTrue(parseQueryIdsByConnection(StarRocksQueryRows(columns, emptyList())).isEmpty())
+        // 非数字 ConnectionId 不进映射（注入防线与 processlist id 同源）。
+        val dirty = StarRocksQueryRows(
+            columns = listOf("QueryId", "ConnectionId"),
+            rows = listOf(listOf("uuid", "34; DROP DATABASE x"), listOf("uuid2", 5L)),
+        )
+        assertEquals(mapOf("5" to "uuid2"), parseQueryIdsByConnection(dirty))
+    }
+
+    @Test
+    fun `proc query id map feeds parseProcessList when query_id column is missing`() {
+        val result = StarRocksQueryRows(
+            columns = columns,
+            rows = listOf(listOf(34L, "root", "h", "db", "Query", 2L, "OK", "SELECT SLEEP(2)")),
+        )
+        val sessions = parseProcessList(
+            result,
+            mapOf("34" to "25ffebe1-e40e-11f1-8289-968dc029c89c"),
+        )
+        assertEquals("25ffebe1-e40e-11f1-8289-968dc029c89c", sessions.single().queryId)
+        // 无映射时仍回落连接 id（原有行为不变）。
+        assertEquals("34", parseProcessList(result).single().queryId)
+    }
+
+    @Test
+    fun `current queries sql stays a proc statement`() {
+        assertTrue(CURRENT_QUERIES_SQL.contains("current_queries"), CURRENT_QUERIES_SQL)
+    }
+
+    @Test
+    fun `own last query row yields connection id to query id pair`() {
+        val result = StarRocksQueryRows(
+            columns = listOf("conn_id", "last_qid"),
+            rows = listOf(listOf(46L, "4a416c9d-e40e-11f1-8289-968dc029c89c")),
+        )
+        assertEquals("46" to "4a416c9d-e40e-11f1-8289-968dc029c89c", parseOwnLastQuery(result))
+        // 形状不符（缺列 / 空行 / 非数字连接 id）返回 null，load 静默跳过。
+        assertNull(parseOwnLastQuery(StarRocksQueryRows(listOf("a", "b"), listOf(listOf(1, 2)))))
+        assertNull(parseOwnLastQuery(StarRocksQueryRows(listOf("conn_id", "last_qid"), emptyList())))
+        assertNull(
+            parseOwnLastQuery(
+                StarRocksQueryRows(listOf("conn_id", "last_qid"), listOf(listOf("x", "uuid"))),
+            ),
+        )
+    }
+
+    @Test
+    fun `own last query sql selects connection and last query id`() {
+        assertTrue(OWN_LAST_QUERY_SQL.contains("LAST_QUERY_ID"), OWN_LAST_QUERY_SQL)
+        assertTrue(OWN_LAST_QUERY_SQL.contains("CONNECTION_ID"), OWN_LAST_QUERY_SQL)
+    }
+
+    @Test
+    fun `profile statements are quoted and fall back to get_query_profile`() {
+        val fullUuid = "a1b2-c3d4"
+        assertEquals(
+            listOf(
+                "SELECT get_query_profile('a1b2-c3d4');",
+                "ANALYZE PROFILE FROM 'a1b2-c3d4';",
+            ),
             profileStatements("a1b2-c3d4"),
         )
         assertEquals(
-            listOf("ANALYZE PROFILE FROM '42';", "ANALYZE PROFILE FROM 42;"),
+            listOf(
+                "SELECT get_query_profile('42');",
+                "ANALYZE PROFILE FROM '42';",
+            ),
             profileStatements("42"),
+        )
+        // 单引号必须：任何语句都不允许出现不带引号的 query id（FE 会把 UUID 在
+        // 连字符处切开，报出形如 'ANALYZE PROFILE FROM 297a21b0' 的误导性语法错）。
+        assertTrue(
+            profileStatements(fullUuid).orEmpty().all { it.contains("'$fullUuid'") },
+            "query id 必须单引号包裹",
         )
         assertNull(profileStatements("42; DROP DATABASE x"))
         assertNull(profileStatements("' OR 1=1 --"))

@@ -62,6 +62,27 @@ private const val FALLBACK_DIAGNOSIS_PROMPT =
         "3) Wrap any SQL or code in Markdown fenced code blocks. " +
         "4) If evidence is insufficient, state what else is needed; never fabricate details."
 
+/** 「询问 AI」入口：EXPLAIN 诊断（SQL 控制台用）——走 [StarRocksAiDiagnosisDialog] 的默认档。 */
+@Composable
+internal fun StarRocksAiDiagnosisDialog(
+    connectionId: String,
+    sql: String,
+    onDismiss: () -> Unit,
+) {
+    StarRocksAiDiagnosisDialog(
+        connectionId = connectionId,
+        sql = sql,
+        onDismiss = onDismiss,
+        title = stringResource("olap.starrocks.ai.title"),
+        systemPrompt = starrocksDiagnosisSystemPrompt(),
+        buildPayload = { statement ->
+            wrapUntrustedContext(
+                StarRocksAiChainBuilder.buildPayload(StarRocksAiChainBuilder.build(connectionId, statement)),
+            )
+        },
+    )
+}
+
 /**
  * 当前语言的慢查询诊断系统提示词：基础角色提示词 + **ai-ui 的不可信上下文规则**
  * （与 MQ 链路分析同一条安全规则，不重复实现）。
@@ -88,30 +109,36 @@ private sealed interface AiDiagnosisState {
 }
 
 /**
- * 「AI 慢查询诊断」弹窗：EXPLAIN + 表结构 → Prompt → 流式输出。
- *
- * 复用的基建（不造轮子）：
+ * 「AI 分析」弹窗（通用壳）：上下文构建 + Prompt 由调用方注入，流式渲染复用
+ * 本文件的全部基建（不造轮子）：
  * - [AdapterChatService] → ai-core 的 `AiAdapterRegistry` + SseParser 流式；
  * - [wrapUntrustedContext] / [untrustedContextRule] → MQ 链路分析同款防注入边界；
  * - [AiMessageBubble] → 项目现成的 Markdown 渲染（代码块 / 列表 / 加粗）+ 复制按钮；
  * - `onChunk` 可能来自任意线程，经 [Channel] 转回组合协程串行追加（与
  *   AiPanelState 的 StreamingReplyBuffer 同思路，100ms 节流避免逐片重解析 Markdown）。
  *
- * 系统提示词通过 `AiConnection.copy(systemPrompt = …)` 换成本场景的「数据库性能
- * 优化专家」，不改任何共享面板行为。
+ * 两个入口：
+ * - EXPLAIN 诊断（SQL 控制台）：[StarRocksAiDiagnosisDialog] 单参数档；
+ * - Query Profile 分析（会话与慢查询面板）：传 [buildPayload] / [systemPrompt] /
+ *   [title] 的 Profile 摘要档（见 ProfileDetailDialog）。
  */
 @Composable
 internal fun StarRocksAiDiagnosisDialog(
     connectionId: String,
+    /** 预览与上下文构建的输入：EXPLAIN 档 = 原始 SQL；Profile 档 = 查询语句（仅展示）。 */
     sql: String,
     onDismiss: () -> Unit,
+    /** 弹窗标题（组合期由调用方 i18n 化）。 */
+    title: String,
+    /** 系统提示词（含模块自己追加的安全规则，见 untrustedContextRule）。 */
+    systemPrompt: String,
+    /** 上下文构建（IO 上下文执行）：statement → 已包裹好的用户消息正文。 */
+    buildPayload: suspend (statement: String) -> String,
 ) {
     var state by remember { mutableStateOf<AiDiagnosisState>(AiDiagnosisState.Building) }
     var answer by remember { mutableStateOf("") }
     val chat = remember { AdapterChatService() }
     val chunks = remember { Channel<String>(Channel.UNLIMITED) }
-    // 提示词在组合期解析（语言切换随重组刷新），发送时直接捕获。
-    val expertPrompt = starrocksDiagnosisSystemPrompt()
     val noProviderText = stringResource("olap.starrocks.ai.no_provider")
     val failedPrefix = stringResource("olap.starrocks.ai.failed_prefix")
 
@@ -122,11 +149,8 @@ internal fun StarRocksAiDiagnosisDialog(
             return@LaunchedEffect
         }
         try {
-            // 上下文构建（EXPLAIN + 表结构）全在 IO 上，不阻塞 UI。
-            val context = withContext(Dispatchers.IO) {
-                StarRocksAiChainBuilder.build(connectionId, sql)
-            }
-            val payload = wrapUntrustedContext(StarRocksAiChainBuilder.buildPayload(context))
+            // 上下文构建全在 IO 上，不阻塞 UI。
+            val payload = withContext(Dispatchers.IO) { buildPayload(sql) }
             val userMessage = AiMessage(
                 id = newUuidV7(),
                 role = Role.USER,
@@ -152,7 +176,7 @@ internal fun StarRocksAiDiagnosisDialog(
             withContext(Dispatchers.IO) {
                 chat.streamReply(
                     history = listOf(userMessage),
-                    connection = connection.copy(systemPrompt = expertPrompt),
+                    connection = connection.copy(systemPrompt = systemPrompt),
                     context = null,
                 ) { chunk -> chunks.trySend(chunk) }
             }
@@ -175,7 +199,7 @@ internal fun StarRocksAiDiagnosisDialog(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Filled.AutoAwesome, contentDescription = null)
                 Text(
-                    stringResource("olap.starrocks.ai.title"),
+                    title,
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.padding(start = 8.dp),
                 )

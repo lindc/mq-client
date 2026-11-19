@@ -46,10 +46,12 @@ data class StarRocksConnectionConfig(
             if (jdbcUrlOverride.isNotBlank()) put(KEY_JDBC_URL, jdbcUrlOverride)
         }
 
-    /** 完整 JDBC URL（[jdbcUrlOverride] 优先）。 */
+    /** 完整 JDBC URL（[jdbcUrlOverride] 优先，自动追加 Profile 采集会话变量）。 */
     val jdbcUrl: String
-        get() = jdbcUrlOverride.takeIf { it.isNotBlank() }
-            ?: "jdbc:mysql://$host:$port/$database"
+        get() = withProfileCollection(
+            jdbcUrlOverride.takeIf { it.isNotBlank() }
+                ?: "jdbc:mysql://$host:$port/$database",
+        )
 
     /** 日志展示用端点（不含凭据）。 */
     val endpoint: String get() = "$host:$port"
@@ -85,8 +87,10 @@ data class StarRocksConnectionConfig(
         /** 默认库（StarRocks 内置，必定存在）。 */
         const val DEFAULT_DATABASE: String = "information_schema"
 
-        /** 从已落盘的 `ConnectionInfo.options` 还原（编辑模式 / 连接管理器用）。 */
-        fun fromOptions(
+    /**
+     * 从已落盘的 `ConnectionInfo.options` 还原（编辑模式 / 连接管理器用）。
+     */
+    fun fromOptions(
             connectionId: String,
             displayName: String,
             options: Map<String, String>,
@@ -101,4 +105,18 @@ data class StarRocksConnectionConfig(
             jdbcUrlOverride = options[KEY_JDBC_URL].orEmpty(),
         )
     }
+}
+
+/**
+ * 在 JDBC URL 上追加 Connector/J 的 `sessionVariables` 连接属性：握手后驱动自动
+ * 对会话执行 `SET enable_profile = true` —— 客户端自身发起的查询因此会被
+ * StarRocks 采集 Profile，「查看 Profile」闭环的采集侧兜底。
+ *
+ * URL 已带查询参数时用 `&` 连接；用户显式配置过 `sessionVariables` 时不覆盖
+ * （尊重高级用户的自定义连接参数）。
+ */
+internal fun withProfileCollection(url: String): String {
+    if (url.contains("sessionVariables=")) return url
+    val separator = if (url.contains('?')) "&" else "?"
+    return "$url${separator}sessionVariables=enable_profile=true"
 }

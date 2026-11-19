@@ -14,9 +14,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -36,8 +35,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -52,9 +49,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.*
 
-/** 当前会话（information_schema.processlist 的一行）。 */
+/** 当前会话（`SHOW FULL PROCESSLIST` 的一行）。 */
 internal data class ProcessInfo(
     val id: String,
     val user: String,
@@ -64,12 +60,29 @@ internal data class ProcessInfo(
     val state: String,
     val timeSeconds: Long,
     val info: String,
-    /** StarRocks 的 queryId（UUID）；老版本 processlist 无此列时回落连接 id。 */
+    /**
+     * StarRocks 的 queryId（UUID）：优先 query_id 列，其次 [CURRENT_QUERIES_SQL]
+     * 的连接 id → QueryId 映射，都没有时回落连接 id（Profile 会得到友好报错）。
+     */
     val queryId: String,
 )
 
-internal const val PROCESSLIST_SQL =
-    "SELECT id, user, host, db, command, time, state, info FROM information_schema.processlist;"
+// 会话列表数据源：StarRocks 的 information_schema 里**没有** processlist 表
+// （3.4.0 实测报 Unknown table），MySQL 风格的 `SHOW FULL PROCESSLIST` 在 FE 上
+// 原生支持；带 FULL 是为了 Info 列返回完整 SQL（不带会截断到 100 字符）。
+internal const val PROCESSLIST_SQL = "SHOW FULL PROCESSLIST;"
+
+// 运行中查询的「连接 id → QueryId」映射数据源：processlist（3.4 实测）不带
+// query_id 列，而 Profile 语句需要的是 UUID —— `SHOW PROC '/current_queries'`
+// 的 QueryId / ConnectionId 两列正好补上这个缺口。
+internal const val CURRENT_QUERIES_SQL = "SHOW PROC '/current_queries';"
+
+// 本会话最近一次查询的 QueryId：Profile 只认 UUID，而 processlist / current_queries
+// 都只覆盖「正在运行」的查询 —— SQL 控制台与面板共用同一会话（单槽串行），
+// `LAST_QUERY_ID()` 取到的正是用户上一条控制台查询（须在面板自己的查询**之前**取，
+// 否则会被本次 load 的 SHOW/PROC 语句覆盖）。
+internal const val OWN_LAST_QUERY_SQL =
+    "SELECT CONNECTION_ID() AS conn_id, LAST_QUERY_ID() AS last_qid;"
 
 /** 慢查询阈值（秒）：超过则耗时列标红。 */
 internal const val SLOW_QUERY_SECONDS = 10L
@@ -81,15 +94,18 @@ private const val AUTO_REFRESH_MS = 5_000L
  * 按**列名**解析 processlist（StarRocks 与 MySQL 的列名 / 顺序可能有差异）。
  * 缺列用空串 / 0 兜底，绝不因形状不同崩面板。
  */
-internal fun parseProcessList(result: StarRocksQueryRows): List<ProcessInfo> {
+internal fun parseProcessList(
+    result: StarRocksQueryRows,
+    queryIdsByConnection: Map<String, String> = emptyMap(),
+): List<ProcessInfo> {
     val cols = result.columns.map { it.lowercase() }
     fun indexOfAny(vararg names: String): Int? =
         names.firstNotNullOfOrNull { n -> cols.indexOf(n.lowercase()).takeIf { it >= 0 } }
 
     val idIdx = indexOfAny("id", "process_id", "connection_id")
-    // StarRocks 3.x 的 processlist 有 QUERY_ID（UUID）；老版本 / MySQL 没有，
-    // 回落连接 id，保证「查看 Profile」链路在没有真实环境时也能点通。
-    // 列名匹配统一在 lowercase 后进行（cols 已归一），无需列大小写变体。
+    // query_id 列（UUID）只有部分来源提供 —— `SHOW FULL PROCESSLIST`（3.4 实测）
+    // 就没有这一列；缺失时回落连接 id，保证「查看 Profile」链路在没有真实环境时
+    // 也能点通。列名匹配统一在 lowercase 后进行（cols 已归一），无需列大小写变体。
     val queryIdIdx = indexOfAny("query_id", "queryid")
     val userIdx = indexOfAny("user")
     val hostIdx = indexOfAny("host")
@@ -115,9 +131,42 @@ internal fun parseProcessList(result: StarRocksQueryRows): List<ProcessInfo> {
             state = cell(row, stateIdx),
             timeSeconds = timeIdx?.let { row.getOrNull(it)?.toString()?.toLongOrNull() } ?: 0L,
             info = infoIdx?.let { row.getOrNull(it)?.toString() }.orEmpty().ifBlank { "" },
-            queryId = cell(row, queryIdIdx).takeUnless { it == "-" } ?: id,
+            queryId = cell(row, queryIdIdx).takeUnless { it == "-" }
+                ?: queryIdsByConnection[id] ?: id,
         )
     }
+}
+
+/**
+ * `SHOW PROC '/current_queries'` → 连接 id → 真实 QueryId（UUID）。
+ *
+ * 列名按 lowercase 匹配（ConnectionId / QueryId，3.4.0 实测）；列缺失或形状
+ * 不符返回空 map，不影响会话列表本身 —— 只是「查看 Profile」退回连接 id。
+ * ConnectionId 必须是数字（与 processlist 的 id 同源，防脏数据进 Kill/Profile 链）。
+ */
+internal fun parseQueryIdsByConnection(result: StarRocksQueryRows): Map<String, String> {
+    val cols = result.columns.map { it.lowercase() }
+    val connIdx = cols.indexOf("connectionid").takeIf { it >= 0 } ?: return emptyMap()
+    val qidIdx = cols.indexOf("queryid").takeIf { it >= 0 } ?: return emptyMap()
+    return buildMap {
+        result.rows.forEach { row ->
+            val conn = row.getOrNull(connIdx)?.toString()?.trim().orEmpty()
+            val qid = row.getOrNull(qidIdx)?.toString()?.trim().orEmpty()
+            if (conn.toLongOrNull() != null && qid.isNotEmpty()) put(conn, qid)
+        }
+    }
+}
+
+/** [OWN_LAST_QUERY_SQL] → (本会话连接 id, 最近一次查询的 QueryId)；形状不符返回 null。 */
+internal fun parseOwnLastQuery(result: StarRocksQueryRows): Pair<String, String>? {
+    val cols = result.columns.map { it.lowercase() }
+    val connIdx = cols.indexOf("conn_id").takeIf { it >= 0 } ?: return null
+    val qidIdx = cols.indexOf("last_qid").takeIf { it >= 0 } ?: return null
+    val row = result.rows.firstOrNull() ?: return null
+    val conn = row.getOrNull(connIdx)?.toString()?.trim().orEmpty()
+    val qid = row.getOrNull(qidIdx)?.toString()?.trim().orEmpty()
+    if (conn.toLongOrNull() == null || qid.isEmpty()) return null
+    return conn to qid
 }
 
 /**
@@ -129,64 +178,8 @@ internal fun killStatements(id: String): List<String>? {
     return listOf("KILL QUERY $numeric;", "KILL $numeric;")
 }
 
-/**
- * Profile 拉取语句：StarRocks 官方文档是 `ANALYZE PROFILE FROM '<queryId>'`，
- * 也接受不带引号的写法；两种都备着，逐条降级尝试（与 Kill 同款）。
- *
- * queryId 先做**字符集白名单校验**（UUID 含 `-`，连接 id 是纯数字），
- * 防 SQL 注入；非法输入返回 null，调用方静默跳过。
- */
-internal fun profileStatements(queryId: String): List<String>? {
-    val safe = queryId.trim()
-    if (safe.isEmpty() || !Regex("""[A-Za-z0-9_:\-]+""").matches(safe)) return null
-    val escaped = safe.replace("'", "''")
-    return listOf(
-        "ANALYZE PROFILE FROM '$escaped';",
-        "ANALYZE PROFILE FROM $escaped;",
-    )
-}
-
-private val prettyJson = Json { prettyPrint = true }
-
-/** 尝试把一段文本 pretty print 成 JSON；不是合法 JSON 返回 null。 */
-private fun prettyJsonOrNull(text: String): String? = runCatching {
-    val element: JsonElement = prettyJson.parseToJsonElement(text)
-    prettyJson.encodeToString(JsonElement.serializer(), element)
-}.getOrNull()
-
-/**
- * Profile 结果 → 展示文本。兼容三种后端返回形态：
- * 1) 整段就是一个 JSON；2) 每行一个 JSON 对象；3) 纯表格文本（原样返回）。
- * 不解析成树，只做格式化文本。
- */
-internal fun formatProfileText(raw: String): String {
-    val trimmed = raw.trim()
-    if (trimmed.isEmpty()) return raw
-    prettyJsonOrNull(trimmed)?.let { return it }
-    val lines = trimmed.lines()
-    val prettyLines = lines.map { prettyJsonOrNull(it.trim()) ?: return raw }
-    return prettyLines.joinToString("\n")
-}
-
-/**
- * 拉取 Profile 原始文本：逐条尝试 [profileStatements]，全部走 [queryRows]
- * （复用 `executeQuery` 流式通道）。全部失败时抛最后一个异常，由 UI 显示友好文案。
- */
-internal suspend fun loadProfileText(connectionId: String, queryId: String): String {
-    val statements = profileStatements(queryId)
-        ?: throw IllegalArgumentException("invalid query id")
-    var lastError: Throwable? = null
-    for (sql in statements) {
-        val result = runCatching { queryRows(connectionId, sql) }
-        result.onSuccess { rows ->
-            return rows.rows.joinToString("\n") { row ->
-                row.joinToString(" | ") { it?.toString() ?: "NULL" }
-            }
-        }
-        lastError = result.exceptionOrNull()
-    }
-    throw lastError ?: IllegalStateException("profile query failed")
-}
+// Profile 取数与解析（profileStatements / fetchQueryProfile / parseProfileSummary /
+// formatProfileText）已迁到 StarRocksProfileSupport.kt；弹窗在 StarRocksProfileDialogs.kt。
 
 /**
  * 「会话与慢查询」只读监控面板（唯一的写操作是 Kill）。
@@ -204,7 +197,8 @@ internal fun StarRocksProcessListPanel(connectionId: String, modifier: Modifier 
     var error by remember { mutableStateOf<String?>(null) }
     var autoRefresh by remember { mutableStateOf(false) }
     var killTarget by remember { mutableStateOf<ProcessInfo?>(null) }
-    var profileTarget by remember { mutableStateOf<ProcessInfo?>(null) }
+    var profileTarget by remember { mutableStateOf<ProfileDetailTarget?>(null) }
+    var profileListOpen by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val snackbar = LocalSnackbarHostState.current
     // 单连接并发防护已下沉到 StarRocksModule.executeQuery 的串行锁：
@@ -218,8 +212,20 @@ internal fun StarRocksProcessListPanel(connectionId: String, modifier: Modifier 
         loading = true
         error = null
         try {
+            // 必须最先取：面板自己的查询会覆盖 LAST_QUERY_ID()，取晚了就只剩上一轮 load。
+            val ownLast = withContext(Dispatchers.IO) {
+                runCatching { parseOwnLastQuery(queryRows(connectionId, OWN_LAST_QUERY_SQL)) }.getOrNull()
+            }
             val result = withContext(Dispatchers.IO) { queryRows(connectionId, PROCESSLIST_SQL) }
-            sessions = parseProcessList(result)
+            // query_id 映射取不到只影响「查看 Profile」（退回连接 id），不影响会话列表。
+            val queryIds = withContext(Dispatchers.IO) {
+                val map = runCatching { parseQueryIdsByConnection(queryRows(connectionId, CURRENT_QUERIES_SQL)) }
+                    .getOrDefault(emptyMap())
+                    .toMutableMap()
+                ownLast?.let { (conn, qid) -> map.putIfAbsent(conn, qid) }
+                map
+            }
+            sessions = parseProcessList(result, queryIds)
         } catch (e: Throwable) {
             error = e.userMessage()
             sessions = emptyList()
@@ -274,6 +280,10 @@ internal fun StarRocksProcessListPanel(connectionId: String, modifier: Modifier 
                 style = MaterialTheme.typography.labelMedium,
             )
             Switch(checked = autoRefresh, onCheckedChange = { autoRefresh = it })
+            // 最近查询（Profile）：SHOW PROFILELIST 的已结束查询直达 Profile 详情。
+            IconButton(onClick = { profileListOpen = true }) {
+                Icon(Icons.Filled.History, contentDescription = stringResource("olap.starrocks.profilelist.title"))
+            }
             IconButton(onClick = { scope.launch { load() } }, enabled = !loading) {
                 Icon(Icons.Filled.Refresh, contentDescription = stringResource("olap.starrocks.catalog.refresh"))
             }
@@ -311,16 +321,26 @@ internal fun StarRocksProcessListPanel(connectionId: String, modifier: Modifier 
             else -> ProcessTable(
                 sessions,
                 onKill = { killTarget = it },
-                onProfile = { profileTarget = it },
+                onProfile = { profileTarget = ProfileDetailTarget(it.queryId, it.info) },
             )
         }
     }
 
-    // ── Profile 文本弹窗（本期只打通链路，不解析为树） ──
-    profileTarget?.let { target ->
-        ProfileDialog(
+    // ── Profile 闭环弹窗：最近查询列表 + 详情（指标 / Top 算子 / 原始文本 / AI 联动） ──
+    if (profileListOpen) {
+        ProfileListDialog(
             connectionId = connectionId,
-            queryId = target.queryId,
+            onOpenProfile = { item ->
+                profileListOpen = false
+                profileTarget = ProfileDetailTarget(item.queryId, item.statement)
+            },
+            onDismiss = { profileListOpen = false },
+        )
+    }
+    profileTarget?.let { target ->
+        ProfileDetailDialog(
+            connectionId = connectionId,
+            target = target,
             onDismiss = { profileTarget = null },
         )
     }
@@ -462,90 +482,3 @@ private fun ProcessCell(
     )
 }
 
-private sealed interface ProfileState {
-    data object Loading : ProfileState
-    data class Loaded(val text: String) : ProfileState
-    data class Failed(val message: String) : ProfileState
-}
-
-/**
- * Profile 文本弹窗：本轮只打通「拿到数据」的链路，不解析为树。
- * 取数走 [loadProfileText] → `executeQuery`；结果由 [formatProfileText] 美化后
- * 作为普通可选中文本展示，附一键复制方便后续离线分析。
- */
-@Composable
-private fun ProfileDialog(connectionId: String, queryId: String, onDismiss: () -> Unit) {
-    var state by remember { mutableStateOf<ProfileState>(ProfileState.Loading) }
-    val clipboard = LocalClipboardManager.current
-    val emptyText = stringResource("olap.starrocks.processlist.profile_empty")
-    val failedTemplate = stringResource("olap.starrocks.processlist.profile_failed")
-
-    LaunchedEffect(connectionId, queryId) {
-        state = ProfileState.Loading
-        val result = withContext(Dispatchers.IO) {
-            runCatching { loadProfileText(connectionId, queryId) }
-        }
-        result
-            .onSuccess { raw -> state = ProfileState.Loaded(formatProfileText(raw).ifBlank { emptyText }) }
-            .onFailure { error -> state = ProfileState.Failed(failedTemplate.withArg(error.userMessage())) }
-    }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        modifier = Modifier.width(720.dp),
-        title = {
-            Text(
-                stringResource("olap.starrocks.processlist.profile_title").withArg(queryId),
-                style = MaterialTheme.typography.titleMedium,
-            )
-        },
-        text = {
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 480.dp)
-                    .verticalScroll(rememberScrollState()),
-            ) {
-                when (val s = state) {
-                    ProfileState.Loading -> Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                        Text(
-                            stringResource("olap.starrocks.processlist.profile_loading"),
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.padding(start = 8.dp),
-                        )
-                    }
-                    is ProfileState.Failed -> Text(
-                        s.message,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                    is ProfileState.Loaded -> {
-                        // TODO: 将 JSON 解析为可视化的 Operator 树，并提取耗时最长的节点送给 AI 分析
-                        SelectionContainer {
-                            Text(
-                                s.text,
-                                fontFamily = FontFamily.Monospace,
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    val text = (state as? ProfileState.Loaded)?.text.orEmpty()
-                    if (text.isNotBlank()) clipboard.setText(AnnotatedString(text))
-                },
-                enabled = state is ProfileState.Loaded,
-            ) {
-                Text(stringResource("olap.starrocks.processlist.profile_copy"))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource("common_close")) }
-        },
-    )
-}
