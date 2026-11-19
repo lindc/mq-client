@@ -65,6 +65,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.mqclient.core.log.LogLevel
+import com.mqclient.starrocks.log.StarRocksLog
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.userMessage
 import com.mqclient.uicommon.i18n.withArg
@@ -240,6 +242,20 @@ internal fun parsePartitions(result: StarRocksQueryRows): List<CatalogPartition>
     }
 }
 
+/**
+ * ResultSet 的「形状摘要」：列名 + 前几行，供解析失败 / 丢行时判断是不是元数据列变了。
+ *
+ * 只取前 [maxRows] 行并交给 [StarRocksLog.truncate] 截断 —— 一个宽表一次能带回
+ * 几百个字段，整段灌进日志既没用也会把上下文冲掉。
+ */
+private fun describeRows(result: StarRocksQueryRows, maxRows: Int = 3): String = buildString {
+    append("columns=").append(result.columns)
+    result.rows.take(maxRows).forEachIndexed { index, row ->
+        append(" | row").append(index).append('=').append(row.map { it?.toString() ?: "NULL" })
+    }
+    if (result.rows.size > maxRows) append(" | (+").append(result.rows.size - maxRows).append(" more rows)")
+}
+
 /** 右侧详情面板的选中节点。字段不再是节点 —— 树只负责导航，字段在右侧表格里展示。 */
 private sealed interface CatalogSelection {
     data object Database : CatalogSelection
@@ -274,16 +290,53 @@ internal fun StarRocksCatalogPanel(connectionId: String, modifier: Modifier = Mo
     val ddlCache = remember { mutableStateMapOf<String, String>() }
     val scope = rememberCoroutineScope()
 
+    /**
+     * 拉表结构（字段）。
+     *
+     * `[Meta]` 打点三件事：开始 / 结束的行数；**解析后行数少于原始行数**时打 WARN 并附
+     * 原始 ResultSet 形状（列名 + 前几行，截断 500）—— 这是「字段缺失」类问题
+     * （information_schema 列名变化、权限被裁剪）最直接的证据；取数失败同样 WARN 带栈。
+     */
     fun ensureColumns(table: String) {
         if (columnCache.containsKey(table)) return
         columnCache[table] = null
         scope.launch {
+            val start = System.currentTimeMillis()
+            StarRocksLog.meta("columns load start table=$table")
             val columns = try {
-                parseColumns(queryRows(connectionId, columnsSql(table)))
+                val raw = queryRows(connectionId, columnsSql(table))
+                val parsed = parseColumns(raw)
+                val cost = System.currentTimeMillis() - start
+                StarRocksLog.meta(
+                    "columns parsed table=$table rows=${raw.rows.size} columns=${parsed.size} cost=${cost}ms",
+                )
+                if (parsed.size < raw.rows.size) {
+                    // 坏行被 parseColumns 静默丢弃：不报错，但必须留证据。
+                    StarRocksLog.meta(
+                        LogLevel.WARN,
+                        "columns dropped table=$table parsed=${parsed.size}/${raw.rows.size} " +
+                            "raw=${StarRocksLog.truncate(describeRows(raw))}",
+                    )
+                } else {
+                    // 形状细节只在需要时看：列名 + 首行，DEBUG。
+                    StarRocksLog.meta(
+                        LogLevel.DEBUG,
+                        "columns shape table=$table ${StarRocksLog.truncate(describeRows(raw))}",
+                    )
+                }
+                StarRocksLog.perf(action = "load_columns", type = "META", costMs = cost)
+                parsed
             } catch (c: CancellationException) {
                 throw c
             } catch (e: Throwable) {
-                emptyList()   // 局部降级：不写全局 error（表结构查不到只影响这一格）
+                // 局部降级（只影响这一格），但对用户是一块空白：WARN + 栈。
+                StarRocksLog.meta(
+                    LogLevel.WARN,
+                    "columns load failed table=$table " +
+                        "cost=${System.currentTimeMillis() - start}ms error=${e.message}",
+                    e,
+                )
+                emptyList()
             }
             columnCache[table] = columns
         }
@@ -293,11 +346,23 @@ internal fun StarRocksCatalogPanel(connectionId: String, modifier: Modifier = Mo
         if (partitionCache.containsKey(table)) return
         partitionCache[table] = PartitionLoadState.Loading
         scope.launch {
+            val start = System.currentTimeMillis()
             val state = try {
-                PartitionLoadState.Loaded(parsePartitions(queryRows(connectionId, partitionsSql(table))))
+                val raw = queryRows(connectionId, partitionsSql(table))
+                val parsed = parsePartitions(raw)
+                val cost = System.currentTimeMillis() - start
+                StarRocksLog.meta("partitions parsed table=$table rows=${raw.rows.size} parsed=${parsed.size} cost=${cost}ms")
+                StarRocksLog.perf(action = "load_partitions", type = "META", costMs = cost)
+                PartitionLoadState.Loaded(parsed)
             } catch (c: CancellationException) {
                 throw c
             } catch (e: Throwable) {
+                // 「引擎不支持 SHOW PARTITIONS」是**预期降级**（MySQL），走 DEBUG 不刷 WARN；
+                // 真正的失败（连接 / 权限）会先由 queryRows 的 WARN 记录。
+                StarRocksLog.meta(
+                    LogLevel.DEBUG,
+                    "partitions unsupported table=$table (${e::class.simpleName}: ${e.message})",
+                )
                 PartitionLoadState.Unsupported
             }
             partitionCache[table] = state
@@ -308,14 +373,25 @@ internal fun StarRocksCatalogPanel(connectionId: String, modifier: Modifier = Mo
         if (ddlCache.containsKey(table)) return
         ddlCache[table] = ""
         scope.launch {
+            val start = System.currentTimeMillis()
+            StarRocksLog.meta("ddl load start table=$table")
             val ddl = try {
                 queryRows(connectionId, ddlSql(table)).rows.firstOrNull()
                     ?.getOrNull(1)?.toString().orEmpty()
             } catch (c: CancellationException) {
                 throw c
             } catch (e: Throwable) {
+                StarRocksLog.meta(
+                    LogLevel.WARN,
+                    "ddl load failed table=$table " +
+                        "cost=${System.currentTimeMillis() - start}ms error=${e.message}",
+                    e,
+                )
                 ""
             }
+            val cost = System.currentTimeMillis() - start
+            StarRocksLog.meta("ddl loaded table=$table chars=${ddl.length} cost=${cost}ms")
+            StarRocksLog.perf(action = "load_ddl", type = "META", costMs = cost)
             ddlCache[table] = ddl
         }
     }
@@ -327,7 +403,8 @@ internal fun StarRocksCatalogPanel(connectionId: String, modifier: Modifier = Mo
     suspend fun load() {
         loading = true
         error = null
-        com.mqclient.core.log.Log.info("starrocks-ui", "[Catalog] load start (connectionId=$connectionId)")
+        val loadStart = System.currentTimeMillis()
+        StarRocksLog.meta("load start connectionId=$connectionId")
         try {
             dbName = runCatching { queryRows(connectionId, "SELECT DATABASE();") }
                 .getOrNull()?.rows?.firstOrNull()?.firstOrNull()?.toString()
@@ -336,8 +413,22 @@ internal fun StarRocksCatalogPanel(connectionId: String, modifier: Modifier = Mo
             val mvNames = runCatching {
                 parseMaterializedViewNames(queryRows(connectionId, MATERIALIZED_VIEW_SQL))
             }.getOrDefault(emptySet())
-            tables = parseTables(queryRows(connectionId, TABLES_SQL), mvNames)
-            com.mqclient.core.log.Log.info("starrocks-ui", "[Catalog] load done: tables=${tables.size}, dbName=$dbName")
+            val rawTables = queryRows(connectionId, TABLES_SQL)
+            val parsedTables = parseTables(rawTables, mvNames)
+            if (parsedTables.size < rawTables.rows.size) {
+                // 表清单同样会因单行坏数据被静默丢弃：留证据（列名 + 前几行）。
+                StarRocksLog.meta(
+                    LogLevel.WARN,
+                    "tables dropped parsed=${parsedTables.size}/${rawTables.rows.size} " +
+                        "raw=${StarRocksLog.truncate(describeRows(rawTables))}",
+                )
+            }
+            tables = parsedTables
+            StarRocksLog.meta(
+                "load done connectionId=$connectionId tables=${tables.size} " +
+                    "mv=${mvNames.size} db=${dbName ?: "-"} cost=${System.currentTimeMillis() - loadStart}ms",
+            )
+            StarRocksLog.perf(action = "load_catalog", type = "META", costMs = System.currentTimeMillis() - loadStart)
             columnCache.clear()
             partitionCache.clear()
             ddlCache.clear()
@@ -347,6 +438,12 @@ internal fun StarRocksCatalogPanel(connectionId: String, modifier: Modifier = Mo
                 ensureDdl(table.name)
             }
         } catch (e: Throwable) {
+            StarRocksLog.meta(
+                LogLevel.WARN,
+                "load failed connectionId=$connectionId " +
+                    "cost=${System.currentTimeMillis() - loadStart}ms error=${e.message}",
+                e,
+            )
             error = e.userMessage()
             tables = emptyList()
         } finally {
@@ -373,10 +470,6 @@ internal fun StarRocksCatalogPanel(connectionId: String, modifier: Modifier = Mo
         it.name.contains(query, ignoreCase = true) || it.comment.contains(query, ignoreCase = true)
     }
 
-    com.mqclient.core.log.Log.info(
-        "starrocks-ui",
-        "[Catalog] composing split layout: tables=${tables.size}, loading=$loading, error=$error",
-    )
     Row(modifier.fillMaxSize()) {
         // ── 左侧树 ──
         Column(Modifier.weight(0.42f).fillMaxHeight()) {

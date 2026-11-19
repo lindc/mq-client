@@ -12,6 +12,8 @@ import com.mqclient.olap.base.connection.HealthReport
 import com.mqclient.olap.base.query.ResultBatch
 import com.mqclient.starrocks.jdbc.JdbcConnector
 import com.mqclient.starrocks.jdbc.MysqlJdbcConnector
+import com.mqclient.core.log.LogLevel
+import com.mqclient.starrocks.log.StarRocksLog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -48,6 +50,7 @@ object StarRocksModule {
     fun initialize(context: ServiceContext) {
         this.context = context
         manager = StarRocksConnectionManager(context, connector = connector)
+        StarRocksLog.conn("module initialized (connector=${connector::class.simpleName})")
     }
 
     /**
@@ -59,15 +62,19 @@ object StarRocksModule {
     fun dispose() {
         val managerToStop = manager
         manager = null
+        StarRocksLog.conn("module dispose start (hasSession=${managerToStop != null})")
         managerToStop?.let { current ->
             runCatching { kotlinx.coroutines.runBlocking { current.shutdown() } }
                 .onFailure {
-                    com.mqclient.core.log.Log.warn(
-                        "olap-starrocks",
+                    // 退出路径上的失败不会中断用户操作，但会留下物理连接：WARN + 栈。
+                    StarRocksLog.conn(
+                        LogLevel.WARN,
                         "module dispose: session shutdown failed (ignored): ${it.message}",
+                        it,
                     )
                 }
         }
+        StarRocksLog.conn("module disposed")
     }
 
     /**
@@ -98,7 +105,10 @@ object StarRocksModule {
      */
     fun executeQuery(connectionId: String, sql: String): Flow<ResultBatch> {
         val current = manager ?: return flow {
-            throw IllegalStateException("StarRocks module is not initialized")
+            // 功能级中断：模块没初始化就不可能有查询，走 ERROR 带栈（便于发现初始化顺序问题）。
+            val error = IllegalStateException("StarRocks module is not initialized")
+            StarRocksLog.sql(LogLevel.ERROR, "exec rejected connection=$connectionId (module not initialized)", error)
+            throw error
         }
         val startedAt = olapTimeMillis()
         val recordId = newUuidV7()
@@ -111,7 +121,7 @@ object StarRocksModule {
             }
             // 单槽串行由 manager.executeQuery 内的 queryMutex 保证（此处只做
             // 身份守卫 + 懒建连，守卫不取锁、connect 自带 manager 级互斥）。
-            current.executeQuery(sql).collect { batch -> emit(batch) }
+            current.executeQuery(sql, connectionId).collect { batch -> emit(batch) }
         }.onCompletion { cause ->
             val recordContext = context ?: return@onCompletion  // 未初始化（无界面脚本）时静默跳过
             recordContext.emit(
@@ -186,11 +196,17 @@ object StarRocksModule {
         val previousId = current.currentConnectionId()
         val result = current.connect(config).map { }
         if (result.isSuccess) {
+            StarRocksLog.conn("connectById ok connectionId=$connectionId previous=$previousId")
             if (previousId != null && previousId != connectionId) {
                 reportStatus(previousId, ConnectionStatus.Disconnected)
             }
             reportStatus(connectionId, ConnectionStatus.Connected)
         } else {
+            // 用户点了连接却失败：WARN（业务异常），底层原因由 manager.openSession 的 ERROR 记录。
+            StarRocksLog.conn(
+                LogLevel.WARN,
+                "connectById failed connectionId=$connectionId: ${result.exceptionOrNull()?.message}",
+            )
             reportStatus(connectionId, ConnectionStatus.Failed)
         }
         return result

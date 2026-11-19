@@ -1,7 +1,10 @@
 package com.mqclient.starrocks.ui
 
 import com.mqclient.core.ServiceException
-import com.mqclient.core.log.Log
+import com.mqclient.core.log.LogLevel
+import com.mqclient.starrocks.jdbc.JdbcConnectTimeoutException
+import com.mqclient.starrocks.jdbc.JdbcFailure
+import com.mqclient.starrocks.log.StarRocksLog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -324,12 +327,41 @@ internal suspend fun fetchQueryProfile(
     runQuery: suspend (String) -> StarRocksQueryRows = { queryRows(connectionId, it) },
 ): String {
     val sql = profileStatements(queryId).single()
+    val start = System.currentTimeMillis()
+    // 排查「Profile 找不到」的第一现场：确认到底对哪个 QueryId 发了哪条语句。
+    StarRocksLog.profile(
+        "fetch start connection=$connectionId queryId=$queryId action=ANALYZE_PROFILE " +
+            "sql=${StarRocksLog.truncate(sql)}",
+    )
     val text = try {
-        stripAnsiEscapes(flattenRows(runQuery(sql)))
+        val raw = runQuery(sql)
+        StarRocksLog.profile(
+            LogLevel.DEBUG,
+            "fetch raw queryId=$queryId rows=${raw.rows.size} columns=${raw.columns} " +
+                "body=${StarRocksLog.truncate(flattenRows(raw))}",
+        )
+        stripAnsiEscapes(flattenRows(raw))
     } catch (cancellation: CancellationException) {
+        StarRocksLog.profile(
+            LogLevel.DEBUG,
+            "fetch cancelled queryId=$queryId after ${System.currentTimeMillis() - start}ms",
+        )
         throw cancellation
     } catch (error: Throwable) {
-        Log.warn("starrocks-ui", "profile fetch failed: ${error.message}")
+        // 具体失败原因（版本不兼容 / 语法错误 / 权限 / 未采集）决定下一步查什么，
+        // 所以把 SQLState / ErrorCode 与异常栈一起留下 —— 这是 WARN 也要带栈的场景。
+        StarRocksLog.profile(
+            LogLevel.WARN,
+            "fetch failed queryId=$queryId cost=${System.currentTimeMillis() - start}ms " +
+                "errorType=${error::class.simpleName} ${jdbcDiagnostics(error)} " +
+                "detail=${error.message} sql=${StarRocksLog.truncate(sql)}",
+            error,
+        )
+        StarRocksLog.perf(
+            action = "fetch_profile",
+            type = "PROFILE",
+            costMs = System.currentTimeMillis() - start,
+        )
         throw ServiceException(
             errorKey = KEY_PROFILE_NOT_COLLECTED,
             fallbackMessage = PROFILE_NOT_COLLECTED_FALLBACK,
@@ -338,13 +370,39 @@ internal suspend fun fetchQueryProfile(
     }
     if (text.isBlank()) {
         // get_query_profile 对未采集查询返回空串（3.4.0 实测）：同样按未采集处理。
-        Log.warn("starrocks-ui", "profile fetch returned empty text (queryId=$queryId)")
+        // 空串与「报错」是两种完全不同的根因（未采集 vs 版本不支持），必须分开记。
+        StarRocksLog.profile(
+            LogLevel.WARN,
+            "fetch returned empty text queryId=$queryId cost=${System.currentTimeMillis() - start}ms " +
+                "hint=query may be unfinished, unsampled, or evicted from the profile list",
+        )
+        StarRocksLog.perf(
+            action = "fetch_profile",
+            type = "PROFILE",
+            costMs = System.currentTimeMillis() - start,
+        )
         throw ServiceException(
             errorKey = KEY_PROFILE_NOT_COLLECTED,
             fallbackMessage = PROFILE_NOT_COLLECTED_FALLBACK,
         )
     }
+    val cost = System.currentTimeMillis() - start
+    StarRocksLog.profile("fetch done queryId=$queryId chars=${text.length} cost=${cost}ms")
+    StarRocksLog.perf(action = "fetch_profile", type = "PROFILE", costMs = cost)
     return text
+}
+
+/**
+ * 异常的 JDBC 诊断字段（SQLState / ErrorCode）。
+ *
+ * Profile 拉取失败最常见的原因是「语句本身不被 FE 接受」（语法 / 版本），
+ * SQLState 与 ErrorCode 比异常消息文本稳定得多 —— 消息会随版本改，码不会。
+ * 非 JDBC 异常返回空串，日志里不出现空洞字段。
+ */
+private fun jdbcDiagnostics(error: Throwable): String = when (error) {
+    is JdbcFailure -> "sqlState=${error.sqlState ?: "-"} errorCode=${error.errorCode}"
+    is JdbcConnectTimeoutException -> "sqlState=- errorCode=- timeout=true"
+    else -> ""
 }
 
 private fun flattenRows(rows: StarRocksQueryRows): String = rows.rows.joinToString("\n") { row ->

@@ -4,6 +4,8 @@ import java.sql.Connection
 import java.sql.SQLException
 import java.sql.SQLTimeoutException
 import java.sql.Statement
+import com.mqclient.core.log.LogLevel
+import com.mqclient.starrocks.log.StarRocksLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.CancellationException
@@ -31,12 +33,31 @@ class MysqlJdbcConnector : JdbcConnector {
     /** 建连接：阻塞调用切 IO；SQLException → JdbcFailure / Timeout。 */
     override suspend fun connect(url: String, user: String, password: String): JdbcConnection =
         withContext(Dispatchers.IO) {
+            val start = System.currentTimeMillis()
+            // DEBUG：这条驱动没有连接池，每次 connect 就是一条物理连接（acquire）。
+            StarRocksLog.conn(
+                LogLevel.DEBUG,
+                "physical acquire start url=${StarRocksLog.redactJdbcUrl(url)} user=$user",
+            )
             try {
                 val raw: Connection = java.sql.DriverManager.getConnection(url, user, password)
+                StarRocksLog.conn(
+                    LogLevel.DEBUG,
+                    "physical acquire done cost=${System.currentTimeMillis() - start}ms",
+                )
                 MysqlJdbcConnection(raw)
             } catch (error: SQLTimeoutException) {
+                StarRocksLog.conn(
+                    LogLevel.WARN,
+                    "physical acquire timeout cost=${System.currentTimeMillis() - start}ms: ${error.message}",
+                )
                 throw JdbcConnectTimeoutException(error.message ?: "connect timed out")
             } catch (error: SQLException) {
+                StarRocksLog.conn(
+                    LogLevel.WARN,
+                    "physical acquire failed cost=${System.currentTimeMillis() - start}ms " +
+                        "sqlState=${error.sqlState} errorCode=${error.errorCode}: ${error.message}",
+                )
                 throw JdbcFailure(error.message, error.sqlState, error.errorCode, error)
             }
         }
@@ -179,6 +200,14 @@ class MysqlJdbcConnector : JdbcConnector {
                             // 顺序：先关 socket 阻断阻塞的 rs.next()，再关 Statement。
                             interruption is CancellationException ||
                                 isConnectionLevelJdbcFailure(interruption) -> {
+                                // 这是「连接被作废」的唯一现场：日志里必须出现，
+                                // 否则事后只看得到「下次执行又重连」，不知道是哪次断的。
+                                StarRocksLog.sql(
+                                    LogLevel.WARN,
+                                    "stream interrupted, closing physical connection: " +
+                                        "cause=${interruption?.let { it::class.simpleName }} " +
+                                        "detail=${interruption?.message}",
+                                )
                                 producer.cancel()
                                 runCatching { raw.close() }
                                 runCatching { statement.close() }
@@ -188,6 +217,11 @@ class MysqlJdbcConnector : JdbcConnector {
                             // isAlive() 仍为 true，左侧树「已连接」不退化，下一次执行
                             // 直接复用会话，绝不会误触发「正在建立连接...」。
                             else -> {
+                                StarRocksLog.sql(
+                                    LogLevel.DEBUG,
+                                    "statement closed, connection kept alive: " +
+                                        "cause=${interruption?.let { it::class.simpleName }}",
+                                )
                                 producer.cancel()
                                 runCatching { statement.close() }
                             }
@@ -206,7 +240,13 @@ class MysqlJdbcConnector : JdbcConnector {
 
         /** 幂等关闭，异常自行吞掉（断开路径不能被关不掉的句柄中断）。 */
         override suspend fun close() = withContext(Dispatchers.IO) {
-            runCatching { raw.close() }
+            val start = System.currentTimeMillis()
+            val closed = runCatching { raw.close() }
+            StarRocksLog.conn(
+                LogLevel.DEBUG,
+                "physical release done cost=${System.currentTimeMillis() - start}ms " +
+                    "ok=${closed.isSuccess}",
+            )
             Unit
         }
 

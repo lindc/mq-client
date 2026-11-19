@@ -68,8 +68,10 @@ import androidx.compose.ui.unit.dp
 import com.mqclient.core.ServiceException
 import com.mqclient.core.db.OlapQueryRecord
 import com.mqclient.core.db.OlapQueryRepository
+import com.mqclient.core.log.LogLevel
 import com.mqclient.olap.base.query.ResultColumn
 import com.mqclient.starrocks.StarRocksModule
+import com.mqclient.starrocks.log.StarRocksLog
 import com.mqclient.uicommon.DangerButton
 import com.mqclient.uicommon.LocalSnackbarHostState
 import com.mqclient.uicommon.SecondaryButton
@@ -319,22 +321,65 @@ private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
         if (phase != ConsolePhase.Finished || grid.successCount == 0 || profileFetching) return
         profileFetching = true
         scope.launch {
+            val start = System.currentTimeMillis()
+            var attemptedId: String? = null
             try {
                 val target = withContext(Dispatchers.IO) {
-                    val listed = parseProfileList(queryRows(connectionId, PROFILELIST_SQL))
+                    val raw = queryRows(connectionId, PROFILELIST_SQL)
+                    val listed = parseProfileList(raw)
+                    // 「找不到 Profile」的第一现场证据：列表到底是不是空的、里面的
+                    // QueryId / State / Statement 长什么样。此前这段没有日志，
+                    // 只能靠猜「列表为空」还是「ID 没匹配上」。
+                    StarRocksLog.profile(
+                        "profilelist rows=${listed.size} " +
+                            "raw=${StarRocksLog.truncate(describeProfileList(raw, listed))}",
+                    )
                     // PROFILELIST 按时间倒序：取最新一条可采集（非系统语句、已结束）的查询。
                     val item = listed
                         .firstOrNull { !isSystemStatement(it.statement) && it.state == "Finished" }
-                        ?: throw ServiceException(
+                    if (item == null) {
+                        // 区分两种「没有可采集查询」：列表为空 vs 有查询但都被过滤掉。
+                        StarRocksLog.profile(
+                            LogLevel.WARN,
+                            "no collectable query in profilelist rows=${listed.size} " +
+                                "candidates=${StarRocksLog.truncate(describeCandidates(listed))}",
+                        )
+                        throw ServiceException(
                             errorKey = KEY_PROFILE_NOT_COLLECTED,
                             fallbackMessage = PROFILE_NOT_COLLECTED_FALLBACK,
                         )
+                    }
+                    attemptedId = item.queryId
+                    StarRocksLog.profile(
+                        "selected queryId=${item.queryId} state=${item.state} " +
+                            "statement=${StarRocksLog.truncate(item.statement)}",
+                    )
                     item.queryId to fetchQueryProfile(connectionId, item.queryId)
                 }
                 profileViewer = target
+                StarRocksLog.profile(
+                    "view done queryId=${target.first} chars=${target.second.length} " +
+                        "cost=${System.currentTimeMillis() - start}ms",
+                )
+                StarRocksLog.perf(
+                    action = "view_profile",
+                    type = "PROFILE",
+                    costMs = System.currentTimeMillis() - start,
+                )
             } catch (cancellation: CancellationException) {
+                StarRocksLog.profile(
+                    LogLevel.DEBUG,
+                    "view cancelled after ${System.currentTimeMillis() - start}ms",
+                )
                 throw cancellation
             } catch (error: Throwable) {
+                // 弹给用户的那句「无法获取 Profile」：WARN，并带上耗时便于区分
+                // 「查得快但没数据」与「查询本身超时」。
+                StarRocksLog.profile(
+                    LogLevel.WARN,
+                    "view failed cost=${System.currentTimeMillis() - start}ms " +
+                        "target=${attemptedId ?: "none"} error=${error.message}",
+                )
                 snackbar.showSnackbar(error.userMessage())
             } finally {
                 profileFetching = false
@@ -350,9 +395,11 @@ private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
         // 无选区发全文（再按分号切多语句）。不做任何 selection 的写回/干预。
         val selected = selectedSource(textFieldValue)
         val sqlToExecute = selected ?: textFieldValue.text
-        com.mqclient.core.log.Log.info(
-            "olap-starrocks-ui",
-            if (selected != null) "execute SELECTION (${selected.length} chars)" else "execute FULL TEXT",
+        // 用户按下「执行」：记清楚是选区还是全文（长度足够区分误操作），
+        // 具体 SQL 由 queryRows / manager 的 [SQL] 行负责，不在这里重复打全文。
+        StarRocksLog.sql(
+            "console run connection=$connectionId " +
+                if (selected != null) "scope=selection chars=${selected.length}" else "scope=full chars=${sqlToExecute.length}",
         )
         if (sqlToExecute.isBlank()) return
         val statements = splitStatements(sqlToExecute)
@@ -963,3 +1010,25 @@ private fun TableCell(text: String, header: Boolean) {
 }
 
 private val HEADER_CELL_WIDTH = 160.dp
+
+/** SHOW PROFILELIST 的原始形状摘要：列名 + 前几行（截断后进日志）。 */
+private fun describeProfileList(
+    raw: StarRocksQueryRows,
+    listed: List<ProfileListItem>,
+): String = buildString {
+    append("columns=").append(raw.columns)
+    raw.rows.take(3).forEachIndexed { index, row ->
+        append(" | row").append(index).append('=').append(row.map { it?.toString() ?: "NULL" })
+    }
+    if (listed.isNotEmpty()) {
+        append(" | firstId=").append(listed.first().queryId)
+        append(" lastId=").append(listed.last().queryId)
+    }
+}
+
+/** 候选过滤后的摘要：为什么没有一条被选中（state / 是否系统语句）。 */
+private fun describeCandidates(listed: List<ProfileListItem>): String =
+    listed.take(5).joinToString(" ; ") { item ->
+        val system = isSystemStatement(item.statement)
+        "id=${item.queryId} state=${item.state} system=$system"
+    }

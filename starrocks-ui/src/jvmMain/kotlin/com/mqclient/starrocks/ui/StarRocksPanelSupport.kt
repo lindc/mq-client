@@ -2,8 +2,11 @@ package com.mqclient.starrocks.ui
 
 import com.mqclient.core.CoreModule
 import com.mqclient.core.event.EventNames
+import com.mqclient.core.log.LogLevel
 import com.mqclient.olap.base.query.ResultColumn
 import com.mqclient.starrocks.StarRocksModule
+import com.mqclient.starrocks.log.StarRocksLog
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -115,15 +118,52 @@ internal fun openConsoleWithSql(connectionId: String, sql: String) {
  * 异常原样上抛，由面板 catch 后显示友好文案。
  */
 internal suspend fun queryRows(connectionId: String, sql: String): StarRocksQueryRows {
+    val start = System.currentTimeMillis()
+    // 面板层的每次取数都过这里（目录 / 进程列表 / Profile / 导出）：
+    // 一句 INFO 就能回答「这个面板到底发了什么 SQL」。
+    StarRocksLog.sql(
+        LogLevel.DEBUG,
+        "panel exec connection=$connectionId ${StarRocksLog.sqlSummary(sql)}",
+    )
     // 预检只是加速路径：会话不属于该连接 / 未连接时，executeQuery 内部会自动抢占建连。
     if (!StarRocksModule.isAlive(connectionId)) {
         StarRocksModule.connectById(connectionId).getOrThrow()
     }
     var columns: List<ResultColumn> = emptyList()
     val rows = mutableListOf<List<Any?>>()
-    StarRocksModule.executeQuery(connectionId, sql).collect { batch ->
-        if (batch.columns.isNotEmpty()) columns = batch.columns
-        rows.addAll(batch.rows)
+    try {
+        StarRocksModule.executeQuery(connectionId, sql).collect { batch ->
+            if (batch.columns.isNotEmpty()) columns = batch.columns
+            rows.addAll(batch.rows)
+        }
+    } catch (cancellation: CancellationException) {
+        throw cancellation
+    } catch (error: Throwable) {
+        // 元数据 / Profile 取数失败会直接弹在面板上：WARN，并附「原列名 + 首个错误行」
+        // 这类形状信息（没有结果集时只能靠错误本身）。
+        StarRocksLog.sql(
+            LogLevel.WARN,
+            "panel exec failed connection=$connectionId " +
+                "cost=${System.currentTimeMillis() - start}ms " +
+                "type=${StarRocksLog.statementKind(sql)} error=${error.message}",
+            error,
+        )
+        StarRocksLog.perf(
+            action = "panel_query",
+            type = StarRocksLog.statementKind(sql),
+            costMs = System.currentTimeMillis() - start,
+        )
+        throw error
     }
+    val cost = System.currentTimeMillis() - start
+    StarRocksLog.sql(
+        "panel done connection=$connectionId type=${StarRocksLog.statementKind(sql)} " +
+            "rows=${rows.size} columns=${columns.size} cost=${cost}ms",
+    )
+    StarRocksLog.perf(
+        action = "panel_query",
+        type = StarRocksLog.statementKind(sql),
+        costMs = cost,
+    )
     return StarRocksQueryRows(columns.map { it.name }, rows)
 }

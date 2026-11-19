@@ -1,7 +1,6 @@
 package com.mqclient.starrocks
 
 import com.mqclient.core.spi.ServiceContext
-import com.mqclient.olap.base.OlapCategory
 import com.mqclient.olap.base.connection.AbstractAnalyticsConnectionManager
 import com.mqclient.olap.base.connection.HealthReport
 import com.mqclient.olap.base.dialect.SqlDialect
@@ -14,6 +13,8 @@ import com.mqclient.starrocks.jdbc.JdbcConnector
 import com.mqclient.starrocks.jdbc.JdbcFailure
 import com.mqclient.starrocks.jdbc.StarRocksErrorDetail
 import com.mqclient.starrocks.jdbc.StarRocksSqlDialect
+import com.mqclient.core.log.LogLevel
+import com.mqclient.starrocks.log.StarRocksLog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -42,9 +43,9 @@ import kotlinx.coroutines.sync.withLock
  *
  * ## 性能打点
  *
- * 与 `[MQ-Perf]` 同口径输出 `[OLAP-Perf][connect]`（前缀取
- * [OlapCategory.PERF_TAG_PREFIX]，不在本模块硬编码），字段含 connection /
- * 耗时=Xms / result。
+ * 打点走模块统一的 [StarRocksLog.perf]，格式
+ * `[MQ-Perf][StarRocks] action=..., type=..., cost=Xms`（与 MQ 系 `[MQ-Perf]` 同口径）。
+ * 日志 tag 统一为 `[StarRocks][Conn]` / `[StarRocks][SQL]`（见 [StarRocksLog]）。
  *
  * @param context 模块运行时上下文（EventBus / scope），由 SPI initialize 传入。
  * @param moduleId 模块 id（默认 `starrocks`）。
@@ -58,12 +59,6 @@ class StarRocksConnectionManager(
     private val dialect: SqlDialect = StarRocksSqlDialect,
 ) : AbstractAnalyticsConnectionManager<StarRocksConnectionConfig, StarRocksSession>(context, moduleId) {
 
-    /** 模块日志句柄（tag = `[OLAP]<moduleId>`，前缀来自 olap-base 常量）。 */
-    private val logTag: String = "${OlapCategory.LOG_TAG_PREFIX}$moduleId"
-
-    /** 打点前缀（取 olap-base 常量，禁止硬编码）。 */
-    private val perfPrefix: String = OlapCategory.PERF_TAG_PREFIX
-
     /**
      * 查询串行锁：行级流式（fetchSize=MIN_VALUE）下，一条物理连接同时只能有
      * 一个活跃 ResultSet。并发收集者在此**挂起排队**（不占线程），而不是撞
@@ -74,15 +69,50 @@ class StarRocksConnectionManager(
 
     /* ------------------------------ 基类钩子 ------------------------------ */
 
-    /** 建立物理连接并包成会话；失败由 [JdbcConnector] 抛平台中立异常。 */
+    /**
+     * 建立物理连接并包成会话；失败由 [JdbcConnector] 抛平台中立异常。
+     *
+     * 日志：建立前打端点 / 用户 / **脱敏后的** URL / 超时配置（INFO），成功后补耗时；
+     * 失败按「功能中断」处理，打 ERROR 并带完整异常栈（连不上就没有后续任何能力）。
+     * 密码永不入日志 —— URL 先过 [StarRocksLog.redactJdbcUrl]，密码本身从不参与拼接。
+     */
     override suspend fun openSession(config: StarRocksConnectionConfig): StarRocksSession {
-        val connection: JdbcConnection = connector.connect(config.jdbcUrl, config.user, config.password)
-        return StarRocksSession(connection, config.endpoint)
+        val start = olapTimeMillis()
+        StarRocksLog.conn(
+            "connect start endpoint=${config.endpoint} user=${config.user} " +
+                "url=${StarRocksLog.redactJdbcUrl(config.jdbcUrl)} timeouts=${timeoutsOf(config.jdbcUrl)}",
+        )
+        return try {
+            val connection: JdbcConnection = connector.connect(config.jdbcUrl, config.user, config.password)
+            StarRocksLog.conn(
+                "connected endpoint=${config.endpoint} cost=${olapTimeMillis() - start}ms",
+            )
+            StarRocksLog.perf(action = "connect", type = "SESSION", costMs = olapTimeMillis() - start)
+            StarRocksSession(connection, config.endpoint)
+        } catch (cancellation: CancellationException) {
+            // 用户中途关掉对话框 / 退出应用：不是失败，记录但不报警。
+            StarRocksLog.conn(LogLevel.DEBUG, "connect cancelled endpoint=${config.endpoint}")
+            throw cancellation
+        } catch (error: Throwable) {
+            val code = dialect.classify(error)
+            StarRocksLog.conn(
+                LogLevel.ERROR,
+                "connect failed endpoint=${config.endpoint} user=${config.user} " +
+                    "url=${StarRocksLog.redactJdbcUrl(config.jdbcUrl)} " +
+                    "code=${code.name} detail=${StarRocksErrorDetail.of(code, error)}",
+                error,
+            )
+            StarRocksLog.perf(action = "connect", type = "SESSION", costMs = olapTimeMillis() - start)
+            throw error
+        }
     }
 
     /** 关闭会话（[StarRocksSession.close] 已自行兜异常）。 */
     override suspend fun closeSession(session: StarRocksSession) {
+        val start = olapTimeMillis()
+        StarRocksLog.conn("close session endpoint=${session.endpoint}")
         session.close()
+        StarRocksLog.conn("session closed endpoint=${session.endpoint} cost=${olapTimeMillis() - start}ms")
     }
 
     /**
@@ -90,13 +120,14 @@ class StarRocksConnectionManager(
      *
      * 失败不抛（基类 `healthCheck` 的 catch 会生成不带错误码的通用失败），
      * 而是就地翻译成 `HealthReport(healthy=false, detail=友好文案+SQLState/ErrorCode)`。
+     * 探测可能被周期调用，成功走 DEBUG；失败走 WARN（半开连接是排查重点）。
      */
     override suspend fun checkHealth(session: StarRocksSession): HealthReport {
         val start = olapTimeMillis()
         return try {
             val ok = session.probe()
             val duration = olapTimeMillis() - start
-            logProbe("healthCheck", ok, duration)
+            logProbe("healthCheck", ok, duration, endpoint = session.endpoint)
             HealthReport(
                 healthy = ok,
                 detail = if (ok) "SELECT 1 ok" else "SELECT 1 returned no rows",
@@ -105,6 +136,12 @@ class StarRocksConnectionManager(
         } catch (error: Throwable) {
             if (error is CancellationException) throw error
             val code = dialect.classify(error)
+            StarRocksLog.conn(
+                LogLevel.WARN,
+                "probe failed endpoint=${session.endpoint} code=${code.name} " +
+                    "detail=${StarRocksErrorDetail.of(code, error)}",
+            )
+            StarRocksLog.perf(action = "health_check", type = "SELECT", costMs = olapTimeMillis() - start)
             HealthReport(
                 healthy = false,
                 detail = StarRocksErrorDetail.of(code, error),
@@ -132,9 +169,12 @@ class StarRocksConnectionManager(
      * [HealthReport] 是 `data class(healthy, detail, latencyMs)`（**不是** sealed
      * 类型），故成功 = `healthy=true`，失败 = `healthy=false` + 错误文案。
      *
-     * 流程：`connect` → `SELECT 1` → 打 `[OLAP-Perf][connect]` 耗时日志 →
-     * 返回报告；**无论成功 / 失败 / 取消，连接都在 finally 中关闭**（轻量句柄
-     * 即用即毁）。取消原样上抛，不被 `runCatching` 吞掉。
+     * 流程：`connect` → `SELECT 1` → 打耗时点 → 返回报告；**无论成功 / 失败 / 取消，
+     * 连接都在 finally 中关闭**（轻量句柄即用即毁）。取消原样上抛，不被
+     * `runCatching` 吞掉。
+     *
+     * 日志：INFO 记端点 / 用户 / 脱敏 URL / 超时配置（表单重复点「测试」时能看出
+     * 是哪个连接）；失败走 WARN（抛给用户的业务异常，功能未中断）。
      *
      * 所有耗时操作都是 `suspend`（阻塞 IO 由 `MysqlJdbcConnector` 切到
      * `Dispatchers.IO`），不阻塞主线程。
@@ -146,6 +186,11 @@ class StarRocksConnectionManager(
     suspend fun testConnection(config: StarRocksConnectionConfig): HealthReport {
         val start = olapTimeMillis()
         var connection: JdbcConnection? = null
+        StarRocksLog.conn(
+            "test start connectionId=${config.connectionId} endpoint=${config.endpoint} " +
+                "user=${config.user} url=${StarRocksLog.redactJdbcUrl(config.jdbcUrl)} " +
+                "timeouts=${timeoutsOf(config.jdbcUrl)}",
+        )
         return try {
             connection = connector.connect(config.jdbcUrl, config.user, config.password)
             val ok = connection.probe()
@@ -157,11 +202,22 @@ class StarRocksConnectionManager(
                 HealthReport(healthy = false, detail = "SELECT 1 returned no rows", latencyMs = duration)
             }
         } catch (cancellation: CancellationException) {
+            StarRocksLog.conn(
+                LogLevel.DEBUG,
+                "test cancelled connectionId=${config.connectionId} endpoint=${config.endpoint}",
+            )
             throw cancellation
         } catch (error: Throwable) {
             val code = dialect.classify(error)
             val duration = olapTimeMillis() - start
             logProbe("testConnection", false, duration, config.connectionId)
+            // 表单里会展示这段提示：业务异常走 WARN，并附带分类与底层诊断字段。
+            StarRocksLog.conn(
+                LogLevel.WARN,
+                "test failed connectionId=${config.connectionId} endpoint=${config.endpoint} " +
+                    "code=${code.name} detail=${StarRocksErrorDetail.of(code, error)} " +
+                    "cost=${duration}ms errorType=${error::class.simpleName}",
+            )
             HealthReport(
                 healthy = false,
                 detail = StarRocksErrorDetail.of(code, error),
@@ -172,9 +228,9 @@ class StarRocksConnectionManager(
             connection?.let { conn ->
                 runCatching { conn.close() }
                     .onFailure {
-                        com.mqclient.core.log.Log.warn(
-                            logTag,
-                            "testConnection: connection close failed (ignored): ${it.message}",
+                        StarRocksLog.conn(
+                            LogLevel.WARN,
+                            "test close failed (ignored) connectionId=${config.connectionId}: ${it.message}",
                         )
                     }
             }
@@ -205,55 +261,106 @@ class StarRocksConnectionManager(
      * // TODO: 迁移到 olap-base 的 AbstractQueryExecutor（QueryHandle / 取消 /
      *   EXPLAIN / 审计），MVP 先走 manager 级轻量通道。
      */
-    fun executeQuery(sql: String): Flow<ResultBatch> = flow {
+    fun executeQuery(sql: String, connectionId: String? = null): Flow<ResultBatch> = flow {
         val start = olapTimeMillis()
         var rows = 0L
         var batchIndex = 0
-        // 单槽串行：锁覆盖整个 withSession（含 emit —— 下游消费慢时上游自然停住）。
-        queryMutex.withLock {
-            withSession { session ->
-                session.executeQuery(sql) { batch ->
-                    val result = if (batch.updateCount != null) {
-                        ResultBatch(
-                            columns = emptyList(),
-                            rows = emptyList(),
-                            lastBatch = batch.isLast,
-                            batchIndex = batchIndex,
-                            updateCount = batch.updateCount,
-                        )
-                    } else {
-                        rows += batch.rows.size
-                        ResultBatch(
-                            columns = batch.columns.map { ResultColumn(it, "") },
-                            rows = batch.rows,
-                            lastBatch = batch.isLast,
-                            batchIndex = batchIndex,
-                        )
+        val kind = StarRocksLog.statementKind(sql)
+        // 一条执行只打一对 INFO：开始（含 connectionId + 截断 SQL）与结束（行数 + 耗时）。
+        // 不在这里之外重复打 SQL —— 进程列表 10 秒一刷新，三条 INFO 就是刷屏。
+        val conn = connectionId?.let { " connection=$it" }.orEmpty()
+        StarRocksLog.sql("exec start$conn ${StarRocksLog.sqlSummary(sql)}")
+        try {
+            // 单槽串行：锁覆盖整个 withSession（含 emit —— 下游消费慢时上游自然停住）。
+            queryMutex.withLock {
+                withSession { session ->
+                    session.executeQuery(sql) { batch ->
+                        val result = if (batch.updateCount != null) {
+                            ResultBatch(
+                                columns = emptyList(),
+                                rows = emptyList(),
+                                lastBatch = batch.isLast,
+                                batchIndex = batchIndex,
+                                updateCount = batch.updateCount,
+                            )
+                        } else {
+                            rows += batch.rows.size
+                            ResultBatch(
+                                columns = batch.columns.map { ResultColumn(it, "") },
+                                rows = batch.rows,
+                                lastBatch = batch.isLast,
+                                batchIndex = batchIndex,
+                            )
+                        }
+                        batchIndex++
+                        emit(result)
                     }
-                    batchIndex++
-                    emit(result)
                 }
             }
+        } catch (cancellation: CancellationException) {
+            StarRocksLog.sql(
+                LogLevel.DEBUG,
+                "exec cancelled$conn after ${olapTimeMillis() - start}ms rows=$rows batches=$batchIndex",
+            )
+            throw cancellation
+        } catch (error: Throwable) {
+            val code = dialect.classify(error)
+            // 业务异常（语法错 / 权限 / 表不存在）走 WARN：UI 会展示文案，功能不中断。
+            // 连接级故障提升到 ERROR：会话已废，后半条链路全部不可用。
+            val level = if (isSessionBroken(error)) LogLevel.ERROR else LogLevel.WARN
+            StarRocksLog.sql(
+                level,
+                "exec failed$conn type=$kind code=${code.name} " +
+                    "detail=${StarRocksErrorDetail.of(code, error)} " +
+                    "cost=${olapTimeMillis() - start}ms errorType=${error::class.simpleName} " +
+                    "sql=${StarRocksLog.truncate(sql)}",
+                error,
+            )
+            StarRocksLog.perf(action = "execute_sql", type = kind, costMs = olapTimeMillis() - start)
+            throw error
         }
-        com.mqclient.core.log.Log.info(
-            logTag,
-            "$perfPrefix[query] rows=$rows 耗时=${olapTimeMillis() - start}ms",
-        )
+        val cost = olapTimeMillis() - start
+        StarRocksLog.sql("exec done$conn type=$kind rows=$rows batches=$batchIndex cost=${cost}ms")
+        StarRocksLog.perf(action = "execute_sql", type = kind, costMs = cost)
     }
 
     /* ------------------------------ 内部 ------------------------------ */
 
-    /** `[OLAP-Perf][connect]` 分段日志（耗时单位 ms，字段与 MQ-Perf 对齐）。 */
+    /**
+     * 探针打点：`[MQ-Perf][StarRocks] action=..., type=SELECT, cost=Xms` + 结果行日志。
+     *
+     * 探针可能被周期调用（healthCheck），成功走 DEBUG；失败走 WARN。
+     */
     private fun logProbe(
         operation: String,
         ok: Boolean,
         durationMs: Long,
         connectionId: String? = null,
+        endpoint: String? = null,
     ) {
-        val conn = connectionId?.let { " connection=$it" } ?: ""
-        com.mqclient.core.log.Log.info(
-            logTag,
-            "$perfPrefix[connect]$conn op=$operation result=$ok 耗时=${durationMs}ms",
+        StarRocksLog.perf(action = operation, type = "SELECT", costMs = durationMs)
+        val context = buildString {
+            connectionId?.let { append(" connectionId=").append(it) }
+            endpoint?.let { append(" endpoint=").append(it) }
+        }
+        StarRocksLog.conn(
+            if (ok) LogLevel.DEBUG else LogLevel.WARN,
+            "probe result=$ok op=$operation$context cost=${durationMs}ms",
         )
+    }
+
+    /**
+     * 从 JDBC URL 里读出显式超时配置（Connector/J 的 connectTimeout / socketTimeout）。
+     *
+     * 未配置时返回 `default`：StarRocks 连接一直没有单独的「超时设置」字段，超时只能
+     * 通过 `jdbcUrlOverride` 传。日志里把它提出来，是为了排查超时时不必先猜 URL 里写了什么。
+     */
+    private fun timeoutsOf(url: String): String {
+        fun param(name: String): String? =
+            Regex("(?i)[?&]" + name + "=([^&]*)").find(url)?.groupValues?.get(1)
+        val connect = param("connectTimeout")
+        val socket = param("socketTimeout")
+        if (connect == null && socket == null) return "default"
+        return "connectTimeout=${connect ?: "-"}, socketTimeout=${socket ?: "-"}"
     }
 }

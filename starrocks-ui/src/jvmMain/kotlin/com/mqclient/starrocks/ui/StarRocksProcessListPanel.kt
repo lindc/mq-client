@@ -37,6 +37,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.mqclient.core.log.LogLevel
+import com.mqclient.starrocks.log.StarRocksLog
 import com.mqclient.uicommon.AppTooltip
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.userMessage
@@ -118,10 +120,22 @@ internal fun StarRocksProcessListPanel(connectionId: String, modifier: Modifier 
     suspend fun load() {
         loading = true
         error = null
+        val start = System.currentTimeMillis()
         try {
             val result = withContext(Dispatchers.IO) { queryRows(connectionId, PROFILELIST_SQL) }
             sessions = parseProcessList(result)
+            StarRocksLog.profile(
+                "processlist rows=${sessions.size} rawRows=${result.rows.size} " +
+                    "cost=${System.currentTimeMillis() - start}ms",
+            )
         } catch (e: Throwable) {
+            // 面板直接展示错误文案：WARN + 栈（自动刷新关闭前每次失败都会留一条）。
+            StarRocksLog.profile(
+                LogLevel.WARN,
+                "processlist load failed connection=$connectionId " +
+                    "cost=${System.currentTimeMillis() - start}ms error=${e.message}",
+                e,
+            )
             error = e.userMessage()
             sessions = emptyList()
         } finally {
