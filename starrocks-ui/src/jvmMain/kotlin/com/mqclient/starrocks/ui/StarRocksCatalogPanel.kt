@@ -145,22 +145,26 @@ internal fun ddlSql(table: String): String =
 
 /** 表清单解析：名称 / 注释 / 类型；物化视图由 table_type 识别。 */
 internal fun parseTables(result: StarRocksQueryRows): List<CatalogTable> = result.rows.mapNotNull { row ->
-    val name = row.getOrNull(0)?.toString().orEmpty()
-    name.takeIf { it.isNotBlank() }?.let {
-        val type = row.getOrNull(2)?.toString().orEmpty()
-        CatalogTable(
-            name = name,
-            comment = row.getOrNull(1)?.toString().orEmpty(),
-            type = type,
-            materializedView = type == TABLES_TABLE_TYPE_MV,
-        )
-    }
+    // 单行坏数据（越界 / 异常 toString）不得崩掉整棵树 —— runCatching 静默丢弃该行。
+    runCatching {
+        val name = row.getOrNull(0)?.toString().orEmpty().trim()
+        name.takeIf { it.isNotBlank() }?.let {
+            val type = row.getOrNull(2)?.toString().orEmpty()
+            CatalogTable(
+                name = name,
+                comment = row.getOrNull(1)?.toString().orEmpty(),
+                type = type,
+                materializedView = type == TABLES_TABLE_TYPE_MV,
+            )
+        }
+    }.getOrNull()
 }
 
 /** 字段解析：information_schema.columns 的 7 列（缺失列空串兜底）。 */
 internal fun parseColumns(result: StarRocksQueryRows): List<CatalogColumn> = result.rows.mapNotNull { row ->
-    val name = row.getOrNull(0)?.toString().orEmpty()
-    name.takeIf { it.isNotBlank() }?.let {
+    runCatching {
+        val name = row.getOrNull(0)?.toString().orEmpty().trim()
+        name.takeIf { it.isNotBlank() }?.let {
         CatalogColumn(
             name = name,
             type = row.getOrNull(1)?.toString().orEmpty(),
@@ -171,6 +175,7 @@ internal fun parseColumns(result: StarRocksQueryRows): List<CatalogColumn> = res
             comment = row.getOrNull(6)?.toString().orEmpty(),
         )
     }
+    }.getOrNull()
 }
 
 /**
@@ -192,6 +197,7 @@ internal fun parsePartitions(result: StarRocksQueryRows): List<CatalogPartition>
 
     val namedBindingAvailable = nameIdx >= 0
     return result.rows.mapNotNull { row ->
+        runCatching {
         fun cell(i: Int?): String = i?.takeIf { it >= 0 }?.let { row.getOrNull(it)?.toString().orEmpty() }?.trim().orEmpty()
 
         val name = cell(nameIdx)
@@ -217,6 +223,7 @@ internal fun parsePartitions(result: StarRocksQueryRows): List<CatalogPartition>
             row.mapNotNull { it?.toString()?.takeIf { s -> s.isNotBlank() } }.joinToString(" · ")
         }
         CatalogPartition(name, key, range, state, rowCount, dataSize, distributionKey, summary)
+        }.getOrNull()
     }
 }
 
@@ -258,11 +265,13 @@ internal fun StarRocksCatalogPanel(connectionId: String, modifier: Modifier = Mo
     suspend fun load() {
         loading = true
         error = null
+        com.mqclient.core.log.Log.info("starrocks-ui", "[Catalog] load start (connectionId=$connectionId)")
         try {
             dbName = runCatching { queryRows(connectionId, "SELECT DATABASE();") }
                 .getOrNull()?.rows?.firstOrNull()?.firstOrNull()?.toString()
                 ?.takeIf { it.isNotBlank() }
             tables = parseTables(queryRows(connectionId, TABLES_SQL))
+            com.mqclient.core.log.Log.info("starrocks-ui", "[Catalog] load done: tables=${tables.size}, dbName=$dbName")
             columnCache.clear()
             partitionCache.clear()
             ddlCache.clear()
@@ -338,6 +347,10 @@ internal fun StarRocksCatalogPanel(connectionId: String, modifier: Modifier = Mo
         it.name.contains(query, ignoreCase = true) || it.comment.contains(query, ignoreCase = true)
     }
 
+    com.mqclient.core.log.Log.info(
+        "starrocks-ui",
+        "[Catalog] composing split layout: tables=${tables.size}, loading=$loading, error=$error",
+    )
     Row(modifier.fillMaxSize()) {
         // ── 左侧树 ──
         Column(Modifier.weight(0.42f).fillMaxHeight()) {
@@ -493,42 +506,42 @@ internal fun StarRocksCatalogPanel(connectionId: String, modifier: Modifier = Mo
                     }
                 }
             }
+        } // 左侧树 Column 闭合
 
-            VerticalDivider()
+        VerticalDivider()
 
-            // ── 右侧详情面板 ──
-            Column(Modifier.weight(0.58f).fillMaxHeight()) {
-                CatalogDetailPane(
-                    selection = selection,
-                    dbName = dbName,
-                    tables = tables,
-                    columnCache = columnCache,
-                    partitionCache = partitionCache,
-                    ddlCache = ddlCache,
-                    onFetchDdl = { table ->
-                        if (!ddlCache.containsKey(table)) {
-                            ddlCache[table] = ""
-                            scope.launch {
-                                val ddl = try {
-                                    queryRows(connectionId, ddlSql(table)).rows.firstOrNull()
-                                        ?.getOrNull(1)?.toString().orEmpty()
-                                } catch (c: CancellationException) {
-                                    throw c
-                                } catch (e: Throwable) {
-                                    ""
-                                }
-                                ddlCache[table] = ddl
+        // ── 右侧详情面板 ──
+        Column(Modifier.weight(0.58f).fillMaxHeight()) {
+            CatalogDetailPane(
+                selection = selection,
+                dbName = dbName,
+                tables = tables,
+                columnCache = columnCache,
+                partitionCache = partitionCache,
+                ddlCache = ddlCache,
+                onFetchDdl = { table ->
+                    if (!ddlCache.containsKey(table)) {
+                        ddlCache[table] = ""
+                        scope.launch {
+                            val ddl = try {
+                                queryRows(connectionId, ddlSql(table)).rows.firstOrNull()
+                                    ?.getOrNull(1)?.toString().orEmpty()
+                            } catch (c: CancellationException) {
+                                throw c
+                            } catch (e: Throwable) {
+                                ""
                             }
+                            ddlCache[table] = ddl
                         }
-                    },
-                    onOpenTable = { name ->
-                        selection = CatalogSelection.Table(name)
-                        tables.firstOrNull { it.name == name }?.let(::toggleTable)
-                    },
-                    onRefreshColumns = { table -> ensureForSelection(CatalogSelection.Table(table)) },
-                )
+                    }
+                },
+                onOpenTable = { name ->
+                    selection = CatalogSelection.Table(name)
+                    tables.firstOrNull { it.name == name }?.let(::toggleTable)
+                },
+                onRefreshColumns = { table -> ensureForSelection(CatalogSelection.Table(table)) },
+            )
             }
-        }
     }
 }
 
