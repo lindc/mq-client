@@ -469,7 +469,7 @@ private fun TopOperatorTable(operators: List<ProfileOperator>) {
                     modifier = Modifier.width(90.dp),
                 )
                 Text(
-                    op.pct,
+                    op.pct.ifBlank { "-" },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.width(64.dp),
