@@ -361,6 +361,7 @@
   "olap.starrocks.catalog.col_default": "默认值",
   "olap.starrocks.catalog.col_extra": "Extra",
   "olap.starrocks.catalog.col_comment": "注释",
+  "olap.starrocks.catalog.table_columns_title": "字段（%1$d）",
   "olap.starrocks.catalog.tab_overview": "概览",
   "olap.starrocks.catalog.tab_ddl": "DDL",
   "olap.starrocks.catalog.ddl_copy": "复制 DDL",

@@ -361,6 +361,7 @@
   "olap.starrocks.catalog.col_default": "Default",
   "olap.starrocks.catalog.col_extra": "Extra",
   "olap.starrocks.catalog.col_comment": "Comment",
+  "olap.starrocks.catalog.table_columns_title": "Columns (%1$d)",
   "olap.starrocks.catalog.tab_overview": "Overview",
   "olap.starrocks.catalog.tab_ddl": "DDL",
   "olap.starrocks.catalog.ddl_copy": "Copy DDL",

@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -580,6 +579,24 @@ private fun TreeRow(
     }
 }
 
+/**
+ * 带引导线的小节标题行（字段 / 分区分组头、加载 / 空态提示）：
+ * 与 TreeRow 共用同一套引导线绘制逻辑，保证从表（depth=2）到小节（depth=3）
+ * 再到列（depth=4）的竖线逐层连续、不再断开。
+ */
+@Composable
+private fun TreeHintRow(depth: Int, text: String, bold: Boolean = false) {
+    TreeRow(depth = depth) {
+        Text(
+            text,
+            style = if (bold) MaterialTheme.typography.labelMedium else MaterialTheme.typography.labelSmall,
+            fontWeight = if (bold) FontWeight.Medium else null,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(vertical = 3.dp),
+        )
+    }
+}
+
 /** 展开箭头（18dp）。 */
 @Composable
 private fun TreeChevron(expanded: Boolean) {
@@ -676,19 +693,18 @@ private fun LazyListScope.tableItems(
             }
 
             if (expanded) {
-                // 字段小节
-                HintText(
-                    stringResource("olap.starrocks.catalog.columns_label"),
-                    startIndent = 72.dp,
+                // 字段小节（depth=3，引导线与表 depth=2 / 列 depth=4 逐层连续）
+                TreeHintRow(
+                    depth = 3,
+                    text = stringResource("olap.starrocks.catalog.columns_label"),
                     bold = true,
                 )
                 when {
-                    columns == null -> HintText(stringResource("olap.starrocks.catalog.loading"), 72.dp)
+                    columns == null -> TreeHintRow(3, stringResource("olap.starrocks.catalog.loading"))
                     visibleColumns.isNullOrEmpty() ->
-                        HintText(stringResource("olap.starrocks.catalog.columns_empty"), 72.dp)
+                        TreeHintRow(3, stringResource("olap.starrocks.catalog.columns_empty"))
                     else -> visibleColumns.forEach { column ->
                         TreeRow(depth = 4, onClick = { onSelectColumn(table.name, column.name) }) {
-                            Spacer(Modifier.width(16.dp))
                             Icon(
                                 Icons.Filled.ViewColumn,
                                 contentDescription = null,
@@ -712,32 +728,23 @@ private fun LazyListScope.tableItems(
                     }
                 }
 
-                // 分区小节（失败静默降级，不弹红字）
-                HintText(
-                    stringResource("olap.starrocks.catalog.partitions_label"),
-                    startIndent = 72.dp,
+                // 分区小节（失败静默降级，不弹红字；引导线与字段区同层连续）
+                TreeHintRow(
+                    depth = 3,
+                    text = stringResource("olap.starrocks.catalog.partitions_label"),
                     bold = true,
                 )
                 when (val state = partitionCache[table.name]) {
                     null, PartitionLoadState.Loading ->
-                        HintText(stringResource("olap.starrocks.catalog.loading"), 72.dp)
+                        TreeHintRow(3, stringResource("olap.starrocks.catalog.loading"))
                     PartitionLoadState.Unsupported ->
-                        HintText(stringResource("olap.starrocks.catalog.partitions_unsupported"), 72.dp)
+                        TreeHintRow(3, stringResource("olap.starrocks.catalog.partitions_unsupported"))
                     is PartitionLoadState.Loaded ->
                         if (state.partitions.isEmpty()) {
-                            HintText(stringResource("olap.starrocks.catalog.partitions_empty"), 72.dp)
+                            TreeHintRow(3, stringResource("olap.starrocks.catalog.partitions_empty"))
                         } else {
                             state.partitions.forEach { partition ->
-                                Text(
-                                    partition.summary,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.padding(
-                                        start = 72.dp, top = 2.dp, bottom = 2.dp, end = 8.dp,
-                                    ),
-                                )
+                                TreeHintRow(4, partition.summary)
                             }
                         }
                 }
@@ -872,7 +879,12 @@ private fun TableDetailPane(
     LaunchedEffect(tableName) { onRefreshColumns(tableName) }
 
     Column(Modifier.fillMaxSize().padding(16.dp)) {
-        Text(tableName, style = MaterialTheme.typography.titleMedium)
+        Text(
+            tableName,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary,
+        )
         Spacer(Modifier.height(8.dp))
         PrimaryTabRow(selectedTabIndex = tab) {
             Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text(stringResource("olap.starrocks.catalog.tab_overview")) })
@@ -887,7 +899,10 @@ private fun TableDetailPane(
     }
 }
 
-/** 表结构表格：列名 / 类型 / 可空 / 键 / 默认值 / Extra（斑马纹 + 横向滚动）。 */
+/**
+ * 表结构详情：与「列」节点一致的属性面板风格 —— 每个字段一个分组
+ * （字段名加粗标题 + [PropertyTable] 键值对），避免横向 6 列表格挤在一起。
+ */
 @Composable
 private fun SchemaGrid(tableName: String, columns: List<CatalogColumn>?) {
     when {
@@ -900,51 +915,44 @@ private fun SchemaGrid(tableName: String, columns: List<CatalogColumn>?) {
 
         columns.isEmpty() -> HintText(stringResource("olap.starrocks.catalog.columns_empty"), 16.dp)
 
-        else -> Column {
-            Row(
-                Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(vertical = 6.dp),
-            ) {
-                listOf(
-                    stringResource("olap.starrocks.catalog.col_name"),
-                    stringResource("olap.starrocks.catalog.col_type"),
-                    stringResource("olap.starrocks.catalog.col_nullable"),
-                    stringResource("olap.starrocks.catalog.col_key"),
-                    stringResource("olap.starrocks.catalog.col_default"),
-                    stringResource("olap.starrocks.catalog.col_extra"),
-                ).forEachIndexed { index, header ->
-                    Text(
-                        header,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.weight(if (index == 0) 1.2f else 1f).padding(horizontal = 8.dp),
-                    )
-                }
+        else -> LazyColumn(
+            Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            item {
+                Text(
+                    stringResource("olap.starrocks.catalog.table_columns_title").withArg(columns.size),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
-            LazyColumn(Modifier.fillMaxSize()) {
-                itemsIndexed(columns) { index, column ->
-                    val zebra = index % 2 == 1
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .background(
-                                if (zebra) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-                                else Color.Transparent,
-                            )
-                            .padding(vertical = 6.dp),
-                    ) {
-                        Text(column.name, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1.2f).padding(horizontal = 8.dp))
-                        Text(column.type, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f).padding(horizontal = 8.dp))
-                        Text(column.nullable.ifBlank { "-" }, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f).padding(horizontal = 8.dp))
-                        Text(column.key.ifBlank { "-" }, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f).padding(horizontal = 8.dp))
-                        Text(column.default.ifBlank { "-" }, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(horizontal = 8.dp))
-                        Text(column.extra.ifBlank { "-" }, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(horizontal = 8.dp))
-                    }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+            items(columns, key = { it.name }) { column ->
+                Column {
+                    Text(
+                        column.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(vertical = 6.dp),
+                    )
+                    PropertyTable(items = columnProperties(column))
                 }
             }
         }
     }
 }
+
+/** 字段的完整属性键值对（表详情每个字段分组 / 列节点详情共用，风格一致）。 */
+@Composable
+private fun columnProperties(column: CatalogColumn): List<PropertyItem> = listOf(
+    PropertyItem(stringResource("olap.starrocks.catalog.col_name"), column.name),
+    PropertyItem(stringResource("olap.starrocks.catalog.col_type"), column.type),
+    PropertyItem(stringResource("olap.starrocks.catalog.col_nullable"), column.nullable.ifBlank { "-" }),
+    PropertyItem(stringResource("olap.starrocks.catalog.col_key"), column.key.ifBlank { "-" }),
+    PropertyItem(stringResource("olap.starrocks.catalog.col_default"), column.default.ifBlank { "-" }),
+    PropertyItem(stringResource("olap.starrocks.catalog.col_extra"), column.extra.ifBlank { "-" }),
+    PropertyItem(stringResource("olap.starrocks.catalog.col_comment"), column.comment.ifBlank { "-" }),
+)
 
 /** DDL Tab：SHOW CREATE TABLE 文本（等宽、可选中）+ 一键复制。 */
 @Composable
@@ -1000,7 +1008,9 @@ private fun ColumnDetailPane(
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         Text(
             "$tableName · $columnName",
-            style = MaterialTheme.typography.titleMedium,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary,
         )
         Spacer(Modifier.height(8.dp))
         when {
@@ -1010,17 +1020,7 @@ private fun ColumnDetailPane(
                 if (column == null) {
                     HintText(stringResource("olap.starrocks.catalog.columns_empty"), 16.dp)
                 } else {
-                    PropertyTable(
-                        items = listOf(
-                            PropertyItem(stringResource("olap.starrocks.catalog.col_name"), column.name),
-                            PropertyItem(stringResource("olap.starrocks.catalog.col_type"), column.type),
-                            PropertyItem(stringResource("olap.starrocks.catalog.col_nullable"), column.nullable.ifBlank { "-" }),
-                            PropertyItem(stringResource("olap.starrocks.catalog.col_key"), column.key.ifBlank { "-" }),
-                            PropertyItem(stringResource("olap.starrocks.catalog.col_default"), column.default.ifBlank { "-" }),
-                            PropertyItem(stringResource("olap.starrocks.catalog.col_extra"), column.extra.ifBlank { "-" }),
-                            PropertyItem(stringResource("olap.starrocks.catalog.col_comment"), column.comment.ifBlank { "-" }),
-                        ),
-                    )
+                    PropertyTable(items = columnProperties(column))
                 }
             }
         }
