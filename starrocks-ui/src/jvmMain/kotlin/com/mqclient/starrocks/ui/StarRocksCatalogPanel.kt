@@ -119,10 +119,22 @@ private const val TABLES_SQL =
 
 private const val TABLES_TABLE_TYPE_MV = "MATERIALIZED VIEW"
 
-/** StarRocks 的物化视图（MySQL 没有这个 table_type，返回空集即可）。 */
-internal const val MATERIALIZED_VIEW_SQL =
-    "SELECT TABLE_NAME FROM information_schema.tables " +
-        "WHERE table_schema = DATABASE() AND table_type = 'MATERIALIZED VIEW';"
+/**
+ * 物化视图名单：`SHOW MATERIALIZED VIEWS`（StarRocks 专属，3.4.0 实测可靠）。
+ * 不能靠 information_schema.tables.table_type == 'MATERIALIZED VIEW' ——
+ * 3.4 的异步物化视图实际返回 `VIEW`（已实测），会被误判为普通视图。
+ * MySQL 不支持该语句，调用方静默降级为空集。
+ */
+internal const val MATERIALIZED_VIEW_SQL = "SHOW MATERIALIZED VIEWS;"
+
+/** 解析 SHOW MATERIALIZED VIEWS 的 name 列 → 物化视图名集合（列名按 lowercase 匹配，坏行跳过）。 */
+internal fun parseMaterializedViewNames(result: StarRocksQueryRows): Set<String> {
+    val nameIdx = result.columns.map { it.lowercase() }.indexOf("name")
+    if (nameIdx < 0) return emptySet()   // MySQL / 意外列形状 → 无物化视图
+    return result.rows.mapNotNull { row ->
+        runCatching { row.getOrNull(nameIdx)?.toString()?.trim()?.takeIf { it.isNotBlank() } }.getOrNull()
+    }.toSet()
+}
 
 /** 表名进 SQL 字符串字面量：单引号转义，防元数据里带引号的名称破坏语句。 */
 internal fun columnsSql(table: String): String =
@@ -142,8 +154,11 @@ internal fun previewSql(table: String): String =
 internal fun ddlSql(table: String): String =
     "SHOW CREATE TABLE `${table.replace("`", "``")}`;"
 
-/** 表清单解析：名称 / 注释 / 类型；物化视图由 table_type 识别。 */
-internal fun parseTables(result: StarRocksQueryRows): List<CatalogTable> = result.rows.mapNotNull { row ->
+/** 表清单解析：名称 / 注释 / 类型；物化视图由 [SHOW MATERIALIZED VIEWS 名单][mvNames] 或 table_type 识别。 */
+internal fun parseTables(
+    result: StarRocksQueryRows,
+    mvNames: Set<String> = emptySet(),
+): List<CatalogTable> = result.rows.mapNotNull { row ->
     // 单行坏数据（越界 / 异常 toString）不得崩掉整棵树 —— runCatching 静默丢弃该行。
     runCatching {
         val name = row.getOrNull(0)?.toString().orEmpty().trim()
@@ -153,7 +168,7 @@ internal fun parseTables(result: StarRocksQueryRows): List<CatalogTable> = resul
                 name = name,
                 comment = row.getOrNull(1)?.toString().orEmpty(),
                 type = type,
-                materializedView = type == TABLES_TABLE_TYPE_MV,
+                materializedView = name in mvNames || type == TABLES_TABLE_TYPE_MV,
             )
         }
     }.getOrNull()
@@ -269,7 +284,11 @@ internal fun StarRocksCatalogPanel(connectionId: String, modifier: Modifier = Mo
             dbName = runCatching { queryRows(connectionId, "SELECT DATABASE();") }
                 .getOrNull()?.rows?.firstOrNull()?.firstOrNull()?.toString()
                 ?.takeIf { it.isNotBlank() }
-            tables = parseTables(queryRows(connectionId, TABLES_SQL))
+            // 物化视图名单走 SHOW MATERIALIZED VIEWS（3.4 的 table_type 不可靠）；失败静默降级。
+            val mvNames = runCatching {
+                parseMaterializedViewNames(queryRows(connectionId, MATERIALIZED_VIEW_SQL))
+            }.getOrDefault(emptySet())
+            tables = parseTables(queryRows(connectionId, TABLES_SQL), mvNames)
             com.mqclient.core.log.Log.info("starrocks-ui", "[Catalog] load done: tables=${tables.size}, dbName=$dbName")
             columnCache.clear()
             partitionCache.clear()

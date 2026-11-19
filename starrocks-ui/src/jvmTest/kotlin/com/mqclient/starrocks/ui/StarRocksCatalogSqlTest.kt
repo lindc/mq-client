@@ -37,6 +37,39 @@ class StarRocksCatalogSqlTest {
     }
 
     @Test
+    fun `async materialized views are recognized via SHOW MATERIALIZED VIEWS`() {
+        // 3.4.0 实测：异步物化视图 table_type = VIEW（不是 MATERIALIZED VIEW）——
+        // 必须靠 SHOW MATERIALIZED VIEWS 名单识别，否则会误显示为普通视图。
+        assertEquals("SHOW MATERIALIZED VIEWS;", MATERIALIZED_VIEW_SQL)
+        val names = parseMaterializedViewNames(
+            StarRocksQueryRows(
+                columns = listOf("id", "database_name", "name", "refresh_type"),
+                rows = listOf(
+                    listOf("10213", "test_db", "mv_sales_by_region", "ASYNC"),
+                    listOf(null, null, null, null),
+                ),
+            ),
+        )
+        assertEquals(setOf("mv_sales_by_region"), names)
+
+        val tables = parseTables(
+            StarRocksQueryRows(
+                columns = listOf("table_name", "table_comment", "table_type"),
+                rows = listOf(
+                    listOf("sales", "", "BASE TABLE"),
+                    listOf("mv_sales_by_region", "", "VIEW"),
+                ),
+            ),
+            mvNames = names,
+        )
+        assertTrue(!tables[0].materializedView, "普通表不得误判")
+        assertTrue(tables[1].materializedView, "MV 名单里的 VIEW 应识别为物化视图")
+
+        // MySQL / 意外列形状 → 无 MV 名单，table_type 兜底仍可用。
+        assertTrue(parseMaterializedViewNames(StarRocksQueryRows(listOf("x"), listOf(listOf("y")))).isEmpty())
+    }
+
+    @Test
     fun `partitions statement escapes identifiers`() {
         assertEquals("SHOW PARTITIONS FROM `orders`;", partitionsSql("orders"))
         assertEquals("SHOW PARTITIONS FROM `we``ird`;", partitionsSql("we`ird"))
