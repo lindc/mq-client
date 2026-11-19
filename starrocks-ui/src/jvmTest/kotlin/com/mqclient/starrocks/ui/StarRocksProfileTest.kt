@@ -225,6 +225,38 @@ class StarRocksProfileTest {
         assertTrue(isSystemStatement("-- 只有注释"))
     }
 
+
+    @Test
+    fun `ansi escapes are stripped from the fetched text`() = runBlocking {
+        // 服务端返回的 Profile 文本夹杂 ANSI 颜色控制符 —— 取数层彻底清洗，
+        // 展示与「复制全部」拿到的都是纯净文本。
+        val colored = "\u001B[1mQuery:\u001B[0m\n  Summary:\n     - Total: \u001B[32m23ms\u001B[0m"
+        val text = fetchQueryProfile("conn-1", "297a21b0-e412-11f1-8289-968dc029c89c") { _ ->
+            StarRocksQueryRows(listOf("t"), listOf(listOf(colored)))
+        }
+        assertTrue(!text.contains("\u001B"), "不得残留 ESC 控制符：$text")
+        assertTrue(!text.contains("[1m") && !text.contains("[0m") && !text.contains("[32m"), text)
+        assertEquals("Query:\n  Summary:\n     - Total: 23ms", text)
+    }
+
+    @Test
+    fun `strip ansi escapes helper covers csi forms`() {
+        assertEquals("abc", stripAnsiEscapes("\u001B[31mabc\u001B[0m"))
+        assertEquals("x", stripAnsiEscapes("\u001B[1;32mx\u001B[0m"))
+        assertEquals("clean", stripAnsiEscapes("\u001B[1mclean\u001B[0m"))
+        assertEquals("plain", stripAnsiEscapes("plain"))
+    }
+
+    @Test
+    fun `parse summary works on ansi stripped text`() {
+        // 清洗先行保证解析不受控制符干扰。
+        val colored = "\u001B[1mSummary\u001B[0m\n    QueryId: 605e4f10-e417-11f1-8289-968dc029c89c\n    State: Finished\n    TotalTime: \u001B[32m23ms\u001B[0m"
+        val summary = parseProfileSummary(colored)
+        assertEquals("605e4f10-e417-11f1-8289-968dc029c89c", summary.queryId)
+        assertEquals("Finished", summary.state)
+        assertEquals("23ms", summary.totalTime)
+    }
+
     @Test
     fun `parses real get_query_profile format`() {
         // 3.4.0 实测：get_query_profile 首选语句返回 `- 键: 值` 缩进风格（与 ANALYZE

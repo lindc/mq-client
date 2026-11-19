@@ -86,9 +86,12 @@ internal data class ProfileSummary(
  * - `ANALYZE PROFILE`（兜底）：Summary 段 + `└──` 算子树。
  * 形状不符的字段一律空串兜底，绝不崩面板。
  */
-internal fun parseProfileSummary(raw: String): ProfileSummary =
-    if (raw.contains("- Query State:")) parseGetQueryProfileSummary(raw)
-    else parseAnalyzeProfileSummary(raw)
+internal fun parseProfileSummary(raw: String): ProfileSummary {
+    // 纵深防御：即使调用方拿到的是未经清洗的原始文本，解析也不受 ANSI 控制符干扰。
+    val clean = stripAnsiEscapes(raw)
+    return if (clean.contains("- Query State:")) parseGetQueryProfileSummary(clean)
+    else parseAnalyzeProfileSummary(clean)
+}
 
 private fun parseGetQueryProfileSummary(raw: String): ProfileSummary {
     val lines = raw.lines()
@@ -322,7 +325,7 @@ internal suspend fun fetchQueryProfile(
 ): String {
     val sql = profileStatements(queryId).single()
     val text = try {
-        flattenRows(runQuery(sql))
+        stripAnsiEscapes(flattenRows(runQuery(sql)))
     } catch (cancellation: CancellationException) {
         throw cancellation
     } catch (error: Throwable) {
@@ -347,6 +350,15 @@ internal suspend fun fetchQueryProfile(
 private fun flattenRows(rows: StarRocksQueryRows): String = rows.rows.joinToString("\n") { row ->
     row.joinToString(" | ") { it?.toString() ?: "NULL" }
 }
+
+/**
+ * ANSI 终端转义序列清洗：StarRocks 服务端返回的 Profile 文本夹杂颜色控制符
+ * （`\u001B[1m` / `\u001B[31m` / `\u001B[0m` 等），在取数层彻底过滤 —— 解析、
+ * 展示与「复制全部」拿到的都是纯净文本。
+ */
+private val ANSI_ESCAPE_REGEX = Regex("\u001B(?:[@-Z\\-_]|\\[[0-?]*[ -/]*[@-~])")
+
+internal fun stripAnsiEscapes(text: String): String = ANSI_ESCAPE_REGEX.replace(text, "")
 
 private val prettyJson = Json { prettyPrint = true }
 

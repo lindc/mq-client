@@ -1,6 +1,8 @@
 package com.mqclient.starrocks.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -19,6 +21,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material3.AlertDialog
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -34,9 +39,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mqclient.aiui.untrustedContextRule
@@ -384,9 +392,19 @@ private fun TopOperatorTable(operators: List<ProfileOperator>) {
     }
 }
 
+/* 查看器深色主题（IDE 风格，独立于应用主题，保证可读性）。 */
+private val ViewerBg = Color(0xFF1E1E1E)
+private val ViewerText = Color(0xFFD4D4D4)
+private val ViewerLabel = Color(0xFF9E9E9E)
+private val ViewerChipBg = Color(0xFF2D2D2D)
+private val ViewerAccent = Color(0xFF4FC1FF)
+private val ViewerHighlight = Color(0xFFFFEB3B).copy(alpha = 0.28f)
+
 /**
- * 完整 Profile 查看器：ObjectDetailDialog 外壳（CONTENT 档 = 屏幕约 85%，可调），
- * 等宽全文可滚动 + 可选中复制 + 「复制全部」一键入剪贴板。
+ * 完整 Profile 查看器：ObjectDetailDialog 外壳（CONTENT 档 = 屏幕约 85%，可调）。
+ * 深色 IDE 风格面板：顶部指标卡（Query ID / 总耗时 / 峰值内存 / 扫描行数 / 状态）+
+ * 关键字搜索（命中处高亮 + 匹配计数）+ 等宽全文（可滚动、可选中复制）。
+ * 底部「复制全部」入剪贴板的文本即上游清洗后的纯净文本（无 ANSI 乱码）。
  */
 @Composable
 internal fun StarRocksProfileViewerDialog(
@@ -395,6 +413,15 @@ internal fun StarRocksProfileViewerDialog(
     onDismiss: () -> Unit,
 ) {
     val clipboard = LocalClipboardManager.current
+    var query by remember { mutableStateOf("") }
+    val summary = remember(raw) { parseProfileSummary(raw) }
+    val annotated = remember(raw, query) { buildHighlightedText(raw, query) }
+    val matchCount = remember(raw, query) {
+        if (query.isBlank()) 0
+        else raw.lowercase().split(query.lowercase()).size - 1
+    }
+    val matchCountText = stringResource("olap.starrocks.profile.match_count").withArg(matchCount)
+
     ObjectDetailDialog(
         title = title,
         onDismiss = onDismiss,
@@ -406,16 +433,127 @@ internal fun StarRocksProfileViewerDialog(
             PrimaryButton(onClick = onDismiss) { Text(stringResource("common_close")) }
         },
     ) {
-        SelectionContainer {
-            Text(
-                formatProfileText(raw),
-                fontFamily = FontFamily.Monospace,
-                style = MaterialTheme.typography.bodySmall,
+        Column(Modifier.fillMaxSize()) {
+            // ── 指标卡 ──
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
+            ) {
+                ViewerMetricChip(stringResource("olap.starrocks.processlist.col_id"), summary.queryId)
+                ViewerMetricChip(stringResource("olap.starrocks.profile.summary_total"), summary.totalTime)
+                ViewerMetricChip(stringResource("olap.starrocks.profile.summary_peak"), summary.peakMemory)
+                ViewerMetricChip(stringResource("olap.starrocks.profile.summary_scan"), summary.scanRows)
+                ViewerMetricChip(stringResource("olap.starrocks.profile.summary_state"), summary.state)
+            }
+
+            // ── 搜索框 + 匹配计数 ──
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodySmall.copy(
+                    fontFamily = FontFamily.Monospace,
+                    color = ViewerText,
+                ),
+                placeholder = {
+                    Text(
+                        stringResource("olap.starrocks.profile.search_placeholder"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = ViewerLabel,
+                    )
+                },
+                trailingIcon = {
+                    if (query.isNotBlank()) {
+                        Text(
+                            matchCountText,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = ViewerAccent,
+                            modifier = Modifier.padding(end = 8.dp),
+                        )
+                    }
+                },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = ViewerText,
+                    unfocusedTextColor = ViewerText,
+                    cursorColor = ViewerAccent,
+                    focusedBorderColor = ViewerAccent,
+                    unfocusedBorderColor = Color(0xFF555555),
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp),
             )
+
+            // ── 深色全文区（可滚动 / 可选中复制 / 命中高亮） ──
+            Box(
+                Modifier
+                    .weight(1f)
+                    .padding(horizontal = 20.dp, vertical = 8.dp)
+                    .background(ViewerBg, RoundedCornerShape(8.dp)),
+            ) {
+                SelectionContainer {
+                    Text(
+                        annotated,
+                        fontFamily = FontFamily.Monospace,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState())
+                            .padding(12.dp),
+                    )
+                }
+            }
         }
+    }
+}
+
+/** 深色指标卡：标签（灰）+ 值（亮），空值显示 "-"。 */
+@Composable
+private fun ViewerMetricChip(label: String, value: String) {
+    Column(
+        modifier = Modifier
+            .background(ViewerChipBg, RoundedCornerShape(6.dp))
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = ViewerLabel,
+        )
+        Text(
+            value.ifBlank { "-" },
+            style = MaterialTheme.typography.bodySmall,
+            color = ViewerText,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/**
+ * 搜索高亮：关键字（大小写不敏感）命中处加背景色；无关键字时原样返回。
+ */
+private fun buildHighlightedText(raw: String, query: String): AnnotatedString = buildAnnotatedString {
+    if (query.isBlank()) {
+        append(raw)
+        return@buildAnnotatedString
+    }
+    val lower = raw.lowercase()
+    val needle = query.lowercase()
+    var index = 0
+    while (true) {
+        val found = lower.indexOf(needle, index)
+        if (found < 0) {
+            append(raw.substring(index))
+            break
+        }
+        append(raw.substring(index, found))
+        withStyle(SpanStyle(background = ViewerHighlight)) {
+            append(raw.substring(found, found + needle.length))
+        }
+        index = found + needle.length
     }
 }
