@@ -1,7 +1,6 @@
 package com.mqclient.starrocks.ui
 
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
 import com.mqclient.core.ServiceException
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
@@ -261,38 +260,20 @@ class StarRocksProfileTest {
 
 
     @Test
-    fun `viewer color presets keep high contrast in both themes`() {
-        // 深色：#1E1E1E 背景配 #D4D4D4 近白文字（用户报告的可读性回归锚点）；
-        // 浅色：#F5F5F5 背景配 #333333 文字；两套高亮都可见。
-        val dark = viewerColors(dark = true)
-        val light = viewerColors(dark = false)
-        assertEquals(0x252526, dark.bg.toArgb().toLong() and 0xFFFFFF)
-        assertEquals(0xD4D4D4, dark.text.toArgb().toLong() and 0xFFFFFF)
-        assertEquals(0xF5F5F5, light.bg.toArgb().toLong() and 0xFFFFFF)
-        assertEquals(0x333333, light.text.toArgb().toLong() and 0xFFFFFF)
-        assertTrue(dark.text != dark.bg && light.text != light.bg)
-        assertTrue(dark.highlight != light.highlight)
-        assertTrue(dark.keyword != Color.White && light.keyword != Color.White)
-    }
+    fun `viewer text stays plain without hardcoded syntax colors`() {
+        // DDL 面板无花哨语法染色 —— Profile 全文也只输出纯文本，搜索命中仅加
+        // 柔和主题色背景，不写入任何蓝 / 绿 / 紫文字色 span。
+        val raw = "  Summary:\n    QueryId: 605e4f10\n    TotalTime: 23ms\n  1. OLAP_SCAN (id=0) : 737.656us (58.36%)"
+        val plain = buildViewerText(raw, "", Color.Unspecified)
+        assertEquals(raw, plain.text, "无搜索词时原文原样输出")
+        assertTrue(plain.spanStyles.isEmpty(), "不得有关键字 / 数字等自定义染色")
 
-    @Test
-    fun `DDL and profile share the exact same code block colors`() {
-        // 关键验收：浅色模式下 DDL 与 Profile 查看器代码块的背景/文字/边框/关键字
-        // 必须完全一致 —— 两者都取 codeBlockColors(dark) 同一份预设。
-        val darkProfile = codeBlockColors(dark = true)
-        val lightProfile = codeBlockColors(dark = false)
-        assertEquals(0x252526, darkProfile.bg.toArgb().toLong() and 0xFFFFFF)
-        // VS Code 风格：关键字浅蓝 / 数字浅绿（深色）
-        assertEquals(0x569CD6, darkProfile.keyword.toArgb().toLong() and 0xFFFFFF)
-        assertEquals(0xB5CEA8, darkProfile.number.toArgb().toLong() and 0xFFFFFF)
-        // 浅色：浅灰底 + 深灰字，与 DDL 在亮色 app 主题下同源
-        assertEquals(0xF5F5F5, lightProfile.bg.toArgb().toLong() and 0xFFFFFF)
-        assertEquals(0x333333, lightProfile.text.toArgb().toLong() and 0xFFFFFF)
-        // ViewerColors 的关键字/数字色来自同一预设（保证染色与容器风格一致）
-        assertTrue(viewerColors(true).keyword == darkProfile.keyword)
-        assertTrue(viewerColors(true).number == darkProfile.number)
-        assertTrue(viewerColors(false).keyword == lightProfile.keyword)
-        assertTrue(viewerColors(false).number == lightProfile.number)
+        // 搜索命中只产生背景高亮，不改变文字颜色。
+        val highlighted = buildViewerText(raw, "TotalTime", Color(0xFF0000FF))
+        assertTrue(highlighted.text.contains("TotalTime"))
+        assertTrue(highlighted.spanStyles.isNotEmpty())
+        assertTrue(highlighted.spanStyles.all { it.item.color == Color.Unspecified },
+            "高亮 span 只能用背景色，不得写死文字色")
     }
 
     @Test

@@ -2,7 +2,6 @@ package com.mqclient.starrocks.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -25,7 +24,6 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -34,9 +32,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -394,62 +392,30 @@ private fun TopOperatorTable(operators: List<ProfileOperator>) {
 }
 
 /**
- * 查看器配色统一管理（VS Code 深色 / 打印浅色两套预设），杜绝组件内散落的硬编码。
- * highlight 在两种主题下都保证可读；keyword 用于 TotalTime 等关键指标的柔和染色。
+ * 指标卡 / 搜索框配色：全部取自当前 [MaterialTheme]，与数据目录 DDL 面板同源。
+ * 浅色主题下即浅灰卡底 + 深灰字，无任何硬编码十六进制色。
  */
 internal data class ViewerColors(
-    val bg: Color,
     val text: Color,
     val label: Color,
     val chipBg: Color,
     val accent: Color,
     val borderColor: Color,
-    val highlight: Color,
-    val keyword: Color,
-    val number: Color,
 )
 
-private val ViewerDarkColors = ViewerColors(
-    bg = Color(0xFF252526),
-    text = Color(0xFFD4D4D4),
-    label = Color(0xFF9E9E9E),
-    chipBg = Color(0xFF2D2D2D),
-    accent = Color(0xFF4FC1FF),
-    borderColor = Color(0xFF333333),
-    highlight = Color(0xFFFFEB3B).copy(alpha = 0.28f),
-    keyword = codeBlockColors(dark = true).keyword,
-    number = codeBlockColors(dark = true).number,
-)
-
-private val ViewerLightColors = ViewerColors(
-    bg = Color(0xFFF5F5F5),
-    text = Color(0xFF333333),
-    label = Color(0xFF7A7A7A),
-    chipBg = Color(0xFFEBEBEB),
-    accent = Color(0xFF0451A5),
-    borderColor = Color(0xFFC8C8C8),
-    highlight = Color(0xFFFFB300).copy(alpha = 0.45f),
-    keyword = codeBlockColors(dark = false).keyword,
-    number = codeBlockColors(dark = false).number,
-)
-
-internal fun viewerColors(dark: Boolean): ViewerColors =
-    if (dark) ViewerDarkColors else ViewerLightColors
-
-/** 结构染色的关键字：Metric 键名 / 分层标题，命中处染柔和色（深蓝 / 浅蓝随主题）。 */
-/** 数字 token（带小数）：VS Code 浅绿染色用。 */
-private val NUMBER_REGEX = Regex("""(?<![A-Za-z0-9_])\d+(?:\.\d+)?(?![A-Za-z0-9_])""")
-
-private val VIEWER_KEYWORDS = listOf(
-    "QueryId:", "State:", "TotalTime:", "OperatorTotalTime:", "OutputRows:",
-    "PeakMemoryUsage", "AllocatedMemoryUsage", "PullRowNum:", "PushRowNum:",
-    "Table:", "Summary:", "Fragment ", "Pipeline (id=",
+@Composable
+private fun currentViewerColors(): ViewerColors = ViewerColors(
+    text = MaterialTheme.colorScheme.onSurface,
+    label = MaterialTheme.colorScheme.onSurfaceVariant,
+    chipBg = MaterialTheme.colorScheme.surfaceVariant,
+    accent = MaterialTheme.colorScheme.primary,
+    borderColor = MaterialTheme.colorScheme.outline,
 )
 
 /**
  * 完整 Profile 查看器：ObjectDetailDialog 外壳（CONTENT 档 = 屏幕约 85%，可调）。
- * IDE 风格面板：顶部指标卡 + 关键字搜索（命中高亮 + 匹配计数）+ 等宽全文
- * （行高 20sp、结构染色、可滚动、可选中复制）；右上角可切换深色 / 浅色主题。
+ * 样式与数据目录 DDL 面板**完全同源**：指标卡 + 关键字搜索（主题色命中高亮）+
+ * 等宽全文（共享 CodeBlock：主题色底、无边框、16dp padding、可选中复制）。
  * 底部「复制全部」入剪贴板的文本即上游清洗后的纯净文本（无 ANSI 乱码）。
  */
 @Composable
@@ -459,11 +425,11 @@ internal fun StarRocksProfileViewerDialog(
     onDismiss: () -> Unit,
 ) {
     val clipboard = LocalClipboardManager.current
-    // 与数据目录 DDL 同源：跟随 app 主题，不再有独立的深 / 浅切换。
-    val colors = viewerColors(dark = isAppThemeDark())
+    val colors = currentViewerColors()
     var query by remember { mutableStateOf("") }
     val summary = remember(raw) { parseProfileSummary(raw) }
-    val annotated = remember(raw, query, colors) { buildViewerText(raw, query, colors) }
+    val highlightColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.24f)
+    val annotated = remember(raw, query, highlightColor) { buildViewerText(raw, query, highlightColor) }
     val matchCount = remember(raw, query) {
         if (query.isBlank()) 0
         else raw.lowercase().split(query.lowercase()).size - 1
@@ -537,12 +503,10 @@ internal fun StarRocksProfileViewerDialog(
                     .padding(horizontal = 20.dp),
             )
 
-            // ── 全文区：与数据目录 DDL 完全同源的共享 CodeBlock（浅色主题下
-            // 浅灰底 + 深灰字、无边框、铺满剩余空间、20dp 内边距；跟随 app 主题） ──
+            // ── 全文区：与 DDL 同源的共享 CodeBlock（主题色底 + 无边框 +
+            // 16dp padding + 铺满剩余空间），无任何花哨语法染色 ──
             CodeBlock(
                 text = annotated,
-                colors = codeBlockColors(dark = isAppThemeDark()),
-                shape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp),
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
@@ -552,7 +516,7 @@ internal fun StarRocksProfileViewerDialog(
     }
 }
 
-/** 深浅主题共用的指标卡：标签 + 值，空值显示 "-"。 */
+/** 主题派生的指标卡：标签 + 值，空值显示 "-"。 */
 @Composable
 private fun ViewerMetricChip(label: String, value: String, colors: ViewerColors) {
     Column(
@@ -560,11 +524,7 @@ private fun ViewerMetricChip(label: String, value: String, colors: ViewerColors)
             .background(colors.chipBg, RoundedCornerShape(6.dp))
             .padding(horizontal = 10.dp, vertical = 6.dp),
     ) {
-        Text(
-            label,
-            style = MaterialTheme.typography.labelSmall,
-            color = colors.label,
-        )
+        Text(label, style = MaterialTheme.typography.labelSmall, color = colors.label)
         Text(
             value.ifBlank { "-" },
             style = MaterialTheme.typography.bodySmall,
@@ -575,61 +535,32 @@ private fun ViewerMetricChip(label: String, value: String, colors: ViewerColors)
     }
 }
 
-/** 搜索高亮 span（高优先级：覆盖关键字染色）。 */
-private data class ViewerSpan(val start: Int, val end: Int, val style: SpanStyle)
-
 /**
- * 构建查看器文本：结构染色（Metric 键名染柔和色）+ 搜索命中高亮（覆盖结构染色）。
- * 两个 span 集合先各自收集，再按起点排序并裁剪重叠。
+ * 构建查看器文本：与 DDL 面板一致——文字统一主题前景色，无任何关键字 / 数字染色；
+ * 仅搜索命中处加一层柔和的主题色背景（[highlightColor]），便于定位。
  */
-private fun buildViewerText(raw: String, query: String, colors: ViewerColors): AnnotatedString = buildAnnotatedString {
-    val keywordSpans = mutableListOf<ViewerSpan>()
-    for (keyword in VIEWER_KEYWORDS) {
-        var index = 0
-        while (true) {
-            val found = raw.indexOf(keyword, index)
-            if (found < 0) break
-            keywordSpans += ViewerSpan(found, found + keyword.length, SpanStyle(color = colors.keyword))
-            index = found + keyword.length
-        }
+internal fun buildViewerText(
+    raw: String,
+    query: String,
+    highlightColor: Color,
+): AnnotatedString = buildAnnotatedString {
+    if (query.isBlank()) {
+        append(raw)
+        return@buildAnnotatedString
     }
-
-    // 数字染色（VS Code 浅绿）：匹配独立的数字 token（含小数 / 单位后缀前的数值）。
-    val numberSpans = mutableListOf<ViewerSpan>()
-    NUMBER_REGEX.findAll(raw).forEach { match ->
-        numberSpans += ViewerSpan(match.range.first, match.range.last + 1, SpanStyle(color = colors.number))
-    }
-
-    val searchSpans = mutableListOf<ViewerSpan>()
-    if (query.isNotBlank()) {
-        val lower = raw.lowercase()
-        val needle = query.lowercase()
-        var index = 0
-        while (true) {
-            val found = lower.indexOf(needle, index)
-            if (found < 0) break
-            searchSpans += ViewerSpan(found, found + needle.length, SpanStyle(background = colors.highlight))
-            index = found + needle.length
-        }
-    }
-
-    // 关键字 / 数字 span 剔除与搜索 span 重叠的部分（搜索高亮优先）；
-    // 数字 span 还要剔除落在关键字里的部分（关键字色优先）。
-    val keptKeywords = keywordSpans.filter { kw ->
-        searchSpans.none { s -> kw.start < s.end && s.start < kw.end }
-    }
-    val keptNumbers = numberSpans.filter { num ->
-        searchSpans.none { s -> num.start < s.end && s.start < num.end } &&
-            keptKeywords.none { kw -> num.start < kw.end && kw.start < num.end }
-    }
-
-    val all = (keptKeywords + keptNumbers + searchSpans).sortedBy { it.start }
+    val lower = raw.lowercase()
+    val needle = query.lowercase()
     var cursor = 0
-    for (span in all.sortedBy { it.start }) {
-        if (span.start < cursor) continue   // 重叠裁剪
-        if (span.start > cursor) append(raw.substring(cursor, span.start))
-        withStyle(span.style) { append(raw.substring(span.start, span.end)) }
-        cursor = span.end
+    while (true) {
+        val found = lower.indexOf(needle, cursor)
+        if (found < 0) {
+            append(raw.substring(cursor))
+            break
+        }
+        append(raw.substring(cursor, found))
+        withStyle(SpanStyle(background = highlightColor)) {
+            append(raw.substring(found, found + needle.length))
+        }
+        cursor = found + needle.length
     }
-    if (cursor < raw.length) append(raw.substring(cursor))
 }
