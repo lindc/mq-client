@@ -243,5 +243,13 @@
   "err_conn_service_id_immutable": "不允许修改连接 '%1$s' 的协议类型（%2$s → %3$s）；请先删除再新建",
   "ai_err_conn_exists": "AI 连接 id '%1$s' 已存在，请改用编辑",
   "ai_err_conn_not_found": "AI 连接 '%1$s' 不存在",
-  "err_conn_not_found": "连接 '%1$s' 不存在"
+  "err_conn_not_found": "连接 '%1$s' 不存在",
+  "olap.err.connection_failed": "无法连接分析引擎",
+  "olap.err.permission_denied": "分析引擎拒绝了该操作（权限不足）",
+  "olap.err.timeout": "查询超时",
+  "olap.err.syntax_error": "SQL 语法或语义错误",
+  "olap.err.resource_limit": "查询超出了引擎资源限制",
+  "olap.err.cancelled": "查询已取消",
+  "olap.err.not_connected": "尚未建立连接，请先连接",
+  "olap.err.unknown": "未知的引擎错误"
 }

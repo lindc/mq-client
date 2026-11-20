@@ -243,5 +243,13 @@
   "err_conn_service_id_immutable": "The protocol of connection '%1$s' cannot change (%2$s → %3$s); delete and re-create it",
   "ai_err_conn_exists": "AI connection id '%1$s' already exists — edit it instead",
   "ai_err_conn_not_found": "AI connection '%1$s' does not exist",
-  "err_conn_not_found": "Connection '%1$s' not found"
+  "err_conn_not_found": "Connection '%1$s' not found",
+  "olap.err.connection_failed": "Cannot connect to the analytics engine",
+  "olap.err.permission_denied": "The analytics engine denied this operation (insufficient privileges)",
+  "olap.err.timeout": "Query timed out",
+  "olap.err.syntax_error": "SQL syntax or semantic error",
+  "olap.err.resource_limit": "Query exceeded engine resource limits",
+  "olap.err.cancelled": "Query was cancelled",
+  "olap.err.not_connected": "Not connected; connect first",
+  "olap.err.unknown": "Unknown engine error"
 }
