@@ -165,8 +165,27 @@ abstract class AbstractAnalyticsConnectionManager<C : AnalyticsConnectionConfig,
      * 关闭连接：关会话、清引用、发 `olap.connection.closed`。
      * 无会话时是空操作（重复点「断开」无副作用）。
      */
-    suspend fun close() = mutex.withLock {
-        val current = session ?: return@withLock
+    suspend fun close() = mutex.withLock { closeLocked() }
+
+    /**
+     * **只关闭属于 [connectionId] 的会话**，返回是否真的关了一条。
+     *
+     * 判据与关闭动作在**同一把锁内**完成：单槽管理器下 `currentConnectionId()` 是
+     * 无锁快照，先读后关之间另一个协程可能已经抢占槽位（connect 另一个连接），
+     * 那种情况下裸 `close()` 会关掉别人刚建好的会话，而对方的树还显示已连接。
+     * 归属不匹配时什么都不做（返回 false），调用方据此只做状态复位。
+     */
+    suspend fun closeIfOwnedBy(connectionId: String): Boolean = mutex.withLock {
+        if (session == null || sessionConfig?.connectionId != connectionId) {
+            return@withLock false
+        }
+        closeLocked()
+        true
+    }
+
+    /** [close] / [closeIfOwnedBy] 的共用体；**调用方必须已持 [mutex]**。 */
+    private suspend fun closeLocked() {
+        val current = session ?: return
         val connectionId = sessionConfig?.connectionId ?: "unknown"
         runCatching { closeSession(current) }
             .onFailure { log.warn("session close failed (ignored): error=${it.message}") }
@@ -177,7 +196,6 @@ abstract class AbstractAnalyticsConnectionManager<C : AnalyticsConnectionConfig,
             name = "$EVENT_NAMESPACE.connection.closed",
             payload = mapOf("connectionId" to connectionId),
         )
-        Unit
     }
 
     /**

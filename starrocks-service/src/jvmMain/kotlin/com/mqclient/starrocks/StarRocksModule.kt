@@ -4,10 +4,12 @@ import com.mqclient.core.ConnectionInfo
 import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ServiceException
 import com.mqclient.core.event.EventNames
+import com.mqclient.core.event.getString
 import com.mqclient.olap.base.perf.olapTimeMillis
 import com.mqclient.core.newUuidV7
 import com.mqclient.core.spi.ServiceContext
 import com.mqclient.core.spi.emit
+import com.mqclient.core.spi.onEvent
 import com.mqclient.olap.base.connection.HealthReport
 import com.mqclient.olap.base.query.ResultBatch
 import com.mqclient.starrocks.jdbc.JdbcConnector
@@ -17,6 +19,9 @@ import com.mqclient.core.log.LogLevel
 import com.mqclient.starrocks.log.StarRocksLog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.onCompletion
@@ -37,6 +42,13 @@ import kotlinx.coroutines.withContext
  */
 object StarRocksModule {
 
+    /**
+     * 「测试连接」的兜底超时（与 kafka / rabbitmq / rocketmq 的 `TEST_TIMEOUT_MS`
+     * 同口径 30s）：JDBC connect 是阻塞 IO，目标端口接受连接却不应答时驱动自己
+     * 不会回来，必须有外层闸。
+     */
+    internal const val TEST_TIMEOUT_MS = 30_000L
+
     @Volatile
     private var manager: StarRocksConnectionManager? = null
 
@@ -47,8 +59,20 @@ object StarRocksModule {
     /** 真实 JDBC 连接器（jvmMain）；UI 侧只通过 [testConnection] 间接使用。 */
     private val connector: JdbcConnector = MysqlJdbcConnector()
 
-    /** SPI 初始化钩子：由 ServiceAdapter 在宿主启动时调用。 */
+    /** 宿主右键菜单动作请求的订阅句柄（`starrocks.connection.*`）；dispose 时取消。 */
+    @Volatile
+    private var subscriptions: List<Job> = emptyList()
+
+    /**
+     * SPI 初始化钩子：由 ServiceAdapter 在宿主启动时调用。
+     *
+     * 幂等（对齐 `KafkaModule.initialize`）：重复调用直接返回 —— 重入会新建一个
+     * manager 顶掉旧的，旧会话与 SSH 隧道就没人关了。
+     */
+    @Synchronized
     fun initialize(context: ServiceContext) {
+        // 已有实例：不重复初始化（订阅也不会重复注册）。
+        if (manager != null) return
         this.context = context
         // JVM 侧提供真实的 SSH 隧道实现；commonMain 只认识 ConnectionTunnel 契约。
         manager = StarRocksConnectionManager(
@@ -56,7 +80,26 @@ object StarRocksModule {
             connector = connector,
             tunnelFactory = { config -> SshTunnel.open(config) },
         )
-        StarRocksLog.conn("module initialized (connector=${connector::class.simpleName})")
+        // 宿主的显式动作请求（右键菜单 / 连接页按钮）走事件约定（见 app-core
+        // `ConnectionActions`）：**不订阅就等于点了没反应**。此前 StarRocks 只经
+        // 面板内的隐式连接工作，菜单里的「连接 / 断开连接 / 测试连接」全部石沉大海。
+        // 事件名由 [StarRocksEvents] 从 PROTOCOL_ID 派生，与宿主拼出的
+        // `<serviceId>.connection.*` 严格同源。
+        subscriptions = listOf(
+            context.onEvent(StarRocksEvents.CONNECT_REQUESTED) { event ->
+                event.getString("connectionId")?.let { connectById(it) }
+            },
+            context.onEvent(StarRocksEvents.DISCONNECT_REQUESTED) { event ->
+                event.getString("connectionId")?.let { disconnectById(it) }
+            },
+            context.onEvent(StarRocksEvents.TEST_REQUESTED) { event ->
+                event.getString("connectionId")?.let { handleTestRequested(it) }
+            },
+        )
+        StarRocksLog.conn(
+            "module initialized (connector=${connector::class.simpleName}, " +
+                "menuSubscriptions=${subscriptions.size})",
+        )
     }
 
     /**
@@ -66,19 +109,29 @@ object StarRocksModule {
      * 其余模块的销毁。
      */
     fun dispose() {
+        val subscriptionsToCancel = subscriptions
         val managerToStop = manager
+        subscriptions = emptyList()
         manager = null
         StarRocksLog.conn("module dispose start (hasSession=${managerToStop != null})")
-        managerToStop?.let { current ->
-            runCatching { kotlinx.coroutines.runBlocking { current.shutdown() } }
-                .onFailure {
-                    // 退出路径上的失败不会中断用户操作，但会留下物理连接：WARN + 栈。
-                    StarRocksLog.conn(
-                        LogLevel.WARN,
-                        "module dispose: session shutdown failed (ignored): ${it.message}",
-                        it,
-                    )
-                }
+        try {
+            managerToStop?.let { current ->
+                runCatching { kotlinx.coroutines.runBlocking { current.shutdown() } }
+                    .onFailure {
+                        // 退出路径上的失败不会中断用户操作，但会留下物理连接：WARN + 栈。
+                        StarRocksLog.conn(
+                            LogLevel.WARN,
+                            "module dispose: session shutdown failed (ignored): ${it.message}",
+                            it,
+                        )
+                    }
+            }
+        } finally {
+            // 订阅最后收：断开过程中发出的 `olap.connection.closed` 还需要有人在场
+            // （与 KafkaModule / IbmMQModule 同序，反了会让在途的 disconnect 被取消，
+            // 基类 close() 把取消当「关闭失败」吞掉后清空引用 → 物理连接泄漏）。
+            subscriptionsToCancel.forEach(Job::cancel)
+            context = null
         }
         StarRocksLog.conn("module disposed")
     }
@@ -227,6 +280,93 @@ object StarRocksModule {
             reportStatus(connectionId, ConnectionStatus.Failed)
         }
         return result
+    }
+
+    /**
+     * 按连接 id 断开（宿主右键菜单「断开连接」的落点）。
+     *
+     * 单槽管理器一次只服务一条连接：只有当前会话确实属于 [connectionId] 时才真的
+     * 关物理连接；属于别的连接（例如树上的状态已陈旧）时不碰那条会话，只把本连接
+     * 的事实状态复位成 [ConnectionStatus.Disconnected]。状态必须上报 —— 宿主靠
+     * `ConnectionStore` 的 Disconnected 跳变收掉该连接的 Tab（否则面板的隐式连接会
+     * 立刻把用户刚点的「断开」撤销掉）。
+     */
+    suspend fun disconnectById(connectionId: String) {
+        val current = manager ?: return
+        // 判据 + 关闭在同一把 manager 锁内完成：先读 currentConnectionId() 再 close()
+        // 会让出窗口给别的连接抢占槽位，从而关掉别人刚建好的会话。
+        val closed = current.closeIfOwnedBy(connectionId)
+        if (!closed) {
+            StarRocksLog.conn(
+                "disconnect: no session to close connectionId=$connectionId " +
+                    "owner=${current.currentConnectionId()}",
+            )
+        }
+        reportStatus(connectionId, ConnectionStatus.Disconnected)
+    }
+
+    /**
+     * 「测试连接」请求的处理：按连接 id 还原配置，发起一次**临时探针**（用完即关，
+     * 不影响共享会话与状态），结果一律发 [StarRocksEvents.TEST_COMPLETED] ——
+     * 成功失败都发，宿主据此弹结果对话框。连接不存在 / 模块未初始化按失败上报。
+     */
+    private suspend fun handleTestRequested(connectionId: String) {
+        val config = runCatching { findConfig(connectionId) }.getOrNull()
+        if (config == null) {
+            emitTestCompleted(
+                connectionId = connectionId,
+                success = false,
+                message = "Connection '$connectionId' not found",
+                durationMs = 0L,
+            )
+            return
+        }
+        val startedAt = olapTimeMillis()
+        // 兜底超时（与 kafka / rabbitmq / rocketmq 同口径）：探针是阻塞 IO，目标端口
+        // 「接受但不应答」时 DriverManager 不会自己回来。没有这道闸，宿主永远收不到
+        // TEST_COMPLETED —— 用户看到的还是「点了没反应」，而且事件处理器是串行的，
+        // 之后每一次「测试连接」都会被一起堵住。
+        val report = try {
+            withTimeout(TEST_TIMEOUT_MS) {
+                manager?.testConnection(config) ?: HealthReport(
+                    healthy = false,
+                    detail = "StarRocks module is not initialized",
+                )
+            }
+        } catch (timeout: TimeoutCancellationException) {
+            HealthReport(
+                healthy = false,
+                detail = "test timed out after ${TEST_TIMEOUT_MS}ms (${config.host}:${config.port})",
+            )
+        }
+        val durationMs = olapTimeMillis() - startedAt
+        emitTestCompleted(
+            connectionId = connectionId,
+            success = report.healthy,
+            message = report.detail,
+            durationMs = durationMs,
+        )
+        StarRocksLog.conn(
+            "test completed connectionId=$connectionId success=${report.healthy} cost=${durationMs}ms",
+        )
+    }
+
+    /** 测试结果事件（宿主 `.connection.test.completed` 后缀订阅据此弹框）。 */
+    private fun emitTestCompleted(
+        connectionId: String,
+        success: Boolean,
+        message: String,
+        durationMs: Long,
+    ) {
+        context?.emit(
+            name = StarRocksEvents.TEST_COMPLETED,
+            payload = mapOf(
+                "connectionId" to connectionId,
+                "success" to success,
+                "message" to message,
+                "durationMs" to durationMs,
+            ),
+        )
     }
 
     /**
