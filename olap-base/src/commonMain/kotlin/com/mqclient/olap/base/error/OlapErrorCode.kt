@@ -43,6 +43,12 @@ enum class OlapErrorCode(
         "SQL syntax or semantic error",
     ),
 
+    /** 引用的库 / 表 / 列不存在（最常见的操作失误，需要与语法错误区分开）。 */
+    OBJECT_NOT_FOUND(
+        errKey("object_not_found"),
+        "The database, table or column does not exist",
+    ),
+
     /** 资源超限（内存 / 磁盘 / 并发数 / 结果集上限被引擎拒绝）。 */
     RESOURCE_LIMIT(
         errKey("resource_limit"),

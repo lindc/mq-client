@@ -24,6 +24,11 @@ object StarRocksSqlDialect : SqlDialect by DefaultSqlDialect {
             error.sqlState?.startsWith("08") == true -> OlapErrorCode.CONNECTION_FAILED
             error.sqlState == "28000" || error.errorCode == 1045 -> OlapErrorCode.PERMISSION_DENIED
             error.errorCode == 1064 || error.sqlState == "42000" -> OlapErrorCode.SYNTAX_ERROR
+            // 5501 / 3F000 = 未知库；5502 / 42602 = 未知表或列（3.4.0 实测）。
+            // 这两种是最常见的操作失误（拼错对象名），必须与语法错误区分开 ——
+            // 否则用户看到的是「未知的引擎错误」，不知道该改哪个字。
+            error.errorCode == 5501 || error.sqlState == "3F000" ||
+                error.errorCode == 5502 || error.sqlState == "42602" -> OlapErrorCode.OBJECT_NOT_FOUND
             error.errorCode == 1203 || error.errorCode == 1226 -> OlapErrorCode.RESOURCE_LIMIT
             error.errorCode == 1317 -> OlapErrorCode.CANCELLED
             // 2006/2013 = server gone away / lost connection。

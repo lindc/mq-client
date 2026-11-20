@@ -248,6 +248,7 @@
   "olap.err.permission_denied": "The analytics engine denied this operation (insufficient privileges)",
   "olap.err.timeout": "Query timed out",
   "olap.err.syntax_error": "SQL syntax or semantic error",
+  "olap.err.object_not_found": "The database, table or column does not exist",
   "olap.err.resource_limit": "Query exceeded engine resource limits",
   "olap.err.cancelled": "Query was cancelled",
   "olap.err.not_connected": "Not connected; connect first",

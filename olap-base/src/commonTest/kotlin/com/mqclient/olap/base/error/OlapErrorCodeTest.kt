@@ -54,4 +54,14 @@ class OlapErrorCodeTest {
             )
         }
     }
+
+    @Test
+    fun `object not found is distinguishable from syntax error`() {
+        // 拼错表名与写错语法是两种修法；合并成一类等于让用户猜。
+        assertTrue(
+            OlapErrorCode.OBJECT_NOT_FOUND != OlapErrorCode.SYNTAX_ERROR,
+            "OBJECT_NOT_FOUND 与 SYNTAX_ERROR 必须是两个分类",
+        )
+        assertEquals("olap.err.object_not_found", OlapErrorCode.OBJECT_NOT_FOUND.errorKey)
+    }
 }

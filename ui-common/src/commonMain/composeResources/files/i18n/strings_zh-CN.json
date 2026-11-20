@@ -248,6 +248,7 @@
   "olap.err.permission_denied": "分析引擎拒绝了该操作（权限不足）",
   "olap.err.timeout": "查询超时",
   "olap.err.syntax_error": "SQL 语法或语义错误",
+  "olap.err.object_not_found": "库、表或列不存在",
   "olap.err.resource_limit": "查询超出了引擎资源限制",
   "olap.err.cancelled": "查询已取消",
   "olap.err.not_connected": "尚未建立连接，请先连接",
