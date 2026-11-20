@@ -23,6 +23,9 @@ filekit = "0.16.0"
 uuidCreator = "5.3.3"
 # Markdown 渲染（AI 回答气泡）：纯 Compose 实现库，m3 模块提供 Material3 配色默认值。
 markdownRenderer = "0.45.0"
+# JSch（mwiede 维护的分支）—— SSH 隧道（StarRocks 生产环境的堡垒机转发）。
+# 选它的理由：**零传递依赖**、单 jar 约 700KB，不会把 BouncyCastle / Netty 拖进来。
+jsch = "2.28.8"
 # JUnit4 —— 测试侧显式声明：test-support 的 Assume 包装需要稳定编译面，
 # 不依赖 kotlin("test") 在各模块传递出来的隐式版本。
 junit = "4.13.2"
@@ -53,6 +56,9 @@ markdown-renderer-m3 = { module = "com.mikepenz:multiplatform-markdown-renderer-
 
 # File I/O for ConfigManager (atomic writes).
 okio = { module = "com.squareup.okio:okio-jvm", version.ref = "okio" }
+
+# SSH 隧道（StarRocks 连接的可选跳板）。零传递依赖。
+jsch = { module = "com.github.mwiede:jsch", version.ref = "jsch" }
 
 # Coroutines — app-core 的事件总线把 CoroutineScope / Job / SharedFlow 放在公开 API
 # 上, 所以由 app-core 用 api 暴露 (见 app-core/build.gradle.kts).

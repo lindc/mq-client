@@ -15,6 +15,7 @@ import com.mqclient.starrocks.jdbc.StarRocksErrorDetail
 import com.mqclient.starrocks.jdbc.StarRocksSqlDialect
 import com.mqclient.core.log.LogLevel
 import com.mqclient.starrocks.log.StarRocksLog
+import com.mqclient.starrocks.tunnel.TunneledConnection
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -56,6 +57,8 @@ class StarRocksConnectionManager(
     context: ServiceContext,
     moduleId: String = StarRocksConstants.PROTOCOL_ID,
     private val connector: JdbcConnector,
+    /** SSH 隧道工厂；null = 本平台不支持隧道（此时 sshEnabled 会被忽略并报错）。 */
+    private val tunnelFactory: com.mqclient.starrocks.tunnel.ConnectionTunnelFactory? = null,
     private val dialect: SqlDialect = StarRocksSqlDialect,
 ) : AbstractAnalyticsConnectionManager<StarRocksConnectionConfig, StarRocksSession>(context, moduleId) {
 
@@ -82,14 +85,34 @@ class StarRocksConnectionManager(
             "connect start endpoint=${config.endpoint} user=${config.user} " +
                 "url=${StarRocksLog.redactJdbcUrl(config.jdbcUrl)} timeouts=${timeoutsOf(config.jdbcUrl)}",
         )
+        // 隧道必须先开、且失败要连带清理 —— 所以放在 try 外单独一段，成功后再进主 try。
+        var tunnel: com.mqclient.starrocks.tunnel.ConnectionTunnel? = null
         return try {
-            val connection: JdbcConnection = connector.connect(config.jdbcUrl, config.user, config.password)
+            val url = if (config.sshEnabled) {
+                val factory = tunnelFactory
+                    ?: throw com.mqclient.starrocks.tunnel.SshUnsupportedException()
+                tunnel = factory.open(config)
+                // 隧道已就绪：JDBC 连本地回环，其余部分（库名 / 参数）逐字节不变。
+                com.mqclient.starrocks.tunnel.rewriteJdbcAuthority(config.jdbcUrl, port = tunnel!!.localPort)
+                    ?: throw IllegalStateException("cannot rewrite JDBC URL for tunnel: ${config.jdbcUrl}")
+            } else {
+                config.jdbcUrl
+            }
+            val raw: JdbcConnection = connector.connect(url, config.user, config.password)
+            // 把隧道挂在连接的关闭路径上：连接关 = 隧道关。
+            // 所有权转移：包进 TunneledConnection 后把局部引用置空，
+            // 免得 catch 分支重复关（关闭虽幂等，但归属要明确）。
+            val connection: JdbcConnection =
+                if (tunnel == null) raw else TunneledConnection(raw, tunnel!!).also { tunnel = null }
             StarRocksLog.conn(
-                "connected endpoint=${config.endpoint} cost=${olapTimeMillis() - start}ms",
+                "connected endpoint=${config.endpoint} cost=${olapTimeMillis() - start}ms" +
+                    (tunnel?.let { " viaSsh localPort=${it.localPort}" } ?: ""),
             )
             StarRocksLog.perf(action = "connect", type = "SESSION", costMs = olapTimeMillis() - start)
             StarRocksSession(connection, config.endpoint)
         } catch (cancellation: CancellationException) {
+            // 取消也要关隧道，否则会留一条 SSH 会话在后台。
+            tunnel?.close()
             // 用户中途关掉对话框 / 退出应用：不是失败，记录但不报警。
             StarRocksLog.conn(LogLevel.DEBUG, "connect cancelled endpoint=${config.endpoint}")
             throw cancellation
@@ -103,6 +126,10 @@ class StarRocksConnectionManager(
                 error,
             )
             StarRocksLog.perf(action = "connect", type = "SESSION", costMs = olapTimeMillis() - start)
+            // 连库失败时隧道必须关掉：否则每次重试都多漏一条 SSH 会话。
+            // 成功路径上所有权已转移给 TunneledConnection（tunnel 局部引用置空），
+            // 这里只清理「还没挂上连接」的情况。
+            tunnel?.close()
             throw error
         }
     }

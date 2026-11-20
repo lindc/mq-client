@@ -25,9 +25,11 @@ data class StarRocksFieldErrors(
     val port: String? = null,
     val user: String? = null,
     val database: String? = null,
+    /** SSH 段整体错误（地址 / 端口 / 用户名任一不合格）。 */
+    val ssh: String? = null,
 ) {
     /** 是否任一字段有错。 */
-    val hasAny: Boolean get() = listOf(host, port, user, database).any { it != null }
+    val hasAny: Boolean get() = listOf(host, port, user, database, ssh).any { it != null }
 }
 
 /**
@@ -72,11 +74,78 @@ class StarRocksConnectionFormState(
     /** 用户名。 */
     var user by mutableStateOf(StarRocksConnectionConfig.DEFAULT_USER)
 
-    /** 密码。 */
+    /** 密码（编辑模式下由用户输入；未动过则沿用 [originalPassword]）。 */
     var password by mutableStateOf("")
+
+    /**
+     * 编辑模式下的原始密码。
+     *
+     * 为什么要这层：`loadFrom` 把密码框留空（不把明文回填到 UI），如果 `buildConfig`
+     * 直接用输入框的值，**打开编辑 → 不改密码 → 保存**就会把已存密码覆盖成空串，
+     * 连接随即失效。IBM MQ 的表单用 `resolveSecret` 处理同一问题，这里对齐。
+     */
+    private var originalPassword by mutableStateOf("")
+
+    /** 用户是否动过密码框（动过才用输入值）。 */
+    private var passwordChanged by mutableStateOf(false)
 
     /** 默认库。 */
     var database by mutableStateOf(StarRocksConnectionConfig.DEFAULT_DATABASE)
+
+    /* ------------------------------ SSH 隧道（可选） ------------------------------ */
+
+    /** 是否经 SSH 隧道连接（生产环境 FE 一般不直接暴露 9030）。 */
+    var sshEnabled by mutableStateOf(false)
+
+    /** 堡垒机地址。 */
+    var sshHost by mutableStateOf("")
+
+    /** SSH 端口（原字符串，构建时解析）。 */
+    var sshPort by mutableStateOf(StarRocksConnectionConfig.DEFAULT_SSH_PORT.toString())
+
+    /** SSH 用户名。 */
+    var sshUser by mutableStateOf("")
+
+    /**
+     * SSH 密码；填了私钥时它作为私钥口令（passphrase）。
+     *
+     * 一个字段承担两种职责是刻意的：OpenSSH 用户的心智就是「密码或私钥+口令」，
+     * 拆成两个框会让人不知道该填哪个。
+     */
+    var sshPassword by mutableStateOf("")
+
+    /** 编辑模式下的原始 SSH 密码（未动过则沿用）。 */
+    private var originalSshPassword by mutableStateOf("")
+
+    /** 用户是否动过 SSH 密码框。 */
+    private var sshPasswordChanged by mutableStateOf(false)
+
+    /** SSH 私钥路径（空 = 用密码）。 */
+    var sshKeyPath by mutableStateOf("")
+
+    /** 编辑模式未动过的密码沿用原值；动过 / 新建 → 用输入值。 */
+    private fun resolveSecret(current: String, original: String, changed: Boolean): String =
+        if (changed || original.isEmpty()) current else original
+
+    /** 密码框变更：记下"动过"，否则编辑保存会覆盖成空串。 */
+    fun onPasswordChange(value: String) {
+        password = value
+        passwordChanged = true
+        clearErrors()
+    }
+
+    /** SSH 密码框变更（同上）。 */
+    fun onSshPasswordChange(value: String) {
+        sshPassword = value
+        sshPasswordChanged = true
+        clearErrors()
+    }
+
+    /** SSH 端口输入只留数字。 */
+    fun onSshPortChange(value: String) {
+        sshPort = value.filter(Char::isDigit).take(5)
+        clearErrors()
+    }
 
     /** 分字段校验错误。 */
     var errors by mutableStateOf(StarRocksFieldErrors())
@@ -104,6 +173,14 @@ class StarRocksConnectionFormState(
         user = StarRocksConnectionConfig.DEFAULT_USER
         password = ""
         database = StarRocksConnectionConfig.DEFAULT_DATABASE
+        sshEnabled = false
+        sshHost = ""
+        sshPort = StarRocksConnectionConfig.DEFAULT_SSH_PORT.toString()
+        sshUser = ""
+        sshPassword = ""
+        originalSshPassword = ""
+        sshPasswordChanged = false
+        sshKeyPath = ""
         errors = StarRocksFieldErrors()
         resetSaveFlow()
     }
@@ -121,7 +198,19 @@ class StarRocksConnectionFormState(
         port = config.port.toString()
         user = config.user
         password = ""
+        originalPassword = config.password
+        passwordChanged = false
         database = config.database
+        // SSH 段同样回填：编辑一个「经堡垒机连接」的配置时，若这些字段空掉，
+        // 用户点保存就会静默退化成直连 —— 那是最难排查的一类配置丢失。
+        sshEnabled = config.sshEnabled
+        sshHost = config.sshHost
+        sshPort = config.sshPort.toString()
+        sshUser = config.sshUser
+        sshPassword = ""
+        originalSshPassword = config.sshPassword
+        sshPasswordChanged = false
+        sshKeyPath = config.sshKeyPath
         errors = StarRocksFieldErrors()
         resetSaveFlow()
     }
@@ -142,6 +231,21 @@ class StarRocksConnectionFormState(
             } else null,
             user = if (user.isBlank()) "olap.starrocks.form.err_user" else null,
             database = if (database.isBlank()) "olap.starrocks.form.err_database" else null,
+            ssh = if (!sshEnabled) {
+                null
+            } else {
+                val sshPortValue = sshPort.toIntOrNull()
+                when {
+                    sshHost.isBlank() -> "olap.starrocks.form.err_ssh_host"
+                    sshPortValue == null || sshPortValue !in 1..65535 -> "olap.starrocks.form.err_ssh_port"
+                    sshUser.isBlank() -> "olap.starrocks.form.err_ssh_user"
+                    // 凭据二选一：既没有私钥也没有密码（新建时）无法认证。
+                    sshKeyPath.isBlank() &&
+                        sshPassword.isBlank() && originalSshPassword.isBlank() ->
+                        "olap.starrocks.form.err_ssh_credential"
+                    else -> null
+                }
+            },
         )
         return !errors.hasAny
     }
@@ -153,8 +257,14 @@ class StarRocksConnectionFormState(
         host = host.trim(),
         port = port.toIntOrNull() ?: StarRocksConnectionConfig.DEFAULT_PORT,
         user = user.trim(),
-        password = password,
+        password = resolveSecret(password, originalPassword, passwordChanged),
         database = database.trim(),
+        sshEnabled = sshEnabled,
+        sshHost = sshHost.trim(),
+        sshPort = sshPort.toIntOrNull() ?: StarRocksConnectionConfig.DEFAULT_SSH_PORT,
+        sshUser = sshUser.trim(),
+        sshPassword = resolveSecret(sshPassword, originalSshPassword, sshPasswordChanged),
+        sshKeyPath = sshKeyPath.trim(),
     )
 
     /**

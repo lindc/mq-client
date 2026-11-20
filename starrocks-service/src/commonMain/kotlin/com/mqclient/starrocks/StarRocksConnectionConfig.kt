@@ -30,7 +30,28 @@ data class StarRocksConnectionConfig(
     val database: String = DEFAULT_DATABASE,
     /** 完整 JDBC URL 覆盖（高级：带连接参数）；空串 = 按字段拼。 */
     val jdbcUrlOverride: String = "",
+
+    /** 是否经 SSH 隧道连接（生产环境 FE 通常不直接暴露 9030）。 */
+    val sshEnabled: Boolean = false,
+    /** 堡垒机 / 跳板机地址。 */
+    val sshHost: String = "",
+    /** SSH 端口（默认 22）。 */
+    val sshPort: Int = DEFAULT_SSH_PORT,
+    /** SSH 用户名。 */
+    val sshUser: String = "",
+    /** SSH 密码；用私钥时它作为私钥口令（passphrase）。落盘加密。 */
+    val sshPassword: String = "",
+    /**
+     * SSH 私钥文件路径（`~/.ssh/id_rsa` 这类）。
+     *
+     * 与 [sshPassword] 二选一：非空则优先用私钥认证，[sshPassword] 退化为私钥口令
+     * （passphrase）。这是 OpenSSH 用户最熟悉的心智模型。
+     */
+    val sshKeyPath: String = "",
 ) : AnalyticsConnectionConfig {
+
+    /** 是否用私钥认证（非空路径即表示用私钥）。 */
+    val sshUsesKey: Boolean get() = sshKeyPath.isNotBlank()
 
     /**
      * 连接选项（契约要求）：全部由具名字段派生，保证表单草稿与落盘只有一份真相。
@@ -44,6 +65,14 @@ data class StarRocksConnectionConfig(
             put(KEY_PASSWORD, password)
             put(KEY_DATABASE, database)
             if (jdbcUrlOverride.isNotBlank()) put(KEY_JDBC_URL, jdbcUrlOverride)
+            if (sshEnabled) {
+                put(KEY_SSH_ENABLED, "true")
+                put(KEY_SSH_HOST, sshHost)
+                put(KEY_SSH_PORT, sshPort.toString())
+                put(KEY_SSH_USER, sshUser)
+                put(KEY_SSH_PASSWORD, sshPassword)
+                if (sshKeyPath.isNotBlank()) put(KEY_SSH_KEY_PATH, sshKeyPath)
+            }
         }
 
     /** 完整 JDBC URL（[jdbcUrlOverride] 优先，自动追加 Profile 采集会话变量）。 */
@@ -75,6 +104,27 @@ data class StarRocksConnectionConfig(
         /** options 键：完整 JDBC URL 覆盖。 */
         const val KEY_JDBC_URL: String = "jdbcUrl"
 
+        /** options 键：启用 SSH 隧道。 */
+        const val KEY_SSH_ENABLED: String = "sshEnabled"
+
+        /** options 键：堡垒机地址。 */
+        const val KEY_SSH_HOST: String = "sshHost"
+
+        /** options 键：SSH 端口。 */
+        const val KEY_SSH_PORT: String = "sshPort"
+
+        /** options 键：SSH 用户名。 */
+        const val KEY_SSH_USER: String = "sshUser"
+
+        /** options 键：SSH 密码 / 私钥口令（敏感，落盘加密）。 */
+        const val KEY_SSH_PASSWORD: String = "sshPassword"
+
+        /** options 键：SSH 私钥文件路径。 */
+        const val KEY_SSH_KEY_PATH: String = "sshKeyPath"
+
+        /** SSH 默认端口。 */
+        const val DEFAULT_SSH_PORT: Int = 22
+
         /** 默认主机。 */
         const val DEFAULT_HOST: String = "localhost"
 
@@ -103,6 +153,12 @@ data class StarRocksConnectionConfig(
             password = options[KEY_PASSWORD].orEmpty(),
             database = options[KEY_DATABASE]?.takeIf { it.isNotBlank() } ?: DEFAULT_DATABASE,
             jdbcUrlOverride = options[KEY_JDBC_URL].orEmpty(),
+            sshEnabled = options[KEY_SSH_ENABLED] == "true",
+            sshHost = options[KEY_SSH_HOST].orEmpty(),
+            sshPort = options[KEY_SSH_PORT]?.toIntOrNull() ?: DEFAULT_SSH_PORT,
+            sshUser = options[KEY_SSH_USER].orEmpty(),
+            sshPassword = options[KEY_SSH_PASSWORD].orEmpty(),
+            sshKeyPath = options[KEY_SSH_KEY_PATH].orEmpty(),
         )
     }
 }

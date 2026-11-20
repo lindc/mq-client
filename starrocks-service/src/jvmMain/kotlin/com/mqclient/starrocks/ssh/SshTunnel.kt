@@ -1,0 +1,143 @@
+package com.mqclient.starrocks.ssh
+
+import com.jcraft.jsch.JSch
+import com.jcraft.jsch.Session
+import com.mqclient.core.log.LogLevel
+import com.mqclient.starrocks.StarRocksConnectionConfig
+import com.mqclient.starrocks.log.StarRocksLog
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.File
+
+/**
+ * 到 StarRocks FE 的**本地端口转发**（SSH 隧道）。
+ *
+ * ## 为什么需要它
+ *
+ * 生产环境的 StarRocks 几乎不会把 9030 直接暴露在公网，客户端只能经堡垒机访问。
+ * 没有隧道时，这个客户端在生产场景下**连不上** —— 这不是体验问题，是可用性问题。
+ *
+ * ## 为什么用本地转发（`-L`）而不是跳板直连
+ *
+ * 本地转发只在 127.0.0.1 上开一个随机端口，由 SSH 会话把流量转到目标；
+ * JDBC 驱动完全不知道隧道的存在（URL 指向 `127.0.0.1:<port>`）。这样：
+ *  - 不需要给 MySQL 驱动做任何适配；
+ *  - 隧道断开会表现为普通的连接错误，走既有的错误分类与重连路径；
+ *  - 监听口绑定回环地址，不会把数据库端口暴露给同网段其它机器。
+ *
+ * ## 生命周期
+ *
+ * 与 JDBC 连接**同生共死**：`StarRocksConnectionManager.openSession` 建隧道 →
+ * 连接成功后把隧道挂在 `JdbcConnection` 的关闭路径上。连接关、隧道关；
+ * 任何一步失败都在本类的调用方 finally 里被清理。
+ */
+internal class SshTunnel private constructor(
+    private val session: Session,
+    /** 本地监听端口（JDBC URL 应指向 `127.0.0.1:localPort`）。 */
+    override val localPort: Int,
+) : com.mqclient.starrocks.tunnel.ConnectionTunnel {
+
+    /** 关闭会话（幂等；异常只记日志，不打断断开路径）。 */
+    override fun close() {
+        runCatching { session.disconnect() }
+            .onFailure {
+                StarRocksLog.conn(
+                    LogLevel.DEBUG,
+                    "ssh tunnel disconnect failed (ignored): ${it.message}",
+                )
+            }
+    }
+
+    companion object {
+
+        /** 本地监听的固定回环地址（不绑 0.0.0.0，见类文档）。 */
+        private const val LOCAL_BIND = "127.0.0.1"
+
+        /** 隧道建连超时（含 TCP + 认证）。堡垒机不可达时不该让表单卡住几十秒。 */
+        private const val CONNECT_TIMEOUT_MS = 15_000
+
+        /**
+         * 打开隧道，返回本地监听端口。
+         *
+         * @param config 连接配置（提供堡垒机地址与凭据，以及要转发的目标 host/port）
+         * @throws SshTunnelException 建连 / 认证 / 端口转发失败（消息可直接给用户看）
+         */
+        suspend fun open(config: StarRocksConnectionConfig): SshTunnel = withContext(Dispatchers.IO) {
+            val start = System.currentTimeMillis()
+            StarRocksLog.conn(
+                "ssh tunnel start jump=${config.sshUser}@${config.sshHost}:${config.sshPort} " +
+                    "target=${config.host}:${config.port} auth=${if (config.sshUsesKey) "key" else "password"}",
+            )
+            try {
+                val session = JSch().let { jsch ->
+                    // 私钥认证（sshPassword 此时是 passphrase）。路径不存在直接报错，
+                    // 不要退化成密码认证 —— 那会让用户以为"密码错了"，实际是找错文件。
+                    if (config.sshUsesKey) {
+                        val key = File(config.sshKeyPath.removePrefix("~").let {
+                            if (config.sshKeyPath.startsWith("~")) {
+                                System.getProperty("user.home") + it
+                            } else {
+                                config.sshKeyPath
+                            }
+                        })
+                        if (!key.isFile) {
+                            throw SshTunnelException("SSH 私钥文件不存在：${config.sshKeyPath}")
+                        }
+                        jsch.addIdentity(key.absolutePath, config.sshPassword.ifBlank { null })
+                    }
+                    val s = jsch.getSession(config.sshUser, config.sshHost, config.sshPort)
+                    if (!config.sshUsesKey) s.setPassword(config.sshPassword)
+                    // 首连不弹 known_hosts 确认框：桌面应用没有终端可交互。
+                    // 代价是不校验主机密钥 —— 对内网堡垒机是常规取舍，README 里说明。
+                    s.setConfig("StrictHostKeyChecking", "no")
+                    s.timeout = CONNECT_TIMEOUT_MS
+                    s
+                }
+                session.connect(CONNECT_TIMEOUT_MS)
+
+                // 端口 0 = 让系统挑一个空闲端口，避免固定端口冲突；
+                // 监听地址显式给 127.0.0.1（JSch 的 sess 参数即绑定地址）。
+                @Suppress("DEPRECATION")
+                val port = session.setPortForwardingL(LOCAL_BIND, 0, config.host, config.port)
+
+                StarRocksLog.conn(
+                    "ssh tunnel ready localPort=$port target=${config.host}:${config.port} " +
+                        "cost=${System.currentTimeMillis() - start}ms",
+                )
+                StarRocksLog.perf(
+                    action = "ssh_tunnel",
+                    type = "CONNECT",
+                    costMs = System.currentTimeMillis() - start,
+                )
+                SshTunnel(session, port)
+            } catch (cancellation: kotlinx.coroutines.CancellationException) {
+                throw cancellation
+            } catch (error: Throwable) {
+                if (error is Error) throw error
+                StarRocksLog.conn(
+                    LogLevel.ERROR,
+                    "ssh tunnel failed jump=${config.sshUser}@${config.sshHost}:${config.sshPort} " +
+                        "cost=${System.currentTimeMillis() - start}ms errorType=${error::class.simpleName} " +
+                        "detail=${error.message}",
+                    error,
+                )
+                throw when (error) {
+                    is SshTunnelException -> error
+                    // JSch 的异常消息对用户没意义（"Auth fail"），补上"卡在哪一步"。
+                    else -> SshTunnelException(
+                        "SSH 隧道建立失败（${config.sshHost}:${config.sshPort}）：${error.message ?: error::class.simpleName}",
+                        error,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 隧道建立失败。
+ *
+ * 单独的类型而不是复用 `JdbcFailure`：失败发生在**连接数据库之前**，把它当成
+ * SQL 错误会让用户去查 SQL / 权限，而真正的问题是堡垒机。
+ */
+class SshTunnelException(message: String, cause: Throwable? = null) : Exception(message, cause)

@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -18,6 +19,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -106,6 +108,8 @@ internal fun StarRocksConnectionFormContent(state: StarRocksConnectionFormState)
             errorKey = state.errors.database,
         )
 
+        SshTunnelSection(state)
+
         // 测试进行中（宿主「完成」已按 busy 禁用）—— MQ 系同款面板内提示。
         if (state.saveState == SaveState.Testing) {
             Text(
@@ -149,35 +153,61 @@ internal fun StarRocksConnectionFormContent(state: StarRocksConnectionFormState)
  */
 @Composable
 private fun HostPortRow(state: StarRocksConnectionFormState) {
+    HostPortRowLike(
+        hostLabel = stringResource("olap.starrocks.form.host"),
+        host = state.host,
+        onHostChange = { state.host = it; state.clearErrors() },
+        hostPlaceholder = stringResource("olap.starrocks.form.host_placeholder"),
+        portLabel = stringResource("olap.starrocks.form.port"),
+        port = state.port,
+        onPortChange = state::onPortChange,
+        portPlaceholder = stringResource("olap.starrocks.form.port_placeholder"),
+    )
+}
+
+/**
+ * 主机 / 端口并排的通用版（连接字段与 SSH 堡垒机字段共用）。
+ *
+ * 抽出来的理由：SSH 段需要完全相同的布局约束（主机吃剩余宽度、端口固定 120dp、
+ * 底边对齐），复制一份必然在下一次调间距时漂移。校验提示不在这里处理 ——
+ * 两组字段的错误展示策略不同（连接字段走 `errors`，SSH 段目前只做整体校验）。
+ */
+@Composable
+private fun HostPortRowLike(
+    hostLabel: String,
+    host: String,
+    onHostChange: (String) -> Unit,
+    portLabel: String,
+    port: String,
+    onPortChange: (String) -> Unit,
+    hostPlaceholder: String? = null,
+    portPlaceholder: String? = null,
+) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.Bottom,
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            FieldLabel(stringResource("olap.starrocks.form.host"))
+            FieldLabel(hostLabel)
             OutlinedTextField(
-                value = state.host,
-                onValueChange = { state.host = it; state.clearErrors() },
+                value = host,
+                onValueChange = onHostChange,
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
-                isError = state.errors.host != null,
-                placeholder = { Text(stringResource("olap.starrocks.form.host_placeholder")) },
-                supportingText = state.errors.host?.let { key -> { Text(stringResource(key)) } },
+                placeholder = hostPlaceholder?.let { { Text(it) } },
             )
         }
 
         Spacer(modifier = Modifier.width(16.dp))
 
         Column(modifier = Modifier.width(120.dp)) {
-            FieldLabel(stringResource("olap.starrocks.form.port"))
+            FieldLabel(portLabel)
             OutlinedTextField(
-                value = state.port,
-                onValueChange = state::onPortChange,
+                value = port,
+                onValueChange = onPortChange,
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
-                isError = state.errors.port != null,
-                placeholder = { Text(stringResource("olap.starrocks.form.port_placeholder")) },
-                supportingText = state.errors.port?.let { key -> { Text(stringResource(key)) } },
+                placeholder = portPlaceholder?.let { { Text(it) } },
             )
         }
     }
@@ -223,7 +253,7 @@ private fun PasswordField(state: StarRocksConnectionFormState) {
     LabeledField(stringResource("olap.starrocks.form.password")) {
         OutlinedTextField(
             value = state.password,
-            onValueChange = { state.password = it },
+            onValueChange = state::onPasswordChange,
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
             visualTransformation = if (visible) {
@@ -243,5 +273,109 @@ private fun PasswordField(state: StarRocksConnectionFormState) {
                 }
             },
         )
+    }
+}
+
+/**
+ * SSH 隧道（可选）：生产环境的 FE 一般不直接暴露 9030，客户端要经堡垒机转发。
+ *
+ * 默认收起（一个 Switch），因为它对本地开发是纯噪音。展开后分两块：
+ *  - 堡垒机地址 / 端口 / 用户名 —— 必填；
+ *  - 凭据：私钥路径 **或** 密码（填了私钥时密码变成私钥口令）—— 二选一。
+ *
+ * 为什么私钥与密码共用一组输入框而不是两个独立模式切换：OpenSSH 用户的心智就是
+ * 「有 key 用 key，没 key 输密码」，多一层 radio 只会增加一次误点。
+ */
+@Composable
+private fun SshTunnelSection(state: StarRocksConnectionFormState) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    stringResource("olap.starrocks.form.ssh_title"),
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Text(
+                    stringResource("olap.starrocks.form.ssh_hint"),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = state.sshEnabled,
+                onCheckedChange = { state.sshEnabled = it; state.clearErrors() },
+            )
+        }
+
+        if (state.sshEnabled) {
+            HostPortRowLike(
+                hostLabel = stringResource("olap.starrocks.form.ssh_host"),
+                host = state.sshHost,
+                onHostChange = { state.sshHost = it; state.clearErrors() },
+                portLabel = stringResource("olap.starrocks.form.ssh_port"),
+                port = state.sshPort,
+                onPortChange = state::onSshPortChange,
+            )
+
+            FormField(
+                label = stringResource("olap.starrocks.form.ssh_user"),
+                value = state.sshUser,
+                onValueChange = { state.sshUser = it; state.clearErrors() },
+            )
+
+            FormField(
+                label = stringResource("olap.starrocks.form.ssh_key_path"),
+                value = state.sshKeyPath,
+                onValueChange = { state.sshKeyPath = it; state.clearErrors() },
+                placeholder = stringResource("olap.starrocks.form.ssh_key_path_placeholder"),
+            )
+
+            state.errors.ssh?.let { key ->
+                Text(
+                    text = stringResource(key),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+
+            // 密码 / 私钥口令：掩码输入（与主密码同款眼睛图标）。
+            LabeledField(
+                stringResource(
+                    if (state.sshKeyPath.isBlank()) {
+                        "olap.starrocks.form.ssh_password"
+                    } else {
+                        "olap.starrocks.form.ssh_passphrase"
+                    },
+                ),
+            ) {
+                var visible by remember { mutableStateOf(false) }
+                OutlinedTextField(
+                    value = state.sshPassword,
+                    onValueChange = state::onSshPasswordChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    visualTransformation = if (visible) {
+                        VisualTransformation.None
+                    } else {
+                        PasswordVisualTransformation()
+                    },
+                    trailingIcon = {
+                        IconButton(onClick = { visible = !visible }) {
+                            Icon(
+                                if (visible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                    },
+                )
+            }
+        }
     }
 }

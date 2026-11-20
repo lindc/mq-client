@@ -12,6 +12,7 @@ import com.mqclient.olap.base.connection.HealthReport
 import com.mqclient.olap.base.query.ResultBatch
 import com.mqclient.starrocks.jdbc.JdbcConnector
 import com.mqclient.starrocks.jdbc.MysqlJdbcConnector
+import com.mqclient.starrocks.ssh.SshTunnel
 import com.mqclient.core.log.LogLevel
 import com.mqclient.starrocks.log.StarRocksLog
 import kotlinx.coroutines.CancellationException
@@ -49,7 +50,12 @@ object StarRocksModule {
     /** SPI 初始化钩子：由 ServiceAdapter 在宿主启动时调用。 */
     fun initialize(context: ServiceContext) {
         this.context = context
-        manager = StarRocksConnectionManager(context, connector = connector)
+        // JVM 侧提供真实的 SSH 隧道实现；commonMain 只认识 ConnectionTunnel 契约。
+        manager = StarRocksConnectionManager(
+            context,
+            connector = connector,
+            tunnelFactory = { config -> SshTunnel.open(config) },
+        )
         StarRocksLog.conn("module initialized (connector=${connector::class.simpleName})")
     }
 

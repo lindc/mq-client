@@ -18,6 +18,9 @@ kotlin {
             // 的模板层与 commonTest 的 FakeJdbcConnector 都不认识 java.sql。
             // 8.0.33：8.0.x 末代稳定版，支持 connectionTimeZone / connectTimeout。
             implementation("com.mysql:mysql-connector-j:8.0.33")
+            // SSH 隧道：生产环境 FE 一般不直接暴露 9030，需经堡垒机转发。
+            // 只在 jvmMain —— commonMain 的模板层不认识 JSch（与 JDBC 同一隔离口径）。
+            implementation(libs.jsch)
         }
         jvmTest.dependencies {
             implementation(kotlin("test"))
