@@ -138,11 +138,20 @@ internal fun StarRocksAiDiagnosisDialog(
     var state by remember { mutableStateOf<AiDiagnosisState>(AiDiagnosisState.Building) }
     var answer by remember { mutableStateOf("") }
     val chat = remember { AdapterChatService() }
-    val chunks = remember { Channel<String>(Channel.UNLIMITED) }
     val noProviderText = stringResource("olap.starrocks.ai.no_provider")
     val failedPrefix = stringResource("olap.starrocks.ai.failed_prefix")
+    val emptyResponseText = stringResource("olap.starrocks.ai.empty_response")
 
     LaunchedEffect(connectionId, sql) {
+        // Channel 必须**每次运行新建**，不能用 remember 缓存：这个 effect 以
+        // (connectionId, sql) 为 key，重跑时上一轮的 finally 已经 close 过它。
+        // 复用已关闭的 Channel 不会报错 —— trySend 静默失败、for 循环立即结束，
+        // 结果是「答案为空但状态显示 Done」，用户看到一片空白却没有任何提示
+        // （实测：trySend 返回失败且 isClosedForSend 恒为 true）。
+        val chunks = Channel<String>(Channel.UNLIMITED)
+        // 重跑时清空上一轮的答案：否则「一个 chunk 都没收到」的检查会被旧回答骗过，
+        // 界面显示的是上一条 SQL 的分析结果。
+        answer = ""
         val connection = withContext(Dispatchers.IO) { activeAiConnection() }
         if (connection == null) {
             state = AiDiagnosisState.NoProvider
@@ -182,7 +191,13 @@ internal fun StarRocksAiDiagnosisDialog(
             }
             chunks.close()
             collector.join()
-            state = AiDiagnosisState.Done
+            // 一个 chunk 都没收到 = 上游静默失败（channel 关闭 / provider 没返回内容）。
+            // 这不能算 Done —— 否则界面是一片空白却没有错误提示。
+            state = if (answer.isBlank()) {
+                AiDiagnosisState.Failed(failedPrefix.withArg(emptyResponseText))
+            } else {
+                AiDiagnosisState.Done
+            }
         } catch (cancellation: CancellationException) {
             throw cancellation
         } catch (error: Throwable) {
