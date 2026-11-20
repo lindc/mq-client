@@ -27,13 +27,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.mqclient.core.ConnectionStore
 import com.mqclient.graph.TopologyData
+import com.mqclient.starrocks.cluster.ClusterSnapshot
+import com.mqclient.starrocks.cluster.StarRocksClusterService
 import com.mqclient.topology.TopologyCanvas
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.userMessage
 import com.mqclient.uicommon.i18n.withArg
 import kotlinx.coroutines.launch
 
-/** FE 展示名取 JDBC 连接的 host（连的就是 FE）；找不到回落占位文案。 */
+/** 没有 FE 数据时的占位名：取 JDBC 连接的 host（连的就是某个 FE）。 */
 private fun frontendName(connectionId: String): String =
     ConnectionStore.connections.value
         .firstOrNull { it.id == connectionId }
@@ -41,38 +43,38 @@ private fun frontendName(connectionId: String): String =
         ?.takeIf { it.isNotBlank() }
         ?: "FE"
 
-/** 节点 id → 卡片显示名：剥掉前缀，BE 显示 IP:端口。 */
-private fun topologyDisplayName(nodeId: String): String = when {
-    nodeId.startsWith("fe:") -> nodeId.removePrefix("fe:")
-    nodeId.startsWith("be:") -> nodeId.removePrefix("be:")
-    else -> nodeId
-}
-
 /**
- * 「拓扑结构」面板：FE（中心）→ BE（子节点）星形图。
+ * 「拓扑结构」面板：三列集群图 —— 外部 Catalog → FE（主 / 跟随 / 观察）→ BE / CN。
  *
  * 装配模式与 RocketMQ / Kafka 拓扑页一致：数据（[buildStarRocksTopology] 产出的
- * [TopologyData]）+ 布局（[starRocksFeBeLayout]）+ [TopologyCanvas] 渲染。拖拽由
- * `nodeDragEnabled = true` 打开，缩放 / 平移 / 适应视图 / 滚动条全部由画布内置。
+ * [TopologyData]）+ 布局（[starRocksClusterLayout]）+ [TopologyCanvas] 渲染。拖拽 /
+ * 缩放 / 适应视图 / 滚动条全部由画布内置。
  *
- * 数据获取失败或没有 BE 节点 → 空状态占位图（图标 + 文案 + 刷新按钮），
- * 不渲染空画布。所有取数复用 [loadClusterNodes] → `executeQuery`。
+ * 取数走 Service 层的 [StarRocksClusterService.loadSnapshot]（逐块降级：没权限看
+ * BACKENDS 就只画 FE，不报错）。双击节点 → [StarRocksNodeDetailController] 打开
+ * 属性对话框（快照秒开 + 后台刷新该节点）。
  */
 @Composable
 internal fun StarRocksTopologyPanel(connectionId: String, modifier: Modifier = Modifier) {
+    var snapshot by remember { mutableStateOf<ClusterSnapshot?>(null) }
     var data by remember { mutableStateOf<TopologyData?>(null) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    val nodeDetail = rememberStarRocksNodeDetailController(connectionId)
 
     suspend fun load() {
         loading = true
         error = null
         try {
-            val backends = loadClusterNodes(connectionId)
-            data = buildStarRocksTopology(frontendName(connectionId), backends)
+            val fresh = StarRocksClusterService.loadSnapshot(connectionId)
+            val graph = buildStarRocksTopology(fresh, fallbackFeName = frontendName(connectionId))
+            snapshot = fresh
+            // 只有占位 FE（两个查询都失败）时不画空图，交给空状态。
+            data = graph.takeIf { fresh.nodes.isNotEmpty() }
         } catch (e: Throwable) {
             error = e.userMessage()
+            snapshot = null
             data = null
         } finally {
             loading = false
@@ -82,7 +84,7 @@ internal fun StarRocksTopologyPanel(connectionId: String, modifier: Modifier = M
     LaunchedEffect(connectionId) { load() }
 
     Column(modifier.fillMaxSize()) {
-        // ── 工具栏：标题 + 刷新 ──
+        // ── 工具栏：标题 + 节点数 + 刷新 ──
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
@@ -105,6 +107,17 @@ internal fun StarRocksTopologyPanel(connectionId: String, modifier: Modifier = M
             }
         }
 
+        // 降级提示（灰字一条）：普通用户看不到 BACKENDS / PROC 是常态，不在这里报错。
+        snapshot?.degradations?.takeIf { it.isNotEmpty() }?.let { degradations ->
+            Text(
+                stringResource("olap.starrocks.topology.degraded")
+                    .withArg(degradations.joinToString("、") { it.part.name }),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
+            )
+        }
+
         val graph = data
         when {
             loading -> EmptyTopology(
@@ -112,7 +125,6 @@ internal fun StarRocksTopologyPanel(connectionId: String, modifier: Modifier = M
                 onRefresh = null,
             )
 
-            // 数据获取失败 / 没有 BE 节点：空状态占位图。
             error != null -> EmptyTopology(
                 text = stringResource("olap.starrocks.topology.failed").withArg(error!!),
                 onRefresh = { scope.launch { load() } },
@@ -123,19 +135,31 @@ internal fun StarRocksTopologyPanel(connectionId: String, modifier: Modifier = M
                 onRefresh = { scope.launch { load() } },
             )
 
-            else -> TopologyCanvas(
-                data = graph,
-                style = StarRocksNodeStyle,
-                layoutProvider = starRocksFeBeLayout,
-                // 节点拖拽（kuiver 原生手势，位置仅会话内有效）。
-                nodeDragEnabled = true,
-                onRescan = { scope.launch { load() } },
-                // MVP 不绑定属性对话框；双击保留给后续「BE 详情」迭代。
-                onNodeDoubleClick = { },
-                displayName = ::topologyDisplayName,
-                modifier = Modifier.fillMaxSize(),
-            )
+            else -> {
+                val nodes = snapshot?.nodes.orEmpty()
+                TopologyCanvas(
+                    data = graph,
+                    style = StarRocksNodeStyle,
+                    layoutProvider = starRocksClusterLayout,
+                    // 节点拖拽（kuiver 原生手势，位置仅会话内有效）。
+                    nodeDragEnabled = true,
+                    onRescan = { scope.launch { load() } },
+                    // 双击节点 → 属性对话框（先用快照秒开，后台再刷新该节点）。
+                    onNodeDoubleClick = { nodeId ->
+                        nodes.firstOrNull { it.nodeId == nodeId }?.let { nodeDetail.open(it, scope) }
+                    },
+                    // 节点 id 形如 `fe:fe-host` / `be:10.0.0.1:9050` / `catalog:hive0`：
+                    // 取第一个冒号后的部分即显示名（与各节点 name 的口径一致）。
+                    displayName = { nodeId -> nodeId.substringAfter(':', nodeId) },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
         }
+    }
+
+    // 对话框宿主（独立窗口，落点不影响视觉）。
+    nodeDetail.state?.let { state ->
+        StarRocksNodeDetailDialog(state = state, onDismiss = nodeDetail::close)
     }
 }
 

@@ -20,59 +20,42 @@ internal data class StarRocksQueryRows(
     val rows: List<List<Any?>>,
 )
 
-/** 一个集群节点（IP / 端口 / 存活 / 版本）。概览与拓扑面板共用。 */
-internal data class ClusterNode(
-    val ip: String,
-    val port: String,
-    val alive: Boolean,
-    val version: String,
-)
-
 /**
- * 集群节点探测语句：优先 StarRocks 的 `SHOW BACKENDS`，不支持则
- * `SHOW FRONTENDS`；都不支持（纯 MySQL）由面板展示空状态。
- * 普通 SQL 错误不会关闭底层连接（见 MysqlJdbcConnection 的中断分类），
- * 因此可以安全地逐条续试。
+ * 字节 → 人话（1024 进制，与 `SHOW BACKENDS` 的显示口径一致）。
+ *
+ * 实现不用 `String.format` / `Locale`：这是纯数值格式化，手写取整避免引入平台差异。
  */
-internal val CLUSTER_NODE_QUERIES = listOf("SHOW BACKENDS;", "SHOW FRONTENDS;")
-
-/** 存活值可能是 true/false、1/0、yes/no，统一归一。 */
-private fun parseAlive(raw: Any?): Boolean =
-    raw?.toString()?.trim()?.lowercase() in setOf("true", "1", "yes", "y")
-
-/**
- * 按**列名**定位节点字段：StarRocks 的 BACKENDS / FRONTENDS 列名不同，纯 MySQL
- * 又可能返回别的形状。找不到某列时用 "-" 占位，绝不因列缺失崩面板。
- */
-internal fun parseNodes(result: StarRocksQueryRows): List<ClusterNode> {
-    val cols = result.columns.map { it.lowercase() }
-    fun indexOfAny(vararg names: String): Int? =
-        names.firstNotNullOfOrNull { n -> cols.indexOf(n.lowercase()).takeIf { it >= 0 } }
-
-    val ipIdx = indexOfAny("ip", "hostname", "host", "backendid", "name")
-    val portIdx = indexOfAny("heartbeatport", "queryport", "httpport", "beport", "editlogport", "rpcport", "brpcport")
-    val aliveIdx = indexOfAny("alive", "isalive")
-    val versionIdx = indexOfAny("version")
-
-    return result.rows.map { row ->
-        ClusterNode(
-            ip = ipIdx?.let { row.getOrNull(it)?.toString() }.orEmpty().ifBlank { "-" },
-            port = portIdx?.let { row.getOrNull(it)?.toString() }.orEmpty().ifBlank { "-" },
-            alive = aliveIdx?.let { parseAlive(row.getOrNull(it)) } ?: false,
-            version = versionIdx?.let { row.getOrNull(it)?.toString() }.orEmpty().ifBlank { "-" },
-        )
+internal fun formatBytes(bytes: Long): String {
+    if (bytes < 1024) return "$bytes B"
+    val units = listOf("KB", "MB", "GB", "TB", "PB")
+    var value = bytes.toDouble() / 1024
+    var unitIndex = 0
+    while (value >= 1024 && unitIndex < units.lastIndex) {
+        value /= 1024
+        unitIndex++
     }
+    // 大单位保留 1 位小数（1.2 GB）；大到三位数时小数没意义，直接取整。
+    val rounded = if (value >= 100) value.toLong().toDouble() else kotlin.math.round(value * 10) / 10
+    val text = if (rounded % 1.0 == 0.0) rounded.toLong().toString() else rounded.toString()
+    return "$text ${units[unitIndex]}"
 }
 
-/** 概览 / 拓扑共用的节点拉取：逐条探测，全部不支持返回空列表。 */
-internal suspend fun loadClusterNodes(connectionId: String): List<ClusterNode> {
-    var result: StarRocksQueryRows? = null
-    for (sql in CLUSTER_NODE_QUERIES) {
-        result = runCatching { queryRows(connectionId, sql) }.getOrNull()
-        if (result != null && result.rows.isNotEmpty()) break
+/**
+ * 百分比展示：`0.53 %` → `0.53%`（小于 1% 保留 2 位，否则 1 位；≥10% 取整）。
+ * 保留小数是因为 StarRocks 的 CPU 使用率常态就是个位数。
+ */
+internal fun formatPercent(percent: Double): String {
+    val text = when {
+        percent >= 10 -> kotlin.math.round(percent).toLong().toString()
+        percent >= 1 -> (kotlin.math.round(percent * 10) / 10).toString()
+        else -> (kotlin.math.round(percent * 100) / 100).toString()
     }
-    return result?.let { parseNodes(it) } ?: emptyList()
+    return "$text%"
 }
+
+/** 两数比百分比（分母无效时返回空串，调用方据此不渲染）。 */
+internal fun percentOf(used: Long, total: Long): String =
+    if (total <= 0) "" else formatPercent(used.toDouble() * 100.0 / total.toDouble())
 
 /**
  * 「数据目录 → SQL 控制台」的跨面板联动 holder（与 app-core 的

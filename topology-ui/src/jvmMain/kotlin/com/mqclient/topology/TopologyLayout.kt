@@ -28,64 +28,70 @@ typealias TopologyLayoutProvider = (
 ) -> Kuiver
 
 /**
- * 「左列 = 主角，右列 = 另一端」的两列布局（Kafka / RocketMQ 的 topic|broker、
- * RabbitMQ 的 exchange|queue 都是这个形状）。
+ * 通用「按列分层」布局：`columnOf` 给出每个节点的列号（0 = 最左），列内纵向堆叠。
  *
- * 列序固定（左 → 右）0 | 1：命中 [inSecondColumn] 的节点进第 1 列，其余兜底第 0 列。
- * 同列纵向排序：第 0 列按 id（名称）稳定排序；第 1 列按**邻居 y 均值**单趟重心
- * （第 0 列先排定，右列跟着自己的左列邻居走，减少长跨线），无邻居的保持 id 序。
+ * 排序规则（两级）：第 0 列按 id（名称）**稳定**排序；其余列按**邻居 y 均值**单趟
+ * 重心 —— 前面的列先排定，后面的列跟着自己的左邻列走，减少长跨线；无邻居的保持 id 序。
+ *
+ * 为什么做成 N 列而不是两列：两列只够表达 `topic | broker` 这类单一流向；StarRocks
+ * 的集群拓扑是三层（外部 Catalog → FE → BE/CN），MQ 的固定 9 列布局又是它自己的
+ * 定制实现。这里给通用算法，列数交给业务模块的谓词决定。
  *
  * 节点坐标直接写入并经 [buildKuiverWithClassifiedEdges] 重建，边类型（FORWARD /
- * BACK / CROSS / SELF_LOOP）随之定档 —— 聚合视图里 broker→topic 这类反向边会标
- * BACK 标橙，与 MQ 拓扑同一语义。
+ * BACK / CROSS / SELF_LOOP）随之定档 —— 跨列回流这类反向边会标 BACK 标橙。
  *
- * @param inSecondColumn 判定节点进右列（其余一律左列，未知类型不必特殊处理）。
- *   谓词由业务模块给出——“哪种类型在右列”是业务语义，不归渲染层。
+ * @param columnOf 节点 → 列号（负数按 0 处理，无需连续）。谓词由业务模块给出 ——
+ *   「哪种类型在哪一列」是业务语义，不归渲染层。
  */
-fun twoColumnLayoutProvider(
-    inSecondColumn: (TopologyNode) -> Boolean,
-): TopologyLayoutProvider = labeled@{ kuiver, config, nodeTable ->
+fun layeredLayoutProvider(columnOf: (TopologyNode) -> Int): TopologyLayoutProvider =
+    labeled@{ kuiver, config, nodeTable ->
     val nodes = kuiver.nodes.values.toList()
     if (nodes.isEmpty()) return@labeled kuiver
 
-    // ---- 邻接表（无向，算右列重心用）----
+    // ---- 邻接表（无向，算列内重心用）----
     val neighbors = mutableMapOf<String, MutableList<String>>()
     kuiver.edges.forEach { edge ->
         neighbors.getOrPut(edge.fromId) { mutableListOf() }.add(edge.toId)
         neighbors.getOrPut(edge.toId) { mutableListOf() }.add(edge.fromId)
     }
 
-    val columns: Map<Int, MutableList<String>> = nodes
-        // 缺项的节点按「未标注」处理（进左列），与旧实现对未知类型的行为一致。
-        .groupBy { node -> if (inSecondColumn(nodeTable[node.id] ?: TopologyNode(node.id))) 1 else 0 }
+    val columnOrder: MutableMap<Int, MutableList<String>> = nodes
+        // 缺项的节点按「未标注」处理（列号由业务谓词决定，通常兜底到 0），
+        // 与旧实现对未知类型的行为一致。
+        .groupBy { node -> columnOf(nodeTable[node.id] ?: TopologyNode(node.id)).coerceAtLeast(0) }
         .mapValues { (_, ns) -> ns.map { it.id }.toMutableList() }
-    columns[0]?.sort() // 左列按 id（名称）稳定排序
-    columns[1]?.sort() // 右列先占位后重心
+        .toMutableMap()
+    val columns = columnOrder.keys.sorted()
+    columnOrder[0]?.sort() // 首列按 id（名称）稳定排序
 
-    // ---- 纵向堆叠 + 右列单趟重心 ----
+    // ---- 纵向堆叠 + 逐列重心 ----
     val yOf = mutableMapOf<String, Float>()
     fun restack(column: Int) {
         var y = 0f
-        columns[column]?.forEach { id ->
+        columnOrder[column]?.forEach { id ->
             yOf[id] = y
             y += NODE_HEIGHT.value + ROW_SPACING.value
         }
     }
-    (0..1).forEach(::restack)
+    columns.forEach(::restack)
 
     fun barycenter(id: String): Float {
         val ys = neighbors[id]?.mapNotNull { yOf[it] } ?: emptyList()
         return if (ys.isEmpty()) yOf[id] ?: 0f else ys.average().toFloat()
     }
 
-    columns[1]?.sortBy { (barycenter(it) * 1000).toInt() } // 量化避免浮点抖动
-    restack(1)
+    // 首列已按 id 定序，其余列依次按重心微调（量化避免浮点抖动）。
+    columns.filter { it != 0 }.forEach { column ->
+        columnOrder[column]?.sortBy { (barycenter(it) * 1000).toInt() }
+        restack(column)
+    }
 
     // ---- 落坐标（列 x 居中；列内 y 依最终顺序堆叠）----
-    val totalWidth = COLUMN_SPACING
+    val columnCount = (columns.maxOrNull() ?: 0) + 1
+    val totalWidth = COLUMN_SPACING * (columnCount - 1)
     val centerX0 = if (config.width > 0.dp) (config.width - totalWidth) / 2f else Dp(0f)
     val positions = mutableMapOf<String, DpOffset>()
-    columns.forEach { (column, ids) ->
+    columnOrder.forEach { (column, ids) ->
         val x = COLUMN_SPACING * column + centerX0
         var y = 0f
         ids.forEach { id ->
@@ -97,6 +103,17 @@ fun twoColumnLayoutProvider(
     val laidNodes = nodes.map { it.copy(position = positions.getValue(it.id)) }
     buildKuiverWithClassifiedEdges(laidNodes, kuiver.edges.toList())
 }
+
+/**
+ * 「左列 = 主角，右列 = 另一端」的两列布局（Kafka / RocketMQ 的 topic|broker、
+ * RabbitMQ 的 exchange|queue、StarRocks 早期的 FE|BE 都是这个形状）。
+ *
+ * 退化为 [layeredLayoutProvider] 的两列特例 —— 列宽 / 行距 / 排序结果逐字不变，
+ * 已有面板零感知。
+ */
+fun twoColumnLayoutProvider(
+    inSecondColumn: (TopologyNode) -> Boolean,
+): TopologyLayoutProvider = layeredLayoutProvider { node -> if (inSecondColumn(node)) 1 else 0 }
 
 /** 卡片高度：对齐 [CARD_HEIGHT]（布局与卡片尺寸必须一致）。 */
 private val NODE_HEIGHT = CARD_HEIGHT.dp
