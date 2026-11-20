@@ -1,7 +1,6 @@
 package com.mqclient.kafka.ui.topology
 
 import com.mqclient.graph.NodeSeverity
-import com.mqclient.graph.TopologyNodeType
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -53,28 +52,28 @@ class KafkaTopologyGraphBuilderTest {
     fun `聚合视图 - 无分区节点 - topic 直连 leader broker - badge 为分区数`() {
         val data = buildKuiverFromSnapshot(snapshot(), strings)
 
-        // 内部主题默认过滤：节点只有 t1 + 3 brokers，无 PARTITION 节点。
+        // 内部主题默认过滤：节点只有 t1 + 3 brokers，无分区节点。
         assertEquals(
             mapOf(
-                "b:0" to TopologyNodeType.BROKER,
-                "b:1" to TopologyNodeType.BROKER,
-                "b:2" to TopologyNodeType.BROKER,
-                "t1" to TopologyNodeType.TOPIC,
+                "b:0" to KafkaNodeType.BROKER,
+                "b:1" to KafkaNodeType.BROKER,
+                "b:2" to KafkaNodeType.BROKER,
+                "t1" to KafkaNodeType.TOPIC,
             ),
-            data.nodeTypes,
+            data.nodes.mapValues { it.value.type },
         )
         // 内部主题默认过滤：只有 t1 的 leader 边（b0、b1）。
         assertEquals(setOf("t1" to "b:0", "t1" to "b:1"), edgeSet(data))
-        assertEquals("3 分区", data.badges["t1"])
+        assertEquals("3 分区", data.nodes["t1"]?.badge)
     }
 
     @Test
     fun `内部主题开关 - 开启后进图并产生聚合边 - badge 带内部标记`() {
         val data = buildKuiverFromSnapshot(snapshot(), strings, showInternalTopics = true)
 
-        assertEquals(TopologyNodeType.TOPIC, data.nodeTypes["__internal"])
+        assertEquals(KafkaNodeType.TOPIC, data.nodes["__internal"]?.type)
         assertTrue("__internal" to "b:2" in edgeSet(data))
-        assertEquals("内部主题 · 1 分区", data.badges["__internal"])
+        assertEquals("内部主题 · 1 分区", data.nodes["__internal"]?.badge)
     }
 
     @Test
@@ -82,8 +81,8 @@ class KafkaTopologyGraphBuilderTest {
         val data = buildKuiverFromSnapshot(snapshot(), strings)
 
         // t1 含离线分区（无 leader）→ ERROR；欠副本分区在 topic 级聚合下同样体现。
-        assertEquals(NodeSeverity.ERROR, data.severities["t1"])
-        assertEquals(NodeSeverity.NORMAL, data.severities["b:0"])
+        assertEquals(NodeSeverity.ERROR, data.nodes["t1"]?.severity)
+        assertEquals(NodeSeverity.NORMAL, data.nodes["b:0"]?.severity)
     }
 
     @Test
@@ -93,6 +92,6 @@ class KafkaTopologyGraphBuilderTest {
             strings,
         )
         assertTrue(data.kuiver.nodes.isEmpty())
-        assertTrue(data.nodeTypes.isEmpty())
+        assertTrue(data.nodes.isEmpty())
     }
 }

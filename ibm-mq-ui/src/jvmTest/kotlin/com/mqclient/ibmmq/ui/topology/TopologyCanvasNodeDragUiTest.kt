@@ -8,9 +8,8 @@ import com.dk.kuiver.model.Kuiver
 import com.dk.kuiver.model.KuiverNode
 import com.dk.kuiver.model.NodeDimensions
 import androidx.compose.ui.unit.dp
-import com.mqclient.graph.NodeSeverity
 import com.mqclient.graph.TopologyData
-import com.mqclient.graph.TopologyNodeType
+import com.mqclient.graph.TopologyNode
 import com.mqclient.topology.CARD_HEIGHT
 import com.mqclient.topology.CARD_WIDTH
 import com.mqclient.topology.TopologyCanvas
@@ -46,13 +45,15 @@ class TopologyCanvasNodeDragUiTest {
         )
         return TopologyData(
             kuiver = kuiver,
-            nodeTypes = mapOf(
-                "LQ1" to TopologyNodeType.LOCAL_QUEUE,
-                "XMIT1" to TopologyNodeType.TRANSMISSION_QUEUE,
-                "CH1.SENDER" to TopologyNodeType.CHANNEL,
-                remoteQmgrNodeId("QM2") to TopologyNodeType.REMOTE_QMGR,
+            nodes = mapOf(
+                "LQ1" to TopologyNode("LQ1", MqNodeType.LOCAL_QUEUE),
+                "XMIT1" to TopologyNode("XMIT1", MqNodeType.TRANSMISSION_QUEUE),
+                "CH1.SENDER" to TopologyNode("CH1.SENDER", MqNodeType.CHANNEL),
+                remoteQmgrNodeId("QM2") to TopologyNode(
+                    remoteQmgrNodeId("QM2"),
+                    MqNodeType.REMOTE_QMGR,
+                ),
             ),
-            severities = ids.associateWith { NodeSeverity.NORMAL },
         )
     }
 
@@ -61,10 +62,10 @@ class TopologyCanvasNodeDragUiTest {
             MaterialTheme {
                 TopologyCanvas(
                     data = mqData(),
+                    style = MqNodeStyle,
                     layoutProvider = columnLayoutProvider,
                     onRescan = {},
                     onNodeDoubleClick = {},
-                    fallbackType = TopologyNodeType.LOCAL_QUEUE,
                     nodeDragEnabled = nodeDragEnabled,
                 )
             }

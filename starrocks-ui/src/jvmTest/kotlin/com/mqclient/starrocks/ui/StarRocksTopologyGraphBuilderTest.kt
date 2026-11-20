@@ -1,7 +1,6 @@
 package com.mqclient.starrocks.ui
 
 import com.mqclient.graph.NodeSeverity
-import com.mqclient.graph.TopologyNodeType
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -14,7 +13,7 @@ class StarRocksTopologyGraphBuilderTest {
         val data = buildStarRocksTopology("fe-host", emptyList())
         assertTrue(data.kuiver.nodes.isEmpty())
         assertTrue(data.kuiver.edges.isEmpty())
-        assertTrue(data.nodeTypes.isEmpty())
+        assertTrue(data.nodes.isEmpty())
     }
 
     @Test
@@ -31,9 +30,9 @@ class StarRocksTopologyGraphBuilderTest {
 
         // 1 FE + 2 BE
         assertEquals(3, data.kuiver.nodes.size)
-        assertEquals(TopologyNodeType.OLAP_FE, data.nodeTypes[feId])
-        assertEquals(TopologyNodeType.OLAP_BE, data.nodeTypes[be1])
-        assertEquals(TopologyNodeType.OLAP_BE, data.nodeTypes[be2])
+        assertEquals(OlapNodeType.FE, data.nodes[feId]?.type)
+        assertEquals(OlapNodeType.BE, data.nodes[be1]?.type)
+        assertEquals(OlapNodeType.BE, data.nodes[be2]?.type)
 
         // 所有边都从 FE 出发（星形），无 BE→BE 边。
         assertEquals(2, data.kuiver.edges.size)
@@ -41,10 +40,10 @@ class StarRocksTopologyGraphBuilderTest {
         assertEquals(setOf(be1, be2), data.kuiver.edges.map { it.toId }.toSet())
 
         // 不存活 → ERROR（红），存活 → NORMAL。
-        assertEquals(NodeSeverity.NORMAL, data.severities[feId])
-        assertEquals(NodeSeverity.NORMAL, data.severities[be1])
-        assertEquals(NodeSeverity.ERROR, data.severities[be2])
-        assertEquals("3.2.0", data.badges[be1])
+        assertEquals(NodeSeverity.NORMAL, data.nodes[feId]?.severity)
+        assertEquals(NodeSeverity.NORMAL, data.nodes[be1]?.severity)
+        assertEquals(NodeSeverity.ERROR, data.nodes[be2]?.severity)
+        assertEquals("3.2.0", data.nodes[be1]?.badge)
     }
 
     @Test
@@ -54,6 +53,6 @@ class StarRocksTopologyGraphBuilderTest {
             listOf(ClusterNode("10.0.0.1", "9050", alive = true, version = "-")),
         )
         assertEquals(2, data.kuiver.nodes.size, "FE 与同 IP 的 BE 必须是两个节点")
-        assertTrue(data.badges.isEmpty(), "版本占位 '-' 不应进 badge")
+        assertTrue(data.nodes.values.none { it.badge != null }, "版本占位 '-' 不应进 badge")
     }
 }

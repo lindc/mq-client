@@ -6,14 +6,14 @@ import androidx.compose.ui.unit.dp
 import com.dk.kuiver.model.Kuiver
 import com.dk.kuiver.model.buildKuiverWithClassifiedEdges
 import com.dk.kuiver.model.layout.LayoutConfig
-import com.mqclient.graph.TopologyNodeType
+import com.mqclient.graph.TopologyNode
 
 /**
- * 带类型语义的布局函数：`nodeId → 类型` 随每次调用**显式传入**。
+ * 带类型语义的布局函数：`nodeId → 节点（含业务类型）` 随每次调用**显式传入**。
  *
  * kuiver 的 `LayoutProvider` 只看得到通用节点（没有 type 字段），而固定列序需要类型
- * 语义。这个类型别名把「图 + 配置 + 类型表」一起交出去，调用方（[TopologyCanvas]）
- * 用 `remember(kuiver, nodeTypes)` 把当前图的类型表**捕获进闭包**——于是：
+ * 语义。这个类型别名把「图 + 配置 + 节点表」一起交出去，调用方（[TopologyCanvas]）
+ * 用 `rememberUpdatedState` 把当前图的节点表**捕获进闭包**——于是：
  *
  *  - 不再需要各面板维护 `internal var xxxTopologyNodeTypes` 这类模块级可变表；
  *  - 布局可以在后台线程跑（kuiver 本身就 `withContext(Dispatchers.Default)`），
@@ -24,7 +24,7 @@ import com.mqclient.graph.TopologyNodeType
 typealias TopologyLayoutProvider = (
     kuiver: Kuiver,
     config: LayoutConfig,
-    nodeTypes: Map<String, TopologyNodeType>,
+    nodes: Map<String, TopologyNode>,
 ) -> Kuiver
 
 /**
@@ -39,11 +39,12 @@ typealias TopologyLayoutProvider = (
  * BACK / CROSS / SELF_LOOP）随之定档 —— 聚合视图里 broker→topic 这类反向边会标
  * BACK 标橙，与 MQ 拓扑同一语义。
  *
- * @param inSecondColumn 判定节点进右列（其余一律左列，未知类型不必特殊处理）
+ * @param inSecondColumn 判定节点进右列（其余一律左列，未知类型不必特殊处理）。
+ *   谓词由业务模块给出——“哪种类型在右列”是业务语义，不归渲染层。
  */
 fun twoColumnLayoutProvider(
-    inSecondColumn: (TopologyNodeType?) -> Boolean,
-): TopologyLayoutProvider = labeled@{ kuiver, config, types ->
+    inSecondColumn: (TopologyNode) -> Boolean,
+): TopologyLayoutProvider = labeled@{ kuiver, config, nodeTable ->
     val nodes = kuiver.nodes.values.toList()
     if (nodes.isEmpty()) return@labeled kuiver
 
@@ -55,7 +56,8 @@ fun twoColumnLayoutProvider(
     }
 
     val columns: Map<Int, MutableList<String>> = nodes
-        .groupBy { if (inSecondColumn(types[it.id])) 1 else 0 }
+        // 缺项的节点按「未标注」处理（进左列），与旧实现对未知类型的行为一致。
+        .groupBy { node -> if (inSecondColumn(nodeTable[node.id] ?: TopologyNode(node.id))) 1 else 0 }
         .mapValues { (_, ns) -> ns.map { it.id }.toMutableList() }
     columns[0]?.sort() // 左列按 id（名称）稳定排序
     columns[1]?.sort() // 右列先占位后重心
@@ -95,21 +97,6 @@ fun twoColumnLayoutProvider(
     val laidNodes = nodes.map { it.copy(position = positions.getValue(it.id)) }
     buildKuiverWithClassifiedEdges(laidNodes, kuiver.edges.toList())
 }
-
-/** Kafka / RocketMQ：topic | broker。 */
-val topicBrokerLayout: TopologyLayoutProvider =
-    twoColumnLayoutProvider { type -> type == TopologyNodeType.BROKER }
-
-/** RabbitMQ：exchange | queue。 */
-val exchangeQueueLayout: TopologyLayoutProvider =
-    twoColumnLayoutProvider { type -> type == TopologyNodeType.RABBIT_QUEUE }
-
-/**
- * OLAP（StarRocks）：FE | BE 的星形投影 —— 单个 FE 在左列，所有 BE 在右列，
- * 每条 FE→BE 边是一条「接入层 → 存储层」连线。复用通用两列布局，不新造布局算法。
- */
-val feBeLayout: TopologyLayoutProvider =
-    twoColumnLayoutProvider { type -> type == TopologyNodeType.OLAP_BE }
 
 /** 卡片高度：对齐 [CARD_HEIGHT]（布局与卡片尺寸必须一致）。 */
 private val NODE_HEIGHT = CARD_HEIGHT.dp

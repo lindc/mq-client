@@ -8,7 +8,7 @@ import com.dk.kuiver.model.NodeDimensions
 import com.dk.kuiver.model.buildKuiver
 import com.mqclient.graph.NodeSeverity
 import com.mqclient.graph.TopologyData
-import com.mqclient.graph.TopologyNodeType
+import com.mqclient.graph.TopologyNode
 import com.mqclient.topology.CARD_HEIGHT
 import com.mqclient.topology.CARD_WIDTH
 
@@ -46,24 +46,20 @@ fun buildKuiverFromSnapshot(
         .filter { showInternalTopics || !it.internal }
         .associateBy { it.name }
     if (visibleTopics.isEmpty() && snapshot.brokers.isEmpty()) {
-        return TopologyData(Kuiver(), emptyMap(), emptyMap())
+        return TopologyData(Kuiver(), emptyMap())
     }
 
-    val nodeTypes = LinkedHashMap<String, TopologyNodeType>()
-    val severities = LinkedHashMap<String, NodeSeverity>()
-    val badges = LinkedHashMap<String, String>()
+    val nodes = LinkedHashMap<String, TopologyNode>()
 
-    fun put(id: String, type: TopologyNodeType, severity: NodeSeverity = NodeSeverity.NORMAL, badge: String? = null) {
-        nodeTypes.putIfAbsent(id, type)
-        severities.putIfAbsent(id, severity)
-        badge?.let { badges.putIfAbsent(id, it) }
+    fun put(id: String, type: KafkaNodeType, severity: NodeSeverity = NodeSeverity.NORMAL, badge: String? = null) {
+        nodes.putIfAbsent(id, TopologyNode(id, type, severity, badge))
     }
 
     // ---- broker 节点 ----
     snapshot.brokers.forEach { b ->
         // host 为空（广告地址缺失等）退化为 id 展示。
         val badge = if (b.host.isNotBlank()) "${b.host}:${b.port}" else "id ${b.id}"
-        put(brokerNodeId(b.id), TopologyNodeType.BROKER, badge = badge)
+        put(brokerNodeId(b.id), KafkaNodeType.BROKER, badge = badge)
     }
 
     // ---- topic 节点 ----
@@ -78,7 +74,7 @@ fun buildKuiverFromSnapshot(
         }
         put(
             id = topic.name,
-            type = TopologyNodeType.TOPIC,
+            type = KafkaNodeType.TOPIC,
             severity = severity,
             badge = badge,
         )
@@ -87,7 +83,7 @@ fun buildKuiverFromSnapshot(
     // ---- 边：聚合 topic → 每个 leader 所在 broker ----
     val edges = LinkedHashSet<Pair<String, String>>()
     fun link(from: String, to: String) {
-        if (from != to && from in nodeTypes && to in nodeTypes) edges += from to to
+        if (from != to && from in nodes && to in nodes) edges += from to to
     }
 
     visibleTopics.values.forEach { topic ->
@@ -97,12 +93,12 @@ fun buildKuiverFromSnapshot(
     }
 
     val kuiver = buildKuiver {
-        nodeTypes.forEach { (id, _) ->
+        nodes.forEach { (id, _) ->
             addNode(KuiverNode(id, NodeDimensions(CARD_WIDTH.dp, CARD_HEIGHT.dp)))
         }
         edges.forEach { (from, to) -> addEdge(KuiverEdge(fromId = from, toId = to)) }
     }
-    return TopologyData(kuiver, nodeTypes, severities, badges)
+    return TopologyData(kuiver, nodes)
 }
 
 /** 分区健康：无 leader → ERROR；欠副本（副本数 > ISR 数）→ WARNING。 */

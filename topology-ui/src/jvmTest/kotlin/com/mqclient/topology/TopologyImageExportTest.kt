@@ -1,8 +1,12 @@
 package com.mqclient.topology
 
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Inbox
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
 import androidx.compose.material3.lightColorScheme
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import java.io.ByteArrayInputStream
@@ -13,6 +17,7 @@ import com.dk.kuiver.model.KuiverEdge
 import com.dk.kuiver.model.KuiverNode
 import com.dk.kuiver.model.NodeDimensions
 import com.dk.kuiver.model.buildKuiver
+import com.mqclient.graph.TopologyNode
 import com.mqclient.graph.TopologyNodeType
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -28,6 +33,33 @@ import kotlin.test.assertTrue
  * 25dp，仍在 48dp padding 内）。
  */
 class TopologyImageExportTest {
+
+    /** 测试侧自建节点类型：渲染层不认识任何中间件，类型由调用方定义。 */
+    private enum class SampleType : TopologyNodeType {
+        QUEUE,
+        CHANNEL,
+    }
+
+    /** 测试侧样式表：记录调用次数——验证离屏渲染确实走了传入的 provider。 */
+    private class CountingStyle : TopologyNodeStyleProvider {
+        var iconCalls = 0
+        var colorCalls = 0
+
+        override fun getIcon(node: TopologyNode): ImageVector {
+            iconCalls++
+            return Icons.Filled.Inbox
+        }
+
+        override fun getColor(node: TopologyNode): Color {
+            colorCalls++
+            return Color(0xFF22C55E)
+        }
+    }
+
+    private fun twoNodes() = mapOf(
+        "A" to TopologyNode("A", SampleType.QUEUE),
+        "B" to TopologyNode("B", SampleType.CHANNEL),
+    )
 
     private fun graph(
         secondX: Float = 200f,
@@ -92,13 +124,11 @@ class TopologyImageExportTest {
 
     @Test
     fun `render - 输出合法 PNG - 尺寸与计划一致`() {
+        val style = CountingStyle()
         val image = renderTopologyPng(
             graph = graph(),
-            nodeTypes = mapOf(
-                "A" to TopologyNodeType.LOCAL_QUEUE,
-                "B" to TopologyNodeType.CHANNEL,
-            ),
-            fallbackType = TopologyNodeType.LOCAL_QUEUE,
+            nodes = twoNodes(),
+            style = style,
             theme = theme(),
             scale = 2f,
         )
@@ -128,6 +158,9 @@ class TopologyImageExportTest {
             }
         }
         assertTrue(nonWhite > 0, "render produced a blank image")
+        // 样式来自传入的 provider（离屏场景经 LocalTopologyNodeStyle 铺下去）。
+        assertTrue(style.iconCalls >= 2, "每个节点都应向 provider 取图标，实际 ${style.iconCalls}")
+        assertTrue(style.colorCalls >= 2, "每个节点都应向 provider 取颜色，实际 ${style.colorCalls}")
     }
 
     /**
@@ -147,8 +180,8 @@ class TopologyImageExportTest {
         val error = assertFailsWith<IllegalStateException> {
             renderTopologyPng(
                 graph = anchored,
-                nodeTypes = mapOf("A" to TopologyNodeType.LOCAL_QUEUE, "B" to TopologyNodeType.CHANNEL),
-                fallbackType = TopologyNodeType.LOCAL_QUEUE,
+                nodes = twoNodes(),
+                style = CountingStyle(),
                 theme = theme(),
                 scale = 1f,
             )
@@ -163,8 +196,8 @@ class TopologyImageExportTest {
         var invoked = 0
         renderTopologyPng(
             graph = graph(),
-            nodeTypes = mapOf("A" to TopologyNodeType.LOCAL_QUEUE, "B" to TopologyNodeType.CHANNEL),
-            fallbackType = TopologyNodeType.LOCAL_QUEUE,
+            nodes = twoNodes(),
+            style = CountingStyle(),
             theme = theme(),
             scale = 1f,
             // 与 TopologyCanvas 的 edgeCustomize 同名同义：面板的按边定制必须进导出图。

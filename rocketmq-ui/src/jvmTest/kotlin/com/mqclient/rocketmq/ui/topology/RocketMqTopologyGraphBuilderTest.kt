@@ -1,7 +1,6 @@
 package com.mqclient.rocketmq.ui.topology
 
 import com.mqclient.graph.NodeSeverity
-import com.mqclient.graph.TopologyNodeType
 import com.mqclient.rocketmq.ui.topology.RocketMqRouteInfo
 import com.mqclient.rocketmq.ui.topology.RocketMqTopicTopologyInfo
 import kotlin.test.Test
@@ -42,8 +41,8 @@ class RocketMqTopologyGraphBuilderTest {
             setOf("app.orders" to "b:broker-a", "app.orders" to "b:broker-b"),
             data.kuiver.edges.map { it.fromId to it.toId }.toSet(),
         )
-        assertEquals(TopologyNodeType.TOPIC, data.nodeTypes["app.orders"])
-        assertEquals(TopologyNodeType.BROKER, data.nodeTypes["b:broker-a"])
+        assertEquals(RocketMqNodeType.TOPIC, data.nodes["app.orders"]?.type)
+        assertEquals(RocketMqNodeType.BROKER, data.nodes["b:broker-a"]?.type)
     }
 
     @Test
@@ -83,7 +82,7 @@ class RocketMqTopologyGraphBuilderTest {
             brokerAddresses = mapOf("broker-a" to "10.0.0.1:10911"),
             strings = strings,
         )
-        assertEquals(NodeSeverity.WARNING, data.severities["ro.topic"])
+        assertEquals(NodeSeverity.WARNING, data.nodes["ro.topic"]?.severity)
     }
 
     @Test
@@ -94,7 +93,7 @@ class RocketMqTopologyGraphBuilderTest {
             strings = strings,
         )
         // 无路由 = 发布不可达，与只读同级告警。
-        assertEquals(NodeSeverity.WARNING, data.severities["orphan.topic"])
+        assertEquals(NodeSeverity.WARNING, data.nodes["orphan.topic"]?.severity)
         assertTrue(data.kuiver.edges.isEmpty())
     }
 }

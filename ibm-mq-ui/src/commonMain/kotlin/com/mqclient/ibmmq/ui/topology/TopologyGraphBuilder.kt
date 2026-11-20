@@ -7,7 +7,7 @@ import com.dk.kuiver.model.NodeDimensions
 import com.dk.kuiver.model.buildKuiver
 import com.mqclient.topology.CARD_WIDTH
 import com.mqclient.topology.CARD_HEIGHT
-import com.mqclient.graph.TopologyNodeType
+import com.mqclient.graph.TopologyNode
 import com.mqclient.graph.TopologyData
 import com.mqclient.graph.NodeSeverity
 import com.mqclient.ibmmq.IbmMQModule
@@ -49,7 +49,7 @@ fun buildKuiverFromCache(connectionId: String, warningThreshold: Int): TopologyD
     val service = IbmMQModule.serviceOrNull()
         ?: run {
             Log.debug(LOG_TAG, "topology build skipped (service not ready): connection=$connectionId")
-            return TopologyData(Kuiver(), emptyMap(), emptyMap())
+            return TopologyData(Kuiver(), emptyMap())
         }
 
     val queues = service.cachedObjects(connectionId, MqObjectType.QUEUE)
@@ -67,23 +67,21 @@ fun buildKuiverFromCache(connectionId: String, warningThreshold: Int): TopologyD
     val localQmgrName = service.cachedQueueManager(connectionId)?.name
 
     // ---- 节点 ----
-    val nodeTypes = LinkedHashMap<String, TopologyNodeType>()
-    val severities = LinkedHashMap<String, NodeSeverity>()
-    fun put(id: String, type: TopologyNodeType, severity: NodeSeverity = NodeSeverity.NORMAL) {
+    val nodes = LinkedHashMap<String, TopologyNode>()
+    fun put(id: String, type: MqNodeType, severity: NodeSeverity = NodeSeverity.NORMAL) {
         if (id.isNotBlank()) {
-            nodeTypes.putIfAbsent(id, type)
-            severities.putIfAbsent(id, severity)
+            nodes.putIfAbsent(id, TopologyNode(id, type, severity))
         }
     }
     queues.forEach {
         val type = when {
-            it.isAliasQueue() -> TopologyNodeType.ALIAS_QUEUE
-            it.isRemoteQueue() -> TopologyNodeType.REMOTE_QUEUE
-            it.isTransmission() -> TopologyNodeType.TRANSMISSION_QUEUE
-            else -> TopologyNodeType.LOCAL_QUEUE
+            it.isAliasQueue() -> MqNodeType.ALIAS_QUEUE
+            it.isRemoteQueue() -> MqNodeType.REMOTE_QUEUE
+            it.isTransmission() -> MqNodeType.TRANSMISSION_QUEUE
+            else -> MqNodeType.LOCAL_QUEUE
         }
         // 消息积压：与队列列表页**同一份**判定（isQueueDepthWarning；两份实现曾分叉）。
-        val severity = if (type == TopologyNodeType.LOCAL_QUEUE &&
+        val severity = if (type == MqNodeType.LOCAL_QUEUE &&
             isQueueDepthWarning(it.currentDepth, it.maxDepth, warningThreshold)
         ) {
             NodeSeverity.WARNING
@@ -92,15 +90,15 @@ fun buildKuiverFromCache(connectionId: String, warningThreshold: Int): TopologyD
         }
         put(it.name, type, severity)
     }
-    topics.forEach { put(it.name, TopologyNodeType.TOPIC) }
-    subs.forEach { put(it.name, TopologyNodeType.SUBSCRIPTION) }
+    topics.forEach { put(it.name, MqNodeType.TOPIC) }
+    subs.forEach { put(it.name, MqNodeType.SUBSCRIPTION) }
     channels.forEach {
         // 通道链路故障：状态 STOPPED / RETRYING → ERROR（对齐旧管线 isProblem 语义）。
         val severity = when (it.channelStatus?.uppercase()) {
             "STOPPED", "RETRYING" -> NodeSeverity.ERROR
             else -> NodeSeverity.NORMAL
         }
-        put(it.name, TopologyNodeType.CHANNEL, severity)
+        put(it.name, MqNodeType.CHANNEL, severity)
     }
     // REMOTE_QMGR 虚拟节点：优先通道自身 RQMNAME；**实测部分 MQ（含 MQ 9.x 沙箱）的
     // INQUIRE_CHANNEL 不回 RQMNAME 参数**（定义里为空），此时经「共享同一 XMITQ 的
@@ -114,10 +112,10 @@ fun buildKuiverFromCache(connectionId: String, warningThreshold: Int): TopologyD
     val remoteQmgrIds = channels.mapNotNull(::channelRqm)
         .filter { it.isNotBlank() && it != localQmgrName }
         .map(::remoteQmgrNodeId)
-    remoteQmgrIds.forEach { put(it, TopologyNodeType.REMOTE_QMGR) }
-    if (nodeTypes.isEmpty()) {
+    remoteQmgrIds.forEach { put(it, MqNodeType.REMOTE_QMGR) }
+    if (nodes.isEmpty()) {
         Log.debug(LOG_TAG, "topology build empty (no objects in cache): connection=$connectionId")
-        return TopologyData(Kuiver(), emptyMap(), emptyMap())
+        return TopologyData(Kuiver(), emptyMap())
     }
 
     // ---- 边 ----
@@ -125,7 +123,7 @@ fun buildKuiverFromCache(connectionId: String, warningThreshold: Int): TopologyD
     val edges = LinkedHashSet<Pair<String, String>>()
     fun link(from: String?, to: String?) {
         if (from == null || to == null || from == to) return
-        if (from in nodeTypes && to in nodeTypes) edges += from to to
+        if (from in nodes && to in nodes) edges += from to to
     }
 
     // 1. Alias → Target（目标须是图内已知对象；alias→alias 自然成链）
@@ -154,15 +152,15 @@ fun buildKuiverFromCache(connectionId: String, warningThreshold: Int): TopologyD
     }
 
     val kuiver = buildKuiver {
-        nodeTypes.forEach { (id, _) -> addNode(KuiverNode(id, NodeDimensions(CARD_WIDTH.dp, CARD_HEIGHT.dp))) }
+        nodes.forEach { (id, _) -> addNode(KuiverNode(id, NodeDimensions(CARD_WIDTH.dp, CARD_HEIGHT.dp))) }
         edges.forEach { (from, to) -> addEdge(KuiverEdge(fromId = from, toId = to)) }
     }
     Log.info(
         LOG_TAG,
-        "topology built: connection=$connectionId nodes=${nodeTypes.size} edges=${edges.size} " +
+        "topology built: connection=$connectionId nodes=${nodes.size} edges=${edges.size} " +
             "duration=${System.currentTimeMillis() - start}ms",
     )
-    return TopologyData(kuiver, nodeTypes, severities)
+    return TopologyData(kuiver, nodes)
 }
 
 /** REMOTE_QMGR 虚拟节点的前缀 + id（避免与真实对象名冲突）。 */

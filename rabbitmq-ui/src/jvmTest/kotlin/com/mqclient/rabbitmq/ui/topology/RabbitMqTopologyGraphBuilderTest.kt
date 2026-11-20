@@ -1,7 +1,6 @@
 package com.mqclient.rabbitmq.ui.topology
 
 import com.mqclient.graph.NodeSeverity
-import com.mqclient.graph.TopologyNodeType
 import com.mqclient.rabbitmq.RabbitMqBindingSnapshot
 import com.mqclient.rabbitmq.RabbitMqExchangeSnapshot
 import com.mqclient.rabbitmq.RabbitMqQueueSnapshot
@@ -57,8 +56,8 @@ class RabbitMqTopologyGraphBuilderTest {
         )
         // 系统交换机 amq.direct 默认被过滤，只剩业务交换机 + 队列。
         assertEquals(setOf("x:app.orders", "q:team.q"), data.kuiver.nodes.keys)
-        assertEquals(TopologyNodeType.EXCHANGE, data.nodeTypes["x:app.orders"])
-        assertEquals(TopologyNodeType.RABBIT_QUEUE, data.nodeTypes["q:team.q"])
+        assertEquals(RabbitMqNodeType.EXCHANGE, data.nodes["x:app.orders"]?.type)
+        assertEquals(RabbitMqNodeType.RABBIT_QUEUE, data.nodes["q:team.q"]?.type)
         assertEquals(setOf("x:app.orders" to "q:team.q"), data.kuiver.edges.map { it.fromId to it.toId }.toSet())
     }
 
@@ -76,9 +75,9 @@ class RabbitMqTopologyGraphBuilderTest {
             strings,
             showSystemObjects = true,
         )
-        assertTrue("x:" in data.nodeTypes.keys && "x:amq.direct" in data.nodeTypes.keys)
+        assertTrue("x:" in data.nodes.keys && "x:amq.direct" in data.nodes.keys)
         // 默认交换机 id 是 x:（name 为空串）。
-        assertTrue("x:" in data.nodeTypes.keys)
+        assertTrue("x:" in data.nodes.keys)
         assertEquals(2, data.kuiver.edges.size)
     }
 
@@ -150,8 +149,8 @@ class RabbitMqTopologyGraphBuilderTest {
             ),
             strings,
         )
-        assertEquals(NodeSeverity.WARNING, data.severities["q:team.q"])
-        assertEquals("消息 3", data.badges["q:team.q"])
+        assertEquals(NodeSeverity.WARNING, data.nodes["q:team.q"]?.severity)
+        assertEquals("消息 3", data.nodes["q:team.q"]?.badge)
     }
 
     @Test
@@ -165,7 +164,7 @@ class RabbitMqTopologyGraphBuilderTest {
             ),
             strings,
         )
-        assertEquals(NodeSeverity.NORMAL, data.severities["q:team.q"])
+        assertEquals(NodeSeverity.NORMAL, data.nodes["q:team.q"]?.severity)
     }
 
     @Test
@@ -178,9 +177,9 @@ class RabbitMqTopologyGraphBuilderTest {
             ),
             strings,
         )
-        assertEquals(NodeSeverity.ERROR, data.severities["q:dead.q"])
+        assertEquals(NodeSeverity.ERROR, data.nodes["q:dead.q"]?.severity)
         // 快扫未覆盖：无 badge（不误判消息数）。
-        assertNull(data.badges["q:dead.q"])
+        assertNull(data.nodes["q:dead.q"]?.badge)
     }
 
     @Test
@@ -194,14 +193,14 @@ class RabbitMqTopologyGraphBuilderTest {
             strings,
         )
         // flow = 内存/磁盘告警被阻塞，与 down 同级（队列卡片红点同口径）。
-        assertEquals(NodeSeverity.ERROR, data.severities["q:blocked.q"])
-        assertNull(data.badges["q:blocked.q"])
+        assertEquals(NodeSeverity.ERROR, data.nodes["q:blocked.q"]?.severity)
+        assertNull(data.nodes["q:blocked.q"]?.badge)
     }
 
     @Test
     fun emptySnapshotYieldsEmptyGraph() {
         val data = buildKuiverFromSnapshot(snapshot(emptyList(), emptyList(), emptyList()), strings)
         assertTrue(data.kuiver.nodes.isEmpty())
-        assertTrue(data.nodeTypes.isEmpty())
+        assertTrue(data.nodes.isEmpty())
     }
 }

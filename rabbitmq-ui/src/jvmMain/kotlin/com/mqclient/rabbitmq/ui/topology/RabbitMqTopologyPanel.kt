@@ -29,7 +29,6 @@ import androidx.compose.ui.unit.dp
 import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.CoreModule
 import com.mqclient.graph.TopologyData
-import com.mqclient.graph.TopologyNodeType
 import com.mqclient.uicommon.command.ToolbarButton
 import com.mqclient.mqui.state.LoadState
 import com.mqclient.rabbitmq.RabbitMqEvents
@@ -40,7 +39,6 @@ import com.mqclient.rabbitmq.ui.RabbitMqExchangePropertiesDialog
 import com.mqclient.rabbitmq.ui.ensureRabbitMqConnecting
 import com.mqclient.rabbitmq.ui.rememberRabbitMqConnectionStatus
 import com.mqclient.topology.TopologyCanvas
-import com.mqclient.topology.exchangeQueueLayout
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
@@ -173,21 +171,23 @@ fun RabbitMqTopologyPanel(
 
                 TopologyCanvas(
                     data = current,
-                    layoutProvider = exchangeQueueLayout,
+                    style = RabbitMqNodeStyle,
+                    layoutProvider = rabbitMqExchangeQueueLayout,
                     // 节点可拖拽：位置仅会话内有效（kuiver manualPositions，内存态）。
                     nodeDragEnabled = true,
                     // 手动扫描：一轮对象慢扫，扫完经 OBJECTS_SCANNED 事件回到 onObjectsScanned。
                     onRescan = { RabbitMqModule.scanNow(connectionId) },
                     onNodeDoubleClick = { nodeId ->
-                        when (current.nodeTypes[nodeId]) {
-                            TopologyNodeType.EXCHANGE -> {
+                        when (current.nodes[nodeId]?.type as? RabbitMqNodeType) {
+                            RabbitMqNodeType.EXCHANGE -> {
                                 val name = nodeId.removePrefix("x:")
                                 snapshot?.exchanges?.firstOrNull { it.name == name }?.let {
                                     propsExchange = it
                                 }
                             }
-                            // queue 节点：双击开属性对话框（节点 id 投影队列名，详情实时拉）。
-                            else -> {
+                            // queue 节点（及未标注 / 非本模块类型）：双击开队列属性对话框
+                            // （节点 id 投影队列名，详情实时拉）。
+                            RabbitMqNodeType.RABBIT_QUEUE, null -> {
                                 val name = nodeId.removePrefix("q:")
                                 if (name != nodeId) {
                                     propsQueue = name
@@ -198,7 +198,6 @@ fun RabbitMqTopologyPanel(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxSize(),
-                    fallbackType = TopologyNodeType.RABBIT_QUEUE,
                     snackbarHostState = snackbarHostState,
                 )
             }

@@ -27,9 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.mqclient.core.ConnectionStore
 import com.mqclient.graph.TopologyData
-import com.mqclient.graph.TopologyNodeType
 import com.mqclient.topology.TopologyCanvas
-import com.mqclient.topology.feBeLayout
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.userMessage
 import com.mqclient.uicommon.i18n.withArg
@@ -54,7 +52,7 @@ private fun topologyDisplayName(nodeId: String): String = when {
  * 「拓扑结构」面板：FE（中心）→ BE（子节点）星形图。
  *
  * 装配模式与 RocketMQ / Kafka 拓扑页一致：数据（[buildStarRocksTopology] 产出的
- * [TopologyData]）+ 布局（[feBeLayout]）+ [TopologyCanvas] 渲染。拖拽由
+ * [TopologyData]）+ 布局（[starRocksFeBeLayout]）+ [TopologyCanvas] 渲染。拖拽由
  * `nodeDragEnabled = true` 打开，缩放 / 平移 / 适应视图 / 滚动条全部由画布内置。
  *
  * 数据获取失败或没有 BE 节点 → 空状态占位图（图标 + 文案 + 刷新按钮），
@@ -127,14 +125,14 @@ internal fun StarRocksTopologyPanel(connectionId: String, modifier: Modifier = M
 
             else -> TopologyCanvas(
                 data = graph,
-                layoutProvider = feBeLayout,
+                style = StarRocksNodeStyle,
+                layoutProvider = starRocksFeBeLayout,
                 // 节点拖拽（kuiver 原生手势，位置仅会话内有效）。
                 nodeDragEnabled = true,
                 onRescan = { scope.launch { load() } },
                 // MVP 不绑定属性对话框；双击保留给后续「BE 详情」迭代。
                 onNodeDoubleClick = { },
                 displayName = ::topologyDisplayName,
-                fallbackType = TopologyNodeType.OLAP_FE,
                 modifier = Modifier.fillMaxSize(),
             )
         }

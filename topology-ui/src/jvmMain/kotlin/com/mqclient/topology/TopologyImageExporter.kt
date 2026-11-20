@@ -11,6 +11,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.ImageComposeScene
@@ -34,8 +35,7 @@ import com.dk.kuiver.model.KuiverNode
 import com.dk.kuiver.ui.EdgePath
 import com.dk.kuiver.ui.EdgePathFactory
 import com.dk.kuiver.ui.EdgeStyle
-import com.mqclient.graph.NodeSeverity
-import com.mqclient.graph.TopologyNodeType
+import com.mqclient.graph.TopologyNode
 import java.awt.image.BufferedImage
 import java.io.ByteArrayOutputStream
 import javax.imageio.ImageIO
@@ -116,8 +116,9 @@ class TopologyExportImage(
  *
  * @param graph 已经完成布局的图（传 `KuiverViewerState.layoutedKuiver`，含用户拖动
  *   后的手动位置；不要传未布局的原始 `Kuiver`）。
- * @param nodeTypes / severities / badges 与屏幕渲染同源的样式表。
- * @param fallbackType 类型表缺失时的兜底类型。
+ * @param nodes 节点表（类型 / 告警 / 徽标），与屏幕渲染同源。
+ * @param style 业务模块的节点样式表；离屏场景是独立 composition，内部经
+ *   [LocalTopologyNodeStyle] 向下铺。
  * @param theme 调用点的 MaterialTheme 快照（颜色 / 字体 / 形状）。
  * @param displayName 节点 id → 显示名（MQ 的 `rqmgr:` 前缀由调用方剥掉）。
  * @param scale 期望倍率；超过安全上限时自动降低，实际值见结果。
@@ -132,11 +133,9 @@ class TopologyExportImage(
 @OptIn(ExperimentalComposeUiApi::class)
 fun renderTopologyPng(
     graph: Kuiver,
-    nodeTypes: Map<String, TopologyNodeType>,
-    fallbackType: TopologyNodeType,
+    nodes: Map<String, TopologyNode>,
+    style: TopologyNodeStyleProvider,
     theme: TopologyExportTheme,
-    severities: Map<String, NodeSeverity> = emptyMap(),
-    badges: Map<String, String> = emptyMap(),
     displayName: (String) -> String = { it },
     scale: Float = TOPOLOGY_EXPORT_DEFAULT_SCALE,
     padding: Dp = EXPORT_PADDING,
@@ -150,10 +149,8 @@ fun renderTopologyPng(
     val plan = planTopologyExport(graph, padding, scale)
     val bitmap = renderOffscreen(
         graph = graph,
-        nodeTypes = nodeTypes,
-        severities = severities,
-        badges = badges,
-        fallbackType = fallbackType,
+        nodes = nodes,
+        style = style,
         theme = theme,
         displayName = displayName,
         plan = plan,
@@ -278,10 +275,8 @@ internal fun planTopologyExport(
 @OptIn(ExperimentalComposeUiApi::class)
 private fun renderOffscreen(
     graph: Kuiver,
-    nodeTypes: Map<String, TopologyNodeType>,
-    severities: Map<String, NodeSeverity>,
-    badges: Map<String, String>,
-    fallbackType: TopologyNodeType,
+    nodes: Map<String, TopologyNode>,
+    style: TopologyNodeStyleProvider,
     theme: TopologyExportTheme,
     displayName: (String) -> String,
     plan: TopologyExportPlan,
@@ -295,22 +290,23 @@ private fun renderOffscreen(
         height = plan.heightPx,
         density = Density(plan.scale),
     ) {
-        MaterialTheme(
-            colorScheme = theme.colorScheme,
-            typography = theme.typography,
-            shapes = theme.shapes,
-        ) {
-            TopologyExportContent(
-                graph = graph,
-                nodeTypes = nodeTypes,
-                severities = severities,
-                badges = badges,
-                fallbackType = fallbackType,
-                displayName = displayName,
-                plan = plan,
-                background = background,
-                edgeCustomize = edgeCustomize,
-            )
+        // 离屏场景是独立 composition（自己的 recomposer）：样式在这里补一次，
+        // 卡片内部经 LocalTopologyNodeStyle 取，不必逐层穿参。
+        CompositionLocalProvider(LocalTopologyNodeStyle provides style) {
+            MaterialTheme(
+                colorScheme = theme.colorScheme,
+                typography = theme.typography,
+                shapes = theme.shapes,
+            ) {
+                TopologyExportContent(
+                    graph = graph,
+                    nodes = nodes,
+                    displayName = displayName,
+                    plan = plan,
+                    background = background,
+                    edgeCustomize = edgeCustomize,
+                )
+            }
         }
     }
     return try {
@@ -325,16 +321,14 @@ private fun renderOffscreen(
 @Composable
 private fun TopologyExportContent(
     graph: Kuiver,
-    nodeTypes: Map<String, TopologyNodeType>,
-    severities: Map<String, NodeSeverity>,
-    badges: Map<String, String>,
-    fallbackType: TopologyNodeType,
+    nodes: Map<String, TopologyNode>,
     displayName: (String) -> String,
     plan: TopologyExportPlan,
     background: Color?,
     edgeCustomize: ((KuiverEdge, EdgeStyle) -> EdgeStyle)?,
 ) {
     val scheme = MaterialTheme.colorScheme
+    val nodeStyle = LocalTopologyNodeStyle.current
     val backgroundModifier = if (background != null) Modifier.background(background) else Modifier
 
     // fillMaxSize 而不是 size(widthDp)，因为像素尺寸向上取整后可能比逻辑尺寸多不到
@@ -360,26 +354,25 @@ private fun TopologyExportContent(
         }
 
         // 节点后画，压在连线之上。卡片定位 = 图坐标左上角 − 包围盒原点。
-        graph.nodes.values.forEach { node ->
-            val width = node.width()
-            val height = node.height()
-            val left = node.position.x.value - width.value / 2f - plan.originX
-            val top = node.position.y.value - height.value / 2f - plan.originY
+        graph.nodes.values.forEach { kuiverNode ->
+            val width = kuiverNode.width()
+            val height = kuiverNode.height()
+            val left = kuiverNode.position.x.value - width.value / 2f - plan.originX
+            val top = kuiverNode.position.y.value - height.value / 2f - plan.originY
             Box(
                 Modifier
                     .offset(x = left.dp, y = top.dp)
                     .size(width, height),
             ) {
                 TopologyNodeCard(
-                    name = displayName(node.id),
-                    type = nodeTypes[node.id] ?: fallbackType,
-                    badge = badges[node.id],
-                    severity = severities[node.id] ?: NodeSeverity.NORMAL,
+                    node = nodes[kuiverNode.id] ?: TopologyNode(kuiverNode.id),
+                    name = displayName(kuiverNode.id),
                     // 导出是静态全图：不表达悬停 / 拖动 / 选中高亮。
                     isHovered = false,
                     isDragging = false,
                     isSelected = false,
                     dimmed = false,
+                    style = nodeStyle,
                 )
             }
         }

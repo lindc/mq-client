@@ -30,7 +30,6 @@ import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.CoreModule
 import com.mqclient.core.log.Log
 import com.mqclient.graph.TopologyData
-import com.mqclient.graph.TopologyNodeType
 import com.mqclient.kafka.KafkaBrokerSnapshot
 import com.mqclient.kafka.KafkaEvents
 import com.mqclient.kafka.KafkaModule
@@ -41,7 +40,6 @@ import com.mqclient.kafka.ui.rememberKafkaConnectionStatus
 import com.mqclient.mqui.state.LoadState
 import com.mqclient.uicommon.command.ToolbarButton
 import com.mqclient.topology.TopologyCanvas
-import com.mqclient.topology.topicBrokerLayout
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
@@ -194,7 +192,8 @@ fun KafkaTopologyPanel(
 
                 TopologyCanvas(
                     data = current,
-                    layoutProvider = topicBrokerLayout,
+                    style = KafkaNodeStyle,
+                    layoutProvider = kafkaTopicBrokerLayout,
                     // 节点可拖拽：位置仅会话内有效（kuiver manualPositions，内存态），
                     // 切走 / 关闭 Tab 随组合销毁恢复默认布局。
                     nodeDragEnabled = true,
@@ -203,17 +202,17 @@ fun KafkaTopologyPanel(
                     // 双击分派（照 ibm-mq 拓扑先例，面板内 setState；拖拽由 kuiver
                     // touch slop 区分，无双击误触）。
                     onNodeDoubleClick = { nodeId ->
-                        when (current.nodeTypes[nodeId]) {
-                            TopologyNodeType.TOPIC -> propsTopic = nodeId
-                            TopologyNodeType.BROKER ->
+                        // 穷尽本模块枚举：Kafka 新增节点角色时这里编译报错，不靠 else 兜。
+                        when (current.nodes[nodeId]?.type as? KafkaNodeType) {
+                            KafkaNodeType.TOPIC -> propsTopic = nodeId
+                            KafkaNodeType.BROKER ->
                                 propsBrokerId = nodeId.removePrefix(BROKER_ID_PREFIX).toIntOrNull()
-                            else -> scope.launch { snackbarHostState.showSnackbar(noPropertiesHint) }
+                            null -> scope.launch { snackbarHostState.showSnackbar(noPropertiesHint) }
                         }
                     },
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxSize(),
-                    fallbackType = TopologyNodeType.BROKER,
                     snackbarHostState = snackbarHostState,
                 )
             }

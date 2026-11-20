@@ -34,9 +34,8 @@ import com.dk.kuiver.renderer.KuiverInteractionCallbacks
 import com.dk.kuiver.renderer.KuiverViewer
 import com.dk.kuiver.renderer.KuiverViewerConfig
 import com.dk.kuiver.ui.EdgeStyle
-import com.mqclient.graph.NodeSeverity
 import com.mqclient.graph.TopologyData
-import com.mqclient.graph.TopologyNodeType
+import com.mqclient.graph.TopologyNode
 import com.mqclient.uicommon.ThemedSnackbarHost
 import com.mqclient.uicommon.file.saveFileBytes
 import com.mqclient.uicommon.i18n.stringResource
@@ -57,7 +56,8 @@ import java.time.format.DateTimeFormatter
  * 参数说明：
  *  - [displayName]：节点 id → 卡片显示名（MQ 的 REMOTE_QMGR 虚拟节点要剥 `rqmgr:` 前缀，
  *    Kafka 等大多数场景传恒等即可）；
- *  - [fallbackType]：类型表缺失时的兜底类型（builder 保证齐全，防御性取值）；
+ *  - [style]：业务模块的节点样式表（图标 / 强调色）。本画布不认识任何节点类型；
+ *    节点表缺项时由 provider 走兜底样式（问号 + 中性灰）；
  *  - [onNodeDoubleClick]：双击节点回调（kuiver 0.4.2 无原生双击，内部用
  *    [NodeDoubleClick] 检测）；画布空白点击会自动打断，业务侧无需处理；
  *  - [layoutProvider]：带类型语义的布局（[TopologyLayoutProvider]）。类型表由本
@@ -73,12 +73,13 @@ import java.time.format.DateTimeFormatter
 @Composable
 fun TopologyCanvas(
     data: TopologyData,
+    /** 业务模块的节点样式表（必填：漏传是编译错误，不做隐式兜底）。 */
+    style: TopologyNodeStyleProvider,
     layoutProvider: TopologyLayoutProvider,
     onRescan: () -> Unit,
     onNodeDoubleClick: (String) -> Unit,
     modifier: Modifier = Modifier,
     displayName: (String) -> String = { it },
-    fallbackType: TopologyNodeType,
     focusName: String? = null,
     onFocusApplied: () -> Unit = {},
     snackbarHostState: SnackbarHostState? = null,
@@ -92,7 +93,8 @@ fun TopologyCanvas(
     /** 节点可拖拽（kuiver 原生手势，touch slop 区分点击；位置仅会话内有效，不持久化）。 */
     nodeDragEnabled: Boolean = false,
 ) {
-    val (kuiver, nodeTypes, severities) = data
+    val kuiver = data.kuiver
+    val nodes = data.nodes
     val scheme = MaterialTheme.colorScheme
     val typography = MaterialTheme.typography
     val shapes = MaterialTheme.shapes
@@ -113,10 +115,10 @@ fun TopologyCanvas(
     // 陈旧 —— IBM MQ 的 columnLayoutProvider 对缺失类型返回第 0 列，于是所有节点塌进同一列、
     // 连线退化（即「布局塌陷成单列」）。用 rememberUpdatedState 让长生命周期闭包始终读到
     // 最新 nodeTypes，layoutConfig 自身保持稳定（不随每次重建图而重建，避免 viewerState 抖动）。
-    val currentNodeTypes by rememberUpdatedState(nodeTypes)
+    val currentNodeNodes by rememberUpdatedState(nodes)
     val layoutConfig = remember {
         LayoutConfig.Custom(
-            provider = { graph, config -> layoutProvider(graph, config, currentNodeTypes) },
+            provider = { graph, config -> layoutProvider(graph, config, currentNodeNodes) },
         )
     }
 
@@ -165,10 +167,8 @@ fun TopologyCanvas(
                 val image = withContext(Dispatchers.Default) {
                     renderTopologyPng(
                         graph = graph,
-                        nodeTypes = nodeTypes,
-                        severities = severities,
-                        badges = data.badges,
-                        fallbackType = fallbackType,
+                        nodes = data.nodes,
+                        style = style,
                         theme = TopologyExportTheme(scheme, typography, shapes),
                         displayName = displayName,
                         scale = TOPOLOGY_EXPORT_DEFAULT_SCALE,
@@ -294,7 +294,8 @@ fun TopologyCanvas(
                 )
             },
             nodeContent = { node ->
-                val type = nodeTypes[node.id] ?: fallbackType
+                // 缺项兜底成「未标注节点」：type = null，样式由 provider 走 Fallback。
+                val item = nodes[node.id] ?: TopologyNode(node.id)
                 // grab 光标提示可拖拽（拖拽启用与否由面板决定，卡片本身可点选，Hand 都成立）；
                 // testTag 以节点 id 定位，供 Compose UI 测试（拖拽语义验证）。
                 Box(
@@ -303,18 +304,16 @@ fun TopologyCanvas(
                         .testTag("topology_node:${node.id}"),
                 ) {
                     TopologyNodeCard(
+                        node = item,
                         name = displayName(node.id),
-                        type = type,
-                        badge = data.badges[node.id],
                         isHovered = isHovered,
                         isDragging = isDragging,
                         // 选中高亮双保险：kuiver interaction 的 isSelected（内部状态，插槽
                         // 作用域可靠失效）+ 本画布 selectedId（焦点选中的直接来源）。
                         isSelected = isSelected || node.id == selectedId,
-                        // 告警覆盖类型色。
-                        severity = severities[node.id] ?: NodeSeverity.NORMAL,
                         // 链路高亮模式：闭包外节点压暗，凸显选中线路。
                         dimmed = highlight != null && node.id !in highlight.nodes,
+                        style = style,
                     )
                 }
             },
@@ -366,12 +365,12 @@ fun TopologyCanvas(
         )
 
         selectedId?.let { id ->
-            val type = nodeTypes[id] ?: return@let
+            val item = nodes[id] ?: return@let
             TopologyNodeDetailCard(
+                node = item,
                 name = displayName(id),
-                type = type,
-                severity = severities[id] ?: NodeSeverity.NORMAL,
                 onDismiss = { select(null) },
+                style = style,
                 modifier = Modifier
                     .align(Alignment.BottomStart)
                     .padding(12.dp),

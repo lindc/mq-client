@@ -9,7 +9,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Icon
-import com.mqclient.uicommon.AppIconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -19,24 +18,27 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.mqclient.graph.NodeSeverity
-import com.mqclient.graph.TopologyNodeType
+import com.mqclient.graph.TopologyNode
+import com.mqclient.uicommon.AppIconButton
 
 /**
  * 选中节点的详情浮层（画布左下角；点击画布空白或关闭按钮消失）。
- * 告警节点图标同步换警告色。原 IBM MQ 面板私有实现，泛化后各拓扑面板共用。
+ *
+ * 图标 / 类型色由业务模块的 [TopologyNodeStyleProvider] 给出；告警级别覆盖类型色
+ * （与卡片同一口径）。副标题显示类型标签（枚举常量名，如 `LOCAL_QUEUE`）。
  */
 @Composable
 fun TopologyNodeDetailCard(
+    node: TopologyNode,
     name: String,
-    type: TopologyNodeType,
-    severity: NodeSeverity,
     onDismiss: () -> Unit,
+    style: TopologyNodeStyleProvider,
     modifier: Modifier = Modifier,
 ) {
-    val accent = when (severity) {
+    val accent = when (node.severity) {
         NodeSeverity.ERROR -> MaterialTheme.colorScheme.error
         NodeSeverity.WARNING -> Color(0xFFED6C02)
-        NodeSeverity.NORMAL -> type.getColor()
+        NodeSeverity.NORMAL -> style.getColor(node)
     }
     Surface(
         modifier = modifier.width(300.dp),
@@ -50,8 +52,8 @@ fun TopologyNodeDetailCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
-                imageVector = type.getIcon(),
-                contentDescription = type.name,
+                imageVector = style.getIcon(node),
+                contentDescription = node.type?.label,
                 tint = accent,
                 modifier = Modifier.size(20.dp),
             )
@@ -66,7 +68,7 @@ fun TopologyNodeDetailCard(
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 Text(
-                    text = type.name,
+                    text = node.type?.label.orEmpty(),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

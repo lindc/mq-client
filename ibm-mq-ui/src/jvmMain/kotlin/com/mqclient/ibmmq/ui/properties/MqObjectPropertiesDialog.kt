@@ -16,6 +16,8 @@ import com.mqclient.ibmmq.ui.QmgrPropertiesPanel
 import com.mqclient.ibmmq.ui.properties.content.ChannelPropertiesContent
 import com.mqclient.ibmmq.ui.properties.content.MqObjectPropertiesContent
 import com.mqclient.ibmmq.ui.topology.isLocalQueue
+import com.mqclient.ibmmq.ui.topology.MqNodeType
+import com.mqclient.graph.TopologyNodeType
 import com.mqclient.uicommon.LocalAiAsk
 import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.PrimaryButton
@@ -97,30 +99,28 @@ private fun cachedSnapshot(state: ObjectPropertiesDialogState): MqObjectSnapshot
 
 /**
  * 拓扑节点类型 → MQ 对象类型（属性对话框按 [MqObjectType] 分发内容）。
- * alias / local / transmission / remote 四种队列角色都落在 QUEUE；
- * REMOTE_QMGR 是虚拟节点（无真实 MQ 对象），返回 null —— 调用方跳过打开对话框。
+ *
+ * alias / local / transmission / remote 四种队列角色都落在 QUEUE；REMOTE_QMGR 是虚拟节点、
+ * QMGR_* 是集群角色视图，三者都无对应的单对象属性页，返回 null —— 调用方跳过打开对话框。
+ *
+ * `when` 穷尽本模块的 [MqNodeType]：MQ 新增节点角色而这里未映射 → 编译错误。
+ * 别的中间件的类型（DB 里混进图里的脏数据）与未标注节点落到 null。
  */
-internal fun com.mqclient.graph.TopologyNodeType.toMqObjectType(): MqObjectType? = when (this) {
-    com.mqclient.graph.TopologyNodeType.ALIAS_QUEUE -> MqObjectType.QUEUE
-    com.mqclient.graph.TopologyNodeType.LOCAL_QUEUE -> MqObjectType.QUEUE
-    com.mqclient.graph.TopologyNodeType.REMOTE_QUEUE -> MqObjectType.QUEUE
-    com.mqclient.graph.TopologyNodeType.TRANSMISSION_QUEUE -> MqObjectType.QUEUE
-    com.mqclient.graph.TopologyNodeType.TOPIC -> MqObjectType.TOPIC
-    com.mqclient.graph.TopologyNodeType.SUBSCRIPTION -> MqObjectType.SUBSCRIPTION
-    com.mqclient.graph.TopologyNodeType.CHANNEL -> MqObjectType.CHANNEL
-    com.mqclient.graph.TopologyNodeType.REMOTE_QMGR -> null
-    // 集群关系图节点是 QMGR 角色视图，无对应的单对象属性页（QMGR 走连接属性面板）。
-    com.mqclient.graph.TopologyNodeType.QMGR_FULL -> null
-    com.mqclient.graph.TopologyNodeType.QMGR_PARTIAL -> null
-    // Kafka / RabbitMQ 专属节点类型：不属 MQ 对象体系（属性面板由各模块自行演进）。
-    com.mqclient.graph.TopologyNodeType.PARTITION -> null
-    com.mqclient.graph.TopologyNodeType.BROKER -> null
-    com.mqclient.graph.TopologyNodeType.CONSUMER_GROUP -> null
-    com.mqclient.graph.TopologyNodeType.EXCHANGE -> null
-    com.mqclient.graph.TopologyNodeType.RABBIT_QUEUE -> null
-    // OLAP 专属节点类型：不属 MQ 对象体系（拓扑面板由各模块自行演进）。
-    com.mqclient.graph.TopologyNodeType.OLAP_FE -> null
-    com.mqclient.graph.TopologyNodeType.OLAP_BE -> null
+internal fun TopologyNodeType?.toMqObjectType(): MqObjectType? = when (this as? MqNodeType) {
+    MqNodeType.ALIAS_QUEUE,
+    MqNodeType.LOCAL_QUEUE,
+    MqNodeType.REMOTE_QUEUE,
+    MqNodeType.TRANSMISSION_QUEUE,
+    -> MqObjectType.QUEUE
+    MqNodeType.TOPIC -> MqObjectType.TOPIC
+    MqNodeType.SUBSCRIPTION -> MqObjectType.SUBSCRIPTION
+    MqNodeType.CHANNEL -> MqObjectType.CHANNEL
+    // REMOTE_QMGR 是虚拟节点（无真实 MQ 对象）；QMGR_* 是集群角色视图，
+    // 属性走连接属性面板而不是单对象属性页。
+    MqNodeType.REMOTE_QMGR -> null
+    MqNodeType.QMGR_FULL -> null
+    MqNodeType.QMGR_PARTIAL -> null
+    null -> null
 }
 
 @Composable

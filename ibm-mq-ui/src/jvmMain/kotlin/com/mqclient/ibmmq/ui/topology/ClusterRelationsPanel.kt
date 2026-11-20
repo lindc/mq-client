@@ -52,9 +52,8 @@ import com.mqclient.topology.TopologyNodeCard
 import com.mqclient.topology.NodeDoubleClick
 import com.mqclient.topology.CARD_WIDTH
 import com.mqclient.topology.CARD_HEIGHT
-import com.mqclient.graph.TopologyNodeType
+import com.mqclient.graph.TopologyNode
 import com.mqclient.graph.TopologyData
-import com.mqclient.graph.NodeSeverity
 import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.CoreModule
 import com.mqclient.ibmmq.IbmMQModule
@@ -240,7 +239,8 @@ private fun ClusterCanvas(
 ) {
     val scheme = MaterialTheme.colorScheme
     val graph = remember(relations) { buildClusterGraph(relations) }
-    val (kuiver, nodeTypes, severities) = graph
+    val kuiver = graph.kuiver
+    val nodes = graph.nodes
 
     // **双击节点**打开 QMgr 属性（[NodeDoubleClick] 手动检测，与拓扑图同一套）：
     // 只有本地 QMgr（`local:` 前缀）有真实属性可看（INQUIRE Q_MGR 只及本机）；
@@ -322,14 +322,16 @@ private fun ClusterCanvas(
                 )
             },
             nodeContent = { node ->
-                val type = nodeTypes[node.id] ?: TopologyNodeType.QMGR_PARTIAL
                 TopologyNodeCard(
+                    // 缺项兜底成「未标注节点」（问号 + 中性灰），正常扫描结果里不应出现。
+                    node = nodes[node.id] ?: TopologyNode(node.id),
                     // 本地节点 id 带 "local:" 前缀（与成员节点区分），显示时剥掉。
                     name = node.id.removePrefix(CLUSTER_LOCAL_PREFIX),
-                    type = type,
                     isHovered = isHovered,
                     isSelected = isSelected || node.id == selectedId,
-                    severity = severities[node.id] ?: NodeSeverity.NORMAL,
+                    // 本面板不走 TopologyCanvas，样式必须显式传：漏传是编译错误，
+                    // 不会静默退化成问号样式。
+                    style = MqNodeStyle,
                 )
             },
             // 边样式：实线 = 手动 CLUSSDR / 虚线 = 自动 CLUSSDRA；颜色按通道状态
@@ -535,25 +537,23 @@ private val CLUSTER_ROW_SPACING = 40.dp
 /** 集群图构建：本地 QMGR + 每个成员一个节点（REPOS / NORMAL 不同类型色）+ 本地→成员边。 */
 internal fun buildClusterGraph(relations: ClusterRelations): TopologyData {
     val localType = if (relations.role == QmgrClusterRole.FULL) {
-        TopologyNodeType.QMGR_FULL
+        MqNodeType.QMGR_FULL
     } else {
-        TopologyNodeType.QMGR_PARTIAL
+        MqNodeType.QMGR_PARTIAL
     }
     val localId = CLUSTER_LOCAL_PREFIX + relations.localQmgrName
 
-    val nodeTypes = linkedMapOf(localId to localType)
-    val severities = linkedMapOf<String, NodeSeverity>(localId to NodeSeverity.NORMAL)
+    val nodes = linkedMapOf<String, TopologyNode>(localId to TopologyNode(localId, localType))
     // CLUSQMGR 结果含本地 QMgr 自身（其行描述自己的 CLUSRCVR）：图里已有本地节点，
     // 跳过，避免重复节点 + 自环边；成员表仍保留该行。
     val remoteMembers = relations.members.filter { it.qmgrName != relations.localQmgrName }
     remoteMembers.forEach { member ->
-        val type = if (member.qmType == "REPOS") TopologyNodeType.QMGR_FULL else TopologyNodeType.QMGR_PARTIAL
-        nodeTypes.putIfAbsent(member.qmgrName, type)
-        severities.putIfAbsent(member.qmgrName, NodeSeverity.NORMAL)
+        val type = if (member.qmType == "REPOS") MqNodeType.QMGR_FULL else MqNodeType.QMGR_PARTIAL
+        nodes.putIfAbsent(member.qmgrName, TopologyNode(member.qmgrName, type))
     }
 
     val kuiver = buildKuiver {
-        nodeTypes.keys.forEach { id ->
+        nodes.keys.forEach { id ->
             addNode(KuiverNode(id, NodeDimensions(CARD_WIDTH.dp, CARD_HEIGHT.dp)))
         }
         remoteMembers.forEach { member ->
@@ -565,5 +565,5 @@ internal fun buildClusterGraph(relations: ClusterRelations): TopologyData {
             )
         }
     }
-    return TopologyData(kuiver, nodeTypes, severities)
+    return TopologyData(kuiver, nodes)
 }

@@ -8,7 +8,7 @@ import com.dk.kuiver.model.NodeDimensions
 import com.dk.kuiver.model.buildKuiver
 import com.mqclient.graph.NodeSeverity
 import com.mqclient.graph.TopologyData
-import com.mqclient.graph.TopologyNodeType
+import com.mqclient.graph.TopologyNode
 import com.mqclient.rabbitmq.RabbitMqBindingSnapshot
 import com.mqclient.rabbitmq.RabbitMqExchangeSnapshot
 import com.mqclient.rabbitmq.RabbitMqQueueSnapshot
@@ -75,22 +75,18 @@ fun buildKuiverFromSnapshot(
         .associateBy { it.name }
     val visibleQueues = snapshot.queues.associateBy { it.name }
     if (visibleExchanges.isEmpty() && visibleQueues.isEmpty()) {
-        return TopologyData(Kuiver(), emptyMap(), emptyMap())
+        return TopologyData(Kuiver(), emptyMap())
     }
 
-    val nodeTypes = LinkedHashMap<String, TopologyNodeType>()
-    val severities = LinkedHashMap<String, NodeSeverity>()
-    val badges = LinkedHashMap<String, String>()
+    val nodes = LinkedHashMap<String, TopologyNode>()
 
-    fun put(id: String, type: TopologyNodeType, severity: NodeSeverity = NodeSeverity.NORMAL, badge: String? = null) {
-        nodeTypes.putIfAbsent(id, type)
-        severities.putIfAbsent(id, severity)
-        badge?.let { badges.putIfAbsent(id, it) }
+    fun put(id: String, type: RabbitMqNodeType, severity: NodeSeverity = NodeSeverity.NORMAL, badge: String? = null) {
+        nodes.putIfAbsent(id, TopologyNode(id, type, severity, badge))
     }
 
     // ---- exchange 节点 ----
     visibleExchanges.values.forEach { exchange ->
-        put(exchangeNodeId(exchange.name), TopologyNodeType.EXCHANGE)
+        put(exchangeNodeId(exchange.name), RabbitMqNodeType.EXCHANGE)
     }
 
     // ---- queue 节点（badge = 消息数）----
@@ -98,7 +94,7 @@ fun buildKuiverFromSnapshot(
         val status = snapshot.queueStatus[queue.name]
         put(
             id = queueNodeId(queue.name),
-            type = TopologyNodeType.RABBIT_QUEUE,
+            type = RabbitMqNodeType.RABBIT_QUEUE,
             severity = queueSeverity(queue, status),
             badge = status?.let { strings.messagesBadge(it.messages) },
         )
@@ -107,7 +103,7 @@ fun buildKuiverFromSnapshot(
     // ---- 边：binding（queue 与 exchange 目标都画；e→e 链式路由自然成多跳）----
     val edges = LinkedHashSet<Pair<String, String>>()
     fun link(from: String, to: String) {
-        if (from != to && from in nodeTypes && to in nodeTypes) edges += from to to
+        if (from != to && from in nodes && to in nodes) edges += from to to
     }
     snapshot.bindings.forEach { binding ->
         // 系统对象被过滤时，指向它们的边一并隐藏（含默认交换机的自动绑定）。
@@ -120,12 +116,12 @@ fun buildKuiverFromSnapshot(
     }
 
     val kuiver = buildKuiver {
-        nodeTypes.forEach { (id, _) ->
+        nodes.forEach { (id, _) ->
             addNode(KuiverNode(id, NodeDimensions(CARD_WIDTH.dp, CARD_HEIGHT.dp)))
         }
         edges.forEach { (from, to) -> addEdge(KuiverEdge(fromId = from, toId = to)) }
     }
-    return TopologyData(kuiver, nodeTypes, severities, badges)
+    return TopologyData(kuiver, nodes)
 }
 
 /**

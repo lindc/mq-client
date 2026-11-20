@@ -20,9 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.mqclient.topology.TopologyCanvas
-import com.mqclient.topology.getColor
 import com.mqclient.graph.TopologyData
-import com.mqclient.graph.TopologyNodeType
 import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.ConnectionStore
 import com.mqclient.core.CoreModule
@@ -227,27 +225,28 @@ private fun MqTopologyContent(
     onRescan: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val nodeTypes = data.nodeTypes
+    val nodes = data.nodes
 
     // 对象属性对话框：**双击节点**打开。打开走统一的 rememberObjectPropertiesDialogController；
     // 无属性可看的节点（rqmgr: 虚拟节点等）弹 Snackbar 提示而非静默无反应。
-    // 回调经 rememberUpdatedState 读**最新** nodeTypes——此前直接捕获首帧 map，
+    // 回调经 rememberUpdatedState 读**最新** 节点表——此前直接捕获首帧 map，
     // OBJECTS_SCANNED 重建图后新增的节点双击会静默失效。
     val propertiesController = rememberObjectPropertiesDialogController(connectionId)
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val virtualNodeHint = stringResource("ibm_mq_topology_no_properties")
-    val currentTypes by rememberUpdatedState(nodeTypes)
+    val currentNodes by rememberUpdatedState(nodes)
 
     TopologyCanvas(
         data = data,
+        style = MqNodeStyle,
         layoutProvider = columnLayoutProvider,
         // 节点可拖拽（与 Kafka 拓扑同步启用）：固定列仍是默认布局，拖动只是会话内
         // 覆盖（kuiver manualPositions，内存态），切走 / 关闭 Tab 即恢复默认布局。
         nodeDragEnabled = true,
         onRescan = onRescan,
         onNodeDoubleClick = { nodeId ->
-            val type = currentTypes[nodeId]?.toMqObjectType()
+            val type = currentNodes[nodeId]?.type.toMqObjectType()
             if (type != null) {
                 propertiesController.open(type, nodeId)
             } else {
@@ -257,7 +256,6 @@ private fun MqTopologyContent(
         modifier = modifier,
         // REMOTE_QMGR 虚拟节点 id 带 `rqmgr:` 前缀（避免与真实对象重名），显示时剥掉。
         displayName = { it.removePrefix(REMOTE_QMGR_PREFIX) },
-        fallbackType = TopologyNodeType.LOCAL_QUEUE,
         focusName = focusName,
         onFocusApplied = onFocusApplied,
         snackbarHostState = snackbarHostState,

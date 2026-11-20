@@ -28,7 +28,6 @@ import androidx.compose.ui.unit.dp
 import com.mqclient.core.ConnectionStatus
 import com.mqclient.core.CoreModule
 import com.mqclient.graph.TopologyData
-import com.mqclient.graph.TopologyNodeType
 import com.mqclient.mqui.state.LoadState
 import com.mqclient.rocketmq.RocketMqEvents
 import com.mqclient.rocketmq.RocketMqModule
@@ -39,7 +38,6 @@ import com.mqclient.rocketmq.ui.RocketMqTopicPropertiesDialog
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.rocketmq.ui.rememberRocketMqConnectionStatus
 import com.mqclient.topology.TopologyCanvas
-import com.mqclient.topology.topicBrokerLayout
 import com.mqclient.uicommon.command.ToolbarButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
@@ -159,7 +157,8 @@ fun RocketMqTopologyPanel(
 
                 TopologyCanvas(
                     data = current,
-                    layoutProvider = topicBrokerLayout,
+                    style = RocketMqNodeStyle,
+                    layoutProvider = rocketMqTopicBrokerLayout,
                     // 节点可拖拽：位置仅会话内有效（kuiver manualPositions，内存态）。
                     nodeDragEnabled = true,
                     // 手动扫描：一轮对象慢扫，扫完经 OBJECTS_SCANNED 事件回到 onObjectsScanned。
@@ -169,7 +168,7 @@ fun RocketMqTopologyPanel(
                     // （距离阈值）隔离，只有未超阈值的点击才会进 onNodeClick，本回调
                     // 只消费点击结果，不需要再自行判定拖拽。
                     onNodeDoubleClick = { nodeId ->
-                        if (current.nodeTypes[nodeId] == TopologyNodeType.BROKER) {
+                        if (current.nodes[nodeId]?.type == RocketMqNodeType.BROKER) {
                             propsTopic = null
                             propsBroker = nodeId.removePrefix("b:")
                         } else {
@@ -180,7 +179,6 @@ fun RocketMqTopologyPanel(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxSize(),
-                    fallbackType = TopologyNodeType.TOPIC,
                 )
             }
         }

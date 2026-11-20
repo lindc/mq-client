@@ -8,7 +8,7 @@ import com.dk.kuiver.model.NodeDimensions
 import com.dk.kuiver.model.buildKuiver
 import com.mqclient.graph.NodeSeverity
 import com.mqclient.graph.TopologyData
-import com.mqclient.graph.TopologyNodeType
+import com.mqclient.graph.TopologyNode
 import com.mqclient.topology.CARD_HEIGHT
 import com.mqclient.topology.CARD_WIDTH
 
@@ -27,32 +27,32 @@ internal fun buildStarRocksTopology(
     feName: String,
     backends: List<ClusterNode>,
 ): TopologyData {
-    if (backends.isEmpty()) return TopologyData(Kuiver(), emptyMap(), emptyMap())
+    if (backends.isEmpty()) return TopologyData(Kuiver(), emptyMap())
 
     val feId = feNodeId(feName)
-    val nodeTypes = LinkedHashMap<String, TopologyNodeType>()
-    val severities = LinkedHashMap<String, NodeSeverity>()
-    val badges = LinkedHashMap<String, String>()
+    val nodes = LinkedHashMap<String, TopologyNode>()
 
-    nodeTypes[feId] = TopologyNodeType.OLAP_FE
-    severities[feId] = NodeSeverity.NORMAL
+    nodes[feId] = TopologyNode(feId, OlapNodeType.FE)
 
     backends.forEach { backend ->
         val id = beNodeId(backend.ip, backend.port)
-        nodeTypes[id] = TopologyNodeType.OLAP_BE
-        severities[id] = if (backend.alive) NodeSeverity.NORMAL else NodeSeverity.ERROR
-        if (backend.version != "-") badges[id] = backend.version
+        nodes[id] = TopologyNode(
+            id = id,
+            type = OlapNodeType.BE,
+            severity = if (backend.alive) NodeSeverity.NORMAL else NodeSeverity.ERROR,
+            badge = backend.version.takeIf { it != "-" },
+        )
     }
 
     val kuiver = buildKuiver {
-        nodeTypes.keys.forEach { id ->
+        nodes.keys.forEach { id ->
             addNode(KuiverNode(id, NodeDimensions(CARD_WIDTH.dp, CARD_HEIGHT.dp)))
         }
         backends.forEach { backend ->
             addEdge(KuiverEdge(fromId = feId, toId = beNodeId(backend.ip, backend.port)))
         }
     }
-    return TopologyData(kuiver, nodeTypes, severities, badges)
+    return TopologyData(kuiver, nodes)
 }
 
 /** FE 节点 id（前缀隔离）。 */

@@ -7,7 +7,7 @@ import com.dk.kuiver.model.Kuiver
 import com.dk.kuiver.model.KuiverNode
 import com.dk.kuiver.model.buildKuiverWithClassifiedEdges
 import com.dk.kuiver.model.layout.LayoutConfig
-import com.mqclient.graph.TopologyNodeType
+import com.mqclient.graph.TopologyNode
 import com.mqclient.topology.CARD_HEIGHT
 import com.mqclient.topology.TopologyLayoutProvider
 
@@ -35,13 +35,16 @@ import com.mqclient.topology.TopologyLayoutProvider
  * 节点坐标由本 provider 直接写入并经 [buildKuiverWithClassifiedEdges] 重建，边类型
  * （FORWARD / BACK / CROSS / SELF_LOOP）随之定档，BACK 边由面板标橙。
  *
- * `nodeTypes` 由 [com.mqclient.topology.TopologyCanvas] 按图传入（见
+ * `nodes` 由 [com.mqclient.topology.TopologyCanvas] 按图传入（见
  * [TopologyLayoutProvider]）—— 本模块不再持有任何模块级查找表，布局在后台线程执行也
  * 不会读到别的面板写进去的类型。
  */
-val columnLayoutProvider: TopologyLayoutProvider = labeled@{ kuiver, config, types ->
+val columnLayoutProvider: TopologyLayoutProvider = labeled@{ kuiver, config, nodeTable ->
     val nodes = kuiver.nodes.values.toList()
     if (nodes.isEmpty()) return@labeled kuiver
+
+    /** 节点类型：只认本模块的 [MqNodeType]（别家类型 / 未标注一律视为未知）。 */
+    fun typeOf(id: String): MqNodeType? = nodeTable[id]?.type as? MqNodeType
 
     // ---- 邻接表（有向 + 无向各一份）----
     val outgoing = mutableMapOf<String, MutableList<String>>()
@@ -76,8 +79,8 @@ val columnLayoutProvider: TopologyLayoutProvider = labeled@{ kuiver, config, typ
     // ---- alias 链深度与最终目标类型 ----
     val aliasNext = mutableMapOf<String, String>()
     kuiver.edges.forEach { e ->
-        if (types[e.fromId] == TopologyNodeType.ALIAS_QUEUE &&
-            types[e.toId] == TopologyNodeType.ALIAS_QUEUE
+        if (typeOf(e.fromId) == MqNodeType.ALIAS_QUEUE &&
+            typeOf(e.toId) == MqNodeType.ALIAS_QUEUE
         ) {
             aliasNext[e.fromId] = e.toId
         }
@@ -98,13 +101,13 @@ val columnLayoutProvider: TopologyLayoutProvider = labeled@{ kuiver, config, typ
     }
 
     /** 沿 alias 链找到的最终非 alias 目标类型（TOPIC / REMOTE_QUEUE / LOCAL_QUEUE…）。 */
-    fun terminalTargetType(id: String): TopologyNodeType? {
+    fun terminalTargetType(id: String): MqNodeType? {
         var cur = id
         val seen = mutableSetOf(id)
         while (true) {
             val direct = outgoing[cur]
-                ?.mapNotNull { types[it] }
-                ?.firstOrNull { it != TopologyNodeType.ALIAS_QUEUE }
+                ?.mapNotNull { typeOf(it) }
+                ?.firstOrNull { it != MqNodeType.ALIAS_QUEUE }
             if (direct != null) return direct
             val next = aliasNext[cur] ?: return null
             if (next in seen) return null
@@ -114,43 +117,35 @@ val columnLayoutProvider: TopologyLayoutProvider = labeled@{ kuiver, config, typ
     }
 
     val aliasDepths = nodes.mapNotNull { n ->
-        if (types[n.id] == TopologyNodeType.ALIAS_QUEUE) n.id to aliasDepth(n.id) else null
+        if (typeOf(n.id) == MqNodeType.ALIAS_QUEUE) n.id to aliasDepth(n.id) else null
     }.toMap()
     val maxAliasDepth = aliasDepths.values.maxOrNull() ?: 0
 
     // ---- 列分配（见类注释的列序表；alias 链按 maxAliasDepth - depth 左移）----
     fun getColumn(id: String): Int {
-        val type = types[id] ?: return 0
+        val type = typeOf(id) ?: return 0
         return when (type) {
-            TopologyNodeType.ALIAS_QUEUE -> {
+            MqNodeType.ALIAS_QUEUE -> {
                 val shift = maxAliasDepth - (aliasDepths[id] ?: 0)
                 when (terminalTargetType(id)) {
-                    TopologyNodeType.TOPIC -> 1 + shift
-                    TopologyNodeType.REMOTE_QUEUE -> 3 + shift
-                    TopologyNodeType.LOCAL_QUEUE -> 8 + shift
-                    // 目标不在图内（悬空 alias）：靠最左，不强行归列。
+                    MqNodeType.TOPIC -> 1 + shift
+                    MqNodeType.REMOTE_QUEUE -> 3 + shift
+                    MqNodeType.LOCAL_QUEUE -> 8 + shift
+                    // 目标不在图内（悬空 alias）或落在非目标角色：靠最左，不强行归列。
+                    // 这里的 else 是**语义兜底**（不是「类型→列」映射），应当保留。
                     else -> 1 + shift
                 }
             }
-            TopologyNodeType.TOPIC -> 2 + maxAliasDepth
-            TopologyNodeType.SUBSCRIPTION -> 3 + maxAliasDepth
-            TopologyNodeType.REMOTE_QUEUE -> 4 + maxAliasDepth
-            TopologyNodeType.TRANSMISSION_QUEUE -> 5 + maxAliasDepth
-            TopologyNodeType.CHANNEL -> 6 + maxAliasDepth
-            TopologyNodeType.REMOTE_QMGR -> 7 + maxAliasDepth
-            // 集群关系面板专用节点（消息流拓扑里不出现）；归 REMOTE_QMGR 同列兜底。
-            TopologyNodeType.QMGR_FULL -> 7 + maxAliasDepth
-            TopologyNodeType.QMGR_PARTIAL -> 7 + maxAliasDepth
-            // Kafka / RabbitMQ 专属节点类型：MQ 图里不出现，归第 0 列兜底（保 exhaustive）。
-            TopologyNodeType.PARTITION -> 0
-            TopologyNodeType.BROKER -> 0
-            TopologyNodeType.CONSUMER_GROUP -> 0
-            TopologyNodeType.EXCHANGE -> 0
-            TopologyNodeType.RABBIT_QUEUE -> 0
-            // OLAP 专属节点类型：MQ 图里不出现，归第 0 列兜底（保 exhaustive）。
-            TopologyNodeType.OLAP_FE -> 0
-            TopologyNodeType.OLAP_BE -> 0
-            TopologyNodeType.LOCAL_QUEUE -> 9 + maxAliasDepth
+            MqNodeType.TOPIC -> 2 + maxAliasDepth
+            MqNodeType.SUBSCRIPTION -> 3 + maxAliasDepth
+            MqNodeType.REMOTE_QUEUE -> 4 + maxAliasDepth
+            MqNodeType.TRANSMISSION_QUEUE -> 5 + maxAliasDepth
+            MqNodeType.CHANNEL -> 6 + maxAliasDepth
+            MqNodeType.REMOTE_QMGR -> 7 + maxAliasDepth
+            // 集群关系面板专用节点（消息流拓扑里不出现）：归 REMOTE_QMGR 同列。
+            MqNodeType.QMGR_FULL -> 7 + maxAliasDepth
+            MqNodeType.QMGR_PARTIAL -> 7 + maxAliasDepth
+            MqNodeType.LOCAL_QUEUE -> 9 + maxAliasDepth
         }
     }
 

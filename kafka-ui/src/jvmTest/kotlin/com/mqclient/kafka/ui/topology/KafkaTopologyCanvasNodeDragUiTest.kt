@@ -9,13 +9,11 @@ import com.dk.kuiver.model.KuiverEdge
 import com.dk.kuiver.model.KuiverNode
 import com.dk.kuiver.model.NodeDimensions
 import androidx.compose.ui.unit.dp
-import com.mqclient.graph.NodeSeverity
 import com.mqclient.graph.TopologyData
-import com.mqclient.graph.TopologyNodeType
+import com.mqclient.graph.TopologyNode
 import com.mqclient.topology.CARD_HEIGHT
 import com.mqclient.topology.CARD_WIDTH
 import com.mqclient.topology.TopologyCanvas
-import com.mqclient.topology.topicBrokerLayout
 import com.mqclient.uitestkit.centerOf
 import com.mqclient.uitestkit.dragAt
 import com.mqclient.uitestkit.panIntoView
@@ -32,7 +30,7 @@ import kotlin.test.assertTrue
  *  - Kafka 特有的 id 形态覆盖：聚合图 topic 直连 leader broker（t1 / b:0 / b:1）+
  *    展开图带冒号的分区 id（p:t1:0）—— testTag / manualPositions 都以完整 id 为键。
  *
- * 面板本体与 AdminClient 查询耦合，这里用真实 [topicBrokerLayout] + 同 id
+ * 面板本体与 AdminClient 查询耦合，这里用真实 [kafkaTopicBrokerLayout] + 同 id
  * 规范 + 同卡片尺寸的 Kafka 形态数据驱动共享画布 [TopologyCanvas]。
  */
 @OptIn(ExperimentalTestApi::class)
@@ -41,16 +39,14 @@ class KafkaTopologyCanvasNodeDragUiTest {
     /** [ids] 全部挂同一组卡片尺寸；[edges] 为 from→to 对。 */
     private fun data(
         ids: List<String>,
-        types: Map<String, TopologyNodeType>,
+        types: Map<String, KafkaNodeType>,
         edges: List<Pair<String, String>> = emptyList(),
         badges: Map<String, String> = emptyMap(),
     ): TopologyData = TopologyData(
         kuiver = Kuiver()
             .withNodes(ids.map { KuiverNode(it, NodeDimensions(CARD_WIDTH.dp, CARD_HEIGHT.dp)) })
             .withEdges(edges.map { (f, t) -> KuiverEdge(fromId = f, toId = t) }),
-        nodeTypes = types,
-        severities = ids.associateWith { NodeSeverity.NORMAL },
-        badges = badges,
+        nodes = ids.associateWith { id -> TopologyNode(id, types[id], badge = badges[id]) },
     )
 
     internal fun ComposeUiTest.setKafkaCanvas(data: TopologyData) {
@@ -58,10 +54,10 @@ class KafkaTopologyCanvasNodeDragUiTest {
             MaterialTheme {
                 TopologyCanvas(
                     data = data,
-                    layoutProvider = topicBrokerLayout,
+                    style = KafkaNodeStyle,
+                    layoutProvider = kafkaTopicBrokerLayout,
                     onRescan = {},
                     onNodeDoubleClick = {},
-                    fallbackType = TopologyNodeType.BROKER,
                     nodeDragEnabled = true,
                 )
             }
@@ -74,9 +70,9 @@ class KafkaTopologyCanvasNodeDragUiTest {
             data(
                 ids = listOf("t1", "b:0", "b:1"),
                 types = mapOf(
-                    "t1" to TopologyNodeType.TOPIC,
-                    "b:0" to TopologyNodeType.BROKER,
-                    "b:1" to TopologyNodeType.BROKER,
+                    "t1" to KafkaNodeType.TOPIC,
+                    "b:0" to KafkaNodeType.BROKER,
+                    "b:1" to KafkaNodeType.BROKER,
                 ),
                 edges = listOf("t1" to "b:0", "t1" to "b:1"),
                 badges = mapOf("t1" to "3 分区"),
@@ -102,16 +98,16 @@ class KafkaTopologyCanvasNodeDragUiTest {
     }
 
     @Test
-    fun `启用拖动 - 展开图带冒号的分区 id 正常定位与拖动`() = runComposeUiTest {
+    fun `启用拖动 - 带冒号的多节点 id 正常定位与拖动`() = runComposeUiTest {
         setKafkaCanvas(
             data(
                 ids = listOf("t1", "p:t1:0", "p:t1:1", "b:0", "b:1"),
                 types = mapOf(
-                    "t1" to TopologyNodeType.TOPIC,
-                    "p:t1:0" to TopologyNodeType.PARTITION,
-                    "p:t1:1" to TopologyNodeType.PARTITION,
-                    "b:0" to TopologyNodeType.BROKER,
-                    "b:1" to TopologyNodeType.BROKER,
+                    "t1" to KafkaNodeType.TOPIC,
+                    "p:t1:0" to KafkaNodeType.TOPIC,
+                    "p:t1:1" to KafkaNodeType.TOPIC,
+                    "b:0" to KafkaNodeType.BROKER,
+                    "b:1" to KafkaNodeType.BROKER,
                 ),
                 edges = listOf(
                     "t1" to "p:t1:0",

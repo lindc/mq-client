@@ -28,42 +28,49 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mqclient.graph.NodeSeverity
-import com.mqclient.graph.TopologyNodeType
+import com.mqclient.graph.TopologyNode
 
 /** 节点卡片统一尺寸：kuiver 的 NodeDimensions（布局）与此处卡片必须对齐（公开：各面板建图时要用）。 */
 const val CARD_WIDTH = 180
 const val CARD_HEIGHT = 56
 
 /**
- * 拓扑节点卡片：类型图标 + 对象名。
+ * 拓扑节点卡片：类型图标 + 对象名（+ 可选徽标）。
  *
  * 底色 / 文字走 MaterialTheme；**类型强调色**只用于图标着色与描边（类型级语义色，
- * 不随主题翻转）。悬停加粗描边 + 投影，选中用类型色实色描边 + 更强投影。
+ * 不随主题翻转）。图标与颜色都由业务模块的 [TopologyNodeStyleProvider] 给出——
+ * 本组件不认识任何中间件的节点类型。
  *
- * 告警级别（[severity]）覆盖类型色：队列积压 WARNING → 警告橙，通道故障 ERROR →
- * 红（主题 error 色，随主题适配）——描边与图标同步换色，一眼定位问题节点。
+ * 告警级别（[TopologyNode.severity]）覆盖类型色：队列积压 WARNING → 警告橙，
+ * 通道故障 ERROR → 红（主题 error 色，随主题适配）——描边与图标同步换色，一眼定位
+ * 问题节点。
  *
  * 状态投影 / 拖动缩放走 spring 动画：拾起加深投影并弹性放大，松手弹回。
+ *
+ * @param node 节点视图（类型 / 告警 / 徽标）；缺类型时由 provider 给兜底样式。
+ * @param name 卡片显示名（可能与节点 id 不同：MQ 的 `rqmgr:` 前缀由面板剥掉）。
+ * @param style 业务模块的节点样式表。**必填**——漏传是编译错误，不做隐式兜底。
  */
 @Composable
 fun TopologyNodeCard(
+    node: TopologyNode,
     name: String,
-    type: TopologyNodeType,
     isHovered: Boolean = false,
     /** 节点正被拖动：悬停级描边 + 选中级投影（提起感）。 */
     isDragging: Boolean = false,
     isSelected: Boolean = false,
-    severity: NodeSeverity = NodeSeverity.NORMAL,
     /** 链路高亮模式下不在选中闭包内：整体压暗，让选中的线路凸显。 */
     dimmed: Boolean = false,
-    /** 名称下方的辅助小字（如 Kafka topic 的分区数）；null 时不占位，维持纯名称形态。 */
-    badge: String? = null,
+    style: TopologyNodeStyleProvider,
 ) {
-    val accent = when (severity) {
+    val accent = when (node.severity) {
         NodeSeverity.ERROR -> MaterialTheme.colorScheme.error
         NodeSeverity.WARNING -> WARNING_ACCENT
-        NodeSeverity.NORMAL -> type.getColor()
+        NodeSeverity.NORMAL -> style.getColor(node)
     }
+
+    // badge 是跨模块的 public API 属性，不能 smart cast：先取本地值。
+    val badge = node.badge
 
     // 拖动动效：拾起时投影弹性加深 + 卡片弹性放大，松手弹回 —— 「提离桌面」手感。
     // kuiver 拖动中经 placement 移动节点（不重组合），缩放动画在卡片内部，二者无冲突；
@@ -126,8 +133,8 @@ fun TopologyNodeCard(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Icon(
-                imageVector = type.getIcon(),
-                contentDescription = type.name,
+                imageVector = style.getIcon(node),
+                contentDescription = node.type?.label,
                 modifier = Modifier.size(20.dp),
                 tint = accent,
             )
