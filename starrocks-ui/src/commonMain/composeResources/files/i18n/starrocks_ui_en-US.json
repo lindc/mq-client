@@ -181,7 +181,7 @@
   "olap.starrocks.console.export": "Export CSV",
   "olap.starrocks.console.exporting": "Exporting... %1$s rows written",
   "olap.starrocks.console.export_success": "Exported: %1$s (%2$s rows)",
-  "olap.starrocks.console.export_failed": "Export failed: %1$s",
+  "olap.starrocks.console.export_failed": "Export failed: %1$s (no file was written; any existing file is unchanged)",
   "olap.starrocks.console.history_clear": "Clear history",
   "olap.starrocks.console.history_clear_confirm": "Clear all execution history for this connection? This cannot be undone.",
   "olap.starrocks.console.history_cleared": "History cleared",

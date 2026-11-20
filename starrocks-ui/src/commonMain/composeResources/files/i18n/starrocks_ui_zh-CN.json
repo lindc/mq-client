@@ -181,7 +181,7 @@
   "olap.starrocks.console.export": "导出 CSV",
   "olap.starrocks.console.exporting": "正在导出... 已写入 %1$s 行",
   "olap.starrocks.console.export_success": "导出成功：%1$s（共 %2$s 行）",
-  "olap.starrocks.console.export_failed": "导出失败：%1$s",
+  "olap.starrocks.console.export_failed": "导出失败：%1$s（未生成文件，原有同名文件未改动）",
   "olap.starrocks.console.history_clear": "清空历史",
   "olap.starrocks.console.history_clear_confirm": "确定清空当前连接的全部执行历史吗？此操作不可恢复。",
   "olap.starrocks.console.history_cleared": "历史已清空",
