@@ -58,7 +58,7 @@ include(
     ":kafka-service", ":kafka-ui",
     ":rabbitmq-service", ":rabbitmq-ui",
     ":rocketmq-service", ":rocketmq-ui",
-    // OLAP 协议族（空骨架）：service / ui 成对，具体协议实现待接入（模板见 olap-base）。
+    // OLAP 协议族：service / ui 成对，模板见 olap-base；目前接入的是 StarRocks。
     ":starrocks-service", ":starrocks-ui",
     // 拓扑图通用件：graph-core 纯模型（统一节点词汇），topology-ui 通用渲染。
     ":graph-core",

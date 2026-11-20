@@ -119,4 +119,27 @@ class KnownHostsStoreTest {
         assertTrue(a != KnownHostsStore.fingerprintOf(keyB), "不同密钥指纹必须不同")
         assertFalse(a.contains("="), "base64 去填充，方便用户抄写比对")
     }
+
+    @Test
+    fun `add writes a fingerprint not the raw key blob`() {
+        // JSch 的 HostKeyRepository.add() 传入的 HostKey.key 是 base64 编码的**密钥本体**。
+        // 如果把它直接当第三列写进文件，check() 就会拿「SHA-256 指纹」去比「密钥本体」，
+        // 永远比不中 —— 这台主机每次连接都报「密钥已变更」。这条用例钉住「写入即指纹」。
+        // 用真实长度（RSA 公钥 blob 约 400 字节）而不是短 stub：base64 的填充与
+        // 换行分支只在长串上才会出现，短 key 测不出解码器的破绽。
+        val realKey = ByteArray(400) { (it % 251).toByte() }
+        val encoded = java.util.Base64.getEncoder().encodeToString(realKey)
+        // 构造器参数顺序是 (marker, host, type, key, comment) —— 第一个是 marker，不是 host。
+        val hostKey = com.jcraft.jsch.HostKey(null, "jump.example", com.jcraft.jsch.HostKey.ED25519, realKey, null)
+        store().add(hostKey, null)
+
+        // 同一密钥再次校验必须放行，且与 remember() 写出的内容同构。
+        assertEquals(HostKeyRepository.OK, store().check("jump.example", realKey))
+        val line = Files.readAllLines(file).single()
+        assertTrue(
+            line.endsWith(KnownHostsStore.fingerprintOf(realKey)),
+            "第三列必须是指纹而不是密钥本体：$line",
+        )
+        assertFalse(line.contains(encoded), "不得把 base64 密钥本体落盘")
+    }
 }

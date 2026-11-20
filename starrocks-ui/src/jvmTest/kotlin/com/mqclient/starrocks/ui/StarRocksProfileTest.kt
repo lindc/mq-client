@@ -299,10 +299,11 @@ class StarRocksProfileTest {
     }
 
     @Test
-    fun `parses real get_query_profile format`() {
-        // 3.4.0 实测：get_query_profile 首选语句返回 `- 键: 值` 缩进风格（与 ANALYZE
-        // 报告不同）—— 算子块按 OperatorTotalTime 降序，扫描行数取 SCAN 块 PullRowNum。
-        val getProfileText = """
+    fun `parses dash style profile text`() {
+        // 3.4.0 真实样本：`- 键: 值` 缩进风格（另一种形状是 Summary + `└──` 算子树，
+        // 见 parseProfileSummary 的判别）—— 算子块按 OperatorTotalTime 降序，
+        // 扫描行数取 SCAN 块 PullRowNum。
+        val dashStyleText = """
             Query:
               Summary:
                  - Query ID: 605e4f10-e417-11f1-8289-968dc029c89c
@@ -353,7 +354,7 @@ class StarRocksProfileTest {
                          - OperatorTotalTime: 12.000us
         """.trimIndent()
 
-        val summary = parseProfileSummary(getProfileText)
+        val summary = parseProfileSummary(dashStyleText)
         assertEquals("605e4f10-e417-11f1-8289-968dc029c89c", summary.queryId)
         assertEquals("Finished", summary.state)
         assertEquals("23ms", summary.totalTime, "- Total: 23ms（不被 Planner 的 -- Total[1] 干扰）")
@@ -368,6 +369,6 @@ class StarRocksProfileTest {
             ),
             summary.topOperators.take(3).map { it.name to it.time },
         )
-        assertTrue(summary.topOperators.all { it.pct.isEmpty() }, "get_query_profile 格式无占比字段")
+        assertTrue(summary.topOperators.all { it.pct.isEmpty() }, "该格式不含占比字段，占比应为空串")
     }
 }

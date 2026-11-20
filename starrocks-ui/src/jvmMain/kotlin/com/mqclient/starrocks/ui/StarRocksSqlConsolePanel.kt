@@ -469,8 +469,9 @@ private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
             ) {
                 Icon(Icons.Filled.History, contentDescription = stringResource("olap.starrocks.console.history"))
             }
-            // 查看本次 Profile：LAST_QUERY_ID() → get_query_profile/ANALYZE 兜底
-            // → 大窗查看器；系统语句或未开采集时 Snackbar 给出带指引的提示。
+            // 查看本次 Profile：SHOW PROFILELIST 取最新一条可采集查询的 QueryId
+            // → ANALYZE PROFILE FROM '<id>' → 大窗查看器；取不到或未采集时 Snackbar
+            // 给出带指引的提示。
             IconButton(
                 onClick = ::viewLastProfile,
                 modifier = Modifier.focusProperties { canFocus = false },

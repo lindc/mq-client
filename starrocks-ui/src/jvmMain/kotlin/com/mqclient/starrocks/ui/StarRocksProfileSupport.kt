@@ -80,11 +80,13 @@ internal data class ProfileSummary(
 )
 
 /**
- * 解析 Profile 文本（自动识别两种格式，均为 3.4.0 真实输出）：
- * - `get_query_profile`（取数链首选）：`- 键: 值` 缩进风格，算子块为
- *   `NAME (plan_node_id=N):` + `- OperatorTotalTime`，扫描行数在 SCAN 块的
+ * 解析 Profile 文本（自动识别两种输出形状，均为 3.4.0 真实样本）：
+ * - **`- 键: 值` 缩进风格**：Summary 段为 `- Query State: Finished` 这类扁平键值，
+ *   算子块为 `NAME (plan_node_id=N):` + `- OperatorTotalTime`，扫描行数在 SCAN 块的
  *   `- PullRowNum: 10.008K (10008)`；
- * - `ANALYZE PROFILE`（兜底）：Summary 段 + `└──` 算子树。
+ * - **`└──` 算子树风格**：Summary 段 + 树形算子。
+ * 判别靠 `- Query State:` 是否存在。取数链只发一条
+ * `ANALYZE PROFILE FROM '<id>'`（见 [profileStatements]），两种形状都必须能解析。
  * 形状不符的字段一律空串兜底，绝不崩面板。
  */
 internal fun parseProfileSummary(raw: String): ProfileSummary {
@@ -376,7 +378,7 @@ internal suspend fun fetchQueryProfile(
         )
     }
     if (text.isBlank()) {
-        // get_query_profile 对未采集查询返回空串（3.4.0 实测）：同样按未采集处理。
+        // 未采集 / 已过保留期的查询会返回空文本（3.4.0 实测）：按未采集处理。
         // 空串与「报错」是两种完全不同的根因（未采集 vs 版本不支持），必须分开记。
         StarRocksLog.profile(
             LogLevel.WARN,

@@ -14,8 +14,9 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
- * UI 侧空骨架的**冒烟测试**：占位页能在 Compose 画布上渲染，且文案确实来自
- * i18n 表（键必须解析成功，不能把裸 key 显示给用户）。
+ * [StarRocksAdapterUI] 的**冒烟测试**：占位页能在 Compose 画布上渲染、文案确实来自
+ * i18n 表（键必须解析成功，不能把裸 key 显示给用户），且 SPI 契约（serviceId /
+ * title / i18nTables / contentFor）与宿主约定一致。
  *
  * 参照仓库既有画布测试（KafkaMessageBrowseToolbarTest / DetailCompositionCostTest）
  * 与 ui-test-kit 的 ComposeUiTest 透传；不依赖真实数据库、不触网。

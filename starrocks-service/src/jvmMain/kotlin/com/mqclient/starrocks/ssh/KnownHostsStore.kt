@@ -31,9 +31,11 @@ import java.security.MessageDigest
  *
  * ## 存储
  *
- * `<configDir>/known_hosts`，格式与 OpenSSH 兼容（`host keytype base64`），
- * 这样用户也能用 `ssh-keygen -F host` 核对。写入走「临时文件 + 原子替换」，
- * 避免写到一半断电把整个文件毁掉（与 CSV 导出同一模式）。
+ * `<configDir>/known_hosts`，每行三列 `主机 密钥类型 SHA-256 指纹`（指纹为密钥本体的
+ * SHA-256，base64 无填充）。列布局与 OpenSSH 的 `known_hosts` 形似，但第三列是**指纹
+ * 而不是公钥本体**，因此 `ssh-keygen -F` 读不了这个文件；核对请用
+ * `ssh-keygen -lf <hostkey.pub>`，把输出里的 `SHA256:` 后面的部分与第三列逐字比对。
+ * 写入走「临时文件 + 原子替换」，避免写到一半断电把整个文件毁掉（与 CSV 导出同一模式）。
  *
  * @param file 存储路径（测试可指向临时目录）
  */
@@ -134,12 +136,32 @@ internal class KnownHostsStore(
     }
 
     override fun add(hostkey: HostKey?, ui: UserInfo?) {
-        // 由 remember() 负责写入（这里需要先经用户确认，不能由 JSch 静默调用）。
-        // HostKey.key 是 base64 字符串；存指纹而非原文，避免格式差异导致比较失败。
-        hostkey ?: return
-        entries.removeAll { it.host == hostkey.host }
-        entries += Entry(hostkey.host, hostkey.type, hostkey.key)
-        persist()
+        // 本项目固定用 StrictHostKeyChecking=yes（见 SshTunnel.open），未知主机由 JSch
+        // 抛异常、经 UI 确认后走 StarRocksKnownHosts.remember，不会走到这里。
+        // 但真被调用时（换回 =ask）必须写出与其他路径同构的指纹 —— 直接存
+        // getKey() 的 base64 密钥本体，会让 check() 的指纹比较永远不中，
+        // 表现是这台主机每次连接都报「密钥已改变」。
+        val key = hostkey ?: return
+        val raw = runCatching { decodeBase64Lenient(key.key) }.getOrNull()
+        if (raw == null) {
+            StarRocksLog.conn(
+                LogLevel.WARN,
+                "ssh known_hosts: add() received an undecodable key for host=${key.host}, ignored",
+            )
+            return
+        }
+        remember(key.host, key.type, raw)
+    }
+
+    /** base64 解码：JSch 的 `HostKey.getKey()` 不带 `=` 填充，先规范化再交给标准解码器。 */
+    private fun decodeBase64Lenient(text: String): ByteArray {
+        val clean = text.filterNot { it.isWhitespace() }
+        val padded = when (clean.length % 4) {
+            2 -> "$clean=="
+            3 -> "$clean="
+            else -> clean
+        }
+        return java.util.Base64.getDecoder().decode(padded)
     }
 
     override fun remove(host: String?, type: String?) {
@@ -204,10 +226,10 @@ internal class KnownHostsStore(
         }
 
         /**
-         * 密钥指纹：密钥本身（DER / SSH wire 格式）的 **SHA-256**，base64 编码。
+         * 密钥指纹：密钥本体（SSH wire 格式）的 **SHA-256**，base64 无填充。
          *
-         * 与 `ssh-keygen -lf` 的 SHA256 指纹同源 —— 用户可以用系统的 ssh 命令
-         * 交叉核对，不必信任本应用的自述。
+         * 与 `ssh-keygen -lf` 输出里的 `SHA256:<值>` **同源**（本函数返回的是冒号后的
+         * 那串 base64），用户可以用系统的 ssh 命令交叉核对，不必信任本应用的自述。
          */
         fun fingerprintOf(key: ByteArray): String {
             val digest = MessageDigest.getInstance("SHA-256").digest(key)

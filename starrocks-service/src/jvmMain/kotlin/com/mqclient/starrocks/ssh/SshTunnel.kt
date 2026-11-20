@@ -91,15 +91,13 @@ internal class SshTunnel private constructor(
                     }
                     val s = jsch.getSession(config.sshUser, config.sshHost, config.sshPort)
                     if (!config.sshUsesKey) s.setPassword(config.sshPassword)
-                    // 首连不弹 known_hosts 确认框：桌面应用没有终端可交互。
-                    // 代价是不校验主机密钥 —— 对内网堡垒机是常规取舍，README 里说明。
-                    s.setConfig("StrictHostKeyChecking", "no")
                     s.timeout = CONNECT_TIMEOUT_MS
                     s
                 }
                 // 主机密钥校验（TOFU）：未知主机 → 抛 SshUnknownHostException 让 UI 确认；
                 // 已变更 → 抛 SshHostKeyChangedException 直接拒绝。
                 // 不用 StrictHostKeyChecking=no —— 那等于任何能拦到流量的人都能冒充堡垒机。
+                // 注意 JSch 只在 connect() 时读这份配置，所以设置必须在这里、且只在这里。
                 session.hostKeyRepository = knownHosts
                 session.setConfig("StrictHostKeyChecking", "yes")
                 session.connect(CONNECT_TIMEOUT_MS)
