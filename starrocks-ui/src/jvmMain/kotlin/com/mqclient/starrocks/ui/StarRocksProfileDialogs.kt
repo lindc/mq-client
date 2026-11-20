@@ -263,7 +263,11 @@ internal fun ProfileDetailDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource("common_close")) }
+            // 全项目对话框的关闭一律 `PrimaryButton`（ObjectDetailDialog 的默认 footer 与
+            // Kafka / RabbitMQ / IBM MQ 各属性对话框都是它）：实心主色底 + 白字。
+            // 这里曾是裸 `TextButton`（无底色纯文字），与上方 viewer 弹窗并排时
+            // 两张父子对话框的关闭按钮长得不一样。
+            PrimaryButton(onClick = onDismiss) { Text(stringResource("common_close")) }
         },
     )
 
