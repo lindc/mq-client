@@ -30,14 +30,6 @@ import kotlinx.coroutines.CancellationException
  * 由调用方决定是显示错误态还是降级成空结果。绝不在这里吞掉。
  */
 
-/** 一次查询的原始结果：列名 + 行。轻量结构，不持有 ResultSet。 */
-data class QueryRows(
-    val columns: List<String>,
-    val rows: List<List<Any?>>,
-) {
-    val isEmpty: Boolean get() = rows.isEmpty()
-}
-
 /**
  * 连接守卫：保证 [connectionId] 的共享会话可用。
  *

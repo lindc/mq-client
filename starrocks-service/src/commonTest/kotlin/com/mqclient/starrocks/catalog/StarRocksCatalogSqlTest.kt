@@ -1,5 +1,6 @@
-package com.mqclient.starrocks.ui
+package com.mqclient.starrocks.catalog
 
+import com.mqclient.starrocks.query.QueryRows
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -42,7 +43,7 @@ class StarRocksCatalogSqlTest {
         // 必须靠 SHOW MATERIALIZED VIEWS 名单识别，否则会误显示为普通视图。
         assertEquals("SHOW MATERIALIZED VIEWS;", MATERIALIZED_VIEW_SQL)
         val names = parseMaterializedViewNames(
-            StarRocksQueryRows(
+            QueryRows(
                 columns = listOf("id", "database_name", "name", "refresh_type"),
                 rows = listOf(
                     listOf("10213", "test_db", "mv_sales_by_region", "ASYNC"),
@@ -53,7 +54,7 @@ class StarRocksCatalogSqlTest {
         assertEquals(setOf("mv_sales_by_region"), names)
 
         val tables = parseTables(
-            StarRocksQueryRows(
+            QueryRows(
                 columns = listOf("table_name", "table_comment", "table_type"),
                 rows = listOf(
                     listOf("sales", "", "BASE TABLE"),
@@ -66,7 +67,7 @@ class StarRocksCatalogSqlTest {
         assertTrue(tables[1].materializedView, "MV 名单里的 VIEW 应识别为物化视图")
 
         // MySQL / 意外列形状 → 无 MV 名单，table_type 兜底仍可用。
-        assertTrue(parseMaterializedViewNames(StarRocksQueryRows(listOf("x"), listOf(listOf("y")))).isEmpty())
+        assertTrue(parseMaterializedViewNames(QueryRows(listOf("x"), listOf(listOf("y")))).isEmpty())
     }
 
     @Test
@@ -78,7 +79,7 @@ class StarRocksCatalogSqlTest {
     @Test
     fun `tables are parsed with type and materialized view flag`() {
         val tables = parseTables(
-            StarRocksQueryRows(
+            QueryRows(
                 columns = listOf("table_name", "table_comment", "table_type"),
                 rows = listOf(
                     listOf("sales", "销售宽表", "BASE TABLE"),
@@ -98,7 +99,7 @@ class StarRocksCatalogSqlTest {
     @Test
     fun `columns are parsed with full attributes`() {
         val columns = parseColumns(
-            StarRocksQueryRows(
+            QueryRows(
                 columns = listOf(
                     "column_name", "data_type", "is_nullable", "column_key",
                     "column_default", "extra", "column_comment",
@@ -125,7 +126,7 @@ class StarRocksCatalogSqlTest {
     fun `partition summary binds the meaningful columns on 3_4`() {
         // 3.4.0 真实输出节选：分区键为空（非 range 分区表），分布键 = region。
         val partitions = parsePartitions(
-            StarRocksQueryRows(
+            QueryRows(
                 columns = listOf(
                     "PartitionId", "PartitionName", "VisibleVersion", "VisibleVersionTime",
                     "VisibleVersionHash", "State", "PartitionKey", "Range", "DistributionKey",
@@ -155,7 +156,7 @@ class StarRocksCatalogSqlTest {
     @Test
     fun `range partitions keep the range expression`() {
         val partitions = parsePartitions(
-            StarRocksQueryRows(
+            QueryRows(
                 columns = listOf("PartitionName", "State", "Range", "PartitionKey"),
                 rows = listOf(listOf("p202401", "NORMAL", "[2024-01-01, 2024-02-01)", "dt")),
             ),
@@ -167,12 +168,12 @@ class StarRocksCatalogSqlTest {
     fun `partition rows are summarized regardless of column shape`() {
         // 列名对不上（老版本 / 其他引擎）→ 回落为全列拼接。
         val partitions = parsePartitions(
-            StarRocksQueryRows(
+            QueryRows(
                 columns = listOf("c1", "c2"),
                 rows = listOf(listOf("10178", "sales")),
             ),
         )
         assertEquals("10178 · sales", partitions.single().summary)
-        assertTrue(parsePartitions(StarRocksQueryRows(emptyList(), emptyList())).isEmpty())
+        assertTrue(parsePartitions(QueryRows(emptyList(), emptyList())).isEmpty())
     }
 }
