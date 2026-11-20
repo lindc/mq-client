@@ -150,8 +150,9 @@ internal fun AliveCell(alive: Boolean) {
 internal fun <T> gridCol(
     title: String,
     weight: Float,
+    sortKey: ((T) -> Any?)? = null,
     cell: @Composable (T) -> Unit,
-): DataGridColumn<T> = DataGridColumn(title = title, weight = weight, cell = cell)
+): DataGridColumn<T> = DataGridColumn(title = title, weight = weight, sortKey = sortKey, cell = cell)
 
 /**
  * 角色短标签（表格里用）。

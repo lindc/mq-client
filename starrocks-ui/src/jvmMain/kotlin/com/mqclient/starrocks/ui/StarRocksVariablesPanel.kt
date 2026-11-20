@@ -192,10 +192,10 @@ private fun ColumnScope.VariableGrid(rows: List<SessionVariable>) {
     val clipboard = LocalClipboardManager.current
     DataGrid(
         columns = listOf(
-            gridCol(stringResource("olap.starrocks.variables.col_name"), 1f) { v ->
+            gridCol(stringResource("olap.starrocks.variables.col_name"), 1f, sortKey = { it.name }) { v ->
                 DataGridTextCell(v.name, emphasized = true)
             },
-            gridCol(stringResource("olap.starrocks.variables.col_value"), 2f) { v ->
+            gridCol(stringResource("olap.starrocks.variables.col_value"), 2f, sortKey = { it.value }) { v ->
                 DataGridTextCell(v.value.ifBlank { "-" }, subdued = v.value.isBlank())
             },
         ),
@@ -215,10 +215,10 @@ private fun ColumnScope.FeConfigGrid(rows: List<FeConfigEntry>) {
     }
     DataGrid(
         columns = listOf(
-            gridCol(stringResource("olap.starrocks.variables.col_name"), 1.4f) { c ->
+            gridCol(stringResource("olap.starrocks.variables.col_name"), 1.4f, sortKey = { it.key }) { c ->
                 DataGridTextCell(c.key, emphasized = true)
             },
-            gridCol(stringResource("olap.starrocks.variables.col_value"), 1.4f) { c ->
+            gridCol(stringResource("olap.starrocks.variables.col_value"), 1.4f, sortKey = { it.value }) { c ->
                 DataGridTextCell(c.value.ifBlank { "-" }, subdued = c.value.isBlank())
             },
             gridCol(stringResource("olap.starrocks.variables.col_type"), 0.7f) { c ->

@@ -30,6 +30,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 
 /** 表头语义标签（渲染测试断言行高用：表头与数据行必须同高）。 */
 const val DataGridHeaderTag = "datagrid_header"
@@ -39,6 +41,14 @@ const val DataGridZebraRowTag = "datagrid_zebra_row"
 
 /** 普通行语义标签。 */
 const val DataGridPlainRowTag = "datagrid_plain_row"
+
+/** 排序指示器语义标签（渲染测试用来确认可排序列有视觉提示）。 */
+const val DataGridSortIndicatorTag = "datagrid_sort_indicator"
+
+/** 未排序 / 升序 / 降序的箭头（纯文本，不引图标字体 —— 与表头同字号即可读）。 */
+private const val SORT_IDLE_ARROW = "⇅"
+private const val SORT_ASC_ARROW = "↑"
+private const val SORT_DESC_ARROW = "↓"
 
 /**
  * 多列数据表：sticky 表头 + `LazyColumn` 行。
@@ -66,6 +76,19 @@ data class DataGridColumn<T>(
     val weight: Float = 1f,
     /** 定宽列（数字 / 状态位这类不需要吃剩余宽度的列）。 */
     val width: Dp? = null,
+    /**
+     * 排序键；非 null 时该列可点表头排序。
+     *
+     * **必须排在 [cell] 之前**：Kotlin 的尾随 lambda 只绑定「最后一个函数类型参数」，
+     * 若 sortKey 在最后，`DataGridColumn("x", 1f) { … }` 的 lambda 会被当成 sortKey，
+     * 所有既有调用点一起失效（模块里这种写法有几十处）。
+     *
+     * 调用方用命名参数指定它：`DataGridColumn("x", 1f, sortKey = { it.id }) { … }`。
+     *
+     * 刻意不默认从 [cell] 里"猜"排序值 —— 单元格是 `@Composable`，取不到纯数据；
+     * 由调用方显式给出，排序语义才明确（比如「状态」列应按优先级而不是显示文案排）。
+     */
+    val sortKey: ((T) -> Any?)? = null,
     /** 单元格渲染。只应放单行文本类内容，多行会破坏行高一致。 */
     val cell: @Composable (T) -> Unit,
 )
@@ -87,7 +110,36 @@ fun <T> DataGrid(
     rowKey: ((T) -> Any)? = null,
     zebraStriping: Boolean = true,
     onRowClick: ((T) -> Unit)? = null,
+    /** 初始排序（默认无排序 = 保持调用方给的顺序）。 */
+    initialSort: SortState? = null,
 ) {
+    // 排序状态在组件内部（调用方不必管）：点表头循环 升 → 降 → 无。
+    var sort by remember(columns) { mutableStateOf(initialSort) }
+    val sortedRows = remember(rows, sort) {
+        if (sort == null) {
+            rows
+        } else {
+            // 委托属性无法智能转换：先取局部快照（同时保证排序期间的读是一致的）。
+            val active = sort!!
+            val comparator = Comparator<T> { a, b ->
+                val key = columns.getOrNull(active.columnIndex)?.sortKey ?: return@Comparator 0
+                val ka = key(a)
+                val kb = key(b)
+                when {
+                    // null 恒在末尾，与方向无关（与 MixedTypeComparator 同一口径）。
+                    ka == null && kb == null -> 0
+                    ka == null -> 1
+                    kb == null -> -1
+                    else -> {
+                        val c = MixedTypeComparator.compare(ka, kb)
+                        if (active.direction == SortDirection.DESCENDING) -c else c
+                    }
+                }
+            }
+            rows.sortedWith(comparator)
+        }
+    }
+
     Column(modifier) {
         // 表头：与数据行同一档字号（bodyMedium），靠背景 + 字重 + 主色区分 ——
         // 不放大字号，否则表头会显得像标题栏而不是行首。
@@ -103,14 +155,46 @@ fun <T> DataGrid(
                 ),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            columns.forEach { column ->
-                TableHeaderText(
-                    text = column.title,
-                    modifier = slotModifier(column),
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
+            columns.forEachIndexed { index, column ->
+                val sortable = column.sortKey != null
+                Row(
+                    modifier = slotModifier(column)
+                        .then(
+                            if (sortable) {
+                                Modifier.clickable { sort = sort?.next(index) ?: SortState(index, SortDirection.ASCENDING) }
+                            } else {
+                                Modifier
+                            },
+                        ),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TableHeaderText(
+                        text = column.title,
+                        modifier = Modifier.weight(1f, fill = false),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    // 只有排序列显示指示器：未排序时用淡色双箭头（可发现性），
+                    // 排序后换成实心方向箭头 —— 与主流表格客户端一致。
+                    if (sortable) {
+                        val direction = sort?.takeIf { it.columnIndex == index }?.direction
+                        Text(
+                            text = when (direction) {
+                                null -> SORT_IDLE_ARROW
+                                SortDirection.ASCENDING -> SORT_ASC_ARROW
+                                SortDirection.DESCENDING -> SORT_DESC_ARROW
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (direction != null) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                            },
+                            modifier = Modifier.testTag(DataGridSortIndicatorTag),
+                        )
+                    }
+                }
             }
         }
         LazyColumn(
@@ -119,7 +203,7 @@ fun <T> DataGrid(
             verticalArrangement = Arrangement.spacedBy(TableVisuals.RowSpacing),
         ) {
             itemsIndexed(
-                items = rows,
+                items = sortedRows,
                 key = if (rowKey == null) null else { _, row -> rowKey(row) },
             ) { index, row ->
                 DataGridRow(

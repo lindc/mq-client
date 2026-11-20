@@ -1,6 +1,7 @@
 package com.mqclient.starrocks.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,12 +19,19 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
+import com.mqclient.uicommon.table.MixedTypeComparator
+import com.mqclient.uicommon.table.SortDirection
+import com.mqclient.uicommon.table.SortState
 
 @Composable
 internal fun ResultArea(grid: ConsoleGrid, phase: ConsolePhase, modifier: Modifier = Modifier) {
@@ -100,18 +108,48 @@ private fun ResultTable(grid: ConsoleGrid, phase: ConsolePhase, modifier: Modifi
             )
         }
 
+        // 排序状态落在**渲染层**而不是 ConsoleGrid 里：滚动 / 重排都是展示行为，
+        // 不该污染结果数据（复制、导出要的是服务端原始顺序）。
+        // 按 columns 身份重置：换一次查询（列变了）就回到原始顺序。
+        var sort by remember(grid.columns.toList()) { mutableStateOf<SortState?>(null) }
+        val visibleRows = remember(grid.rows.toList(), sort) {
+            MixedTypeComparator.sortRows(grid.rows.toList(), sort)
+        }
+
         val horizontal = rememberScrollState()
         // 外层横向滚动（列多不挤爆），内层纵向 LazyColumn 虚拟化（只组装可见行）；
         // 表头与数据行共用同一横向偏移，列自然对齐。
         Row(Modifier.fillMaxSize().horizontalScroll(horizontal)) {
             Column {
                 Row(Modifier.background(MaterialTheme.colorScheme.surfaceVariant)) {
-                    grid.columns.forEach { column ->
-                        TableCell(text = column.name, header = true)
+                    grid.columns.forEachIndexed { index, column ->
+                        val direction = sort?.takeIf { it.columnIndex == index }?.direction
+                        Row(
+                            modifier = Modifier.clickable {
+                                sort = sort?.next(index) ?: SortState(index, SortDirection.ASCENDING)
+                            },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            TableCell(text = column.name, header = true)
+                            Text(
+                                text = when (direction) {
+                                    null -> "⇅"
+                                    SortDirection.ASCENDING -> "↑"
+                                    SortDirection.DESCENDING -> "↓"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (direction != null) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                },
+                                modifier = Modifier.padding(horizontal = 2.dp),
+                            )
+                        }
                     }
                 }
                 LazyColumn(Modifier.weight(1f)) {
-                    items(grid.rows) { row ->
+                    items(visibleRows) { row ->
                         Row {
                             row.forEach { value ->
                                 TableCell(text = value?.toString() ?: "NULL", header = false)

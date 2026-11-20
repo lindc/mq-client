@@ -238,8 +238,9 @@ private fun OverviewPane(columns: List<CatalogColumn>?, partitions: PartitionLoa
 private fun gridColumn(
     title: String,
     weight: Float,
+    sortKey: ((CatalogColumn) -> Any?)? = null,
     cell: @Composable (CatalogColumn) -> Unit,
-): DataGridColumn<CatalogColumn> = DataGridColumn(title = title, weight = weight, cell = cell)
+): DataGridColumn<CatalogColumn> = DataGridColumn(title = title, weight = weight, sortKey = sortKey, cell = cell)
 
 /**
  * 字段表：只负责「哪 7 列、各占多宽、每格取哪个字段」—— 表格本身完全交给
@@ -253,16 +254,16 @@ private fun gridColumn(
 private fun ColumnDataGrid(columns: List<CatalogColumn>, modifier: Modifier = Modifier) {
     DataGrid(
         columns = listOf(
-            gridColumn(stringResource("olap.starrocks.catalog.col_name"), 2f) { column ->
+            gridColumn(stringResource("olap.starrocks.catalog.col_name"), 2f, sortKey = { it.name }) { column ->
                 DataGridTextCell(column.name, emphasized = true)
             },
-            gridColumn(stringResource("olap.starrocks.catalog.col_type"), 1.5f) { column ->
+            gridColumn(stringResource("olap.starrocks.catalog.col_type"), 1.5f, sortKey = { it.type }) { column ->
                 DataGridTextCell(column.type)
             },
-            gridColumn(stringResource("olap.starrocks.catalog.col_nullable"), 1f) { column ->
+            gridColumn(stringResource("olap.starrocks.catalog.col_nullable"), 1f, sortKey = { it.nullable }) { column ->
                 DataGridTextCell(column.nullable.ifBlank { "-" }, subdued = true)
             },
-            gridColumn(stringResource("olap.starrocks.catalog.col_key"), 1f) { column ->
+            gridColumn(stringResource("olap.starrocks.catalog.col_key"), 1f, sortKey = { it.key }) { column ->
                 DataGridTextCell(column.key.ifBlank { "-" }, subdued = true)
             },
             gridColumn(stringResource("olap.starrocks.catalog.col_default"), 1.2f) { column ->
