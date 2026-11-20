@@ -107,33 +107,31 @@ import kotlinx.coroutines.withContext
  */
 @Composable
 internal fun StarRocksBackendsPanel(connectionId: String, modifier: Modifier = Modifier) {
-    var nodes by remember { mutableStateOf<List<ClusterNodeInfo>>(emptyList()) }
-    var loading by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var degraded by remember { mutableStateOf<String?>(null) }
-    val scope = rememberCoroutineScope()
+    // 按 connectionId 分键：切连接后不能残留上一条连接的 BE 列表。
+    var nodes by remember(connectionId) { mutableStateOf<List<ClusterNodeInfo>>(emptyList()) }
+    var loading by remember(connectionId) { mutableStateOf(false) }
+    var error by remember(connectionId) { mutableStateOf<String?>(null) }
+    var degraded by remember(connectionId) { mutableStateOf<String?>(null) }
+    val scope = rememberConnectionScope(connectionId)
     val nodeDetail = rememberStarRocksNodeDetailController(connectionId)
 
     suspend fun load() {
         loading = true
         error = null
         try {
-            val snapshot = StarRocksClusterService.loadSnapshot(connectionId)
-            nodes = snapshot.nodes.filter { it.role.isCompute }
-            // BE 与 CN 是两块独立查询：一块失败时另一块照常显示，提示里说清缺的是哪块。
-            degraded = snapshot.degradations
-                .filter { it.part.name in setOf("BACKENDS", "COMPUTE_NODES", "NODE_MEMORY") }
-                .takeIf { it.isNotEmpty() }
-                ?.joinToString("、") { it.part.name }
-        } catch (c: CancellationException) {
-            // 离开页面 / 重新连接会取消这次取数：**不是**错误，不能把面板刷成红字。
-            throw c
-        } catch (e: Throwable) {
-            error = e.userMessage()
-            nodes = emptyList()
+            runPanelLoad(onError = { e -> error = e.userMessage(); nodes = emptyList() }) {
+                val snapshot = StarRocksClusterService.loadSnapshot(connectionId)
+                nodes = snapshot.nodes.filter { it.role.isCompute }
+                // BE 与 CN 是两块独立查询：一块失败时另一块照常显示，提示里说清缺的是哪块。
+                degraded = snapshot.degradations
+                    .filter { it.part.name in setOf("BACKENDS", "COMPUTE_NODES", "NODE_MEMORY") }
+                    .takeIf { it.isNotEmpty() }
+                    ?.joinToString("、") { it.part.name }
+            }
+        } finally {
+            // 取消（切连接 / 离开页面）也要复位 spinner，否则留下一个永远转的圈。
+            loading = false
         }
-        // 取消路径在上面直接 rethrow，走不到这里 —— 旧请求不会把新请求的 spinner 关掉。
-        loading = false
     }
 
     LaunchedEffect(connectionId) { load() }
@@ -255,29 +253,28 @@ private fun shortTimestamp(raw: String?): String {
  */
 @Composable
 internal fun StarRocksHaPanel(connectionId: String, modifier: Modifier = Modifier) {
-    var frontends by remember { mutableStateOf<List<ClusterNodeInfo>>(emptyList()) }
-    var loading by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var degraded by remember { mutableStateOf<String?>(null) }
-    val scope = rememberCoroutineScope()
+    // 同上（BE 面板）：FE 列表与降级提示都必须随连接切换而重置。
+    var frontends by remember(connectionId) { mutableStateOf<List<ClusterNodeInfo>>(emptyList()) }
+    var loading by remember(connectionId) { mutableStateOf(false) }
+    var error by remember(connectionId) { mutableStateOf<String?>(null) }
+    var degraded by remember(connectionId) { mutableStateOf<String?>(null) }
+    val scope = rememberConnectionScope(connectionId)
     val nodeDetail = rememberStarRocksNodeDetailController(connectionId)
 
     suspend fun load() {
         loading = true
         error = null
         try {
-            val snapshot = StarRocksClusterService.loadSnapshot(connectionId)
-            frontends = snapshot.nodes.filter { it.role.isFrontend }
-            degraded = snapshot.degradations
-                .firstOrNull { it.part.name == "FRONTENDS" }
-                ?.message
-        } catch (c: CancellationException) {
-            throw c
-        } catch (e: Throwable) {
-            error = e.userMessage()
-            frontends = emptyList()
+            runPanelLoad(onError = { e -> error = e.userMessage(); frontends = emptyList() }) {
+                val snapshot = StarRocksClusterService.loadSnapshot(connectionId)
+                frontends = snapshot.nodes.filter { it.role.isFrontend }
+                degraded = snapshot.degradations
+                    .firstOrNull { it.part.name == "FRONTENDS" }
+                    ?.message
+            }
+        } finally {
+            loading = false
         }
-        loading = false
     }
 
     LaunchedEffect(connectionId) { load() }
@@ -426,7 +423,7 @@ internal fun StarRocksVariablesPanel(connectionId: String, modifier: Modifier = 
     var loading by remember(connectionId) { mutableStateOf(false) }
     var error by remember(connectionId) { mutableStateOf<String?>(null) }
     var search by remember(connectionId) { mutableStateOf("") }
-    val scope = rememberCoroutineScope()
+    val scope = rememberConnectionScope(connectionId)
 
     suspend fun load(which: Int) {
         // 已有数据就不重复拉（刷新按钮走 force = true）。
@@ -629,7 +626,7 @@ internal fun StarRocksLogsPanel(connectionId: String, modifier: Modifier = Modif
     var loading by remember(connectionId, file) { mutableStateOf(false) }
     var error by remember(connectionId) { mutableStateOf<String?>(null) }
     var autoRefresh by remember(connectionId) { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
+    val scope = rememberConnectionScope(connectionId)
     val clipboard = LocalClipboardManager.current
 
     suspend fun load() {

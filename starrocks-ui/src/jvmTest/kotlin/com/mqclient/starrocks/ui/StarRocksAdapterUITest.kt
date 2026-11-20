@@ -23,8 +23,9 @@ import kotlin.test.assertTrue
 class StarRocksAdapterUITest {
 
     private fun loadTables(language: String) = runBlocking {
-        // 全局语言表（ui-common）已含 olap.starrocks.* 键；模块私有表为空。
-        LanguageResources.load(language, emptyList())
+        // olap.starrocks.* 文案现在由**模块私有表**提供（不再挤在 ui-common 公共表里），
+        // 所以测试必须像宿主一样把 i18nTables 传进去。
+        LanguageResources.load(language, StarRocksAdapterUI().i18nTables)
     }
 
     @Test
@@ -46,11 +47,13 @@ class StarRocksAdapterUITest {
     }
 
     @Test
-    fun `adapter ui exposes placeholder contract without data binding`() {
+    fun `adapter ui exposes its contract`() {
         val ui = StarRocksAdapterUI()
         assertEquals("starrocks", ui.serviceId)
         assertEquals("StarRocks", ui.title)
         assertNotNull(ui.contentFor("catalog", "any-connection"))
-        assertTrue(ui.i18nTables.isEmpty(), "空骨架用全局语言表，不声明模块私有表")
+        // 模块私有 i18n 表必须声明，否则 olap.starrocks.* 全部解析成裸 key。
+        assertEquals(1, ui.i18nTables.size, "应声明一张模块私有表")
+        assertEquals("starrocks_ui", ui.i18nTables.single().base)
     }
 }

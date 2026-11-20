@@ -8,15 +8,18 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import com.mqclient.core.AdapterUI
+import com.mqclient.core.ModuleI18nTable
 import com.mqclient.starrocks.StarRocksConstants
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
+import mq_client.starrocks_ui.generated.resources.Res
 
 /**
- * StarRocks UI 层的 [AdapterUI] SPI **空骨架**实现。
+ * StarRocks UI 层的 [AdapterUI] SPI 实现：按导航项向宿主贡献各个 Tab 的内容
+ * （集群概览 / 数据目录 / SQL 控制台 / 拓扑 / 会话与慢查询 / 四个系统页）。
  *
- * Skeleton only, protocol logic pending：所有入口只返回 [StarRocksPlaceholder]，
- * 不做任何数据绑定、不读取连接状态、不触网。
+ * [content] 仍是 [StarRocksPlaceholder] —— 那是「连接卡在还没选具体 Tab」时的
+ * 空白态文案，不是模块未完成的意思；真实内容一律经 [contentFor] 分发。
  *
  * ## 为什么放在 jvmMain（而非 commonMain）
  *
@@ -34,15 +37,13 @@ import com.mqclient.uicommon.i18n.withArg
  * i18n 键，宿主 `toMiddlewareType` 查表翻译）。
  * 本类通过 [serviceId] 与它配对（`ModuleRegistry` 按 id 校验）。
  *
- * ## 创建表单（S2）
+ * ## 创建表单
  *
  * 「新建连接」第二步的创建面板**不是** [AdapterUI] 的方法，而是独立的
  * `ConnectionFormUi` SPI：[StarRocksConnectionForm] 经
  * `META-INF/services/com.mqclient.core.ConnectionFormUi` 注册后，宿主
- * `NewConnectionDialog` 按 [serviceId] 装配它，原先的
- * 「该类型的创建表单将在后续版本提供」占位提示随之消失。
- * [content] / [contentFor] 仍返回 [StarRocksPlaceholder] —— 那是**主内容区**
- * （连接建好后的 Tab 页面），与创建表单是两条不同的路径。
+ * `NewConnectionDialog` 按 [serviceId] 装配它。创建表单与主内容区（连接建好后的
+ * Tab 页面）是两条不同的路径。
  *
  * ## SPI 注册
  *
@@ -65,6 +66,20 @@ class StarRocksAdapterUI : AdapterUI {
      */
     val category: String = StarRocksConstants.CATEGORY
 
+    /**
+     * 模块私有 i18n 表（`files/i18n/starrocks_ui_<lang>.json`）。
+     *
+     * 275 条 `olap.starrocks.*` 文案原先放在 `ui-common` 的公共表里 —— 那是全应用
+     * 每个模块启动都要加载的一份表，占掉一半以上是给一个模块用的。按项目约定
+     * （kafka-ui / ibm-mq-ui / rabbitmq-ui / rocketmq-ui 各自持有私有表）迁回本模块：
+     * 别人不会误改本模块文案，本模块也能独立演进语言覆盖。
+     */
+    override val i18nTables: List<ModuleI18nTable> = listOf(
+        ModuleI18nTable(base = "starrocks_ui") { language ->
+            Res.readBytes("files/i18n/starrocks_ui_$language.json").decodeToString()
+        },
+    )
+
     /** 主内容 = 占位页。 */
     override val content: @Composable () -> Unit = { StarRocksPlaceholder() }
 
@@ -81,7 +96,7 @@ class StarRocksAdapterUI : AdapterUI {
      */
     override fun contentFor(objectType: String, connectionId: String): (@Composable () -> Unit)? =
         when (objectType) {
-            "console" -> { { StarRocksSqlConsolePlaceholder(connectionId = connectionId) } }
+            "console" -> { { StarRocksSqlConsolePanel(connectionId = connectionId) } }
             "catalog" -> { { StarRocksCatalogPanel(connectionId) } }
             "overview" -> { { StarRocksOverviewPanel(connectionId) } }
             "topology" -> { { StarRocksTopologyPanel(connectionId) } }

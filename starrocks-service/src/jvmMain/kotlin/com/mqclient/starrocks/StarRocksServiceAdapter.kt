@@ -8,11 +8,11 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 
 /**
- * StarRocks service 层的 [ServiceAdapter] SPI **空骨架**实现。
+ * StarRocks service 层的 [ServiceAdapter] SPI 实现：协议身份、OLAP 分类、
+ * 导航菜单与生命周期钩子。
  *
- * Skeleton only, protocol logic pending：仅暴露协议身份与 OLAP 分类，所有
- * 生命周期 / 导航 / 徽章方法保持占位（统一 `TODO` 或返回空集合），
- * **不实现**任何连接、目录扫描、查询执行逻辑。
+ * 真正的连接 / 查询逻辑在 [StarRocksModule] 与 [StarRocksConnectionManager]，
+ * 本类只把它们接进宿主（`initialize` / `dispose`）。
  *
  * ## 为什么放在 jvmMain（而非 commonMain）
  *
@@ -84,7 +84,7 @@ class StarRocksServiceAdapter : ServiceAdapter {
         NavigationItem(id = "logs", titleKey = "olap.starrocks.menu.logs", iconId = "logs", isTool = true),
     )
 
-    /** 空骨架不贡献徽章。 */
+    /** 暂无需要的数量徽章（扫描结果不按对象类型计数）。 */
     override fun badgeCounts(connectionId: String): Flow<Map<String, Int>> = emptyFlow()
 
     /** 退出时摘掉模块门面引用。 */

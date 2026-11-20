@@ -1,7 +1,6 @@
 package com.mqclient.starrocks.system
 
 import com.mqclient.core.log.LogLevel
-import com.mqclient.olap.base.query.ResultColumn
 import com.mqclient.starrocks.StarRocksModule
 import com.mqclient.starrocks.cluster.indexOfAny
 import com.mqclient.starrocks.cluster.parseBool
@@ -45,22 +44,12 @@ object StarRocksSystemService {
 
     private const val SQL_FRONTENDS = "SHOW FRONTENDS;"
 
-    /** 一次查询的原始结果（列名 + 行）。 */
-    private data class Rows(val columns: List<String>, val rows: List<List<Any?>>)
-
-    /** 走共享会话的只读查询（与面板其它取数同一条通道）。 */
-    private suspend fun query(connectionId: String, sql: String): Rows {
-        if (!StarRocksModule.isAlive(connectionId)) {
-            StarRocksModule.connectById(connectionId).getOrThrow()
-        }
-        var columns: List<ResultColumn> = emptyList()
-        val rows = mutableListOf<List<Any?>>()
-        StarRocksModule.executeQuery(connectionId, sql).collect { batch ->
-            if (batch.columns.isNotEmpty()) columns = batch.columns
-            rows.addAll(batch.rows)
-        }
-        return Rows(columns.map { it.name }, rows)
-    }
+    /**
+     * 走共享会话的只读查询 —— 与面板、集群快照同一条通道
+     * （[com.mqclient.starrocks.query.queryRows]），连接守卫与日志不在本文件重复实现。
+     */
+    private suspend fun query(connectionId: String, sql: String) =
+        com.mqclient.starrocks.query.queryRows(connectionId, sql, origin = "system")
 
     /**
      * 会话 / 全局变量。

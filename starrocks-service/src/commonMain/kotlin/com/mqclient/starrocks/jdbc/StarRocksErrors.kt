@@ -35,7 +35,7 @@ object StarRocksSqlDialect : SqlDialect by DefaultSqlDialect {
 }
 
 /**
- * 错误 → 用户可读文案的单一出口（空骨架阶段先落在 `HealthReport.detail`）。
+ * 错误 → 用户可读文案的单一出口（`HealthReport.detail` 与 `ServiceException` 共用）。
  *
  * 文案本体取自 [OlapErrorCode.fallbackMessage]（英文兜底，中文在 i18n
  * `olap.err.*` 键里，由 UI 展示时按 [OlapErrorCode.errorKey] 翻译），

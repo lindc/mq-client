@@ -36,7 +36,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.mqclient.mqui.metric.MetricCard
 import com.mqclient.starrocks.cluster.ClusterNodeRole
@@ -63,21 +62,25 @@ import kotlinx.coroutines.launch
  */
 @Composable
 internal fun StarRocksOverviewPanel(connectionId: String, modifier: Modifier = Modifier) {
-    var snapshot by remember { mutableStateOf<ClusterSnapshot?>(null) }
-    var loading by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    val scope = rememberCoroutineScope()
+    // 状态按 connectionId 分键：宿主在同一个组合槽位里切换连接（MainWindow 的
+    // contentFor(...) 没有 key），不带键的 remember 会让 A 集群的节点表留在 B 的页面上。
+    var snapshot by remember(connectionId) { mutableStateOf<ClusterSnapshot?>(null) }
+    var loading by remember(connectionId) { mutableStateOf(false) }
+    var error by remember(connectionId) { mutableStateOf<String?>(null) }
+    val scope = rememberConnectionScope(connectionId)
     val nodeDetail = rememberStarRocksNodeDetailController(connectionId)
 
     suspend fun load() {
         loading = true
         error = null
         try {
-            snapshot = StarRocksClusterService.loadSnapshot(connectionId)
-        } catch (e: Throwable) {
-            error = e.userMessage()
-            snapshot = null
+            // 取消原样上抛（不写 error）；失败时结果为 null → 空态。
+            snapshot = runPanelLoad(onError = { error = it.userMessage() }) {
+                StarRocksClusterService.loadSnapshot(connectionId)
+            }
         } finally {
+            // 必须在 finally 里复位：取消（切连接 / 关自动刷新）也要关掉 spinner，
+            // 否则界面上会留下一个永远转的圈。旧状态的写入不会影响新连接（状态按 id 分键）。
             loading = false
         }
     }

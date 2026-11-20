@@ -3,14 +3,13 @@ package com.mqclient.starrocks
 import com.mqclient.olap.base.OlapCategory
 
 /**
- * StarRocks 协议族常量（**空骨架**阶段）。
+ * StarRocks 协议族常量。
  *
  * 分类、日志、性能打点前缀全部引用 olap-base 的 [OlapCategory] —— 本模块
  * **不硬编码**任何分类前缀字面量，保证 OLAP 协议族的口径只有一个来源
  * （日志、事件、i18n 键、打点全部由 [OlapCategory] 派生）。
  *
- * Skeleton only, protocol logic pending：本文件只有常量，不含连接 / 扫描 /
- * 查询逻辑，也不引任何 StarRocks / MySQL JDBC / HTTP 客户端依赖。
+ * 本文件只有常量，不含连接 / 扫描 / 查询逻辑。
  */
 object StarRocksConstants {
 

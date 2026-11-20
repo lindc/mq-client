@@ -29,7 +29,7 @@ import kotlin.test.assertTrue
 class StarRocksSystemPanelsTest {
 
     private fun loadTables(language: String) = runBlocking {
-        LanguageResources.load(language, emptyList())
+        LanguageResources.load(language, StarRocksAdapterUI().i18nTables)
     }
 
     private fun assertPanelRenders(titleKey: String, panel: @androidx.compose.runtime.Composable () -> Unit) {
@@ -70,9 +70,9 @@ class StarRocksSystemPanelsTest {
             "olap.starrocks.menu.variables",
             "olap.starrocks.menu.logs",
         ).forEach { key ->
-            LanguageResources.load(LanguageResources.LANGUAGE_ZH_CN, emptyList())
+            LanguageResources.load(LanguageResources.LANGUAGE_ZH_CN, StarRocksAdapterUI().i18nTables)
             assertTrue(stringResource(key) != key, "zh-CN 缺键：$key")
-            LanguageResources.load(LanguageResources.LANGUAGE_EN_US, emptyList())
+            LanguageResources.load(LanguageResources.LANGUAGE_EN_US, StarRocksAdapterUI().i18nTables)
             assertTrue(stringResource(key) != key, "en-US 缺键：$key")
         }
     }

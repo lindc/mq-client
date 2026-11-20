@@ -69,6 +69,9 @@ internal suspend fun streamCsvExport(
         OutputStreamWriter(FileOutputStream(File(path)), Charsets.UTF_8),
     ).use { writer ->
         writer.write("\ufeff")
+        // 流式导出需要逐批消费，不能走「一次性收集」的 queryRows；但连接守卫必须同样走
+        // ensureSession（否则树不会变绿，且会话属于别的连接时会静默连错库）。
+        com.mqclient.starrocks.query.ensureSession(connectionId).getOrThrow()
         StarRocksModule.executeQuery(connectionId, sql).collect { batch ->
             if (!headerWritten) {
                 // 列名来自 ResultBatch.columns（每批自带全量 schema），首个批次写表头。

@@ -99,16 +99,27 @@ private val TIMESTAMP_FORMATTER: DateTimeFormatter =
     DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
 
 /**
- * 大小列：B / KB / MB（各保留 1 位小数）。
+ * 字节 → 人话：`512 B` / `1.5 KB` / `12.0 MB` / `236.5 GB`（B 为整数，其余 1 位小数）。
  *
- * 统一后用 MB 档：此前 MQ / Kafka / RocketMQ 只到 KB，大消息会显示成
- * `2048.0 KB`；RabbitMQ 那份有 MB。取超集，纯显示变化。
+ * 1024 进制，单位自动上浮到 PB。原先只到 MB —— 消息大小够用，但集群磁盘容量
+ * （`SHOW BACKENDS` 的 `TotalCapacity`，几百 GB 起步）会显示成
+ * `242148.4 MB`，既难读也容易被误当成异常值。上浮到 GB / TB 后同一函数可直接
+ * 供容量类字段使用，不必再在模块里各写一份。StarRocks 模块原先就有一份私有
+ * `formatBytes`（到 PB、但丢掉 `.0`），已并入本函数。
  */
-fun formatSize(bytes: Long): String = when {
-    bytes >= 1_048_576 -> String.format(Locale.ROOT, "%.1f MB", bytes / 1_048_576.0)
-    bytes >= 1024 -> String.format(Locale.ROOT, "%.1f KB", bytes / 1024.0)
-    else -> "$bytes B"
+fun formatSize(bytes: Long): String {
+    if (bytes < 1024) return "$bytes B"
+    var value = bytes.toDouble()
+    var unit = -1
+    while (value >= 1024 && unit < SIZE_UNITS.lastIndex) {
+        value /= 1024
+        unit++
+    }
+    return String.format(Locale.ROOT, "%.1f %s", value, SIZE_UNITS[unit])
 }
+
+/** [formatSize] 的单位序列（KB 起步；B 单独处理，不带小数）。 */
+private val SIZE_UNITS = listOf("KB", "MB", "GB", "TB", "PB")
 
 /** 时间戳列：epoch millis → 本地时区文本；`<= 0`（无时间戳 / epoch 0）显示 "-"。 */
 fun formatTimestamp(millis: Long): String =

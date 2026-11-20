@@ -32,7 +32,7 @@ class StarRocksHostPortRowUiTest {
     }
 
     private fun loadTables() = runBlocking {
-        LanguageResources.load(LanguageResources.LANGUAGE_ZH_CN, emptyList())
+        LanguageResources.load(LanguageResources.LANGUAGE_ZH_CN, StarRocksAdapterUI().i18nTables)
     }
 
     @Test

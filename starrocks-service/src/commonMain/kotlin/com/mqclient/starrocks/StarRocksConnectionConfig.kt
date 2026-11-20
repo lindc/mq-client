@@ -5,7 +5,7 @@ import com.mqclient.olap.base.connection.AnalyticsConnectionConfig
 /**
  * StarRocks 连接配置快照（不可变；实现 olap-base 的 [AnalyticsConnectionConfig]）。
  *
- * S2 起字段改为**具名类型字段**（host / port / user / password / database），
+ * 字段为**具名类型字段**（host / port / user / password / database），
  * 表单直接读写它们；[options] 由字段派生，保持与 app-core `ConnectionInfo.options`
  * 同形 —— 落盘时密码等敏感项由 `SensitiveOptionsSerializer` 加密，本类不感知。
  *

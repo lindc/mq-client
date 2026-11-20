@@ -54,13 +54,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -275,20 +272,22 @@ private sealed interface CatalogSelection {
  */
 @Composable
 internal fun StarRocksCatalogPanel(connectionId: String, modifier: Modifier = Modifier) {
-    var dbName by remember { mutableStateOf<String?>(null) }
-    var tables by remember { mutableStateOf<List<CatalogTable>>(emptyList()) }
-    var loading by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var dbExpanded by remember { mutableStateOf(true) }
-    var tablesFolderExpanded by remember { mutableStateOf(true) }
-    var mvFolderExpanded by remember { mutableStateOf(true) }
-    var selection by remember { mutableStateOf<CatalogSelection?>(null) }
-    var search by remember { mutableStateOf("") }
+    // 全部状态按 connectionId 分键：宿主在同一个组合槽位里切换连接，不带键的
+    // remember 会把 A 库的表树 / 字段缓存留在 B 的页面上（缓存里还存着 A 的结果）。
+    var dbName by remember(connectionId) { mutableStateOf<String?>(null) }
+    var tables by remember(connectionId) { mutableStateOf<List<CatalogTable>>(emptyList()) }
+    var loading by remember(connectionId) { mutableStateOf(false) }
+    var error by remember(connectionId) { mutableStateOf<String?>(null) }
+    var dbExpanded by remember(connectionId) { mutableStateOf(true) }
+    var tablesFolderExpanded by remember(connectionId) { mutableStateOf(true) }
+    var mvFolderExpanded by remember(connectionId) { mutableStateOf(true) }
+    var selection by remember(connectionId) { mutableStateOf<CatalogSelection?>(null) }
+    var search by remember(connectionId) { mutableStateOf("") }
     // 字段：null = 加载中；空列表 = 加载完成但确实无字段。
-    val columnCache = remember { mutableStateMapOf<String, List<CatalogColumn>?>() }
-    val partitionCache = remember { mutableStateMapOf<String, PartitionLoadState>() }
-    val ddlCache = remember { mutableStateMapOf<String, String>() }
-    val scope = rememberCoroutineScope()
+    val columnCache = remember(connectionId) { mutableStateMapOf<String, List<CatalogColumn>?>() }
+    val partitionCache = remember(connectionId) { mutableStateMapOf<String, PartitionLoadState>() }
+    val ddlCache = remember(connectionId) { mutableStateMapOf<String, String>() }
+    val scope = rememberConnectionScope(connectionId)
 
     /**
      * 拉表结构（字段）。
@@ -406,47 +405,54 @@ internal fun StarRocksCatalogPanel(connectionId: String, modifier: Modifier = Mo
         val loadStart = System.currentTimeMillis()
         StarRocksLog.meta("load start connectionId=$connectionId")
         try {
-            dbName = runCatching { queryRows(connectionId, "SELECT DATABASE();") }
-                .getOrNull()?.rows?.firstOrNull()?.firstOrNull()?.toString()
-                ?.takeIf { it.isNotBlank() }
-            // 物化视图名单走 SHOW MATERIALIZED VIEWS（3.4 的 table_type 不可靠）；失败静默降级。
-            val mvNames = runCatching {
-                parseMaterializedViewNames(queryRows(connectionId, MATERIALIZED_VIEW_SQL))
-            }.getOrDefault(emptySet())
-            val rawTables = queryRows(connectionId, TABLES_SQL)
-            val parsedTables = parseTables(rawTables, mvNames)
-            if (parsedTables.size < rawTables.rows.size) {
-                // 表清单同样会因单行坏数据被静默丢弃：留证据（列名 + 前几行）。
+            runPanelLoad(
+                onError = { e ->
+                    StarRocksLog.meta(
+                        LogLevel.WARN,
+                        "load failed connectionId=$connectionId " +
+                            "cost=${System.currentTimeMillis() - loadStart}ms error=${e.message}",
+                        e,
+                    )
+                    error = e.userMessage()
+                    tables = emptyList()
+                },
+            ) {
+                // 三个可选查询用 runOptional：失败降级为 null / 空集，但**取消必须上抛**
+                // （裸 runCatching 会把 CancellationException 一起吞掉，切连接后还会继续发 SQL）。
+                dbName = runOptional { queryRows(connectionId, "SELECT DATABASE();") }
+                    ?.rows?.firstOrNull()?.firstOrNull()?.toString()
+                    ?.takeIf { it.isNotBlank() }
+                // 物化视图名单走 SHOW MATERIALIZED VIEWS（3.4 的 table_type 不可靠）；失败静默降级。
+                val mvNames = runOptional {
+                    parseMaterializedViewNames(queryRows(connectionId, MATERIALIZED_VIEW_SQL))
+                }.orEmpty()
+                val rawTables = queryRows(connectionId, TABLES_SQL)
+                val parsedTables = parseTables(rawTables, mvNames)
+                if (parsedTables.size < rawTables.rows.size) {
+                    // 表清单同样会因单行坏数据被静默丢弃：留证据（列名 + 前几行）。
+                    StarRocksLog.meta(
+                        LogLevel.WARN,
+                        "tables dropped parsed=${parsedTables.size}/${rawTables.rows.size} " +
+                            "raw=${StarRocksLog.truncate(describeRows(rawTables))}",
+                    )
+                }
+                tables = parsedTables
                 StarRocksLog.meta(
-                    LogLevel.WARN,
-                    "tables dropped parsed=${parsedTables.size}/${rawTables.rows.size} " +
-                        "raw=${StarRocksLog.truncate(describeRows(rawTables))}",
+                    "load done connectionId=$connectionId tables=${tables.size} " +
+                        "mv=${mvNames.size} db=${dbName ?: "-"} cost=${System.currentTimeMillis() - loadStart}ms",
                 )
+                StarRocksLog.perf(action = "load_catalog", type = "META", costMs = System.currentTimeMillis() - loadStart)
+                columnCache.clear()
+                partitionCache.clear()
+                ddlCache.clear()
+                (selection as? CatalogSelection.Table)?.let { table ->
+                    ensureColumns(table.name)
+                    ensurePartitions(table.name)
+                    ensureDdl(table.name)
+                }
             }
-            tables = parsedTables
-            StarRocksLog.meta(
-                "load done connectionId=$connectionId tables=${tables.size} " +
-                    "mv=${mvNames.size} db=${dbName ?: "-"} cost=${System.currentTimeMillis() - loadStart}ms",
-            )
-            StarRocksLog.perf(action = "load_catalog", type = "META", costMs = System.currentTimeMillis() - loadStart)
-            columnCache.clear()
-            partitionCache.clear()
-            ddlCache.clear()
-            (selection as? CatalogSelection.Table)?.let { table ->
-                ensureColumns(table.name)
-                ensurePartitions(table.name)
-                ensureDdl(table.name)
-            }
-        } catch (e: Throwable) {
-            StarRocksLog.meta(
-                LogLevel.WARN,
-                "load failed connectionId=$connectionId " +
-                    "cost=${System.currentTimeMillis() - loadStart}ms error=${e.message}",
-                e,
-            )
-            error = e.userMessage()
-            tables = emptyList()
         } finally {
+            // 取消（切连接）也要复位 spinner；状态按 connectionId 分键，写的是旧状态，无害。
             loading = false
         }
     }

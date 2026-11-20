@@ -84,6 +84,9 @@ object StarRocksAiChainBuilder {
     /** 把查询结果集拍平成文本（StarRocks EXPLAIN 是单列多行，MySQL 可能是多列表格）。 */
     private suspend fun queryText(connectionId: String, sql: String): String {
         val lines = mutableListOf<String>()
+        // 流式收集需要逐批消费，走不了「一次性」的 queryRows；但连接守卫同样走
+        // ensureSession，保证「会话属于别的连接」时先切换再查。
+        com.mqclient.starrocks.query.ensureSession(connectionId).getOrThrow()
         StarRocksModule.executeQuery(connectionId, sql).collect { batch ->
             batch.rows.forEach { row ->
                 lines += row.joinToString(" | ") { it?.toString() ?: "NULL" }
@@ -96,6 +99,7 @@ object StarRocksAiChainBuilder {
         val sql = "SELECT column_name, data_type FROM information_schema.columns " +
             "WHERE table_schema = DATABASE() AND table_name = '${table.replace("'", "''")}';"
         val columns = mutableListOf<Pair<String, String>>()
+        com.mqclient.starrocks.query.ensureSession(connectionId).getOrThrow()
         StarRocksModule.executeQuery(connectionId, sql).collect { batch ->
             batch.rows.forEach { row ->
                 val name = row.getOrNull(0)?.toString().orEmpty()

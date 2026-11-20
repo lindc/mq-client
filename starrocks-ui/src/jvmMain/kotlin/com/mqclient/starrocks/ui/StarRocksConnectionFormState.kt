@@ -43,7 +43,7 @@ data class StarRocksFieldErrors(
  * 字段草稿由 `mutableStateOf` 持有、经 `rememberFormState` 的 `remember { }`
  * 缓存；连接名初始为空，靠 placeholder 提示（不硬编码「连接 N」）。
  *
- * @param probe 注入的连接探针（默认走 [StarRocksModule] 的 S1 testConnection，单测传 fake）。
+ * @param probe 注入的连接探针（默认走 [StarRocksModule] 的 testConnection，单测传 fake）。
  * @param persistence 落盘端口（默认直连 `ConnectionStore`）。
  * @param ioDispatcher 落盘线程（默认 IO；单测注入 Unconfined 以在虚拟时间下可预测）。
  */
@@ -158,7 +158,7 @@ class StarRocksConnectionFormState(
     )
 
     /**
-     * 临时连接测试：复用 S1 的 [StarRocksModule.testConnection]。
+     * 临时连接测试：复用 [StarRocksModule.testConnection]。
      * 基类契约要求「失败抛异常」—— 把 `healthy=false` 的报告转成异常，
      * [detail][HealthReport.detail]（含友好文案 + SQLState/ErrorCode）即确认框内容。
      */

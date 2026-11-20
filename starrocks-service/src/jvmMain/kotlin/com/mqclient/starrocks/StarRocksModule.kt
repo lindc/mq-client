@@ -22,13 +22,13 @@ import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.withContext
 
 /**
- * StarRocks service 层的**模块门面**：把 S1 的 [StarRocksConnectionManager] 暴露给
+ * StarRocks service 层的**模块门面**：把 [StarRocksConnectionManager] 暴露给
  * UI 表单，而不让 UI 认识 `ServiceContext` / `java.sql`。
  *
  * 生命周期由 [StarRocksServiceAdapter.initialize] / `dispose` 驱动（宿主
  * `ModuleRegistry.initializeServices` 在启动时注入 [ServiceContext]）。
  * 门面持有注入了真实 [JdbcConnector] 的管理器，按次提供 [testConnection] ——
- * 表单的「测试连接」按钮直接调它，复用 S1 的 `SELECT 1` +
+ * 表单的「测试连接」按钮直接调它，复用 `SELECT 1` +
  * `[OLAP-Perf][connect]` 打点 + finally 关闭逻辑，不重复实现。
  *
  * 未初始化时返回 `healthy=false` 的报告而不是抛异常：表单把它当普通失败展示，
@@ -78,7 +78,7 @@ object StarRocksModule {
     }
 
     /**
-     * 一次性连接测试（UI「测试连接」按钮 → S1 的真实探针）。
+     * 一次性连接测试（UI「测试连接」按钮 → 真实探针）。
      * 不复用共享会话：探针自带 connect → SELECT 1 → finally close。
      */
     suspend fun testConnection(config: StarRocksConnectionConfig): HealthReport =
@@ -88,9 +88,9 @@ object StarRocksModule {
         )
 
     /**
-     * SQL 控制台的查询入口（S3）：在当前共享会话上执行 [sql]，按批流式返回。
+     * SQL 控制台的查询入口：在当前共享会话上执行 [sql]，按批流式返回。
      *
-     * ## 执行历史落库（S4）
+     * ## 执行历史落库
      *
      * [onCompletion] 是唯一的执行咽喉点：流正常收完（SUCCESS）或异常结束
      * （FAILED，含 SQLException / 取消）都会回调，在此计算耗时并组装**自包含
@@ -141,7 +141,7 @@ object StarRocksModule {
         }
     }
 
-    /* ------------------------------ 懒加载连接（S3） ------------------------------ */
+    /* ------------------------------ 懒加载连接 ------------------------------ */
 
     /**
      * 共享会话是否存活**且属于 [connectionId]**（SQL 控制台「执行」前的预检）。

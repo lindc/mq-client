@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -39,7 +38,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -86,7 +84,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * 「SQL 控制台」导航项的内容页（S3：流式渲染 + 多语句执行）。
+ * 「SQL 控制台」导航项的内容页：流式渲染 + 多语句执行。
  *
  * 交互模式移植自 mq-ui 的命令控制台（CommandConsoleViewModel）：
  * - 编辑器用 [TextFieldValue] 持有光标 / 选中态 —— **有选中只执行选中，否则全文**；
@@ -101,11 +99,13 @@ import kotlinx.coroutines.withContext
  * （Compose 快照 List），`LazyColumn` 虚拟化只组装可见行。
  */
 @Composable
-internal fun StarRocksSqlConsolePlaceholder(modifier: Modifier = Modifier, connectionId: String = "") {
+internal fun StarRocksSqlConsolePanel(modifier: Modifier = Modifier, connectionId: String = "") {
     // TODO: 监听 StarRocksConnectionManager 的关闭事件，清理当前连接下的所有 Tabs，重连时自动恢复
 
-    var tabCount by remember { mutableIntStateOf(1) }
-    var selected by remember { mutableIntStateOf(0) }
+    // 状态按 connectionId 分键：切连接后不能留着上一条连接的编辑器内容与结果集
+    // （宿主在同一个组合槽位里渲染各面板，不带键的 remember 会跨连接存活）。
+    var tabCount by remember(connectionId) { mutableIntStateOf(1) }
+    var selected by remember(connectionId) { mutableIntStateOf(0) }
 
     Column(modifier.fillMaxSize()) {
         Row(modifier = Modifier.fillMaxWidth()) {
@@ -118,7 +118,7 @@ internal fun StarRocksSqlConsolePlaceholder(modifier: Modifier = Modifier, conne
                         selected = selected == index,
                         onClick = { selected = index },
                         text = {
-                            // TODO: 支持多 Tab 独立维护各自的 SQL 和结果状态（MVP 单共享态）
+                            // TODO: 支持多 Tab 独立维护各自的 SQL 和结果状态（目前各 Tab 共享一份）
                             Text(stringResource("olap.starrocks.console.query_tab").withArg(index + 1))
                         },
                     )
@@ -212,25 +212,27 @@ private const val DRAFT_DEBOUNCE_MS = 1_000L
 /** 截断信号：继承 [CancellationException] 以结束当前收集协程，但不算错误。 */
 private class StopStream : CancellationException("result set truncated at $MAX_ROWS rows")
 
-/** 单个 Tab 的内容：工具栏 + SQL 编辑器 + 结果区（MVP 各 Tab 共享一份状态）。 */
+/** 单个 Tab 的内容：工具栏 + SQL 编辑器 + 结果区（目前各 Tab 共享一份状态）。 */
 @Composable
 private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
     // TextFieldValue（而非纯 String）：与 mq-ui CommandConsoleViewModel 同构，
     // 持有光标 / 选中态，「执行选中」依赖它。
-    var textFieldValue by remember { mutableStateOf(TextFieldValue("")) }
-    val grid = remember { ConsoleGrid() }
-    var phase by remember { mutableStateOf(ConsolePhase.Idle) }
-    var showHistory by remember { mutableStateOf(false) }
-    var diagnosisSql by remember { mutableStateOf<String?>(null) }
-    var draftLoaded by remember { mutableStateOf(false) }
+    // 同上：全部按 connectionId 分键。编辑器草稿尤其重要 —— 否则在 A 连接写的 SQL
+    // 会出现在 B 连接的编辑器里，一键执行就打到了错的库上。
+    var textFieldValue by remember(connectionId) { mutableStateOf(TextFieldValue("")) }
+    val grid = remember(connectionId) { ConsoleGrid() }
+    var phase by remember(connectionId) { mutableStateOf(ConsolePhase.Idle) }
+    var showHistory by remember(connectionId) { mutableStateOf(false) }
+    var diagnosisSql by remember(connectionId) { mutableStateOf<String?>(null) }
+    var draftLoaded by remember(connectionId) { mutableStateOf(false) }
     // CSV 导出：-1 = 空闲；>=0 = 导出中（已写入行数，进度横幅用）。
-    var exportingRows by remember { mutableLongStateOf(-1L) }
+    var exportingRows by remember(connectionId) { mutableLongStateOf(-1L) }
     // 「查看本次 Profile」：取数中 + 取到 (queryId, 原始文本) 后弹大窗查看器。
-    var profileFetching by remember { mutableStateOf(false) }
-    var profileViewer by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var profileFetching by remember(connectionId) { mutableStateOf(false) }
+    var profileViewer by remember(connectionId) { mutableStateOf<Pair<String, String>?>(null) }
     val snackbar = LocalSnackbarHostState.current
-    val scope = rememberCoroutineScope()
-    var job by remember { mutableStateOf<Job?>(null) }
+    val scope = rememberConnectionScope(connectionId)
+    var job by remember(connectionId) { mutableStateOf<Job?>(null) }
     val clipboard = LocalClipboardManager.current
     // 导出文案在组合期解析（协程里用捕获值，避免在非组合上下文查表）。
     val exportSuccessText = stringResource("olap.starrocks.console.export_success")
@@ -408,18 +410,17 @@ private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
         job = scope.launch {
             var start = 0L
             try {
-                // 懒加载连接：只有「未连接 / 会话属于别的连接」时才进 Connecting 阶段。
-                // 带身份的预检保证多连接下不会误判（executeQuery 内部还有身份守卫兜底）。
-                if (!StarRocksModule.isAlive(connectionId)) {
+                // 懒加载连接：规则与其它面板同源（service 的 ensureSession），
+                // 这里只多挂一个「切到 Connecting 阶段」的 UI 回调。
+                val connected = com.mqclient.starrocks.query.ensureSession(connectionId) {
                     phase = ConsolePhase.Connecting
-                    val connected = StarRocksModule.connectById(connectionId)
-                    if (connected.isFailure) {
-                        grid.reset()
-                        grid.hasRun = true
-                        grid.error = stringResource("olap.starrocks.console.connect_failed")
-                            .withArg(connected.exceptionOrNull()?.userMessage() ?: "unknown")
-                        return@launch
-                    }
+                }
+                if (connected.isFailure) {
+                    grid.reset()
+                    grid.hasRun = true
+                    grid.error = stringResource("olap.starrocks.console.connect_failed")
+                        .withArg(connected.exceptionOrNull()?.userMessage() ?: "unknown")
+                    return@launch
                 }
 
                 // 连接就绪 → **立即**切到查询阶段（关键修复）：旧实现把
@@ -692,7 +693,7 @@ internal fun selectedSource(textFieldValue: TextFieldValue): String? {
 }
 
 /**
- * 分号切分多语句（MVP：不处理字符串字面量内的分号 —— SQL 字面量里写分号的
+ * 分号切分多语句（已知限制：不处理字符串字面量内的分号 —— SQL 字面量里写分号的
  * 场景在本工具的目标查询里极少）。剔除 `--` 行注释与空段，末尾多余分号
  * 自然产生空段被过滤。
  */
@@ -720,9 +721,9 @@ private fun HistoryPanel(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var entries by remember { mutableStateOf<List<OlapQueryRecord>>(emptyList()) }
-    var confirmClear by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
+    var entries by remember(connectionId) { mutableStateOf<List<OlapQueryRecord>>(emptyList()) }
+    var confirmClear by remember(connectionId) { mutableStateOf(false) }
+    val scope = rememberConnectionScope(connectionId)
     val snackbar = LocalSnackbarHostState.current
     val clearedText = stringResource("olap.starrocks.console.history_cleared")
 

@@ -17,19 +17,21 @@ import androidx.compose.ui.unit.dp
 import com.mqclient.uicommon.i18n.stringResource
 
 /**
- * StarRocks 占位页（**空骨架**）：显示「即将支持」文案，不做任何数据绑定、
- * 不触发连接 / 扫描 / 查询。
+ * StarRocks 的**空白态**页面：显示模块标题与提示文案，不读数据、不触网。
  *
- * Skeleton only, protocol logic pending：这是模块唯一的可见 UI，填肉时按
- * 导航项替换为真实面板（目录树 / 查询结果 / 计划树）。
+ * 两处用途：
+ *  - `AdapterUI.content` —— 连接卡片被展开但还没选具体 Tab 时的占位；
+ *  - `contentFor` 遇到**未知的 objectType** 时的兜底（未来的新导航项在实现前
+ *    也是这个页面，而不是白屏）。
+ *
+ * 真实面板（目录树 / 查询结果 / 集群视图…）都在 jvmMain，经 `contentFor` 分发。
  *
  * ## 复用策略
  *
- * 文案一律走 ui-common 的 `stringResource`（键前缀 `olap.starrocks.*`，
- * 见 ui-common 全局语言表），配色 / 字号一律走 MaterialTheme —— 这两项是
- * 仓库既有的共享基础能力。ui-common **没有**通用空状态组件（只有
- * `PartialScanBanner` 等提示条），因此这里用 Material3 基础组件拼装，
- * 不新造可复用组件（避免空壳阶段引入未经使用的抽象）。
+ * 文案走 ui-common 的 `stringResource`（键前缀 `olap.starrocks.*`，由本模块的
+ * 私有语言表提供），配色 / 字号一律走 MaterialTheme。ui-common **没有**通用
+ * 空状态组件（只有 `PartialScanBanner` 等提示条），因此这里用 Material3 基础
+ * 组件拼装，不为一个占位页新造抽象。
  */
 @Composable
 fun StarRocksPlaceholder(modifier: Modifier = Modifier) {

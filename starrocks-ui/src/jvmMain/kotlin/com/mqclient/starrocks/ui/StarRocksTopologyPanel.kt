@@ -56,27 +56,28 @@ private fun frontendName(connectionId: String): String =
  */
 @Composable
 internal fun StarRocksTopologyPanel(connectionId: String, modifier: Modifier = Modifier) {
-    var snapshot by remember { mutableStateOf<ClusterSnapshot?>(null) }
-    var data by remember { mutableStateOf<TopologyData?>(null) }
-    var loading by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    val scope = rememberCoroutineScope()
+    // 状态按 connectionId 分键（宿主在同一个组合槽位里切换连接，见 OverviewPanel 同款说明）。
+    var snapshot by remember(connectionId) { mutableStateOf<ClusterSnapshot?>(null) }
+    var data by remember(connectionId) { mutableStateOf<TopologyData?>(null) }
+    var loading by remember(connectionId) { mutableStateOf(false) }
+    var error by remember(connectionId) { mutableStateOf<String?>(null) }
+    val scope = rememberConnectionScope(connectionId)
     val nodeDetail = rememberStarRocksNodeDetailController(connectionId)
 
     suspend fun load() {
         loading = true
         error = null
         try {
-            val fresh = StarRocksClusterService.loadSnapshot(connectionId)
-            val graph = buildStarRocksTopology(fresh, fallbackFeName = frontendName(connectionId))
-            snapshot = fresh
-            // 只有占位 FE（两个查询都失败）时不画空图，交给空状态。
-            data = graph.takeIf { fresh.nodes.isNotEmpty() }
-        } catch (e: Throwable) {
-            error = e.userMessage()
-            snapshot = null
-            data = null
+            val graphResult = runPanelLoad(onError = { error = it.userMessage() }) {
+                val fresh = StarRocksClusterService.loadSnapshot(connectionId)
+                val graph = buildStarRocksTopology(fresh, fallbackFeName = frontendName(connectionId))
+                // 只有占位 FE（两个查询都失败）时不画空图，交给空状态。
+                fresh to graph.takeIf { fresh.nodes.isNotEmpty() }
+            }
+            snapshot = graphResult?.first
+            data = graphResult?.second
         } finally {
+            // 取消也要复位 spinner（同 OverviewPanel）。
             loading = false
         }
     }

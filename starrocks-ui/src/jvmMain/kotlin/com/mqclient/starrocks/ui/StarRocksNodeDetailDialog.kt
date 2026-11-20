@@ -56,9 +56,12 @@ class StarRocksNodeDetailController(private val connectionId: String) {
     fun open(node: ClusterNodeInfo, scope: CoroutineScope) {
         state = StarRocksNodeDetailState(node = node, refreshing = true)
         scope.launch {
-            val fresh = runCatching {
+            // runOptional：失败降级为 null（保持旧数据 + stale 提示），**取消照旧上抛**——
+            // 裸 runCatching 会把 CancellationException 当成失败，切连接时把对话框
+            // 标成「信息可能已过期」，而它其实只是被取消了。
+            val fresh = runOptional {
                 StarRocksClusterService.loadNode(connectionId, node.nodeId)
-            }.getOrNull()
+            }
             // 期间用户可能又双击了别的节点：只更新同一个 nodeId，避免串台。
             val current = state?.takeIf { it.node.nodeId == node.nodeId } ?: return@launch
             state = current.copy(

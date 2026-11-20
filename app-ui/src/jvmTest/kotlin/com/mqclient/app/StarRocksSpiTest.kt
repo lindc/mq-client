@@ -55,7 +55,11 @@ class StarRocksSpiTest {
         assertEquals("OLAP", adapter.category)
         // description 不能再是 TODO()：宿主渲染卡片时会直接读它。
         assertTrue(adapter.description.isNotBlank())
-        runBlocking { LanguageResources.load(LanguageResources.LANGUAGE_EN_US) }
+        // 与宿主同一条路径：olap.starrocks.* 现在由模块私有表提供，
+        // 只加载公共表会看到一个裸 key（这正是本用例要防的症状之一）。
+        runBlocking {
+            LanguageResources.load(LanguageResources.LANGUAGE_EN_US, ModuleRegistry.i18nTables)
+        }
         assertEquals(
             "StarRocks connection and analytics",
             stringResource(adapter.description),

@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -110,35 +109,42 @@ internal fun parseProcessList(result: StarRocksQueryRows): List<ProcessInfo> {
  */
 @Composable
 internal fun StarRocksProcessListPanel(connectionId: String, modifier: Modifier = Modifier) {
-    var sessions by remember { mutableStateOf<List<ProcessInfo>>(emptyList()) }
-    var loading by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var autoRefresh by remember { mutableStateOf(false) }
-    var profileTarget by remember { mutableStateOf<ProfileDetailTarget?>(null) }
-    val scope = rememberCoroutineScope()
+    // 状态按 connectionId 分键：切连接后不能残留上一条连接的查询列表。
+    var sessions by remember(connectionId) { mutableStateOf<List<ProcessInfo>>(emptyList()) }
+    var loading by remember(connectionId) { mutableStateOf(false) }
+    var error by remember(connectionId) { mutableStateOf<String?>(null) }
+    var autoRefresh by remember(connectionId) { mutableStateOf(false) }
+    var profileTarget by remember(connectionId) { mutableStateOf<ProfileDetailTarget?>(null) }
+    val scope = rememberConnectionScope(connectionId)
 
     suspend fun load() {
         loading = true
         error = null
         val start = System.currentTimeMillis()
         try {
-            val result = withContext(Dispatchers.IO) { queryRows(connectionId, PROFILELIST_SQL) }
-            sessions = parseProcessList(result)
-            StarRocksLog.profile(
-                "processlist rows=${sessions.size} rawRows=${result.rows.size} " +
-                    "cost=${System.currentTimeMillis() - start}ms",
-            )
-        } catch (e: Throwable) {
-            // 面板直接展示错误文案：WARN + 栈（自动刷新关闭前每次失败都会留一条）。
-            StarRocksLog.profile(
-                LogLevel.WARN,
-                "processlist load failed connection=$connectionId " +
-                    "cost=${System.currentTimeMillis() - start}ms error=${e.message}",
-                e,
-            )
-            error = e.userMessage()
-            sessions = emptyList()
+            val loaded = runPanelLoad(
+                onError = { e ->
+                    // 面板直接展示错误文案：WARN + 栈（自动刷新关闭前每次失败都会留一条）。
+                    StarRocksLog.profile(
+                        LogLevel.WARN,
+                        "processlist load failed connection=$connectionId " +
+                            "cost=${System.currentTimeMillis() - start}ms error=${e.message}",
+                        e,
+                    )
+                    error = e.userMessage()
+                },
+            ) {
+                val result = withContext(Dispatchers.IO) { queryRows(connectionId, PROFILELIST_SQL) }
+                val parsed = parseProcessList(result)
+                StarRocksLog.profile(
+                    "processlist rows=${parsed.size} rawRows=${result.rows.size} " +
+                        "cost=${System.currentTimeMillis() - start}ms",
+                )
+                parsed
+            }
+            sessions = loaded ?: emptyList()
         } finally {
+            // 自动刷新被关掉时这个 load() 可能正被取消：spinner 必须复位。
             loading = false
         }
     }

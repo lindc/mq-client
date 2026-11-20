@@ -1,8 +1,6 @@
 package com.mqclient.starrocks.cluster
 
 import com.mqclient.core.log.LogLevel
-import com.mqclient.olap.base.query.ResultColumn
-import com.mqclient.starrocks.StarRocksModule
 import com.mqclient.starrocks.log.StarRocksLog
 import kotlinx.coroutines.CancellationException
 
@@ -12,7 +10,8 @@ import kotlinx.coroutines.CancellationException
  *
  * ## 依赖方向
  *
- * 拓扑双击 → UI 的控制器 → **本门面**（suspend 调用）→ [StarRocksModule.executeQuery]。
+ * 拓扑双击 → UI 的控制器 → **本门面**（suspend 调用）→
+ * [com.mqclient.starrocks.query.queryRows]（service 的唯一取数入口）。
  * 刻意不用 EventBus：事件是"广播 + 无返回值"，做"点了这个节点、拉这一条"的请求-响应
  * 得自己配 correlation id / 超时 / 去重，而一次 suspend 调用就是全部语义。
  * 与 MQ 的属性对话框同款（`ObjectPropertiesDialogController` 直接读 service）。
@@ -30,11 +29,6 @@ import kotlinx.coroutines.CancellationException
  *    概览自动退化到"平均内存使用率"。
  */
 object StarRocksClusterService {
-
-    /** 一次查询的原始结果（列名 + 行），只在本文件内部流转。 */
-    private data class Rows(val columns: List<String>, val rows: List<List<Any?>>) {
-        val isEmpty: Boolean get() = rows.isEmpty()
-    }
 
     private const val SQL_FRONTENDS = "SHOW FRONTENDS;"
     private const val SQL_BACKENDS = "SHOW BACKENDS;"
@@ -154,18 +148,15 @@ object StarRocksClusterService {
     }
 
     /**
-     * 与面板既有口径一致：未连接先走 [StarRocksModule.connectById]。
+     * 与面板既有口径一致：未连接先走 service 的 [com.mqclient.starrocks.query.ensureSession]。
      *
      * 为什么不只依赖 `executeQuery` 内部的懒建连：`connectById` 会 
      * `reportStatus(Connected)`（左侧连接树变绿），而 `executeQuery` 内部的
      * `manager.connect` 只发事件不报状态 —— 直接执行会导致"面板有数据、树还
      * 显示未连接"。这是从旧面板实现里继承下来的教训，迁移时不能丢。
      */
-    private suspend fun ensureConnected(connectionId: String) {
-        if (!StarRocksModule.isAlive(connectionId)) {
-            StarRocksModule.connectById(connectionId).getOrThrow()
-        }
-    }
+    private suspend fun ensureConnected(connectionId: String) =
+        com.mqclient.starrocks.query.ensureSession(connectionId).getOrThrow()
 
     /** 探测式拉 Routine Load：第一条返回结果（或至少能执行）的语句胜出。 */
     private suspend fun loadRoutineLoads(connectionId: String): Result<List<RoutineLoadInfo>> {
@@ -192,39 +183,15 @@ object StarRocksClusterService {
     private suspend fun <T> runPart(
         connectionId: String,
         sql: String,
-        parse: (Rows) -> T,
-    ): Result<T> {
-        val startedAt = System.currentTimeMillis()
-        StarRocksLog.sql(LogLevel.DEBUG, "cluster exec connection=$connectionId ${StarRocksLog.sqlSummary(sql)}")
-        return try {
-            var columns: List<ResultColumn> = emptyList()
-            val rows = mutableListOf<List<Any?>>()
-            StarRocksModule.executeQuery(connectionId, sql).collect { batch ->
-                if (batch.columns.isNotEmpty()) columns = batch.columns
-                rows.addAll(batch.rows)
-            }
-            val cost = System.currentTimeMillis() - startedAt
-            StarRocksLog.sql(
-                "cluster done connection=$connectionId type=${StarRocksLog.statementKind(sql)} " +
-                    "rows=${rows.size} columns=${columns.size} cost=${cost}ms",
-            )
-            StarRocksLog.perf(
-                action = "cluster_query",
-                type = StarRocksLog.statementKind(sql),
-                costMs = cost,
-            )
-            Result.success(parse(Rows(columns.map { it.name }, rows)))
-        } catch (cancellation: CancellationException) {
-            throw cancellation
-        } catch (error: Throwable) {
-            val cost = System.currentTimeMillis() - startedAt
-            StarRocksLog.sql(
-                LogLevel.WARN,
-                "cluster failed connection=$connectionId type=${StarRocksLog.statementKind(sql)} " +
-                    "cost=${cost}ms error=${error.message}",
-                error,
-            )
-            Result.failure(error)
-        }
+        parse: (com.mqclient.starrocks.query.QueryRows) -> T,
+    ): Result<T> = try {
+        // 取数（含连接守卫、日志、打点、取消语义）全走 service 的唯一入口；
+        // 这里只负责「失败收敛成 Result」，由调用方决定记降级还是静默忽略。
+        Result.success(parse(com.mqclient.starrocks.query.queryRows(connectionId, sql, origin = "cluster")))
+    } catch (cancellation: CancellationException) {
+        throw cancellation
+    } catch (error: Throwable) {
+        if (error is Error) throw error
+        Result.failure(error)
     }
 }

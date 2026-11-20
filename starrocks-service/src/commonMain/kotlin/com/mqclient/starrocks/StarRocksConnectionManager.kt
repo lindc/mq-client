@@ -22,7 +22,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 /**
- * StarRocks 连接管理器（S1：真实 `testConnection` 与 `healthCheck`）。
+ * StarRocks 连接管理器：真实 `testConnection` / `healthCheck` / 流式查询。
  *
  * 继承 olap-base 的 [AbstractAnalyticsConnectionManager]，复用其「单连接 +
  * Mutex 串行 + EventBus 状态广播 + 半开自愈」骨架；本类只填协议相关的三个钩子：
@@ -160,7 +160,7 @@ class StarRocksConnectionManager(
     /** 日志里的会话标识（端点，不含凭据）。 */
     override fun describe(session: StarRocksSession): String = session.endpoint
 
-    /* ------------------------------ S1 公开 API ------------------------------ */
+    /* ------------------------------ 连接探针 ------------------------------ */
 
     /**
      * 一次性连接测试（UI「测试连接」按钮的入口）。
@@ -243,10 +243,10 @@ class StarRocksConnectionManager(
         runCatching { connector.close() }
     }
 
-    /* ------------------------------ S3 查询 ------------------------------ */
+    /* ------------------------------ 查询 ------------------------------ */
 
     /**
-     * 在**当前共享会话**上执行一条 SQL，结果按批流式返回（MVP 查询闭环）。
+     * 在**当前共享会话**上执行一条 SQL，结果按批流式返回。
      *
      * - SELECT：每 [JdbcConnection.DEFAULT_QUERY_BATCH_SIZE] 行一个
      *   [ResultBatch]（schema 每批全量携带，UI 不用回看前序批次）；
@@ -259,7 +259,7 @@ class StarRocksConnectionManager(
      * healthCheck（半开自愈语义见基类）。
      *
      * // TODO: 迁移到 olap-base 的 AbstractQueryExecutor（QueryHandle / 取消 /
-     *   EXPLAIN / 审计），MVP 先走 manager 级轻量通道。
+     *   EXPLAIN / 审计），目前走 manager 级轻量通道。
      */
     fun executeQuery(sql: String, connectionId: String? = null): Flow<ResultBatch> = flow {
         val start = olapTimeMillis()
