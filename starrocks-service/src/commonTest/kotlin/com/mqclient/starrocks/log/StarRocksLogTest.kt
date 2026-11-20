@@ -64,6 +64,27 @@ class StarRocksLogTest {
     }
 
     @Test
+    fun `password containing an at-sign does not leak its tail`() {
+        // userinfo 段按**最后一个** `@` 切分：密码自身可能含 `@`。
+        // 旧实现（非贪婪 `[^/@\s]+`）抹掉 `user:p` 就停，输出
+        // `jdbc:mysql://***@ss@host:9030/db` —— `ss` 是密码残段，照样泄露。
+        //
+        // 断言用**精确相等**而不是 contains/endsWith：后者在旧实现下也成立
+        // （实测过），守不住这个缺陷。
+        assertEquals(
+            "jdbc:mysql://***@host:9030/db",
+            StarRocksLog.redactJdbcUrl("jdbc:mysql://user:p@ss@host:9030/db"),
+        )
+    }
+
+    @Test
+    fun `at-sign in query parameters is not treated as userinfo`() {
+        // `[^/\s]` 在第一个 `/` 处停下，路径 / 参数里的 @ 不会被误当成凭据。
+        val url = "jdbc:mysql://host:9030/db?note=a@b"
+        assertEquals(url, StarRocksLog.redactJdbcUrl(url))
+    }
+
+    @Test
     fun `statement kind separates profile from ordinary show`() {
         assertEquals("PROFILE", StarRocksLog.statementKind("ANALYZE PROFILE FROM 'abc';"))
         assertEquals("PROFILE", StarRocksLog.statementKind("show profilelist;"))

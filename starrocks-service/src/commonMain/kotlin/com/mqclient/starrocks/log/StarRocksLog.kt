@@ -200,5 +200,8 @@ object StarRocksLog {
      * 注意别把替换结果写成字面量注释：Kotlin 的块注释会嵌套，
      * 注释里出现斜杠加星号就会开启一层新注释、把后面的代码吞掉。
      */
-    private val USER_INFO = Regex("//([^/@\\s]+)@")
+    // 贪婪匹配到 authority 段**最后一个** `@`：密码本身可能含 `@`
+    // （`//user:p@ss@host`），非贪婪版本只会抹掉 `user:p`，把 `ss@host` 留在日志里。
+    // 不会误伤路径/参数里的 `@` —— `[^/\s]` 在第一个 `/` 处就停下。
+    private val USER_INFO = Regex("//([^/\\s]+)@")
 }
