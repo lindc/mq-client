@@ -1,9 +1,6 @@
 package com.mqclient.starrocks.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,14 +10,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Download
@@ -28,9 +20,7 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -43,7 +33,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -60,22 +49,16 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mqclient.core.ServiceException
-import com.mqclient.core.db.OlapQueryRecord
 import com.mqclient.core.db.OlapQueryRepository
 import com.mqclient.core.log.LogLevel
-import com.mqclient.olap.base.query.ResultColumn
 import com.mqclient.starrocks.StarRocksModule
 import com.mqclient.starrocks.log.StarRocksLog
-import com.mqclient.uicommon.DangerButton
 import com.mqclient.uicommon.LocalSnackbarHostState
-import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.userMessage
 import com.mqclient.uicommon.i18n.withArg
-import com.mqclient.uicommon.table.formatTimestamp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -95,8 +78,17 @@ import kotlinx.coroutines.withContext
  *   Statement / 连接由 service 层强制关闭，经懒加载路径自动重连）。
  *
  * 查询执行走 [StarRocksModule.executeQuery]（当前共享会话上的流式
- * `Flow<ResultBatch>`）；UI **边收集边渲染** —— 行落在 [ConsoleGrid.rows]
+ * `Flow<ResultBatch>`）；UI **边收集并渲染** —— 行落在 [ConsoleGrid.rows]
  * （Compose 快照 List），`LazyColumn` 虚拟化只组装可见行。
+ *
+ * ## 文件组织
+ *
+ * 控制台的代码按「状态 / 文本 / 渲染 / 历史」切开，本文件只留入口与执行状态机：
+ *  - 本文件 —— [StarRocksSqlConsolePanel] 入口、Tab 容器、[ConsoleBody] 执行流程；
+ *  - [StarRocksSqlConsoleState] —— [ConsolePhase] / [ConsoleGrid] / 截断信号等状态模型；
+ *  - [StarRocksSqlText] —— 选区取源、分号切分、TSV 导出等纯文本函数（已有单测）；
+ *  - [StarRocksSqlConsoleResult] —— 结果区 / 结果表格 / 状态横幅等渲染；
+ *  - [StarRocksSqlConsoleHistory] —— 执行历史面板（只读审计表）。
  */
 @Composable
 internal fun StarRocksSqlConsolePanel(modifier: Modifier = Modifier, connectionId: String = "") {
@@ -138,79 +130,6 @@ internal fun StarRocksSqlConsolePanel(modifier: Modifier = Modifier, connectionI
         ConsoleBody(Modifier.fillMaxSize(), connectionId)
     }
 }
-
-/**
- * 控制台的**阶段机**：连接与查询是互斥的两个阶段。
- *
- * 旧实现用 `connecting: Boolean` + `grid.streaming: Boolean` 两套状态，且连接
- * 成功后的整个查询期间 `connecting` 仍为 true（直到 launch 的 finally 才复位）
- * —— 结果区一直显示「正在建立连接...」，文案与事实不符。单一阶段机让文案
- * 与阶段一一对应，不可能组合出「已连接 + 显示建立连接」这种非法态。
- */
-private enum class ConsolePhase {
-    /** 未执行过（初始提示）。 */
-    Idle,
-
-    /** 懒加载自动建连中 → 「正在建立连接...」。 */
-    Connecting,
-
-    /** 连接已就绪、查询进行中 → 「正在执行查询...」。 */
-    Executing,
-
-    /** 本轮结束：结果 / 错误由 [ConsoleGrid] 表达，不再显示加载态。 */
-    Finished,
-}
-
-/**
- * 结果网格的可观察状态：**流式收集的落点**。
- *
- * `columns` / `rows` 用 Compose 快照 List —— 协程里每收一批就 append，
- * `LazyColumn` 随之增量重组（边收边渲染，不等全部收完）。
- */
-private class ConsoleGrid {
-    val columns = mutableStateListOf<ResultColumn>()
-    val rows = mutableStateListOf<List<Any?>>()
-
-    /** 本轮是否已发起过执行（区分「初始」与「空结果集」）。 */
-    var hasRun by mutableStateOf(false)
-
-    /** 超过 [MAX_ROWS] 截断（防 OOM）：停止 append 并取消后续拉取。 */
-    var truncated by mutableStateOf(false)
-
-    /** 最近一条 DML / DDL 的受影响行数（SELECT 流为 null）。 */
-    var updateCount by mutableStateOf<Long?>(null)
-
-    /** 真实墙钟耗时（全部语句累计）。 */
-    var durationMs by mutableLongStateOf(0L)
-
-    /** 执行失败的用户文案（`userMessage()` 翻译后的）；非空 = 本轮以失败告终。 */
-    var error by mutableStateOf<String?>(null)
-
-    /** 本轮语句统计：成功 / 失败条数（多条执行的状态栏）。 */
-    var successCount by mutableIntStateOf(0)
-    var failedCount by mutableIntStateOf(0)
-
-    fun reset() {
-        columns.clear()
-        rows.clear()
-        hasRun = false
-        truncated = false
-        updateCount = null
-        durationMs = 0L
-        error = null
-        successCount = 0
-        failedCount = 0
-    }
-}
-
-/** OOM 保护：超过该行数停止 append 并取消拉取（数据仍在服务端，客户端不再累积）。 */
-private const val MAX_ROWS = 50_000
-
-/** 草稿防抖窗口（停止输入后毫秒数）。 */
-private const val DRAFT_DEBOUNCE_MS = 1_000L
-
-/** 截断信号：继承 [CancellationException] 以结束当前收集协程，但不算错误。 */
-private class StopStream : CancellationException("result set truncated at $MAX_ROWS rows")
 
 /** 单个 Tab 的内容：工具栏 + SQL 编辑器 + 结果区（目前各 Tab 共享一份状态）。 */
 @Composable
@@ -667,347 +586,6 @@ private fun ConsoleBody(modifier: Modifier = Modifier, connectionId: String) {
         }
     }
 }
-
-/**
- * 结果 → TSV 文本（表头 + 行，Tab 分隔，NULL 原样）。纯函数便于测试；
- * 大结果集的拼接由调用方放到 IO 线程。
- */
-internal fun buildTsv(columns: List<ResultColumn>, rows: List<List<Any?>>): String = buildString {
-    appendLine(columns.joinToString("\t") { it.name })
-    rows.forEach { row -> appendLine(row.joinToString("\t") { it?.toString() ?: "NULL" }) }
-}
-
-/**
- * 「执行选中」的取源逻辑（与 mq-ui `CommandConsoleViewModel.execute` 同构）：
- * selection 在反向选择（从后往前拖）时 start > end，必须用 min/max 归一，
- * 否则 substring 会抛 StringIndexOutOfBoundsException。
- * 返回 null = 没有选中文本（调用方回落全文）。
- */
-internal fun selectedSource(textFieldValue: TextFieldValue): String? {
-    val selection = textFieldValue.selection
-    // 无选区（光标只是一个闪烁竖线）→ 返回 null，由调用方执行全文。
-    if (selection.start == selection.end) return null
-    // 反向选择（从后往前拖）时 start > end，用 min/max 归一防 substring 越界；
-    // 除此之外**原样截取**，不改写任何选区状态。
-    return textFieldValue.text.substring(selection.min, selection.max)
-}
-
-/**
- * 分号切分多语句（已知限制：不处理字符串字面量内的分号 —— SQL 字面量里写分号的
- * 场景在本工具的目标查询里极少）。剔除 `--` 行注释与空段，末尾多余分号
- * 自然产生空段被过滤。
- */
-internal fun splitStatements(text: String): List<String> =
-    text.split(';')
-        .map { segment ->
-            segment.lines()
-                .filterNot { it.trimStart().startsWith("--") }
-                .joinToString("\n")
-                .trim()
-        }
-        .filter { it.isNotEmpty() }
-
-/**
- * 「执行历史」右侧面板：最近 50 条（时间倒序），点击回填 SQL，可一键清空。
- * **只查审计表，不碰结果集**。
- *
- * 形态是叠加在主内容右侧的常驻面板（Box 对齐 CenterEnd），主内容左侧仍可交互；
- * 关闭 / 切 Tab 随组合销毁。
- */
-@Composable
-private fun HistoryPanel(
-    connectionId: String,
-    onPick: (String) -> Unit,
-    onDismiss: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    var entries by remember(connectionId) { mutableStateOf<List<OlapQueryRecord>>(emptyList()) }
-    var confirmClear by remember(connectionId) { mutableStateOf(false) }
-    val scope = rememberConnectionScope(connectionId)
-    val snackbar = LocalSnackbarHostState.current
-    val clearedText = stringResource("olap.starrocks.console.history_cleared")
-
-    fun reload() {
-        scope.launch {
-            entries = runCatching { OlapQueryRepository.recent(connectionId, 50) }.getOrDefault(emptyList())
-        }
-    }
-
-    LaunchedEffect(connectionId) { reload() }
-
-    Column(
-        modifier
-            .fillMaxHeight()
-            .background(MaterialTheme.colorScheme.surface)
-            .padding(8.dp),
-    ) {
-        // ── 标题栏：标题 + 清空 + 关闭 ──
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-            Text(
-                stringResource("olap.starrocks.console.history_title"),
-                style = MaterialTheme.typography.titleSmall,
-                modifier = Modifier.weight(1f),
-            )
-            IconButton(onClick = { confirmClear = true }, enabled = entries.isNotEmpty()) {
-                Icon(Icons.Filled.DeleteSweep, contentDescription = stringResource("olap.starrocks.console.history_clear"))
-            }
-            IconButton(onClick = onDismiss) {
-                Icon(Icons.Filled.Close, contentDescription = stringResource("common_close"))
-            }
-        }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-
-        if (entries.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(
-                    stringResource("olap.starrocks.console.history_empty"),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        } else {
-            LazyColumn(
-                Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                items(entries, key = { "${it.id}:${it.createdAt}" }) { entry ->
-                    val ok = entry.status == OlapQueryRecord.STATUS_SUCCESS
-                    Column(
-                        Modifier
-                            .fillMaxWidth()
-                            .clickable { onPick(entry.sqlText) }
-                            .background(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.shapes.small)
-                            .padding(8.dp),
-                    ) {
-                        // 头部：状态（成功绿 / 失败红）· 执行时间 · 耗时
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                stringResource(
-                                    if (ok) "olap.starrocks.console.history_ok"
-                                    else "olap.starrocks.console.history_fail",
-                                ),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (ok) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.error,
-                            )
-                            Text(
-                                "  ${formatTimestamp(entry.createdAt)}  ${entry.durationMs} ms",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        // 内容：SQL 前两行，超出省略
-                        val lines = entry.sqlText.lines()
-                        val preview = if (lines.size > 2) lines.take(2).joinToString("\n") + "\n…" else entry.sqlText
-                        Text(
-                            preview,
-                            fontFamily = FontFamily.Monospace,
-                            style = MaterialTheme.typography.bodySmall,
-                            maxLines = 3,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(top = 4.dp),
-                        )
-                    }
-                }
-            }
-        }
-    }
-
-    // ── 清空历史二次确认（不可逆操作） ──
-    if (confirmClear) {
-        AlertDialog(
-            onDismissRequest = { confirmClear = false },
-            title = { Text(stringResource("olap.starrocks.console.history_clear")) },
-            text = { Text(stringResource("olap.starrocks.console.history_clear_confirm")) },
-            confirmButton = {
-                DangerButton(onClick = {
-                    confirmClear = false
-                    scope.launch {
-                        withContext(Dispatchers.IO) { runCatching { OlapQueryRepository.clear(connectionId) } }
-                        entries = emptyList()
-                        snackbar.showSnackbar(clearedText)
-                    }
-                }) { Text(stringResource("common_ok")) }
-            },
-            dismissButton = {
-                SecondaryButton(onClick = { confirmClear = false }) { Text(stringResource("common_cancel")) }
-            },
-        )
-    }
-}
-
-
-@Composable
-private fun ResultArea(grid: ConsoleGrid, phase: ConsolePhase, modifier: Modifier = Modifier) {
-    Box(modifier, contentAlignment = Alignment.Center) {
-        when (phase) {
-            ConsolePhase.Idle -> Text(
-                stringResource("olap.starrocks.console.idle_hint"),
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-
-            // 只有**真正**在自动建连时才显示这个文案。
-            ConsolePhase.Connecting -> ProgressHint(stringResource("olap.starrocks.console.connecting"))
-
-            // 连接就绪、查询进行中：结果还没到就显示居中的「正在执行查询...」，
-            // 已有首批数据则边收边渲染表格（顶部横幅同款文案）。
-            ConsolePhase.Executing ->
-                if (grid.rows.isEmpty() && grid.columns.isEmpty()) {
-                    ProgressHint(stringResource("olap.starrocks.console.executing"))
-                } else {
-                    ResultTable(grid, phase, Modifier.fillMaxSize())
-                }
-
-            // 本轮结束：结果 / 错误由 grid 表达，任何 Loading 文案都不再显示。
-            ConsolePhase.Finished -> when {
-                // 执行失败（清空了之前的表格）。
-                grid.error != null -> Text(
-                    stringResource("olap.starrocks.console.error_prefix") + grid.error,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(16.dp),
-                )
-
-                // DML / DDL：受影响行数（列 schema 为空）。
-                grid.updateCount != null -> Text(
-                    stringResource("olap.starrocks.console.affected_rows")
-                        .withArg(grid.updateCount ?: 0L, grid.durationMs),
-                    style = MaterialTheme.typography.bodyLarge,
-                )
-
-                // 空结果集。
-                grid.columns.isEmpty() && grid.rows.isEmpty() -> Text(
-                    stringResource("olap.starrocks.console.empty_result").withArg(grid.durationMs),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-
-                else -> ResultTable(grid, phase, Modifier.fillMaxSize())
-            }
-        }
-    }
-}
-
-// TODO: 结果表格支持列宽拖拽与冻结列（虚拟滚动已由 LazyColumn 承担）
-
-/** 流式结果表格：行落在快照 List，边收边渲染；顶部横幅反映拉取进度。 */
-@Composable
-private fun ResultTable(grid: ConsoleGrid, phase: ConsolePhase, modifier: Modifier = Modifier) {
-    Column(modifier) {
-        // ── 顶部状态横幅：执行中显示进度；截断显示保护提示 ──
-        when {
-            phase == ConsolePhase.Executing -> StreamingBanner(
-                text = stringResource("olap.starrocks.console.stream_loading").withArg(grid.rows.size),
-            )
-            grid.truncated -> StreamingBanner(
-                text = stringResource("olap.starrocks.console.truncated").withArg(MAX_ROWS),
-                busy = false,
-            )
-            else -> Text(
-                summaryLine(grid),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(bottom = 4.dp),
-            )
-        }
-
-        val horizontal = rememberScrollState()
-        // 外层横向滚动（列多不挤爆），内层纵向 LazyColumn 虚拟化（只组装可见行）；
-        // 表头与数据行共用同一横向偏移，列自然对齐。
-        Row(Modifier.fillMaxSize().horizontalScroll(horizontal)) {
-            Column {
-                Row(Modifier.background(MaterialTheme.colorScheme.surfaceVariant)) {
-                    grid.columns.forEach { column ->
-                        TableCell(text = column.name, header = true)
-                    }
-                }
-                LazyColumn(Modifier.weight(1f)) {
-                    items(grid.rows) { row ->
-                        Row {
-                            row.forEach { value ->
-                                TableCell(text = value?.toString() ?: "NULL", header = false)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-/** 汇总行：行数 + 耗时；多条执行时追加成功 / 失败计数。 */
-@Composable
-private fun summaryLine(grid: ConsoleGrid): String {
-    val base = stringResource("olap.starrocks.console.row_count")
-        .withArg(grid.rows.size, grid.durationMs)
-    val multi = grid.successCount + grid.failedCount > 1
-    return if (multi) {
-        base + "  " + stringResource("olap.starrocks.console.summary")
-            .withArg(grid.successCount + grid.failedCount, grid.successCount, grid.failedCount)
-    } else {
-        base
-    }
-}
-
-/** 顶部进度横幅：小号 spinner + 文案（截断提示复用同一形态，不带 spinner）。 */
-@Composable
-private fun StreamingBanner(text: String, busy: Boolean = true) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-    ) {
-        if (busy) {
-            CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
-            Text(
-                text,
-                style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier.padding(start = 8.dp),
-            )
-        } else {
-            Text(
-                text,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-/** 居中的 spinner + 文案（连接中共用形态）。 */
-@Composable
-private fun ProgressHint(text: String) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        CircularProgressIndicator()
-        Text(text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 12.dp))
-    }
-}
-
-/** 单元格：固定宽度、单行省略；表头用 label 样式区分。 */
-@Composable
-private fun TableCell(text: String, header: Boolean) {
-    Box(
-        Modifier
-            .width(HEADER_CELL_WIDTH)
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-    ) {
-        SelectionContainer {
-            Text(
-                text,
-                style = if (header) MaterialTheme.typography.labelMedium else MaterialTheme.typography.bodyMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                color = if (header) MaterialTheme.colorScheme.onSurfaceVariant
-                else MaterialTheme.colorScheme.onSurface,
-            )
-        }
-    }
-}
-
-private val HEADER_CELL_WIDTH = 160.dp
 
 /** SHOW PROFILELIST 的原始形状摘要：列名 + 前几行（截断后进日志）。 */
 private fun describeProfileList(
