@@ -55,11 +55,23 @@ class SshTunnelLiveTest {
     fun `query runs through a real ssh tunnel`() = runBlocking {
         if (!enabled || sshKey.isBlank()) return@runBlocking
 
+        // 主机密钥校验是新增的安全层：测试也走一遍 TOFU ——
+        // 先用临时 known_hosts 触发「未知主机」，拿到指纹后记住，再连。
+        val knownDir = kotlin.io.path.createTempDirectory("tunnel-live")
+        val known = KnownHostsStore(knownDir.resolve("known_hosts"), port = sshPort)
         val manager = StarRocksConnectionManager(
             context(),
             connector = MysqlJdbcConnector(),
-            tunnelFactory = { cfg -> SshTunnel.open(cfg) },
+            tunnelFactory = { cfg -> SshTunnel.open(cfg, known) },
         )
+
+        val firstTry = manager.connect(config())
+        if (firstTry.exceptionOrNull() is SshUnknownHostException) {
+            val fp = known.lastSeenFingerprint("127.0.0.1").orEmpty()
+            println("LIVE tunnel tofu -> fingerprint=$fp")
+            known.rememberFingerprint("127.0.0.1", "ssh-ed25519", fp)
+            manager.close()
+        }
 
         val connected = manager.connect(config())
         println("LIVE ssh connect -> ${connected.isSuccess} ${connected.exceptionOrNull()}")
@@ -73,6 +85,7 @@ class SshTunnelLiveTest {
         assertTrue(rows > 0, "经隧道应能查到数据")
 
         manager.close()
+        knownDir.toFile().deleteRecursively()
         println("LIVE ssh closed")
     }
 }

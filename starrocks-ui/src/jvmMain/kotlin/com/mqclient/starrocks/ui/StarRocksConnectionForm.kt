@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Visibility
@@ -19,6 +20,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -29,6 +31,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
@@ -38,6 +41,8 @@ import com.mqclient.mqui.state.SaveAnywayDialog
 import com.mqclient.mqui.state.SaveState
 import com.mqclient.starrocks.StarRocksConstants
 import com.mqclient.uicommon.LabeledField
+import com.mqclient.uicommon.PrimaryButton
+import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
 
 /**
@@ -344,6 +349,10 @@ private fun SshTunnelSection(state: StarRocksConnectionFormState) {
                 )
             }
 
+            // 首连确认：核对指纹后记住（TOFU）。这是 SSH 的安全核心 ——
+            // 没有它就只能 StrictHostKeyChecking=no，等于谁都能冒充堡垒机。
+            state.pendingHostFingerprint?.let { prompt -> HostKeyConfirmCard(state, prompt) }
+
             // 密码 / 私钥口令：掩码输入（与主密码同款眼睛图标）。
             LabeledField(
                 stringResource(
@@ -375,6 +384,74 @@ private fun SshTunnelSection(state: StarRocksConnectionFormState) {
                         }
                     },
                 )
+            }
+        }
+    }
+}
+
+/**
+ * 主机指纹确认卡（首连 / 密钥变更时出现）。
+ *
+ * 展示**完整指纹**让用户跟运维给的数字逐段核对 —— 这是 TOFU 唯一的验证手段，
+ * 因此不能隐藏、不能截断。变更（[SshHostKeyPrompt.changed]）用 error 色强调：
+ * 它可能是服务器重装，也可能是中间人，必须让用户停一下。
+ */
+@Composable
+internal fun HostKeyConfirmCard(
+    state: StarRocksConnectionFormState,
+    prompt: StarRocksConnectionFormState.SshHostPrompt,
+) {
+    Surface(
+        color = if (prompt.changed) {
+            MaterialTheme.colorScheme.errorContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceVariant
+        },
+        shape = MaterialTheme.shapes.small,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                stringResource(
+                    if (prompt.changed) "olap.starrocks.form.ssh_host_changed_title"
+                    else "olap.starrocks.form.ssh_host_unknown_title",
+                ),
+                style = MaterialTheme.typography.titleSmall,
+                color = if (prompt.changed) {
+                    MaterialTheme.colorScheme.onErrorContainer
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                },
+            )
+            Text(
+                "${prompt.host}:${prompt.port} · ${prompt.keyType}",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            // 指纹等宽显示：方便逐字符核对。
+            SelectionContainer {
+                Text(
+                    "SHA256:${prompt.fingerprint.ifBlank { "-" }}",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            Text(
+                stringResource("olap.starrocks.form.ssh_host_verify_hint"),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                PrimaryButton(onClick = state::trustPendingHost) {
+                    Text(stringResource("olap.starrocks.form.ssh_host_trust"))
+                }
+                SecondaryButton(onClick = state::dismissPendingHost) {
+                    Text(stringResource("olap.starrocks.form.ssh_host_dismiss"))
+                }
             }
         }
     }

@@ -218,9 +218,22 @@ class StarRocksConnectionManager(
                 "user=${config.user} url=${StarRocksLog.redactJdbcUrl(config.jdbcUrl)} " +
                 "timeouts=${timeoutsOf(config.jdbcUrl)}",
         )
+        // 与 openSession 同一条路径：配了 SSH 就必须经隧道，否则测试连接会直连 FE
+        // 并失败（用户看到的是"连不上"，实际是漏了隧道）。
+        var tunnel: com.mqclient.starrocks.tunnel.ConnectionTunnel? = null
         return try {
-            connection = connector.connect(config.jdbcUrl, config.user, config.password)
-            val ok = connection.probe()
+            val url = if (config.sshEnabled) {
+                val factory = tunnelFactory
+                    ?: throw com.mqclient.starrocks.tunnel.SshUnsupportedException()
+                tunnel = factory.open(config)
+                com.mqclient.starrocks.tunnel.rewriteJdbcAuthority(config.jdbcUrl, port = tunnel!!.localPort)
+                    ?: throw IllegalStateException("cannot rewrite JDBC URL for tunnel")
+            } else {
+                config.jdbcUrl
+            }
+            val raw = connector.connect(url, config.user, config.password)
+            connection = if (tunnel == null) raw else TunneledConnection(raw, tunnel!!).also { tunnel = null }
+            val ok = connection!!.probe()
             val duration = olapTimeMillis() - start
             logProbe("testConnection", ok, duration, config.connectionId)
             if (ok) {
@@ -251,6 +264,8 @@ class StarRocksConnectionManager(
                 latencyMs = duration,
             )
         } finally {
+            // 隧道未挂上连接（失败 / 取消路径）时单独关。
+            tunnel?.close()
             // 轻量句柄即用即毁：成功 / 失败 / 取消都要关，且关不掉不能掩盖真实错误。
             connection?.let { conn ->
                 runCatching { conn.close() }

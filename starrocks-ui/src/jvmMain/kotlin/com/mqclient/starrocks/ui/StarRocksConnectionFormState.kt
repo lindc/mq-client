@@ -11,6 +11,7 @@ import com.mqclient.mqui.state.AbstractConnectionFormState
 import com.mqclient.olap.base.connection.HealthReport
 import com.mqclient.starrocks.StarRocksConnectionConfig
 import com.mqclient.starrocks.StarRocksConstants
+import com.mqclient.starrocks.ssh.StarRocksKnownHosts
 import com.mqclient.starrocks.StarRocksModule
 import com.mqclient.uicommon.i18n.stringResource
 import kotlinx.coroutines.CoroutineDispatcher
@@ -18,6 +19,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
+import com.mqclient.uicommon.i18n.withArg
 
 /** 分字段校验错误（存 i18n key，展示时由面板翻译）。 */
 data class StarRocksFieldErrors(
@@ -113,6 +115,25 @@ class StarRocksConnectionFormState(
      * 拆成两个框会让人不知道该填哪个。
      */
     var sshPassword by mutableStateOf("")
+
+    /**
+     * 首连确认：待用户核对的 SSH 主机指纹（null = 没有待确认项）。
+     *
+     * 为什么不能自动信任：首次连接时客户端无法判断对端是不是真的堡垒机。
+     * 展示指纹让用户跟运维核对（`ssh-keygen -lf` 同一算法），确认后才写入
+     * known_hosts —— 这就是 OpenSSH 的 TOFU 流程。
+     */
+    var pendingHostFingerprint by mutableStateOf<SshHostPrompt?>(null)
+        private set
+
+    /** 待确认的主机指纹（UI 展示 + 用户点「信任」）。 */
+    data class SshHostPrompt(
+        val host: String,
+        val port: Int,
+        val keyType: String,
+        val fingerprint: String,
+        val changed: Boolean,
+    )
 
     /** 编辑模式下的原始 SSH 密码（未动过则沿用）。 */
     private var originalSshPassword by mutableStateOf("")
@@ -274,7 +295,64 @@ class StarRocksConnectionFormState(
      */
     override suspend fun testConnection(config: StarRocksConnectionConfig) {
         val report = probe(config)
-        if (!report.healthy) throw IllegalStateException(report.detail)
+        if (report.healthy) return
+
+        // 隧道拒绝未知 / 变更的主机密钥时，把指纹交给 UI 让用户确认，
+        // 而不是丢一句"未知的引擎错误"（原来就是那样，用户无从下手）。
+        val prompt = parseHostKeyPrompt(config, report.detail)
+        if (prompt != null) {
+            pendingHostFingerprint = prompt
+            throw IllegalStateException(
+                stringResource(
+                    if (prompt.changed) "olap.starrocks.form.ssh_host_changed"
+                    else "olap.starrocks.form.ssh_host_unknown",
+                ).withArg(prompt.fingerprint),
+            )
+        }
+        throw IllegalStateException(report.detail)
+    }
+
+    /**
+     * 从测试失败的 detail 里认出「主机密钥待确认」。
+     *
+     * 为什么靠文本而不是异常类型：`testConnection` 返回 `HealthReport` 而不是抛
+     * 异常（UI 的统一错误模型），服务层把异常翻成了 detail 文本。这里匹配的是
+     * 我们自己写的那句话（见 SshUnknownHostException / SshHostKeyChangedException），
+     * 不是第三方文案。
+     */
+    private fun parseHostKeyPrompt(
+        config: StarRocksConnectionConfig,
+        detail: String,
+    ): SshHostPrompt? {
+        val changed = detail.contains("changed", ignoreCase = true)
+        val unknown = detail.contains("Unknown SSH host key", ignoreCase = true)
+        if (!changed && !unknown) return null
+        val fingerprint = Regex("""SHA256:(\S+)""").find(detail)?.groupValues?.get(1).orEmpty()
+        val keyType = Regex("""\((\w+),""").find(detail)?.groupValues?.get(1) ?: "unknown"
+        return SshHostPrompt(
+            host = config.sshHost,
+            port = config.sshPort,
+            keyType = keyType,
+            fingerprint = fingerprint,
+            changed = changed,
+        )
+    }
+
+    /**
+     * 用户已核对指纹并选择信任：写入 known_hosts，清掉待确认状态。
+     *
+     * 只写这一个主机的一个密钥 —— 不是"关掉校验"，其它主机仍然要走确认。
+     */
+    fun trustPendingHost() {
+        val prompt = pendingHostFingerprint ?: return
+        StarRocksKnownHosts.remember(prompt.host, prompt.port, prompt.keyType, prompt.fingerprint)
+        pendingHostFingerprint = null
+        clearErrors()
+    }
+
+    /** 用户拒绝信任：清掉提示，不写任何东西。 */
+    fun dismissPendingHost() {
+        pendingHostFingerprint = null
     }
 
     /** 测试超时文案（与 MQ 系同为 15 秒）。 */

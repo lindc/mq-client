@@ -270,6 +270,14 @@
   "olap.starrocks.form.err_ssh_host": "Jump host is required",
   "olap.starrocks.form.err_ssh_port": "SSH port must be 1-65535",
   "olap.starrocks.form.err_ssh_user": "SSH user is required",
+  "olap.starrocks.form.err_ssh_credential": "Provide a private key file or a password",
   "olap.starrocks.console.cell_detail_title": "%1$s · row %2$s",
-  "olap.starrocks.console.cell_detail_copy": "Copy full value"
+  "olap.starrocks.console.cell_detail_copy": "Copy full value",
+  "olap.starrocks.form.ssh_host_unknown_title": "First connection to this host",
+  "olap.starrocks.form.ssh_host_unknown": "Cannot verify the host identity (SHA256:%1$s). Check the fingerprint before trusting.",
+  "olap.starrocks.form.ssh_host_changed_title": "Host key has changed",
+  "olap.starrocks.form.ssh_host_changed": "The host key differs from last time (SHA256:%1$s). Could be a reinstall — or a man-in-the-middle.",
+  "olap.starrocks.form.ssh_host_verify_hint": "Verify with your ops team (run ssh-keygen -lf /etc/ssh/ssh_host_*_key.pub on the jump host).",
+  "olap.starrocks.form.ssh_host_trust": "Verified — trust this host",
+  "olap.starrocks.form.ssh_host_dismiss": "Cancel"
 }

@@ -270,6 +270,14 @@
   "olap.starrocks.form.err_ssh_host": "请填写堡垒机地址",
   "olap.starrocks.form.err_ssh_port": "SSH 端口需在 1-65535 之间",
   "olap.starrocks.form.err_ssh_user": "请填写 SSH 用户名",
+  "olap.starrocks.form.err_ssh_credential": "请填写私钥文件或密码",
   "olap.starrocks.console.cell_detail_title": "%1$s · 第 %2$s 行",
-  "olap.starrocks.console.cell_detail_copy": "复制完整内容"
+  "olap.starrocks.console.cell_detail_copy": "复制完整内容",
+  "olap.starrocks.form.ssh_host_unknown_title": "首次连接该主机",
+  "olap.starrocks.form.ssh_host_unknown": "无法确认主机身份（SHA256:%1$s）。核对指纹后再决定是否信任。",
+  "olap.starrocks.form.ssh_host_changed_title": "主机密钥已改变",
+  "olap.starrocks.form.ssh_host_changed": "主机密钥与上次不同（SHA256:%1$s）。可能是服务器重装，也可能是中间人攻击。",
+  "olap.starrocks.form.ssh_host_verify_hint": "请与运维核对指纹（在堡垒机上执行 ssh-keygen -lf /etc/ssh/ssh_host_*_key.pub）。",
+  "olap.starrocks.form.ssh_host_trust": "已核对，信任此主机",
+  "olap.starrocks.form.ssh_host_dismiss": "取消"
 }

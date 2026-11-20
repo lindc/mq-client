@@ -62,7 +62,11 @@ internal class SshTunnel private constructor(
          * @param config 连接配置（提供堡垒机地址与凭据，以及要转发的目标 host/port）
          * @throws SshTunnelException 建连 / 认证 / 端口转发失败（消息可直接给用户看）
          */
-        suspend fun open(config: StarRocksConnectionConfig): SshTunnel = withContext(Dispatchers.IO) {
+        suspend fun open(
+            config: StarRocksConnectionConfig,
+            // 端口要传给仓库：JSch 的 check() 用 `[host]:port` 作为主机标识。
+            knownHosts: KnownHostsStore = KnownHostsStore(port = config.sshPort),
+        ): SshTunnel = withContext(Dispatchers.IO) {
             val start = System.currentTimeMillis()
             StarRocksLog.conn(
                 "ssh tunnel start jump=${config.sshUser}@${config.sshHost}:${config.sshPort} " +
@@ -93,6 +97,11 @@ internal class SshTunnel private constructor(
                     s.timeout = CONNECT_TIMEOUT_MS
                     s
                 }
+                // 主机密钥校验（TOFU）：未知主机 → 抛 SshUnknownHostException 让 UI 确认；
+                // 已变更 → 抛 SshHostKeyChangedException 直接拒绝。
+                // 不用 StrictHostKeyChecking=no —— 那等于任何能拦到流量的人都能冒充堡垒机。
+                session.hostKeyRepository = knownHosts
+                session.setConfig("StrictHostKeyChecking", "yes")
                 session.connect(CONNECT_TIMEOUT_MS)
 
                 // 端口 0 = 让系统挑一个空闲端口，避免固定端口冲突；
@@ -123,6 +132,10 @@ internal class SshTunnel private constructor(
                 )
                 throw when (error) {
                     is SshTunnelException -> error
+                    // JSch 在 StrictHostKeyChecking=yes 下对未知/变更主机抛 JSchException，
+                    // 消息里带主机指纹。翻译成我们的类型，UI 才能区分「首次连接要确认」
+                    // 与「密钥变了要警惕」——两者的处理完全不同。
+                    is com.jcraft.jsch.JSchException -> translateHostKeyError(error, config, knownHosts)
                     // JSch 的异常消息对用户没意义（"Auth fail"），补上"卡在哪一步"。
                     else -> SshTunnelException(
                         "SSH 隧道建立失败（${config.sshHost}:${config.sshPort}）：${error.message ?: error::class.simpleName}",
@@ -132,6 +145,41 @@ internal class SshTunnel private constructor(
             }
         }
     }
+}
+
+/**
+ * 把 JSch 的主机密钥错误翻译成可操作的类型。
+ *
+ * **按异常类型判断，不解析消息文本**：JSch 2.28 有专门的分支
+ * （`JSchUnknownHostKeyException` / `JSchChangedHostKeyException`），而消息
+ * 文本只有一句 `reject HostKey: [127.0.0.1]:2223` —— 既没有指纹也没有 key 类型
+ * （实测）。我最初按消息正则匹配，结果两类错误都被判成 UNKNOWN 且指纹为空。
+ *
+ * 指纹也拿不到 —— JSch 报错时不带。所以 UI 层要展示指纹时，由首连确认流程
+ * 单独探测（见 [probeHostKey]）。
+ */
+private fun translateHostKeyError(
+    error: com.jcraft.jsch.JSchException,
+    config: StarRocksConnectionConfig,
+    knownHosts: KnownHostsStore,
+): Throwable = when (error) {
+    is com.jcraft.jsch.JSchUnknownHostKeyException ->
+        // 指纹从 check() 的副产物取（B 端公钥在密钥交换时已经过 check）。
+        SshUnknownHostException(
+            config.sshHost,
+            keyType = "unknown",
+            fingerprint = knownHosts.lastSeenFingerprint(config.sshHost).orEmpty(),
+        )
+    is com.jcraft.jsch.JSchChangedHostKeyException ->
+        SshHostKeyChangedException(
+            config.sshHost,
+            keyType = "unknown",
+            fingerprint = knownHosts.lastSeenFingerprint(config.sshHost).orEmpty(),
+        )
+    else -> SshTunnelException(
+        "SSH 隧道建立失败（${config.sshHost}:${config.sshPort}）：${error.message}",
+        error,
+    )
 }
 
 /**
