@@ -37,6 +37,11 @@ internal fun formatBytes(bytes: Long): String = com.mqclient.uicommon.table.form
  * 保留小数是因为 StarRocks 的 CPU 使用率常态就是个位数。
  */
 internal fun formatPercent(percent: Double): String {
+    // 非有限值（NaN / ±Infinity）不是"零使用率"：实测 kotlin.math.round 对 NaN
+    // 返回 NaN（显示 "NaN%"），对 Infinity 返回 Long.MAX_VALUE（显示
+    // "9223372036854775807%"）。两者都是无意义的天文数字/乱码，与项目其它
+    // "无数据"的表示对齐，统一返回 "-"。
+    if (!percent.isFinite()) return "-"
     val text = when {
         percent >= 10 -> kotlin.math.round(percent).toLong().toString()
         percent >= 1 -> (kotlin.math.round(percent * 10) / 10).toString()
