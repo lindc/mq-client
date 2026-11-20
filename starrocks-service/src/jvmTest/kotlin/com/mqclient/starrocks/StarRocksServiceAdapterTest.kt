@@ -37,9 +37,12 @@ class StarRocksServiceAdapterTest {
     }
 
     @Test
-    fun `navigation contributes the five placeholder menu entries`() {
+    fun `navigation contributes the object and system menu entries`() {
         val items = adapter.navigationItems(dummyConnection())
-        assertEquals(listOf("overview", "catalog", "console", "topology", "queries"), items.map { it.id })
+        assertEquals(
+            listOf("overview", "catalog", "console", "topology", "queries", "backends", "ha", "variables", "logs"),
+            items.map { it.id },
+        )
         // titleKey 走公共表 olap.starrocks.menu.* 前缀；iconId 必须是宿主 NavIcons
         // 已登记的 id，否则树图标回落 Circle（空心圆）。
         assertEquals(
@@ -49,11 +52,18 @@ class StarRocksServiceAdapterTest {
                 "olap.starrocks.menu.console",
                 "olap.starrocks.menu.topology",
                 "olap.starrocks.menu.queries",
+                "olap.starrocks.menu.backends",
+                "olap.starrocks.menu.ha",
+                "olap.starrocks.menu.variables",
+                "olap.starrocks.menu.logs",
             ),
             items.map { it.titleKey },
         )
         assertEquals(
-            listOf("clusterRelations", "namelists", "command", "topology", "processDefinitions"),
+            listOf(
+                "clusterRelations", "namelists", "command", "topology", "processDefinitions",
+                "backends", "ha", "variables", "logs",
+            ),
             items.map { it.iconId },
         )
         // badge 仍是骨架占位。

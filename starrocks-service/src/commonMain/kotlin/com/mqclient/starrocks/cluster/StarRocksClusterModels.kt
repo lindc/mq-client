@@ -29,6 +29,15 @@ enum class ClusterNodeRole {
     val isFrontend: Boolean
         get() = this == FE_LEADER || this == FE_FOLLOWER || this == FE_OBSERVER
 
+    /**
+     * 是否参与选主（BDB JE 的 electable peer）。
+     *
+     * LEADER 与 FOLLOWER 都进 quorum，OBSERVER 只读不投票 —— HA 页的
+     * 「存活可选举节点是否过半」就按这个集合算。
+     */
+    val isElectable: Boolean
+        get() = this == FE_LEADER || this == FE_FOLLOWER
+
     val isCompute: Boolean
         get() = this == BE || this == CN
 }

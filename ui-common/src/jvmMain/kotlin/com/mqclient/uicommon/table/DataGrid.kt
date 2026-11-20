@@ -1,6 +1,7 @@
 package com.mqclient.uicommon.table
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
@@ -85,6 +86,7 @@ fun <T> DataGrid(
     modifier: Modifier = Modifier,
     rowKey: ((T) -> Any)? = null,
     zebraStriping: Boolean = true,
+    onRowClick: ((T) -> Unit)? = null,
 ) {
     Column(modifier) {
         // 表头：与数据行同一档字号（bodyMedium），靠背景 + 字重 + 主色区分 ——
@@ -124,6 +126,7 @@ fun <T> DataGrid(
                     columns = columns,
                     row = row,
                     striped = zebraStriping && index % 2 == 1,
+                    onClick = onRowClick,
                 )
             }
         }
@@ -139,7 +142,12 @@ private fun <T> RowScope.slotModifier(column: DataGridColumn<T>): Modifier {
 
 /** 一行：hover 高亮 / 斑马纹 + 与表头逐列对齐（行高、圆角、内边距全部同 [TableVisuals]）。 */
 @Composable
-private fun <T> DataGridRow(columns: List<DataGridColumn<T>>, row: T, striped: Boolean) {
+private fun <T> DataGridRow(
+    columns: List<DataGridColumn<T>>,
+    row: T,
+    striped: Boolean,
+    onClick: ((T) -> Unit)? = null,
+) {
     val interactionSource = remember { MutableInteractionSource() }
     val hovered by interactionSource.collectIsHoveredAsState()
     val background = when {
@@ -157,6 +165,7 @@ private fun <T> DataGridRow(columns: List<DataGridColumn<T>>, row: T, striped: B
             .testTag(if (striped) DataGridZebraRowTag else DataGridPlainRowTag)
             .heightIn(min = TableVisuals.RowMinHeight)
             .clip(TableVisuals.RowShape)
+            .then(if (onClick == null) Modifier else Modifier.clickable { onClick(row) })
             .hoverable(interactionSource)
             .background(background)
             .padding(

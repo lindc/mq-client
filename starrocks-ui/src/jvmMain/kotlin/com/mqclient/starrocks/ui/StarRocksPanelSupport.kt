@@ -1,5 +1,8 @@
 package com.mqclient.starrocks.ui
 
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.Color
 import com.mqclient.core.CoreModule
 import com.mqclient.core.event.EventNames
 import com.mqclient.core.log.LogLevel
@@ -52,6 +55,16 @@ internal fun formatPercent(percent: Double): String {
     }
     return "$text%"
 }
+
+/**
+ * 「存活」语义色：暗色主题用亮绿（Material 深绿在深底上对比度不足），浅色用深绿。
+ *
+ * Compose M3 没有内置 success 语义色。此前概览页内部有一份私有实现，系统页
+ * （backends / ha）也要用 —— 于是提到这里做**唯一出处**，两处不可能漂移。
+ */
+@Composable
+internal fun aliveSemanticColor(): Color =
+    if (isSystemInDarkTheme()) Color(0xFF81C784) else Color(0xFF2E7D32)
 
 /** 两数比百分比（分母无效时返回空串，调用方据此不渲染）。 */
 internal fun percentOf(used: Long, total: Long): String =

@@ -30,3 +30,12 @@ kotlin {
         }
     }
 }
+
+tasks.withType<Test>().configureEach {
+    // 真机用例（StarRocksSystemLiveTest）的开关透传：命令行 -Dstarrocks.live.*=...
+    // 原样传给测试 JVM（与 kafka-service 的 kafkadiag.* 同一做法）；
+    // 默认一个都不设 → 用例自己跳过，日常 jvmTest 不触网、也不要求本地有 StarRocks。
+    System.getProperties()
+        .filterKeys { it is String && it.startsWith("starrocks.live.") }
+        .forEach { (key, value) -> systemProperty(key.toString(), value.toString()) }
+}

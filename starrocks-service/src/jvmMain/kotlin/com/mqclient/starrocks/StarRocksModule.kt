@@ -150,6 +150,17 @@ object StarRocksModule {
      */
     fun isAlive(connectionId: String): Boolean = manager?.isAlive(connectionId) == true
 
+    /**
+     * 按连接 id 还原配置（找不到返回 null）。
+     *
+     * 供需要「连接凭据本身」的功能使用 —— 目前是 FE 日志：它走 Web 端口（8030）的
+     * Basic Auth，与 MySQL 会话不是同一条通道，必须能拿到 host / 端口 / 用户名。
+     * 密码只在进程内存里流转，不落日志（见 StarRocksLog.redactJdbcUrl 的口径）。
+     */
+    fun configOrNull(connectionId: String): StarRocksConnectionConfig? = runCatching {
+        findConfig(connectionId)
+    }.getOrNull()
+
     /** 按连接 id 从注入的注册表还原配置（找不到连接抛 [ServiceException]）。 */
     private fun findConfig(connectionId: String): StarRocksConnectionConfig {
         val info: ConnectionInfo = context?.connectionRegistry?.findConnection(connectionId)

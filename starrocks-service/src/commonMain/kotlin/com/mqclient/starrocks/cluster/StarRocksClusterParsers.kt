@@ -100,6 +100,15 @@ internal fun parseFrontends(
     val versionIdx = indexOfAny(columns, "version")
     val joinIdx = indexOfAny(columns, "jointime")
     val heartbeatIdx = indexOfAny(columns, "lastheartbeat")
+    // HA 页需要但拓扑/概览不需要的列：统一进 extra（Map<String,String>），
+    // 不扩 ClusterNodeInfo 的强类型字段 —— 那是拓扑/概览的模型，
+    // 为了一个只读页给它加五个可空字段，所有构造点都得跟着改。
+    val joinFlagIdx = indexOfAny(columns, "join")
+    val replayedIdx = indexOfAny(columns, "replayedjournalid")
+    val clusterIdIdx = indexOfAny(columns, "clusterid")
+    val helperIdx = indexOfAny(columns, "ishelper")
+    val errIdx = indexOfAny(columns, "errmsg")
+    val startIdx = indexOfAny(columns, "starttime")
 
     return rows.mapNotNull { row ->
         val ip = row.textAt(ipIdx)
@@ -127,7 +136,15 @@ internal fun parseFrontends(
             version = row.textAt(versionIdx) ?: "-",
             joinTime = row.textAt(joinIdx),
             lastHeartbeat = row.textAt(heartbeatIdx),
-            extra = if (rawRole.isNotEmpty()) mapOf("role" to rawRole) else emptyMap(),
+            extra = buildMap {
+                if (rawRole.isNotEmpty()) put("role", rawRole)
+                row.textAt(joinFlagIdx)?.let { put("join", it) }
+                row.textAt(replayedIdx)?.let { put("replayed_journal_id", it) }
+                row.textAt(clusterIdIdx)?.let { put("cluster_id", it) }
+                row.textAt(helperIdx)?.let { put("is_helper", it) }
+                row.textAt(errIdx)?.let { put("err_msg", it) }
+                row.textAt(startIdx)?.let { put("start_time", it) }
+            },
         )
     }
 }

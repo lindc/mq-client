@@ -5,6 +5,7 @@ import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.CallSplit
 import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Hearing
 import androidx.compose.material.icons.filled.Hub
@@ -14,10 +15,12 @@ import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.MarkEmailUnread
+import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SettingsInputAntenna
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.ui.graphics.vector.ImageVector
 
 /**
@@ -30,6 +33,11 @@ import androidx.compose.ui.graphics.vector.ImageVector
  */
 internal fun navigationIcon(iconId: String): ImageVector =
     when (iconId) {
+        // ===== StarRocks 系统页（对齐 FE Web 控制台）=====
+        "backends" -> Icons.Filled.Dns
+        "ha" -> Icons.Filled.Security
+        "variables" -> Icons.Filled.Tune
+        "logs" -> Icons.Filled.ReceiptLong
         // ===== IBM MQ 工具类 =====
         "topology" -> Icons.Filled.Map
         "clusterRelations" -> Icons.Filled.Hub

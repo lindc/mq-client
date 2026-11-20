@@ -61,7 +61,8 @@ class StarRocksServiceAdapter : ServiceAdapter {
 
     /**
      * 侧边栏二级菜单（与 RocketMQ 同构，树由 service 的 [ServiceAdapter.navigationItems]
-     * 提供）：集群概览 / 数据目录 / SQL 控制台 / 拓扑结构 / 会话与慢查询。
+     * 提供）：集群概览 / 数据目录 / SQL 控制台 / 拓扑结构 / 会话与慢查询，以及
+     * 对齐 FE Web 控制台的 BE 节点 / 高可用 / 变量与配置 / 运行日志。
      * 全部是占位入口 —— `contentFor` 按 objectType 分发，「console」渲染 Tab
      * 布局占位页，其余回落「模块开发中」占位。
      *
@@ -76,6 +77,11 @@ class StarRocksServiceAdapter : ServiceAdapter {
         NavigationItem(id = "console", titleKey = "olap.starrocks.menu.console", iconId = "command", isTool = true),
         NavigationItem(id = "topology", titleKey = "olap.starrocks.menu.topology", iconId = "topology", isTool = true),
         NavigationItem(id = "queries", titleKey = "olap.starrocks.menu.queries", iconId = "processDefinitions"),
+        // 与 FE Web 控制台（:8030）对齐的系统页：BE 节点 / 高可用 / 变量与配置 / 运行日志。
+        NavigationItem(id = "backends", titleKey = "olap.starrocks.menu.backends", iconId = "backends"),
+        NavigationItem(id = "ha", titleKey = "olap.starrocks.menu.ha", iconId = "ha", isTool = true),
+        NavigationItem(id = "variables", titleKey = "olap.starrocks.menu.variables", iconId = "variables"),
+        NavigationItem(id = "logs", titleKey = "olap.starrocks.menu.logs", iconId = "logs", isTool = true),
     )
 
     /** 空骨架不贡献徽章。 */

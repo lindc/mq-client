@@ -73,7 +73,7 @@ class StarRocksAdapterUI : AdapterUI {
      * - `console` → SQL 控制台（可接收数据目录的「双击表名」联动）；
      * - `catalog` → 数据目录（库 / 表 / 字段树）；
      * - `overview` → 集群概览（MetricCard + 节点表）；
-     * - 其余两个已知导航项 → 「模块开发中」占位；
+     * - `backends` / `ha` / `variables` / `logs` → 对齐 FE Web 控制台的系统页；
      * - 未知 objectType → 模块通用占位页。
      *
      * 导航项 id 与 `StarRocksServiceAdapter.navigationItems` 严格对齐（与
@@ -86,6 +86,11 @@ class StarRocksAdapterUI : AdapterUI {
             "overview" -> { { StarRocksOverviewPanel(connectionId) } }
             "topology" -> { { StarRocksTopologyPanel(connectionId) } }
             "queries" -> { { StarRocksProcessListPanel(connectionId) } }
+            // 对齐 FE Web 控制台的四个系统页（取数来源见 StarRocksSystemPanels 的说明）
+            "backends" -> { { StarRocksBackendsPanel(connectionId) } }
+            "ha" -> { { StarRocksHaPanel(connectionId) } }
+            "variables" -> { { StarRocksVariablesPanel(connectionId) } }
+            "logs" -> { { StarRocksLogsPanel(connectionId) } }
             else -> { { StarRocksPlaceholder() } }
         }
 
