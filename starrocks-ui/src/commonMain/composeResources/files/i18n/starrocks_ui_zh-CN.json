@@ -270,5 +270,6 @@
   "olap.starrocks.form.err_ssh_host": "请填写堡垒机地址",
   "olap.starrocks.form.err_ssh_port": "SSH 端口需在 1-65535 之间",
   "olap.starrocks.form.err_ssh_user": "请填写 SSH 用户名",
-  "olap.starrocks.form.err_ssh_credential": "请填写私钥文件或密码"
+  "olap.starrocks.console.cell_detail_title": "%1$s · 第 %2$s 行",
+  "olap.starrocks.console.cell_detail_copy": "复制完整内容"
 }

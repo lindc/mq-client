@@ -270,5 +270,6 @@
   "olap.starrocks.form.err_ssh_host": "Jump host is required",
   "olap.starrocks.form.err_ssh_port": "SSH port must be 1-65535",
   "olap.starrocks.form.err_ssh_user": "SSH user is required",
-  "olap.starrocks.form.err_ssh_credential": "Provide a private key file or a password"
+  "olap.starrocks.console.cell_detail_title": "%1$s · row %2$s",
+  "olap.starrocks.console.cell_detail_copy": "Copy full value"
 }

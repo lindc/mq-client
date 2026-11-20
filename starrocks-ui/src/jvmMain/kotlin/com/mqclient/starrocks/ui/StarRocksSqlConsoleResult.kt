@@ -18,20 +18,30 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.mqclient.uicommon.AppTooltip
+import com.mqclient.uicommon.LocalSnackbarHostState
+import com.mqclient.uicommon.dialog.ObjectDetailDialog
 import com.mqclient.uicommon.i18n.stringResource
 import com.mqclient.uicommon.i18n.withArg
 import com.mqclient.uicommon.table.MixedTypeComparator
 import com.mqclient.uicommon.table.SortDirection
 import com.mqclient.uicommon.table.SortState
+import kotlinx.coroutines.launch
+import androidx.compose.foundation.lazy.itemsIndexed
 
 @Composable
 internal fun ResultArea(grid: ConsoleGrid, phase: ConsolePhase, modifier: Modifier = Modifier) {
@@ -90,6 +100,10 @@ internal fun ResultArea(grid: ConsoleGrid, phase: ConsolePhase, modifier: Modifi
 /** 流式结果表格：行落在快照 List，边收边渲染；顶部横幅反映拉取进度。 */
 @Composable
 private fun ResultTable(grid: ConsoleGrid, phase: ConsolePhase, modifier: Modifier = Modifier) {
+    // 长值详情状态提升到函数顶层：弹窗渲染在 Column 之外（独立窗口，不该被
+    // 横向滚动容器裁剪），状态必须两层都能看到。
+    var detailCell by remember { mutableStateOf<CellDetail?>(null) }
+
     Column(modifier) {
         // ── 顶部状态横幅：执行中显示进度；截断显示保护提示 ──
         when {
@@ -149,16 +163,83 @@ private fun ResultTable(grid: ConsoleGrid, phase: ConsolePhase, modifier: Modifi
                     }
                 }
                 LazyColumn(Modifier.weight(1f)) {
-                    items(visibleRows) { row ->
+                    itemsIndexed(visibleRows) { rowIndex, row ->
                         Row {
-                            row.forEach { value ->
-                                TableCell(text = value?.toString() ?: "NULL", header = false)
+                            row.forEachIndexed { columnIndex, value ->
+                                ValueCell(
+                                    value = value,
+                                    // 列名从 columns 取；行号用**当前显示顺序**（排序后的位置），
+                                    // 与用户眼前的行对得上，而不是原始下标。
+                                    columnName = grid.columns.getOrNull(columnIndex)?.name ?: "#$columnIndex",
+                                    rowIndex = rowIndex,
+                                    onOpenDetail = { detailCell = it },
+                                )
                             }
                         }
                     }
                 }
             }
         }
+    }
+
+    // 详情弹窗放在最外层：它是独立窗口，不该被横向滚动容器裁剪。
+    detailCell?.let { cell ->
+        CellDetailDialog(cell, onDismiss = { detailCell = null })
+    }
+}
+
+/** 单元格详情：列名 / 行号 / 完整值。 */
+internal data class CellDetail(
+    val columnName: String,
+    val rowIndex: Int,
+    val value: Any?,
+)
+
+/**
+ * 结果单元格：**长值必须可读**。
+ *
+ * 单元格固定 160dp、单行省略（`maxLines = 1` + Ellipsis）—— 这是为了列对齐与行高
+ * 恒定，但代价是省略号后面的内容在 Compose 里根本没有布局，**连拖选都选不到**。
+ * 对一条含 JSON / 长文本 / 堆栈的结果，等于看不到。
+ *
+ * 两条出路都提供：
+ *  - 悬停 tooltip：扫一眼即可，不打断阅读；
+ *  - 点击 → 详情弹窗：完整值 + 可选中 + 一键复制（贴着长值真正要用的动作）。
+ *
+ * 短值也走同一条路径（不做长度判断）：判断"是否被截断"需要测量文本宽度，
+ * 而每次滚动都测一遍不划算；统一行为反而更可预期 —— 用户不用猜"这格能不能点"。
+ */
+@Composable
+internal fun ValueCell(
+    value: Any?,
+    columnName: String,
+    rowIndex: Int,
+    onOpenDetail: (CellDetail) -> Unit,
+) {
+    val text = value?.toString() ?: "NULL"
+    // 空值与 NULL 都不可点（没有可看的内容）。
+    if (value == null) {
+        TableCell(text = text, header = false, subdued = true)
+        return
+    }
+    AppTooltip(
+        tooltip = {
+            Text(
+                text,
+                style = MaterialTheme.typography.bodySmall,
+                // 长文本在 tooltip 里换行显示前若干行，够判断"是不是我要的那条"。
+                maxLines = 8,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+    ) {
+        TableCell(
+            text = text,
+            header = false,
+            onClick = onOpenDetail,
+            columnName = columnName,
+            rowIndex = rowIndex,
+        )
     }
 }
 
@@ -212,12 +293,32 @@ private fun ProgressHint(text: String) {
     }
 }
 
-/** 单元格：固定宽度、单行省略；表头用 label 样式区分。 */
+/**
+ * 单元格：固定宽度、单行省略；表头用 label 样式区分。
+ *
+ * [subdued] 用于 NULL 占位（次要色），[onClick] 用于打开详情（数据行专用）。
+ * 宽度固定是刻意的：列对齐与行高恒定比"尽量显示更多字"更重要 —— 完整值由
+ * tooltip / 详情弹窗提供，不靠这一格撑开。
+ */
 @Composable
-private fun TableCell(text: String, header: Boolean) {
+private fun TableCell(
+    text: String,
+    header: Boolean,
+    subdued: Boolean = false,
+    onClick: ((CellDetail) -> Unit)? = null,
+    columnName: String = "",
+    rowIndex: Int = 0,
+) {
     Box(
         Modifier
             .width(HEADER_CELL_WIDTH)
+            .then(
+                if (onClick != null) {
+                    Modifier.clickable { onClick(CellDetail(columnName, rowIndex, text)) }
+                } else {
+                    Modifier
+                },
+            )
             .padding(horizontal = 8.dp, vertical = 6.dp),
     ) {
         SelectionContainer {
@@ -226,11 +327,55 @@ private fun TableCell(text: String, header: Boolean) {
                 style = if (header) MaterialTheme.typography.labelMedium else MaterialTheme.typography.bodyMedium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                color = if (header) MaterialTheme.colorScheme.onSurfaceVariant
-                else MaterialTheme.colorScheme.onSurface,
+                color = when {
+                    header -> MaterialTheme.colorScheme.onSurfaceVariant
+                    subdued -> MaterialTheme.colorScheme.onSurfaceVariant
+                    else -> MaterialTheme.colorScheme.onSurface
+                },
             )
         }
     }
 }
 
 internal val HEADER_CELL_WIDTH = 160.dp
+
+/**
+ * 单元格详情弹窗：完整值 + 可选中 + 一键复制。
+ *
+ * 为什么用 [ObjectDetailDialog] 而不是 AlertDialog：它与全应用其它详情框
+ * （消息详情 / 对象属性）同一外壳（标题栏 / ✕ / ESC / 尺寸档位），用户不需要
+ * 为"看一个格子"学一套新的交互。
+ */
+@Composable
+private fun CellDetailDialog(cell: CellDetail, onDismiss: () -> Unit) {
+    val clipboard = LocalClipboardManager.current
+    val snackbar = LocalSnackbarHostState.current
+    val scope = rememberCoroutineScope()
+    val fullText = cell.value?.toString() ?: "NULL"
+
+    ObjectDetailDialog(
+        title = stringResource("olap.starrocks.console.cell_detail_title")
+            .withArg(cell.columnName, cell.rowIndex + 1),
+        onDismiss = onDismiss,
+        footerActions = {
+            TextButton(
+                onClick = {
+                    clipboard.setText(AnnotatedString(fullText))
+                    scope.launch { snackbar.showSnackbar(stringResource("msg_detail_copied")) }
+                },
+            ) {
+                Text(stringResource("olap.starrocks.console.cell_detail_copy"))
+            }
+        },
+    ) {
+        // 等宽 + 可选中：长 JSON / 堆栈按原样看，且能拖选其中一段。
+        SelectionContainer {
+            Text(
+                text = fullText,
+                style = MaterialTheme.typography.bodyMedium,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier.fillMaxWidth().padding(8.dp),
+            )
+        }
+    }
+}
