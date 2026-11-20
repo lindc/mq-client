@@ -3,7 +3,6 @@ package com.mqclient.starrocks.system
 import com.mqclient.starrocks.cluster.ClusterNodeInfo
 import com.mqclient.starrocks.cluster.ClusterNodeRole
 import com.mqclient.starrocks.cluster.indexOfAny
-import com.mqclient.starrocks.cluster.parseBool
 import com.mqclient.starrocks.cluster.textAt
 
 /**

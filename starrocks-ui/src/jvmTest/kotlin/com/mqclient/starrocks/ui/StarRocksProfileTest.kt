@@ -193,13 +193,35 @@ class StarRocksProfileTest {
 
     @Test
     fun `fetch rejects injection before touching the connection`() = runBlocking {
+        var queried = false
         val error = runCatching {
             fetchQueryProfile("conn-1", "297a21b0'; DROP DATABASE x") { _ ->
+                queried = true
                 throw AssertionError("不得执行任何语句")
             }
         }.exceptionOrNull()
-        assertEquals("invalid query id", error?.message)
+
+        // 第一道防线：语句根本没发出去。
+        assertTrue(!queried, "非法 queryId 不应触发任何查询")
+
+        // 第二道防线：错误必须经过统一出口，转成带指引的业务异常。
+        // 此前 profileStatements 的 require 在 try 之外，抛出的是
+        // IllegalArgumentException("invalid query id")，会原样显示给用户。
+        assertTrue(
+            error is ServiceException,
+            "非法 queryId 应转成 ServiceException，实际 ${error?.let { it::class.simpleName }}",
+        )
+        assertEquals(KEY_PROFILE_NOT_COLLECTED, (error as ServiceException).errorKey)
         Unit
+    }
+
+    @Test
+    fun `profileStatements itself still rejects invalid ids`() {
+        // 底层守卫保持不变（防注入的点位在拼 SQL 处，不能因为上层包了一层就放松）。
+        assertEquals(
+            "invalid query id",
+            runCatching { profileStatements("297a21b0'; DROP DATABASE x") }.exceptionOrNull()?.message,
+        )
     }
 
     @Test

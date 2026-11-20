@@ -45,7 +45,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.mqclient.aiui.untrustedContextRule
 import com.mqclient.aiui.wrapUntrustedContext
 import com.mqclient.core.LocalizedException

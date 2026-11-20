@@ -6,8 +6,6 @@ import com.mqclient.starrocks.jdbc.JdbcConnectTimeoutException
 import com.mqclient.starrocks.jdbc.JdbcFailure
 import com.mqclient.starrocks.log.StarRocksLog
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 
@@ -326,14 +324,20 @@ internal suspend fun fetchQueryProfile(
     queryId: String,
     runQuery: suspend (String) -> StarRocksQueryRows = { queryRows(connectionId, it) },
 ): String {
-    val sql = profileStatements(queryId).single()
     val start = System.currentTimeMillis()
-    // 排查「Profile 找不到」的第一现场：确认到底对哪个 QueryId 发了哪条语句。
-    StarRocksLog.profile(
-        "fetch start connection=$connectionId queryId=$queryId action=ANALYZE_PROFILE " +
-            "sql=${StarRocksLog.truncate(sql)}",
-    )
+    // profileStatements 对非法 queryId 会 require 失败。**必须放在 try 之内**：
+    // 否则 IllegalArgumentException("invalid query id") 会绕过下面那个把它映射成
+    // 友好文案的 catch，界面直接显示英文内部消息（userMessage() 对非
+    // LocalizedException 原样返回 message）。当前调用点恰好都先做过 ID 校验，
+    // 但错误出口不该依赖上下游的运气。
+    var sql: String? = null
     val text = try {
+        sql = profileStatements(queryId).single()
+        // 排查「Profile 找不到」的第一现场：确认到底对哪个 QueryId 发了哪条语句。
+        StarRocksLog.profile(
+            "fetch start connection=$connectionId queryId=$queryId action=ANALYZE_PROFILE " +
+                "sql=${StarRocksLog.truncate(sql)}",
+        )
         val raw = runQuery(sql)
         StarRocksLog.profile(
             LogLevel.DEBUG,
@@ -354,7 +358,10 @@ internal suspend fun fetchQueryProfile(
             LogLevel.WARN,
             "fetch failed queryId=$queryId cost=${System.currentTimeMillis() - start}ms " +
                 "errorType=${error::class.simpleName} ${jdbcDiagnostics(error)} " +
-                "detail=${error.message} sql=${StarRocksLog.truncate(sql)}",
+                "detail=${error.message} " +
+                // sql 为 null 说明失败发生在拼语句之前（非法 queryId）——日志里如实标出来，
+                // 比打一个空串更能说明「这条语句根本没发出去」。
+                "sql=${sql?.let { StarRocksLog.truncate(it) } ?: "<rejected before build>"}",
             error,
         )
         StarRocksLog.perf(

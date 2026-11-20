@@ -38,7 +38,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -467,9 +466,12 @@ internal fun StarRocksVariablesPanel(connectionId: String, modifier: Modifier = 
                 1 -> { globalVars = emptyList(); globalLoaded = false }
                 else -> { feConfig = emptyList(); configLoaded = false }
             }
+        } finally {
+            // 必须在 finally 里复位：取消（离开页面 / 切 Tab）也要关掉 spinner，
+            // 否则界面上会留下一个永远转的圈。`which == tab` 的判断保留 ——
+            // 非当前 Tab 的请求结束不该关掉当前 Tab 的 spinner。
+            if (which == tab) loading = false
         }
-        // 同理：非当前 Tab 的请求结束不该关掉当前 Tab 的 spinner。
-        if (which == tab) loading = false
     }
 
     LaunchedEffect(connectionId) { load(tab) }
@@ -654,8 +656,11 @@ internal fun StarRocksLogsPanel(connectionId: String, modifier: Modifier = Modif
         } catch (e: Throwable) {
             error = e.userMessage()
             text = null
+        } finally {
+            // 取消（切文件 / 关自动刷新）也要复位 spinner —— 否则自动刷新关掉后
+            // 界面上会留一个永远转的圈。状态按 (connectionId, file) 分键，写旧状态无害。
+            loading = false
         }
-        loading = false
     }
 
     LaunchedEffect(connectionId, file) { load() }
