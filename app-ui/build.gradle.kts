@@ -104,7 +104,7 @@ compose.desktop {
 
             // 版本号只影响包元数据（Linux 的 .desktop、Windows 的 exe 属性）。
             // 若以后要打 MSI，MSI 要求第一段不能是 0，那时再改成 "1.0.0"。
-            packageVersion = "0.1.0"
+            packageVersion = "0.2.0"
 
             // 不用 includeAllModules = true，改用显式清单：把 jdk.compiler / jdk.javadoc /
             // jdk.jshell / jdk.jlink / jdk.jpackage 这些开发工具模块打进交付镜像没有意义。
@@ -166,7 +166,7 @@ compose.desktop {
 // Windows 免安装 zip 导出（app-image → zip，非 MSI）：
 //
 //   ./gradlew :app-ui:zipDistributable
-//   → app-ui/build/compose/binaries/main/MQClient-0.1.0-windows-x64.zip
+//   → app-ui/build/compose/binaries/main/MQClient-0.2.0-windows-x64.zip
 //     解压后 MQClient/MQClient.exe 双击即用（自带精简 runtime，无需装 JDK）。
 //
 // 为什么需要下面两步修复：WiX 工具集只服务于 msi/exe 安装器，本工程用不到；

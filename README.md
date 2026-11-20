@@ -2,11 +2,10 @@
 
 # MQ Client Desktop
 
-**A local-first, multi-protocol desktop workbench for message middleware — with AI-powered chain diagnosis**
+**A local desktop client for message middleware (IBM MQ / Kafka / RabbitMQ / RocketMQ) and StarRocks.**
+Built with Kotlin Multiplatform + Compose Desktop; all data stays on the local machine.
 
-基于 Kotlin Multiplatform + Compose Desktop 构建的本地优先、多协议统一桌面工作台。
-
-[![Kotlin](https://img.shields.io/badge/Kotlin-2.x%20Multiplatform-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org)
+[![Kotlin](https://img.shields.io/badge/Kotlin-2.4%20Multiplatform-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org)
 [![Compose](https://img.shields.io/badge/UI-Compose%20Desktop%20·%20Material%203-4285F4?logo=jetpackcompose&logoColor=white)](https://www.jetbrains.com/lp/compose-multiplatform/)
 [![JDK](https://img.shields.io/badge/JDK-25-000000?logo=openjdk&logoColor=white)](https://openjdk.org)
 [![Storage](https://img.shields.io/badge/Storage-SQLite%20·%20SQLDelight-003B57)](https://github.com/cashapp/sqldelight)
@@ -18,65 +17,132 @@
 
 ---
 
-## 🎯 Why this exists
+## Overview
 
-If you operate message middleware, you know the drill: MQ Explorer for IBM MQ, kafka-tool for Kafka, a browser tab for RabbitMQ, yet another console for RocketMQ. Four tools, four mental models, four sets of scattered connection configs — and by the time you notice the queue is piling up, the real problem is often sitting on a **channel at the other end of the chain**.
+MQ Client Desktop is a single-window desktop application that connects to four message
+middleware products and to StarRocks. Each protocol is a pair of `service` / `ui` modules
+registered into the host through SPI; removing a protocol pair does not affect compilation of
+the rest of the application.
 
-MQ Client Desktop pulls all of that into a single local desktop app, and does one thing nobody else does: **it hands the entire message chain to the AI**.
+Connection settings, command history, query history and AI conversations are stored locally
+under `~/.mqclient/`. No central service is involved.
 
-Click "Ask AI" on any object page, and the app packages the full picture of that object into structured context:
+### Supported systems
+
+| Domain | Systems | Scope |
+|---|---|---|
+| Message middleware | IBM MQ, Kafka, RabbitMQ, RocketMQ | Object browsing, message browsing/sending, properties, topology |
+| OLAP | StarRocks | Catalogs, SQL console, query profiles, cluster/system pages |
+
+### AI-assisted diagnosis
+
+Object pages expose an "Ask AI" entry point. The application assembles the object's context —
+attributes, upstream/downstream topology, live backlog figures, cluster relations — into
+structured text and sends it to an OpenAI-compatible or Anthropic endpoint (SSE streaming):
 
 ```text
-Object attributes + upstream/downstream topology (who produces, who consumes, via which channel)
+Object attributes + upstream/downstream topology (producer / consumer / channel)
         + live backlog data (queue depth / consumer count / channel status)
         + cluster relations (cluster membership, repository role)
                     ↓
       OpenAI-compatible / Anthropic adapters (SSE streaming)
                     ↓
-"XMITQ has 3200 messages backed up, DOWNSTREAM.CHL is RETRYING,
- the receiver channel on QM2 isn't running" ← root cause
+"XMITQ holds 3200 messages; DOWNSTREAM.CHL is RETRYING;
+ the receiver channel on QM2 is not running."   ← reported root cause
 ```
 
-Each of the four MQ modules ships its own chain builder (`IbmMqAiChainBuilder` / `KafkaAiChainBuilder` / …), turning "things you can't see in a table" into text the AI can reason over.
+Each MQ module provides its own chain builder (IBM MQ uses `AiChainBuilder`; Kafka, RabbitMQ and
+RocketMQ use `KafkaAiChainBuilder` / `RabbitMqAiChainBuilder` / `RocketMqAiChainBuilder`).
+For StarRocks, the SQL console and the session panel provide a slow-query diagnosis entry point
+whose context contains the SQL text, the `EXPLAIN` plan and the column structure of the referenced
+tables.
 
-## ✨ Highlights
+## Capabilities
 
-- **🔌 Unified multi-protocol abstraction** — Three SPI layers (`ServiceAdapter` / `AdapterUI` / `MessageInterpreter`): the core defines contracts only, and all four major middlewares plug in. Removing any protocol doesn't break the host build. 33 Gradle modules, with `mq-base` carrying the connection/scan skeletons of four protocols in just 1.3K lines of templates.
-- **⚙️ Deep native protocol integration** — No neutered REST proxies:
-  - **IBM MQ**: full PCF object scanning + MQSC command console (with MQRC error-code translation) + dmpmqmsg migration-file import;
-  - **Kafka**: direct `assign + seek + poll` live queries — no consumer group, no offset commits, multi-startpoint targeted browsing;
-  - **RabbitMQ**: full management API + non-destructive `basicGet` browsing (unacked holds, auto-requeue on close) + Stream-queue pre-flight interception;
-  - **RocketMQ**: Remoting protocol + ACL/TLS, queue-count-adaptive parallel fetching (8 shard-local temporary consumers + dynamic timeout).
-- **🛡️ Prompt-injection hardening** — Untrusted data is wrapped in `[BEGIN/END UNTRUSTED CONTEXT]` boundaries, backed by a security rule in the system prompt and full-width neutralization of forged boundaries. One pipeline covers all four protocols.
-- **🕸️ Topology visualization** — `graph-core` (pure graph model) + `topology-ui` (Canvas rendering engine): node dragging, zoom, double-click details, PNG export; every protocol gets its own topology view (IBM MQ uses a fixed-column layout following message flow).
-- **🧩 Handle-isolation discipline** — "Share heavy connections, destroy light handles after use": heavy handles (AdminClient / MQQueueManager / Producer) are connection-level shared with lock serialization; light handles (Consumer / MQQueue / Channel) are created per operation and released in `finally`. A single protocol failure never takes down the app.
-- **🛠️ Engineering polish** — Bilingual i18n (zh-CN / en-US), smart message-body interpreters (JSON / XML / Hex / Base64 / SAP IDoc), `@Sensitive`-annotation-driven local encryption, SQLite operation auditing, and `[MQ-Perf]` structured timing logs across the whole fetch chain (4 UI checkpoints + 5 service segments: instance / io / parse / total).
+### Message middleware
 
-## 📊 Feature Matrix
+- **Three SPI layers** — `ServiceAdapter` (service side), `AdapterUI` (UI side) and
+  `MessageInterpreter` (message body display). The core modules define contracts only; protocol
+  modules are peers.
+- **Protocol integration**:
+  - **IBM MQ** — PCF object scanning (queues / channels / listeners), MQSC command console with
+    MQRC error-code translation, dmpmqmsg migration-file import, TLS with `CipherSuiteOptions`.
+  - **Kafka** — live reads through `assign + seek + poll`: no consumer group is joined and no
+    offset is committed; multiple start points per read, partition-level cursor continuation.
+  - **RabbitMQ** — management API for objects and status, `basicGet` browsing that leaves messages
+    unacknowledged and requeues them on close, Stream-queue pre-check through the management API.
+  - **RocketMQ** — Remoting protocol with ACL and TLS; when a topic has 64 or more queues, reads
+    are sharded across 8 temporary pull consumers with a computed timeout.
+- **Topology views** — `graph-core` (graph model) + `topology-ui` (Canvas renderer): node dragging,
+  zoom, node detail panel, PNG export. IBM MQ uses a fixed-column layout that follows message flow.
+- **Handle lifecycle** — heavy handles (`AdminClient`, `MQQueueManager`, producer) are shared at
+  connection level and serialized by lock; light handles (consumer, channel, JDBC statement) are
+  created per operation and closed in `finally`. `MQQueue` depends on the operation: the browse
+  session keeps one handle open to preserve the server-side cursor and closes it with the session,
+  while delete / requeue / send open a fresh handle and close it in `finally`.
+- **Message body interpreters** — JSON, XML, Hex, Base64, plain text, SAP IDoc.
+- **Local storage** — SQLite (SQLDelight) for connection snapshots, command audit and AI history;
+  sensitive fields encrypted through the `@Sensitive` annotation.
+- **Bilingual UI** — zh-CN and en-US resource tables per module.
+
+### StarRocks
+
+- **Connection** — MySQL protocol on the FE query port (9030); optional SSH tunnel with private key
+  or password. The first connection records the host key fingerprint (trust-on-first-use) to
+  `<configDir>/known_hosts` as `host keytype sha256-fingerprint`; later connections are verified
+  against it, and a changed key blocks the connection until the user confirms.
+- **Catalog** — tree of databases, tables, views and materialized views. Selecting a table loads a
+  two-dimensional column table (name, type, nullable, key, default, extra, comment) and a DDL tab;
+  partitions are summarized in a collapsible section.
+- **SQL console** — tab strip over one editor and one result grid (tabs do not keep independent
+  documents); execute selection or whole buffer, multiple statements in sequence, cancel, streamed
+  results with a 50,000-row cap, sortable columns, hover/click detail for long values, CSV export
+  (UTF-8 with BOM, atomic write), and a persistent execution history (`olap_query_history`).
+- **Sessions and slow queries** — `SHOW PROFILELIST` listing; profile viewer that issues
+  `ANALYZE PROFILE FROM '<id>'` and reports a "profile not collected" message when the statement
+  fails or returns no text.
+- **Cluster pages** — overview, three-tier topology (external catalogs → FE → BE/CN) with node
+  property dialogs, BE/CN capacity and heartbeat, HA (leader, quorum, electable/observer nodes),
+  variables (session / global / FE config), and FE log tail through the FE web port.
+- **Logging** — `[StarRocks][Conn]` / `[SQL]` / `[Meta]` / `[Profile]` structured log tags, SQL
+  statements truncated to 500 characters, credentials never logged.
+
+## Feature matrix — message middleware
 
 | Capability | IBM MQ | Kafka | RabbitMQ | RocketMQ |
 |:---|:---:|:---:|:---:|:---:|
-| Object scan / health | ✅ Full PCF (queues/channels/listeners) | ✅ Topics / consumer groups | ✅ Exchanges / queues / bindings / nodes | ✅ Topics / groups / cluster |
-| Properties panel (grouped pipeline) | ✅ MQ Explorer-grade attrs | ✅ | ✅ | ✅ |
-| Message browsing | ✅ Per-op handles, cursor-equivalent paging | ✅ Assign+Seek, multi-startpoint | ✅ Non-destructive basicGet | ✅ Multi-queue parallel, multi-startpoint |
-| Message sending | ✅ | ✅ | ✅ Batch files / test publish | ✅ |
-| Object CRUD | — | ✅ Topic config | ✅ Exchanges / bindings | ✅ With guard rails |
-| Command console | ✅ MQSC (audited history) | — | — | — |
-| Native topology | ✅ Cluster edge relations | ✅ | ✅ Exchange→Queue routing | ✅ |
-| AI chain diagnosis | ✅ | ✅ | ✅ | ✅ |
-| TLS / self-signed certs | ✅ | ✅ SASL_SSL | ✅ | ✅ |
+| Object scan / health | PCF (queues, channels, listeners) | Topics, consumer groups | Exchanges, queues, bindings, nodes | Topics, groups, cluster |
+| Properties panel (grouped pipeline) | Full attribute extraction | Yes | Yes | Yes |
+| Message browsing | Session-scoped cursor handle (server-side `BROWSE_NEXT` paging) | Assign + Seek, multiple start points | Non-destructive `basicGet` | Multi-queue parallel, multiple start points |
+| Message sending | Yes | Yes | Batch files, test publish | Yes |
+| Object CRUD | — | Topic config | Exchanges, bindings | Yes, with guard rails |
+| Command console | MQSC (audited history) | — | — | — |
+| Native topology | Cluster edge relations | Yes | Exchange → queue routing | Yes |
+| AI chain diagnosis | Yes | Yes | Yes | Yes |
+| TLS / self-signed certificates | Yes | SASL_SSL | Yes | Yes |
 
-## 🏗️ Architecture
+## Feature matrix — StarRocks
+
+| Capability | Status |
+|:---|:---|
+| Connection | MySQL protocol; optional SSH tunnel (key or password); TOFU host-key verification |
+| Catalog | Databases, tables, views, materialized views; column table; DDL; partition summary |
+| SQL console | Tab strip (shared editor/result state), selection execution, multi-statement, cancel, streaming, sorting, CSV export, history |
+| Diagnostics | `SHOW PROFILELIST`; `ANALYZE PROFILE FROM '<id>'`; AI slow-query analysis |
+| Cluster | Overview, topology, BE/CN, HA, variables and FE config, FE logs |
+| Object DDL/DML | Through the SQL console only (no GUI object editing) |
+
+## Architecture
 
 ```mermaid
 flowchart TB
-    subgraph HOST["Host Layer"]
-        APPUI["app-ui (main window / connections / settings)"]
+    subgraph HOST["Host layer"]
+        APPUI["app-ui (window / connections / settings)"]
     end
 
-    subgraph AI["AI Layer"]
+    subgraph AI["AI layer"]
         AIUI["ai-ui (panel / system prompts / untrusted-context wrapping)"]
-        AISVC["ai-service (chat_history audit persistence)"]
+        AISVC["ai-service (chat_history persistence)"]
         AICORE["ai-core (AiProvider / SseParser)"]
         OPENAI["openai-service"]
         ANTHRO["anthropic-service"]
@@ -84,61 +150,68 @@ flowchart TB
         AICORE -.-> OPENAI & ANTHRO
     end
 
-    subgraph PLUGINS["Protocol Plugin Layer (SPI: ServiceAdapter / AdapterUI)"]
+    subgraph PROTOCOLS["Protocol layer (SPI: ServiceAdapter / AdapterUI)"]
         IBM["ibm-mq\nservice + ui"]
         KFK["kafka\nservice + ui"]
         RMQ["rabbitmq\nservice + ui"]
         RKT["rocketmq\nservice + ui"]
+        SR["starrocks\nservice + ui"]
     end
 
-    subgraph SHARED["Shared Layer"]
+    subgraph SHARED["Shared layer"]
         MQUI["mq-ui (console / common panels)"]
-        TOPO["topology-ui ← graph-core (topology engine)"]
-        UICOM["ui-common (component library / i18n)"]
+        TOPO["topology-ui ← graph-core"]
+        UICOM["ui-common (components / i18n / tables)"]
     end
 
-    subgraph CORE["Core Layer"]
+    subgraph CORE["Core layer"]
         APCORE["app-core (EventBus / SQLDelight / Scheduler / Encryption)"]
-        MQBASE["mq-base (connection / scan templates)"]
+        MQBASE["mq-base (MQ connection / scan templates)"]
+        OLAPBASE["olap-base (OLAP templates + audit events)"]
     end
 
-    APPUI --> AIUI & MQUI & UICOM & PLUGINS
-    PLUGINS --> MQBASE & APCORE & UICOM
+    APPUI --> AIUI & MQUI & UICOM & PROTOCOLS
+    PROTOCOLS --> MQBASE & OLAPBASE & APCORE & UICOM
     MQUI --> UICOM
     TOPO --> UICOM
 ```
 
-Iron rule of dependency direction: **UI → Service → mq-base / app-core, one-way**; the reverse direction communicates only through EventBus events and SPI callbacks. Every MQ protocol ships as a peer `service`/`ui` pair — adding a protocol means one pair of modules inheriting the templates, with zero platform-layer changes.
+Dependency direction: UI → service → `mq-base` / `olap-base` / `app-core`, one-way. The reverse
+direction uses EventBus events and SPI callbacks only. Each protocol ships as a peer `service` / `ui`
+pair; adding a protocol means adding a pair of modules and an SPI registration.
 
-> 📐 A full architecture & feature inventory (all 33 modules, per-domain feature list, codebase metrics) lives in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+> A module-by-module inventory, per-domain feature list and code metrics are in
+> [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
-## 📁 Project Layout
+## Project layout
 
 ```text
 mq-client/
-├── app-core/            # Platform foundation: EventBus, SQLDelight (4 tables), scheduler, encryption, SPI contracts
+├── app-core/            # EventBus, SQLDelight (6 tables), scheduler, encryption, SPI contracts
 ├── mq-base/             # AbstractConnectionManager / AbstractScanService templates
-├── ui-common/           # Compose component library: DecoratedDialog, PropertyTable, i18n
+├── olap-base/           # OLAP templates: AbstractAnalyticsConnectionManager (in use) + catalog/query templates
+├── ui-common/           # Component library: dialogs, PropertyTable, DataGrid, i18n
 ├── mq-ui/               # Shared MQ UI: command console, object list panels, MetricCard
-├── graph-core/          # TopologyGraph pure model
-├── topology-ui/         # Topology rendering: Canvas, node dragging, zoom, PNG export
-├── ibm-mq-service/  ibm-mq-ui/       # IBM MQ plugin (PCF + MQSC + dmpmqmsg)
-├── kafka-service/   kafka-ui/        # Kafka plugin (Assign+Seek live browsing)
-├── rabbitmq-service/ rabbitmq-ui/    # RabbitMQ plugin (management API + connection self-healing)
-├── rocketmq-service/ rocketmq-ui/    # RocketMQ plugin (Remoting + parallel fetching)
+├── graph-core/          # Topology graph model (TopologyData / TopologyNode)
+├── topology-ui/         # Canvas renderer: dragging, zoom, PNG export
+├── ibm-mq-service/  ibm-mq-ui/       # IBM MQ (PCF, MQSC, dmpmqmsg)
+├── kafka-service/   kafka-ui/        # Kafka (Assign + Seek)
+├── rabbitmq-service/ rabbitmq-ui/    # RabbitMQ (management API, basicGet)
+├── rocketmq-service/ rocketmq-ui/    # RocketMQ (Remoting, parallel fetch)
+├── starrocks-service/ starrocks-ui/  # StarRocks (catalog, SQL console, profile, cluster pages)
 ├── ai-core/  ai-service/  ai-ui/     # AI diagnosis stack
-├── openai-service/  openai-ui/       # Provider plugin pair
-├── anthropic-service/ anthropic-ui/  # Provider plugin pair
+├── openai-service/  openai-ui/       # Provider pair
+├── anthropic-service/ anthropic-ui/  # Provider pair
 ├── message-interpreter-api/          # Message interpreter SPI
 │   ├── -json / -xml / -hex / -base64 / -text / -idoc
 │   └── -registry                     # Aggregate registry
 ├── ui-test-kit/  test-support/       # Compose canvas test kit / LiveTest SKIP wrapper
-└── app-ui/              # Desktop host (Main.kt / packaging config)
+└── app-ui/              # Desktop host (Main.kt / packaging)
 ```
 
-## 🚀 Getting Started
+## Getting started
 
-**Requirements**: JDK 25
+**Requirements**: JDK 25 (the build targets `jvmToolchain(25)`), Gradle wrapper 9.7.1.
 
 ```bash
 git clone <your-repo-url>
@@ -146,73 +219,105 @@ cd mq-client
 ./gradlew :app-ui:run          # development run
 ```
 
-**Packaging** (portable zip, no MSI installer):
+**Verification** (architecture rules + assemble + unit tests + i18n key checks):
 
 ```bash
-# one-liner per platform (auto-detects JDK 25, auto-names the zip by host OS):
+bash ./scripts/verify.sh
+```
+
+**Packaging** (portable zip, no installer):
+
+```bash
 ./build.bat            # Windows
 ./build.sh             # Linux / macOS
-# or via gradle directly:
+# or directly:
 ./gradlew :app-ui:zipDistributable
 ```
 
-Artifacts land in `app-ui/build/compose/binaries/main/` —
-`MQClient-0.1.0-windows-x64.zip` / `-linux-x64.zip` / `-macos-x64.zip` / `-macos-arm64.zip`
-(jpackage only packages the **current** OS — build each platform on that platform).
-Unzip and run `MQClient/MQClient.exe` (Windows) or `./MQClient/bin/MQClient`
-(Linux/macOS) — ships with a trimmed JRE (jpackage with an explicit module list),
-no JDK installation needed.
+Artifacts are written to `app-ui/build/compose/binaries/main/` and named
+`MQClient-0.2.0-<os>-<arch>.zip`. jpackage can only package the host operating system, so each
+platform's zip must be built on that platform. The archive contains a trimmed JRE; unzip and run
+`MQClient/MQClient.exe` (Windows) or `./MQClient/bin/MQClient` (Linux/macOS).
 
-**Data directory**: everything lives under `~/.mqclient/`:
+**Data directory** — everything is stored under `~/.mqclient/`:
 
 ```text
 ~/.mqclient/
-├── config.toml    # connection & app config
-├── secret.key     # encryption key for sensitive data
-├── mqclient.db    # SQLite (connection snapshots / command audit / AI history)
-└── logs/          # runtime logs (incl. [MQ-Perf] end-to-end timing traces)
+├── config.toml    # connections and application settings
+├── secret.key     # encryption key for sensitive fields
+├── mqclient.db    # SQLite: mq_connection / mq_command / ai_connection / chat_history
+│                  #         olap_query_history / olap_draft
+├── known_hosts    # SSH host keys remembered for the StarRocks tunnel (host, key type, SHA-256 fingerprint)
+└── logs/          # runtime logs, including [MQ-Perf] and [StarRocks] traces
 ```
 
-## 📊 Codebase at a Glance
+## Codebase metrics
+
+Measured over the working tree at the 0.2.0 release (`find`/`wc -l` over `src/**/*.kt`,
+excluding `build/`):
 
 | Metric | Value |
 |:---|:---|
-| Gradle modules | 33 (+ included build for version catalog / convention plugins) |
-| Kotlin source | ~87.5K lines / ~534 files (plus 12.1K lines of tests / 85 files) |
-| `@Composable` | 512 |
-| `suspend fun` | 276 |
-| SQLDelight tables | 4 |
+| Gradle modules | 35 (+ included build for version catalog / convention plugins) |
+| Kotlin files | 753 (532 main, 221 test) |
+| Kotlin lines | 119,328 (90,104 main, 29,224 test) |
+| `@Composable` declarations | 522 |
+| `suspend fun` declarations | 527 (including `expect` / `actual` pairs) |
+| SQLDelight tables | 6 |
 
-## 🤝 Contributing
+## Limitations
 
-All kinds of contributions are welcome: bug reports, feature requests, documentation improvements, and code PRs.
+- Object DDL and DML are performed through the SQL console only; there is no GUI object editor.
+- The SQL console has no autocomplete and no statement formatter, and no database selector — the
+  session uses the connection's default database unless a `USE` statement is issued.
+- Console tabs share one editor and one result grid; switching tabs does not switch documents.
+- One connection executes one statement at a time (single shared session).
+- Result sets are capped at 50,000 rows; the excess is truncated with a banner, and there is no
+  paging continuation.
+- No dedicated TLS toggle in the connection form; TLS parameters go through `jdbcUrlOverride`.
+- StarRocks support has been verified against StarRocks 3.4.0 on a single-node instance, not against
+  multi-BE production clusters or other versions.
+
+## Contributing
+
+Bug reports, feature requests, documentation fixes and pull requests are welcome.
 
 ```bash
-# 1. Fork and create a feature branch
+# 1. Fork and create a branch
 git checkout -b feat/your-feature
 
 # 2. Self-check: build + unit tests
-./gradlew build     # full build
-./gradlew jvmTest   # per-module unit tests
+./gradlew build
+./gradlew jvmTest
 
-# 3. Commit and open a Pull Request
+# 3. Commit and open a pull request
 ```
 
 **Conventions**:
 
-- **Commit messages**: follow Conventional Commits (`feat:` / `fix:` / `refactor:` / `docs:`), with the body explaining motivation and scope;
-- **i18n**: every user-visible string must ship both `zh-CN` and `en-US` resources — no hardcoded strings;
-- **UI components**: prefer existing `ui-common` components (`PropertyTable`, `PrimaryButton`/`SecondaryButton`/`DangerButton`, `ObjectDetailDialog`, etc.);
-- **Architecture boundaries**: `service` modules must not depend on `ui` modules; cross-module communication goes through SPI contracts and the EventBus, never direct implementation references;
-- **Error handling**: raw error codes / stack traces stay in logs only; the UI must display friendly text translated via `userMessage()`;
-- **Handle lifecycle**: follow "share heavy connections, destroy light handles after use" — heavy handles are connection-level shared with lock serialization; light handles are created per operation and released in `finally`;
-- **Tests**: new service-layer logic requires jvmTest; protocol-behavior tests must not require a live broker (real-broker verification uses `-D*diag.enabled=true` LiveTests, which SKIP automatically without an environment).
+- **Commit messages** — Conventional Commits (`feat:` / `fix:` / `refactor:` / `docs:`), body
+  explaining motivation and scope.
+- **i18n** — every user-visible string ships both `zh-CN` and `en-US` resources; no hardcoded
+  strings.
+- **UI components** — reuse `ui-common` components (`PropertyTable`, `DataGrid`, `PrimaryButton` /
+  `SecondaryButton` / `DangerButton`, `ObjectDetailDialog`) instead of writing local equivalents.
+- **Architecture boundaries** — `service` modules must not depend on `ui` modules; cross-module
+  communication goes through SPI contracts and the EventBus.
+- **Error handling** — raw error codes and stack traces stay in logs; the UI shows text translated
+  through `userMessage()`.
+- **Handle lifecycle** — heavy handles are shared at connection level under lock; light handles are
+  created per operation and closed in `finally`, except the messaging browse cursor which stays
+  open for the session so paging remains server-side.
+- **Tests** — new service-layer logic requires `jvmTest`. Protocol-behavior tests must not require
+  a live broker; real-environment checks run as `*LiveTest` guarded by a `-D*.live.enabled=true`
+  system property and skip when the environment is absent.
 
-**Issue reports**: please include your OS, JDK version, reproduction steps, and the relevant snippet from `~/.mqclient/logs/` (redact credentials — never paste connection secrets).
+**Issue reports**: include the OS, JDK version, reproduction steps and the relevant lines from
+`~/.mqclient/logs/`. Redact credentials.
 
-## 📄 License
+## License
 
-This project is released under the [Apache License 2.0](LICENSE).
+Apache License 2.0 — see [LICENSE](LICENSE).
 
 ```text
 Copyright 2026 Lindc

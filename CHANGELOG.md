@@ -2,6 +2,84 @@
 
 本文件记录 MQClient 的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.2.0] — 2026-11-20
+
+新增 StarRocks（OLAP）协议模块，复用 0.1.0 引入的 `olap-base` 模板层。模块数 33 → 35。
+
+### Added
+
+- **StarRocks 协议接入**（`starrocks-service` / `starrocks-ui`，分类 `OLAP`）：连接表单 +
+  MySQL 协议（FE query port）连接探测，经 SPI 注册后出现在新建连接向导与导航中。
+- **`olap-base` 开始承接具体协议**：StarRocks 连接管理器继承 0.1.0 引入的
+  `AbstractAnalyticsConnectionManager`，错误分类走 `SqlDialect` / `OlapErrorCode`，配置与会话
+  实现 `AnalyticsConnectionConfig` / `AnalyticsSession` 契约。本版本在模板层补齐了
+  `OBJECT_NOT_FOUND` 错误分类（StarRocks 5501 / 5502）与取消语义、查询模型的若干细节。
+  `AbstractCatalogScanService` / `AbstractQueryExecutor` / `OlapPerfMarker` / `QueryAuditSink`
+  目前仍未被 StarRocks 接入。
+- **数据目录**：库 / 表 / 视图 / 物化视图树；选中表后右侧为字段二维表（列名、类型、可空、
+  键、默认值、Extra、注释）与 DDL 双 Tab；分区在概览底部折叠小节给出摘要。
+- **SQL 控制台**：标签栏（共用一份编辑器与结果区）、执行选区或全文、按分号切分多语句顺序
+  执行、中断、流式渲染（上限 50,000 行）、语法高亮、列排序、长值悬停与点击详情、复制、
+  CSV 导出、执行历史（`olap_query_history`，最近 50 条）。
+- **会话与慢查询**：`SHOW PROFILELIST` 列表与 Query Profile 查看器；Profile 文本经 ANSI
+  清洗后以等宽代码块展示；控制台可一键查看本次查询的 Profile；支持 AI 分析。
+- **集群概览与拓扑**：三层拓扑（外部 Catalog → FE → BE/CN）、节点属性对话框（先以拓扑快照
+  渲染、后台刷新该节点）、拓扑节点拖拽与 PNG 导出。
+- **四个系统页**：BE 节点、高可用、变量与配置（会话 / 全局 / FE 配置）、FE 运行日志。
+- **SSH 隧道**：经堡垒机连接生产 FE，支持私钥（含口令）与密码两种认证；`testConnection`
+  与 `openSession` 走同一条隧道路径。
+- **主机指纹 TOFU**：首连把主机密钥指纹记入 `<configDir>/known_hosts`（`主机 密钥类型
+  SHA-256 指纹` 三列），之后逐次比对；指纹变更则拒绝连接并要求确认。取代此前
+  `StrictHostKeyChecking=no` 的不校验行为。
+- **结构化日志**：`[StarRocks][Conn]` / `[SQL]` / `[Meta]` / `[Profile]` 四个标签，SQL 与
+  原始返回超 500 字符截断，凭据不入日志。
+- **`ui-common` 表格能力**：`DataGrid` 增加列排序（`DataGridColumn.sortKey` + 可点表头），
+  目录表 / 变量表 / 结果集共用；表格视觉标尺收敛到 `TableVisuals`（斑马纹、悬浮高亮、
+  行高、表头样式），MQ 属性面板与 StarRocks 字段表使用同一套实现。
+
+### Changed
+
+- **数据目录交互**：左树只保留库 → 表 / 视图 / 物化视图，不再展开字段与分区；字段信息集中到
+  右侧二维表格，避免宽表把树拉长。
+- **拓扑渲染层**：节点类型下沉到各业务模块（`OlapNodeType` 等），`topology-ui` 不再持有
+  中间件语义。
+- **Profile 查看器**：代码块与 DDL 共用 `CodeBlock`（`StarRocksCodeBlock.kt`）主题，去除硬编码
+  配色与独立深浅色开关。
+- **文档**：README（中英）与 `docs/ARCHITECTURE.md` 更新至 0.2.0，模块数、代码规模与功能
+  清单按当前工作区重新核算。
+
+### Fixed
+
+- **Profile 取数链**：收敛为单条 `ANALYZE PROFILE FROM '<id>'`（3.1+）；语句报错或返回空
+  文本时统一报「Profile 未采集」，不再显示空白或错误地报「完成」。
+- **物化视图识别**：3.4 实测 `table_type=VIEW` 不可靠，改用 `SHOW MATERIALIZED VIEWS`。
+- **CSV 导出**：改为先写临时文件再原子替换，磁盘或权限失败不再毁掉已有文件。
+- **JDBC URL 脱敏**：密码含 `@` 时日志会残留片段，改为按 URL 结构截断。
+- **OLAP 错误文案**：i18n 键存在双点缺陷（`..`），导致错误翻译从未生效；同时补充
+  `OBJECT_NOT_FOUND` 分类以识别 StarRocks 5501 / 5502。
+- **SQL 报错不断连**：普通 SQL 错误保留会话，仅半开 / 已关闭连接触发重建。
+- **数据目录白屏**：左树 `Column` 少一个闭合括号导致右侧面板高度为 0。
+- **`formatPercent`**：NaN / Infinity 返回占位符 `-`（与其他「无数据」表示一致），而不是天文数字。
+- **AI 诊断重跑**：重跑后内容空白却报「完成」。
+- **Profile 详情弹窗**：关闭按钮改用 `PrimaryButton`，与其他对话框一致。
+
+### Verification
+
+- `bash ./scripts/verify.sh` 通过（架构规则 + assemble + test + jvmTest + i18n 键检查）。
+- 真机用例（`-Dstarrocks.live.enabled=true`，StarRocks 3.4.0 本地实例）：目录解析、DDL、
+  物化视图探测、预览取行、Profile 列表与 Profile 取数、BACKENDS / HA / 变量 / FE 配置 /
+  FE 日志、错误密码归类、SSH 隧道查询、主机指纹三段（未知 / 已记录 / 变更）均通过。
+
+### Known limitations
+
+- 未提供 GUI 对象编辑（建表 / 删表 / 改数据）：按设计仅经 SQL 控制台执行。
+- SQL 控制台无自动补全与格式化；无库选择器（使用连接配置的默认库或手写 `USE`）。
+- 控制台的标签共用一份编辑器与结果区，切换标签不切换文档；草稿按连接保存（一个连接一份）。
+- 一个连接同一时刻只执行一条查询（单槽共享会话）。
+- 连接表单无独立 TLS 开关，需经 `jdbcUrlOverride` 传连接参数。
+- 结果集上限 50,000 行，超出截断且不支持分页续取。
+- StarRocks 侧仅在单机 StarRocks 3.4.0 上验证，未在多 BE 生产集群与跨版本上验证。
+
 ## [Unreleased] — 2026-10-29 (24)
 
 ### Fixed
