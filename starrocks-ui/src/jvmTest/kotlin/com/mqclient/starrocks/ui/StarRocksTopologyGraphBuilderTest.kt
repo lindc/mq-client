@@ -21,6 +21,15 @@ import kotlin.test.assertTrue
  */
 class StarRocksTopologyGraphBuilderTest {
 
+    /**
+     * 测试用的 badge 文案（与中文表一致）。真实调用点由面板用 stringResource 提供；
+     * 这里固定一份，让「badge 内容」的断言不随语言表漂移。
+     */
+    private val testStrings = StarRocksTopologyStrings(
+        diskBadge = "%1\$d% 磁盘",
+        memoryBadge = "%1\$d% 内存",
+    )
+
     private fun frontend(
         name: String,
         ip: String = "10.0.0.1",
@@ -69,7 +78,7 @@ class StarRocksTopologyGraphBuilderTest {
 
     @Test
     fun `snapshot without any node yields an empty graph`() {
-        val data = buildStarRocksTopology(ClusterSnapshot(emptyList()), fallbackFeName = "fe-host")
+        val data = buildStarRocksTopology(ClusterSnapshot(emptyList()), fallbackFeName = "fe-host", strings = testStrings)
 
         assertTrue(data.kuiver.nodes.isEmpty())
         assertTrue(data.nodes.isEmpty())
@@ -81,6 +90,7 @@ class StarRocksTopologyGraphBuilderTest {
         val data = buildStarRocksTopology(
             ClusterSnapshot(nodes = listOf(backend("10.0.0.11"))),
             fallbackFeName = "fe-host",
+            strings = testStrings,
         )
 
         val placeholder = data.nodes["fe:fe-host"]
@@ -105,7 +115,7 @@ class StarRocksTopologyGraphBuilderTest {
             ),
         )
 
-        val data = buildStarRocksTopology(snapshot, fallbackFeName = "unused")
+        val data = buildStarRocksTopology(snapshot, fallbackFeName = "unused", strings = testStrings)
 
         assertEquals(6, data.nodes.size)
         assertEquals(OlapNodeType.FE_LEADER, data.nodes["fe:fe-leader"]?.type)
@@ -139,7 +149,7 @@ class StarRocksTopologyGraphBuilderTest {
                 catalog("hive0"),
             ),
         )
-        val data = buildStarRocksTopology(snapshot, fallbackFeName = "unused")
+        val data = buildStarRocksTopology(snapshot, fallbackFeName = "unused", strings = testStrings)
 
         // 直接跑布局 provider，按 x 坐标验证分层（Catalog=0 / FE=1 / BE·CN=2）。
         val layouted = starRocksClusterLayout(
@@ -172,7 +182,7 @@ class StarRocksTopologyGraphBuilderTest {
             ),
         )
 
-        val data = buildStarRocksTopology(snapshot, fallbackFeName = "unused")
+        val data = buildStarRocksTopology(snapshot, fallbackFeName = "unused", strings = testStrings)
 
         assertEquals(NodeSeverity.ERROR, data.nodes["fe:fe-dead"]?.severity)
         assertEquals(NodeSeverity.NORMAL, data.nodes["be:10.0.0.11:9050"]?.severity)
@@ -193,13 +203,44 @@ class StarRocksTopologyGraphBuilderTest {
             ),
         )
 
-        val data = buildStarRocksTopology(snapshot, fallbackFeName = "unused")
+        val data = buildStarRocksTopology(snapshot, fallbackFeName = "unused", strings = testStrings)
 
         assertEquals("LEADER", data.nodes["fe:fe-leader"]?.badge)
         assertEquals("OBSERVER", data.nodes["fe:fe-observer"]?.badge)
         assertEquals("42% 磁盘", data.nodes["be:10.0.0.11:9050"]?.badge)
         assertEquals("33% 内存", data.nodes["cn:10.0.0.12:9050"]?.badge, "CN 没有盘 → 退回内存")
         assertEquals("ICEBERG", data.nodes["catalog:iceberg0"]?.badge)
+    }
+
+    /**
+     * badge 文案可以按语言替换：英文界面下不应再出现中文后缀。
+     *
+     * 这是「硬编码中文」那个缺陷的守卫 —— builder 在组合外执行，文案必须由面板
+     * 用 stringResource 解析后传进来；这条用例证明注入生效，而不是只换了个参数名。
+     */
+    @Test
+    fun `badge text follows the injected strings`() {
+        val snapshot = ClusterSnapshot(
+            nodes = listOf(
+                frontend("fe-leader"),
+                backend("10.0.0.11", diskUsedPercent = 42.7),
+                backend("10.0.0.12", role = ClusterNodeRole.CN, diskUsedPercent = null, memUsedPercent = 33.2),
+            ),
+        )
+
+        val english = buildStarRocksTopology(
+            snapshot,
+            fallbackFeName = "unused",
+            strings = StarRocksTopologyStrings(diskBadge = "%1\$d% disk", memoryBadge = "%1\$d% mem"),
+        )
+
+        assertEquals("42% disk", english.nodes["be:10.0.0.11:9050"]?.badge)
+        assertEquals("33% mem", english.nodes["cn:10.0.0.12:9050"]?.badge)
+        // 英文图里不应残留中文后缀。
+        assertTrue(
+            english.nodes.values.none { it.badge?.contains("磁盘") == true || it.badge?.contains("内存") == true },
+            "英文 badge 不应含中文：${english.nodes.values.map { it.badge }}",
+        )
     }
 
     @Test
@@ -212,7 +253,7 @@ class StarRocksTopologyGraphBuilderTest {
             ),
         )
 
-        val data = buildStarRocksTopology(snapshot, fallbackFeName = "unused")
+        val data = buildStarRocksTopology(snapshot, fallbackFeName = "unused", strings = testStrings)
 
         assertEquals(1, data.nodes.size, "Routine Load 不是拓扑节点")
         assertEquals(1, snapshot.runningRoutineLoadCount)

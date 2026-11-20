@@ -49,7 +49,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** 「数据库性能优化专家」系统提示词的 i18n 键（文案在 ui-common 公共表）。 */
+/** 「数据库性能优化专家」系统提示词的 i18n 键（文案在模块私有表 starrocks_ui_*）。 */
 private const val KEY_DIAGNOSIS_PROMPT = "ai_starrocks_diagnosis_system_prompt"
 
 private const val FALLBACK_DIAGNOSIS_PROMPT =

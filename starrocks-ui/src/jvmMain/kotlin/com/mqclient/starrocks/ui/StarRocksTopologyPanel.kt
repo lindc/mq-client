@@ -62,6 +62,18 @@ internal fun StarRocksTopologyPanel(connectionId: String, modifier: Modifier = M
     var error by remember(connectionId) { mutableStateOf<String?>(null) }
     val scope = rememberConnectionScope(connectionId)
     val nodeDetail = rememberStarRocksNodeDetailController(connectionId)
+    // badge 文案在组合期解析（builder 在组合外跑）：语言切换时 strings 变化触发重组，
+    // 图随之重建。与 RabbitMQ / RocketMQ 拓扑页同一写法。
+    // stringResource 在组合上下文解析（不能放进 remember 的 lambda），
+    // 解析后的模板再按值 key 缓存 —— 语言切换时模板变化，strings 随之重建。
+    val diskBadgeTemplate = stringResource("olap.starrocks.topology.badge_disk")
+    val memoryBadgeTemplate = stringResource("olap.starrocks.topology.badge_memory")
+    val strings = remember(diskBadgeTemplate, memoryBadgeTemplate) {
+        StarRocksTopologyStrings(
+            diskBadge = diskBadgeTemplate,
+            memoryBadge = memoryBadgeTemplate,
+        )
+    }
 
     suspend fun load() {
         loading = true
@@ -69,7 +81,11 @@ internal fun StarRocksTopologyPanel(connectionId: String, modifier: Modifier = M
         try {
             val graphResult = runPanelLoad(onError = { error = it.userMessage() }) {
                 val fresh = StarRocksClusterService.loadSnapshot(connectionId)
-                val graph = buildStarRocksTopology(fresh, fallbackFeName = frontendName(connectionId))
+                val graph = buildStarRocksTopology(
+                    fresh,
+                    fallbackFeName = frontendName(connectionId),
+                    strings = strings,
+                )
                 // 只有占位 FE（两个查询都失败）时不画空图，交给空状态。
                 fresh to graph.takeIf { fresh.nodes.isNotEmpty() }
             }
@@ -81,7 +97,7 @@ internal fun StarRocksTopologyPanel(connectionId: String, modifier: Modifier = M
         }
     }
 
-    LaunchedEffect(connectionId) { load() }
+    LaunchedEffect(connectionId, strings) { load() }
 
     Column(modifier.fillMaxSize()) {
         // ── 工具栏：标题 + 节点数 + 刷新 ──

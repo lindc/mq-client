@@ -22,8 +22,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.PlayArrow
@@ -73,8 +73,9 @@ import com.mqclient.uicommon.DangerButton
 import com.mqclient.uicommon.LocalSnackbarHostState
 import com.mqclient.uicommon.SecondaryButton
 import com.mqclient.uicommon.i18n.stringResource
-import com.mqclient.uicommon.i18n.withArg
 import com.mqclient.uicommon.i18n.userMessage
+import com.mqclient.uicommon.i18n.withArg
+import com.mqclient.uicommon.table.formatTimestamp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -790,7 +791,7 @@ private fun HistoryPanel(
                                 else MaterialTheme.colorScheme.error,
                             )
                             Text(
-                                "  ${formatTime(entry.createdAt)}  ${entry.durationMs} ms",
+                                "  ${formatTimestamp(entry.createdAt)}  ${entry.durationMs} ms",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -835,9 +836,6 @@ private fun HistoryPanel(
     }
 }
 
-/** 历史条目时间戳（本机时区，jvmMain 可用 java.text）。 */
-private fun formatTime(epochMs: Long): String =
-    java.text.SimpleDateFormat("MM-dd HH:mm:ss").format(java.util.Date(epochMs))
 
 @Composable
 private fun ResultArea(grid: ConsoleGrid, phase: ConsolePhase, modifier: Modifier = Modifier) {

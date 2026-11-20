@@ -14,6 +14,7 @@ import com.mqclient.starrocks.cluster.ClusterNodeRole
 import com.mqclient.starrocks.cluster.ClusterSnapshot
 import com.mqclient.topology.CARD_HEIGHT
 import com.mqclient.topology.CARD_WIDTH
+import com.mqclient.uicommon.i18n.withArg
 
 /** 磁盘占用达到这个百分比就把节点标成 WARNING（与 StarRocks Web UI 的橙色系同口径）。 */
 internal const val DISK_WARNING_PERCENT = 85.0
@@ -44,6 +45,7 @@ internal const val MEM_WARNING_PERCENT = 90.0
 internal fun buildStarRocksTopology(
     snapshot: ClusterSnapshot,
     fallbackFeName: String,
+    strings: StarRocksTopologyStrings,
 ): TopologyData {
     val nodes = LinkedHashMap<String, TopologyNode>()
 
@@ -78,7 +80,7 @@ internal fun buildStarRocksTopology(
             id = node.nodeId,
             type = node.role.toOlapNodeType(),
             severity = node.computeSeverity(),
-            badge = node.diskBadge(),
+            badge = node.diskBadge(strings),
         )
     }
 
@@ -146,13 +148,30 @@ internal fun ClusterNodeInfo.computeSeverity(): NodeSeverity {
     }
 }
 
+/**
+ * 拓扑 badge 的取词口径：builder 在组合外执行，模板由面板用 stringResource 解析好
+ * 再传进来（语言切换随重组自然刷新）。与 RabbitMQ / RocketMQ 的
+ * `RabbitMqTopologyStrings` / `RocketMqTopologyStrings` 同一模式。
+ *
+ * 占位符走 ui-common 的 [withArg]（全项目唯一的占位符替换实现）。
+ *
+ * **没有默认值**：默认值会让「新增调用方忘了传文案」静默退化成写死的中文。
+ * 必填之后由编译器保证每个调用点都给出当前语言的文案。
+ */
+internal class StarRocksTopologyStrings(
+    /** 磁盘占用 badge：`%1$d% 磁盘`。 */
+    val diskBadge: String,
+    /** 内存占用 badge（CN 无盘时退回）：`%1$d% 内存`。 */
+    val memoryBadge: String,
+)
+
 /** 执行层卡片 badge：磁盘占用（CN 可能没有盘 → 退回内存使用率）。 */
-internal fun ClusterNodeInfo.diskBadge(): String? {
+internal fun ClusterNodeInfo.diskBadge(strings: StarRocksTopologyStrings): String? {
     val diskPercent = diskUsedPercent
     val memPercent = memUsedPercent
     return when {
-        diskPercent != null -> "${diskPercent.toInt()}% 磁盘"
-        memPercent != null -> "${memPercent.toInt()}% 内存"
+        diskPercent != null -> strings.diskBadge.withArg(diskPercent.toInt())
+        memPercent != null -> strings.memoryBadge.withArg(memPercent.toInt())
         else -> null
     }
 }

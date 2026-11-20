@@ -301,7 +301,7 @@ internal fun profileStatements(queryId: String): List<String> {
 internal const val ENABLE_PROFILE_SQL = "SET enable_profile = true;"
 
 
-/** Profile 未采集的业务异常错误键（文案在 ui-common 公共表，userMessage() 渲染）。 */
+/** Profile 未采集的业务异常错误键（文案在模块私有表，userMessage() 渲染）。 */
 internal const val KEY_PROFILE_NOT_COLLECTED = "olap.starrocks.profile_not_collected"
 
 

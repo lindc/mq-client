@@ -58,7 +58,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** 「StarRocks 性能调优专家」系统提示词的 i18n 键（文案在 ui-common 公共表）。 */
+/** 「StarRocks 性能调优专家」系统提示词的 i18n 键（文案在模块私有表 starrocks_ui_*）。 */
 private const val KEY_PROFILE_PROMPT = "ai_starrocks_profile_system_prompt"
 
 /** 未命中 i18n 时的兜底提示词（与 zh 表同一文案来源，用户指定的角色设定）。 */
